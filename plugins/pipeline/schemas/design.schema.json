@@ -1,0 +1,38 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "agent-pipeline/design.schema.json",
+  "title": "Design",
+  "description": "Output of Phase 2.5 (architectural tier only). The judge synthesizes the winning sketch from the two independent design sketches and grafts the best of the runner-up. Phase 3 Dev implements THIS, not just the spec.",
+  "type": "object",
+  "required": ["designed_at", "chosen_approach", "rationale", "rejected_alternatives"],
+  "properties": {
+    "issue_number": {"type": "integer"},
+    "designed_at": {"type": "string", "format": "date-time"},
+    "chosen_approach": {
+      "type": "object",
+      "required": ["summary"],
+      "properties": {
+        "summary": {"type": "string", "description": "The end-to-end approach: data model, contract changes, control flow, failure modes, migration shape."},
+        "data_model": {"type": "string"},
+        "contract_changes": {"type": "array", "items": {"type": "string"}},
+        "control_flow": {"type": "string"},
+        "failure_modes": {"type": "array", "items": {"type": "string"}},
+        "migration_shape": {"type": "string", "description": "The up and down of any schema migration, if the project uses migrations (down documented as manual-rollback notes, not executable)."},
+        "grafted_from_runner_up": {"type": "array", "items": {"type": "string"}, "description": "Elements taken from the losing sketch and why they strengthen the winner."}
+      }
+    },
+    "rationale": {"type": "string"},
+    "rejected_alternatives": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["approach", "why_rejected"],
+        "properties": {
+          "approach": {"type": "string"},
+          "why_rejected": {"type": "string"}
+        }
+      }
+    },
+    "residual_risks": {"type": "array", "items": {"type": "string"}}
+  }
+}

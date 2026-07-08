@@ -1,0 +1,27 @@
+{
+  "_comment": "Copy this to `pipeline.config.json` at your PROJECT root and edit. Every value is optional; sensible defaults apply when a key is absent. Grep the plugin for `CUSTOMIZE` to see where each is used.",
+
+  "integrationBranch": "main",
+
+  "checkCommand": "npm run typecheck && npm test && npm run lint",
+
+  "knowledgeDir": "knowledge",
+
+  "frontendSurface": [
+    "**/*.tsx",
+    "**/*.jsx",
+    "**/*.vue",
+    "**/*.svelte",
+    "**/components/**",
+    "**/ui/**",
+    "**/styles/**"
+  ],
+
+  "migrationsGlob": "migrations/**",
+
+  "architecturalTriggers": {
+    "_comment": "Domains/keywords that force the architectural tier (deep review). Tailor to your stack.",
+    "domains": ["data", "security", "compliance"],
+    "keywords": ["migration", "schema change", "auth", "encryption", "new external data source"]
+  }
+}

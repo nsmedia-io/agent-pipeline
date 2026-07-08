@@ -1,0 +1,39 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "agent-pipeline/map.schema.json",
+  "title": "Map",
+  "description": "Output of Phase 0.5. Enumerates the contracts/tables/types the ask touches and their readers across three layers (source-code call sites, data-layer-resident readers such as DB function/view bodies in schema-migration files if the project uses them, and independent re-derivations). Input to the Phase 1 spec's blast-radius section and the Phase 4 blast-radius lens. Light at standard tier (touched contracts plus known catalogs), deep at architectural tier. Seeded from the knowledge store's consumer catalogs (knowledge/living-context/<domain>--<contract>-consumers.json) when one exists.",
+  "type": "object",
+  "required": ["mapped_at", "depth", "contracts"],
+  "properties": {
+    "issue_number": {"type": ["integer", "null"], "description": "Null when the map is produced before the issue exists."},
+    "mapped_at": {"type": "string", "format": "date-time"},
+    "depth": {"type": "string", "enum": ["light", "deep"]},
+    "seeded_from_catalogs": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "knowledge/living-context/<domain>--<contract>-consumers.json files used as seeds, if any."
+    },
+    "contracts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "kind", "readers"],
+        "properties": {
+          "name": {"type": "string", "description": "Symbol, table, type, queue schema, or DB function/view name."},
+          "kind": {"type": "string", "enum": ["table", "db-function", "view", "enum-or-source-value", "queue-message", "exported-type", "endpoint", "other"]},
+          "change_shape": {"type": "string", "description": "What the ask does to it (adds column, changes return shape, new value, ...)."},
+          "readers": {
+            "type": "object",
+            "properties": {
+              "typescript": {"type": "array", "items": {"type": "string"}, "description": "Source-code call sites and importers (file:line). Rename to your language if not TypeScript; the field name is kept for schema stability."},
+              "sql_resident": {"type": "array", "items": {"type": "string"}, "description": "Data-layer-resident readers: DB function/view bodies in schema-migration files that reference it; invisible to a call-site grep. Empty if the project has no such layer."},
+              "re_derivations": {"type": "array", "items": {"type": "string"}, "description": "Code paths that independently recompute the same value (diverge silently while both compile)."}
+            }
+          },
+          "notes": {"type": "string"}
+        }
+      }
+    }
+  }
+}

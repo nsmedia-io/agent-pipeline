@@ -1,0 +1,12 @@
+# This repo IS the plugin. Keep it clean.
+node_modules/
+*.log
+.DS_Store
+.env
+scratch/
+
+# Note for ADOPTING projects (not this repo): add `.pipeline/` to your project's
+# .gitignore. That is per-run pipeline state. If you want `/pipeline --resume` to
+# survive across machines, un-ignore just the checkpoint files:
+#   .pipeline/
+#   !.pipeline/*/status.json

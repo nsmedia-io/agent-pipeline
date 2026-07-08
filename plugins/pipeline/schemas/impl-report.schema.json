@@ -1,0 +1,106 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "agent-pipeline/impl-report.schema.json",
+  "title": "ImplReport",
+  "description": "Output of Phase 3, written by Dev at completion (body, requirement_checks, and the qa_signoff coverage record). The behavioral test contract is QA-authored at the architectural tier (QA-first model) and Dev-authored at trivial/standard tier (single-thread model, held to QA's test-discipline standard); qa_signoff records that coverage either way and is not an independent sign-off. The binding independent adversarial test verdict is QA's, in peer-review.json at Phase 4.",
+  "type": "object",
+  "required": ["issue_number", "branch", "commits", "checks_passed", "completed_at", "requirement_checks"],
+  "properties": {
+    "issue_number": {"type": "integer"},
+    "branch": {"type": "string"},
+    "base_branch": {"type": "string", "default": "main"},
+    "commits": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["sha", "message"],
+        "properties": {
+          "sha": {"type": "string"},
+          "message": {"type": "string"},
+          "files_changed": {"type": "array", "items": {"type": "string"}},
+          "files_removed": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    },
+    "files_removed": {"type": "array", "items": {"type": "string"}},
+    "tests_added": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "file": {"type": "string"},
+          "description": {"type": "string"}
+        }
+      }
+    },
+    "acceptance_criteria_met": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "criterion": {"type": "string"},
+          "met": {"type": "boolean"},
+          "evidence": {"type": "string"}
+        }
+      }
+    },
+    "requirement_checks": {
+      "type": "array",
+      "minItems": 1,
+      "description": "One entry per item in spec.requirements. Dev emits this before declaring Phase 3 done.",
+      "items": {
+        "type": "object",
+        "required": ["requirement_index", "requirement_text", "status", "notes"],
+        "properties": {
+          "requirement_index": {"type": "integer", "minimum": 0},
+          "requirement_text": {"type": "string"},
+          "status": {"type": "string", "enum": ["PASS", "PARTIAL", "SKIP"]},
+          "notes": {"type": "string"},
+          "justification": {"type": "string"}
+        },
+        "if": {
+          "properties": {"status": {"enum": ["PARTIAL", "SKIP"]}},
+          "required": ["status"]
+        },
+        "then": {
+          "required": ["requirement_index", "requirement_text", "status", "notes", "justification"]
+        }
+      }
+    },
+    "scope_drift": {
+      "type": "object",
+      "properties": {
+        "detected": {"type": "boolean"},
+        "description": {"type": ["string", "null"]},
+        "resolution": {"type": ["string", "null"], "description": "extended-spec | rolled-back | escalated"}
+      }
+    },
+    "checks_passed": {
+      "type": "object",
+      "required": ["typecheck", "test", "lint"],
+      "properties": {
+        "typecheck": {"type": "boolean"},
+        "test": {"type": "boolean"},
+        "lint": {"type": "boolean"},
+        "typecheck_error": {"type": "string"},
+        "test_error": {"type": "string"},
+        "lint_error": {"type": "string"}
+      }
+    },
+    "pr_url": {"type": "string", "format": "uri"},
+    "completed_at": {"type": "string", "format": "date-time"},
+    "qa_signoff": {
+      "type": "object",
+      "description": "Coverage record of the QA-authored behavioral tests (committed first in Phase 3) plus any internal-unit tests Dev added. Filled in by Dev at completion. Not the binding sign-off; QA renders the binding adversarial verdict in peer-review.json at Phase 4. verdict retains PENDING_CI as a legal value for backward compatibility with archived runs, though current pipelines do not emit it.",
+      "properties": {
+        "signed_off_at": {"type": "string", "format": "date-time"},
+        "test_files": {"type": "array"},
+        "edge_cases_covered": {"type": "array", "items": {"type": "string"}},
+        "edge_cases_deferred": {"type": "array"},
+        "acceptance_mapping": {"type": "array"},
+        "verdict": {"type": "string", "enum": ["APPROVE", "REQUEST_REFACTOR", "REQUEST_CHANGES", "PENDING_CI"]},
+        "notes": {"type": "string"}
+      }
+    }
+  }
+}

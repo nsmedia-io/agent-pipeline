@@ -1,0 +1,73 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "agent-pipeline/review.schema.json",
+  "title": "Review",
+  "description": "Output of Phase 2 (architectural tier only; the standard tier replaces the reviewer fan-out with constraints.md injection). DBA, DevOps, and SecOps each write their block via per-agent shards the orchestrator merges.",
+  "type": "object",
+  "properties": {
+    "dba": {"$ref": "#/definitions/agentBlock"},
+    "devops": {"$ref": "#/definitions/agentBlock"},
+    "design_review": {"$ref": "#/definitions/agentBlock"},
+    "secops": {
+      "allOf": [
+        {"$ref": "#/definitions/agentBlock"},
+        {
+          "properties": {
+            "verdict": {"enum": ["APPROVE", "APPROVE_WITH_NOTES", "REQUEST_CHANGES", "VETO"]},
+            "compliance_flags": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "statute": {"type": "string", "description": "# CUSTOMIZE: the regulation or policy this concern maps to for your domain (e.g. GDPR, CCPA, HIPAA, an internal data-handling policy). Free-form so it fits any jurisdiction."},
+                  "concern": {"type": "string"},
+                  "action": {"type": "string", "enum": ["block", "require-consent", "require-exemption-doc", "ok-as-designed"]}
+                }
+              }
+            },
+            "vulnerabilities": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "severity": {"type": "string", "enum": ["critical", "high", "medium", "low", "info"]},
+                  "category": {"type": "string", "enum": ["auth", "input-validation", "encryption", "logging", "cors", "rate-limit", "compliance", "secret"]},
+                  "description": {"type": "string"},
+                  "location": {"type": "string"},
+                  "remediation": {"type": "string"}
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  },
+  "definitions": {
+    "agentBlock": {
+      "type": "object",
+      "required": ["verdict", "reviewed_at", "concerns", "notes"],
+      "properties": {
+        "verdict": {"type": "string", "enum": ["APPROVE", "APPROVE_WITH_NOTES", "REQUEST_CHANGES"]},
+        "reviewed_at": {"type": "string", "format": "date-time"},
+        "concerns": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["severity", "description"],
+            "properties": {
+              "severity": {"type": "string", "enum": ["blocker", "major", "nit", "critical", "high", "medium", "low", "info"], "description": "This schema is the single source of truth for concern severity. The canonical panel vocabulary is blocker|major|nit (DBA/DevOps/Design emit these); SecOps's CVE-style critical|high|medium|low|info is accepted alongside it so a SecOps concern (e.g. severity 'low') validates cleanly. Distinct from the knowledge_drift_claims severity field."},
+              "description": {"type": "string"},
+              "location": {"type": "string", "description": "file:line if applicable"}
+            }
+          }
+        },
+        "notes": {
+          "type": ["string", "array"],
+          "items": {"type": "string"},
+          "description": "Free-text reasoning. String preferred; an array of strings is accepted (agents emit both in practice)."
+        }
+      }
+    }
+  }
+}

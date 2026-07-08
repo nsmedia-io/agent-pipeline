@@ -1,0 +1,40 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "agent-pipeline/librarian-report.schema.json",
+  "title": "LibrarianReport",
+  "description": "Output of Librarian runs (post-merge or weekly).",
+  "type": "object",
+  "required": ["ran_at", "trigger", "actions"],
+  "properties": {
+    "ran_at": {"type": "string", "format": "date-time"},
+    "trigger": {"type": "string", "enum": ["post-merge", "weekly", "ad-hoc"]},
+    "issue_number": {"type": ["integer", "null"]},
+    "actions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["kind", "target", "status"],
+        "properties": {
+          "kind": {"type": "string", "enum": ["knowledge-update", "issue-archive", "decision-record", "drift-flag", "cleanup"]},
+          "target": {"type": "string"},
+          "summary": {"type": "string"},
+          "commit": {"type": "string", "description": "Git SHA that landed the change. REQUIRED in practice for knowledge-update actions: a knowledge-store update with no commit behind it is status failed (definition of done: disk, then git)."},
+          "status": {"type": "string", "enum": ["ok", "failed", "skipped"]},
+          "error": {"type": ["string", "null"]}
+        }
+      }
+    },
+    "drift_flags": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "severity": {"type": "string", "enum": ["blocker", "warning", "info"]},
+          "description": {"type": "string"},
+          "suggested_action": {"type": "string"}
+        }
+      }
+    },
+    "cleanup_candidates": {"type": "array", "items": {"type": "string"}}
+  }
+}

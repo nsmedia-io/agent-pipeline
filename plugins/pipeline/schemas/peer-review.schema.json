@@ -1,0 +1,69 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "agent-pipeline/peer-review.schema.json",
+  "title": "PeerReview",
+  "description": "Output of Phase 4. The dispatched panel roles review the diff (all six at architectural/trivial tier; ba+dev+qa+secops plus surface-conditional dba/devops at standard tier, per status.json panel_roles). Orchestrator merges the per-role shards and computes final_verdict. Only dispatched roles appear as keys; an absent role key means trimmed-by-tier, never a missing review. APPROVE_WITH_NOTES is canonical; APPROVE_WITH_NITS is a legacy alias kept valid for archived runs.",
+  "type": "object",
+  "required": ["final_verdict", "reviewed_at"],
+  "properties": {
+    "ba": {"$ref": "#/definitions/panelVerdict"},
+    "dba": {"$ref": "#/definitions/panelVerdict"},
+    "devops": {"$ref": "#/definitions/panelVerdict"},
+    "secops": {"$ref": "#/definitions/panelVerdict"},
+    "dev": {"$ref": "#/definitions/panelVerdict"},
+    "qa": {"$ref": "#/definitions/panelVerdict"},
+    "design_review": {"$ref": "#/definitions/panelVerdict"},
+    "final_verdict": {
+      "type": "string",
+      "enum": ["APPROVE", "APPROVE_WITH_NOTES", "APPROVE_WITH_NITS", "REQUEST_CHANGES", "REQUEST_REFACTOR", "SECOPS_VETO"]
+    },
+    "reviewed_at": {"type": "string", "format": "date-time"},
+    "blockers": {
+      "type": "array",
+      "description": "Collected from all REQUEST_CHANGES blocks. Must be cleared before merge.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "agent": {"type": "string"},
+          "description": {"type": "string"},
+          "location": {"type": "string"}
+        }
+      }
+    }
+  },
+  "definitions": {
+    "panelVerdict": {
+      "type": "object",
+      "required": ["verdict"],
+      "properties": {
+        "verdict": {
+          "type": "string",
+          "enum": ["APPROVE", "APPROVE_WITH_NOTES", "APPROVE_WITH_NITS", "REQUEST_CHANGES", "REQUEST_REFACTOR", "VETO"],
+          "description": "REQUEST_REFACTOR is QA-only (testability). VETO is SecOps-only."
+        },
+        "reviewed_at": {"type": "string", "format": "date-time"},
+        "concerns": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "severity": {"type": "string", "enum": ["blocker", "major", "nit", "critical", "high", "medium", "low", "info"], "description": "This schema is the single source of truth for concern severity. The canonical panel vocabulary is blocker|major|nit (DBA/DevOps/Design emit these); SecOps's CVE-style critical|high|medium|low|info is accepted alongside it so a SecOps concern (e.g. severity 'low') validates cleanly. Distinct from the knowledge_drift_claims severity field."},
+              "description": {"type": "string"},
+              "location": {"type": "string"}
+            }
+          }
+        },
+        "notes": {
+          "type": ["string", "array"],
+          "items": {"type": "string"},
+          "description": "Free-text reasoning. String preferred; an array of strings is accepted (agents emit both in practice)."
+        },
+        "knowledge_drift_claims": {
+          "type": "array",
+          "description": "Optional staleness claims for the Librarian, recorded INSIDE the block (never as a sibling key beside it).",
+          "items": {"type": "object"}
+        }
+      }
+    }
+  }
+}

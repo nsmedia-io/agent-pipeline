@@ -1,0 +1,78 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "agent-pipeline/status.schema.json",
+  "title": "Status",
+  "description": "Live orchestrator state. Source of truth for /pipeline --resume. current_phase is pattern-validated, not enum-validated: the enum drifted out of sync with the phases the orchestrator actually writes (0.5-map, 2-constraints, 2.5-design, 3-impl-tripwire, ...) and a stale enum derails runs. Canonical values are whatever /pipeline's checkpoint steps write; the pattern only pins the <phase-number>-<slug> shape.",
+  "type": "object",
+  "required": ["current_phase", "started_at", "updated_at", "branch", "events"],
+  "properties": {
+    "issue_number": {"type": ["integer", "null"]},
+    "current_phase": {
+      "type": "string",
+      "pattern": "^([0-5](\\.5)?-[a-z0-9-]+|halted-error)$",
+      "description": "Examples: 0-setup, 0.5-map, 1-ba, 1-ba-complete, 1-ba-rework-required, 2-constraints, 2-constraints-complete, 2-review, 2-review-complete, 2.5-design, 2.5-design-complete, 3-impl, 3-impl-complete, 3-impl-tripwire, 3-impl-gate-failed, 3-impl-verification-unverified, 3-scope-drift-adjudication, 4-review, 4-review-complete, 4-veto-rework-required, 5-archive, 5-archived, halted-error."
+    },
+    "started_at": {"type": "string", "format": "date-time"},
+    "updated_at": {"type": "string", "format": "date-time"},
+    "completed_at": {"type": "string", "format": "date-time"},
+    "branch": {"type": "string"},
+    "ask_text": {"type": "string", "description": "Truncated, secret-redacted task summary. status.json is committed to git; never let a token-shaped substring through."},
+    "risk_tier": {
+      "type": "string",
+      "enum": ["trivial", "standard", "architectural"],
+      "description": "Copied from spec.json after Phase 1 (post orchestrator tier validation) so checkpoints and re-runs honor the same depth."
+    },
+    "panel_roles": {
+      "type": "array",
+      "items": {"type": "string", "enum": ["ba", "dba", "devops", "secops", "dev", "qa"]},
+      "description": "The Phase 4 panel composition resolved by tier and diff surfaces. Recorded before dispatch so the merge, the rubric, and --resume agree on who was on the panel. The design_review lens is tracked via its own shard, added whenever the diff touches a frontend surface."
+    },
+    "worktree_path": {"type": "string", "description": "Absolute path of the Phase 3 implementation worktree. Read by ${CLAUDE_PLUGIN_ROOT}/scripts/archive-pipeline.mjs as the artifact fallback location."},
+    "phase3_qa_test_commit": {"type": "string", "description": "Architectural tier only: SHA of QA's committed failing-test contract, recorded before Dev dispatches."},
+    "pr_url": {"type": "string", "format": "uri"},
+    "final_verdict": {
+      "type": "string",
+      "enum": ["APPROVE", "APPROVE_WITH_NOTES", "APPROVE_WITH_NITS", "REQUEST_CHANGES", "REQUEST_REFACTOR", "SECOPS_VETO"]
+    },
+    "peer_review_verdict_counts": {
+      "type": "object",
+      "properties": {
+        "approve": {"type": "integer"},
+        "approve_with_notes": {"type": "integer"},
+        "request_changes": {"type": "integer"},
+        "request_refactor": {"type": "integer"},
+        "veto": {"type": "integer"}
+      }
+    },
+    "veto_reason": {"type": "string"},
+    "error": {"type": "string"},
+    "events": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["phase", "at"],
+        "properties": {
+          "phase": {"type": "string"},
+          "verdict": {"type": "string"},
+          "at": {"type": "string", "format": "date-time"},
+          "note": {"type": "string"}
+        }
+      }
+    },
+    "flags": {
+      "type": "array",
+      "description": "One-line-per-agent digest appended after each agent returns; Phase 4 reviewers read this instead of re-parsing earlier artifacts from cold.",
+      "items": {
+        "type": "object",
+        "required": ["phase", "agent", "at"],
+        "properties": {
+          "phase": {"type": "string"},
+          "agent": {"type": "string"},
+          "verdict": {"type": "string"},
+          "summary": {"type": "string", "maxLength": 140},
+          "at": {"type": "string", "format": "date-time"}
+        }
+      }
+    }
+  }
+}
