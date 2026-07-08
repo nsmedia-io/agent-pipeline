@@ -6,10 +6,7 @@
     "name": "NS Media"
   },
   "homepage": "https://github.com/nsmedia-io/agent-pipeline",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/nsmedia-io/agent-pipeline.git"
-  },
+  "repository": "https://github.com/nsmedia-io/agent-pipeline",
   "license": "MIT",
   "keywords": ["orchestration", "subagents", "code-review", "workflow", "pipeline", "agents"]
 }

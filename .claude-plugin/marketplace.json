@@ -1,5 +1,4 @@
 {
-  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
   "name": "agent-pipeline",
   "version": "0.1.0",
   "description": "A risk-tiered multi-agent development pipeline for Claude Code, with a file-based knowledge store and no external service dependencies.",
