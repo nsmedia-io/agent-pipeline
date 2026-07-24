@@ -14,7 +14,7 @@ The phases are **gates, not a one-way waterfall**. The shape of the work, not th
 
 - **The write path carries full context, single-threaded.** Every artifact handoff between agents is a lossy compression, so the pipeline minimizes pre-implementation handoffs. At the **standard tier** Phase 3 is ONE Dev thread that writes code AND its tests together in a single context, receiving the spec, the map, and the specialist constraint checklists up front (A/B-measured: one full-context writer produces fewer errors than fragmenting planning, review, and implementation across contexts). At the **architectural tier** the stakes justify more ceremony: QA first authors the failing behavioral test contract, commits it, and only then does Dev implement against it, still one tree, one actor at a time. Both shapes preserve the property that killed the old `PENDING_CI` race: no agent ever reviews or builds against a half-built tree owned by a concurrent agent.
 - **Independent review of a FINISHED artifact fans out.** The Phase 4 panel (and, at the architectural tier, Phase 2) applies distinct, non-overlapping lenses to a fixed artifact. Dispatch them **concurrently** and reconcile after. Fresh eyes on a finished diff are structurally independent in a way self-review is not: the author's blind spots are correlated with the bugs it wrote. This is where multi-agent earns its cost, and QA's BINDING adversarial verdict always runs here, LAST.
-- **Loop back, do not push forward, when an assumption breaks.** Any phase can surface information that invalidates an upstream decision. When it does, return to the owning phase (see "Loop-back triggers" below) rather than carrying a known-wrong assumption downstream. The gates that protect compliance and safety (SecOps veto, DBA migration review, access-control rationale) are never skipped at any tier: SecOps sits on every non-trivial panel with veto power, and a migration surfacing in a standard-tier diff trips the mis-tier halt (see the Phase 3 to 4 gate).
+- **Loop back, do not push forward, when an assumption breaks.** Any phase can surface information that invalidates an upstream decision. When it does, return to the owning phase (see "Loop-back triggers" below) rather than carrying a known-wrong assumption downstream. The gates that protect compliance and safety (SecOps veto, DBA migration review, access-control rationale) are never skipped at any tier: SecOps sits on every panel at every tier with veto power, and a migration surfacing in a standard-tier diff trips the mis-tier halt (see the Phase 3 to 4 gate).
 
 **Argument:** `$ARGUMENTS`
 
@@ -94,8 +94,8 @@ When dispatching Phase 4 reviewer prompts (see the Phase 4 section below), inclu
 
 The orchestrator scales how DEEP it runs by the `risk_tier` BA sets in `spec.json` (`trivial | standard | architectural`; the legacy `trivial` boolean still implies `risk_tier: "trivial"`). The principle: **spend the multi-agent budget where independence pays (review of a finished diff, compliance gates), and keep the write path in one full-context thread.** The compliance and safety gates (SecOps veto, DBA migration review, access-control rationale) are never skipped at any tier; the tiers change WHERE they bind, not WHETHER.
 
-- **trivial**: typo or one-line fix, no data/infra/security impact. Skips Phase 2/2-lite, Phase 2.5, and the deep Phase 0.5 map. Straight from Phase 1 to Phase 3 (single Dev thread authoring its own tests), then Phase 4.
-- **standard**: a normal feature or bugfix with no schema/migration change, no cross-cutting contract change, and no security/compliance dimension (anything with those auto-promotes to architectural at intake). Runs a LIGHT Phase 0.5 map, **Phase 2-lite** (the orchestrator extracts the DBA/DevOps/SecOps constraint checklists into `constraints.md`; no reviewer subagents dispatched), a **single-thread Phase 3** (one Dev context writes code AND tests together against spec + map + constraints), and a **trimmed Phase 4 panel** (BA, Dev, QA, SecOps always; DBA and DevOps added when the diff touches their surfaces). This is the A/B-validated shape: the win was moving the multi-agent boundary from before-code-exists to after-a-diff-exists.
+- **trivial**: typo or one-line fix, no data/infra/security impact. Skips Phase 2/2-lite, Phase 2.5, and the deep Phase 0.5 map. Straight from Phase 1 to Phase 3 (single Dev thread authoring its own tests), then a trimmed Phase 4 panel of QA plus SecOps (plus surface-conditional Design), not the six standing roles.
+- **standard**: a normal feature or bugfix with no schema/migration change, no cross-cutting contract change, and no security/compliance dimension (anything with those auto-promotes to architectural at intake). Runs a LIGHT Phase 0.5 map that is catalog-seeded verification FOLDED INTO the BA Phase 1 dispatch (no separate map subagent dispatch), **Phase 2-lite** (the orchestrator extracts the DBA/DevOps/SecOps constraint checklists into `constraints.md`; no reviewer subagents dispatched), a **single-thread Phase 3** (one Dev context writes code AND tests together against spec + map + constraints), and a **trimmed Phase 4 panel** (BA, Dev, QA, SecOps always; DBA and DevOps added when the diff touches their surfaces). This is the A/B-validated shape: the win was moving the multi-agent boundary from before-code-exists to after-a-diff-exists.
 - **architectural**: a schema/migration change, a cross-cutting contract change, or any security/compliance dimension. Runs the DEEP Phase 0.5 map, the full Phase 2 reviewer fan-out, the Phase 2.5 design bake-off, the QA-first Phase 3 (3a test contract, then 3b Dev), the full six-agent Phase 4 panel, the live-verification gate, and the higher-effort agents.
 
 **A/B and review economics (when to build twice).** The default is build ONCE, the single-writer Phase 3, then spend the multi-agent budget on independent ADVERSARIAL review of that one artifact (Phase 4). Building an artifact TWICE is the `ab_build` escalation only: when BA sets `spec.ab_build: true` (architectural, and only when two or more materially different approaches are genuinely viable and a wrong one is expensive), Phase 3 runs as TWO independent implementations of the SAME fixed surface, each worktree-isolated, judged BLIND by a heterogeneous panel, then the winner is materialized with best-of-both grafts. That path costs roughly an order of magnitude more, so it is rare and deliberate; run a full dual-build A/B at most as a periodic calibration, not per task. Two free, always-on rules carry most of what a full A/B would otherwise re-discover, the grounding gate and the gate-bites proof, so each A/B you do run banks rules and retires.
@@ -114,9 +114,9 @@ Phase 0.5 runs BEFORE the Phase 1 spec locks. It produces a `map.json` artifact 
 2. **Data-layer-resident readers** (function and view bodies in your migration/schema sources that read the changed table; invisible to a code-level call-site grep).
 3. **Client-side or other independent re-derivations** (a client that recomputes a label the server now composes, or any second code path that derives the same value).
 
-Dispatch the mapping pass as BA (or, for an architectural-tier ask, parallel reader agents each scoping one layer), seeding from the knowledge store (`knowledge/living-context/<domain>--<contract>-consumers.json` under the contract's owning domain; see Phase 5) when one exists for a touched contract, then verifying and extending it. The map is the INPUT to the Phase 1 spec (BA writes the blast-radius section from it) and to the Phase 4 blast-radius lens, so blast radius is consulted from a stored map rather than re-grepped fresh each phase, where a data-layer-resident reader is easy to miss.
+Dispatch the mapping pass as BA (or, for an architectural-tier ask, parallel reader agents each scoping one layer), seeding from the knowledge store (`knowledge/living-context/<domain>--<contract>-consumers.json` under the contract's owning domain; see Phase 5) when one exists for a touched contract, then verifying and extending it. The map is the INPUT to the Phase 1 spec (BA writes the blast-radius section from it) and to the Phase 4 blast-radius lens, so blast radius is consulted from a stored map rather than re-grepped fresh each phase, where a data-layer-resident reader is easy to miss. When a SEPARATE map dispatch is made (the architectural tier), pin it to `model: "sonnet"`: the map is mechanical catalog-seeded reader enumeration, not the deep-reasoning work that warrants opus.
 
-Gate by risk tier (see "Risk-tiered orchestration depth" above): the **trivial** tier may SKIP the deep map entirely; **standard** runs a light map (touched contracts plus their known catalogs); **architectural** runs the deep three-layer map. After the map is written, update `status.json` with `current_phase: "0.5-map-complete"` and proceed to Phase 1.
+Gate by risk tier (see "Risk-tiered orchestration depth" above): the **trivial** tier may SKIP the deep map entirely; **standard** does NOT make a separate map subagent dispatch at all, its map is catalog-seeded verification (the touched contracts plus their known `knowledge/living-context/<domain>--<contract>-consumers.json` catalogs) FOLDED INTO the BA Phase 1 dispatch, so BA produces `map.json` alongside `spec.json` in one context; **architectural** runs the deep three-layer map as its own (sonnet) dispatch. After the map is written (separately at architectural, or as part of Phase 1 at standard), update `status.json` with `current_phase: "0.5-map-complete"` and proceed to Phase 1.
 
 ---
 
@@ -332,8 +332,8 @@ This phase runs ONLY when `spec.risk_tier === "architectural"`. For trivial and 
 
 For an architectural-tier spec, dispatch a competitive design bake-off rather than letting Phase 3 improvise an approach:
 
-1. **Two INDEPENDENT design sketches, in parallel.** Send a single message with two Agent calls, each asked to sketch an end-to-end approach (data model, contract changes, control flow, failure modes, migration shape) against `spec.json`, `review.json`, and `map.json`. They do not see each other's sketch; independence is the point.
-2. **One judge, after both return.** Dispatch a judge that reads both sketches, synthesizes the WINNER, and grafts the best of the runner-up where it strengthens the winner.
+1. **Two INDEPENDENT design sketches, in parallel.** Send a single message with two Agent calls, each asked to sketch an end-to-end approach (data model, contract changes, control flow, failure modes, migration shape) against `spec.json`, `review.json`, and `map.json`. They do not see each other's sketch; independence is the point. Pin BOTH sketch dispatches to an explicit `subagent_type: "dev"` (the architectural-approach reasoning role) with `model: "sonnet"`, e.g. `Agent({subagent_type: "dev", model: "sonnet", description: "Design sketch A for #<issue>", prompt: "..."})`. The explicit `subagent_type` is what stops these dispatches from inheriting the session model (which can be a non-opus/non-sonnet session default); they must never inherit the session default.
+2. **One judge, after both return.** Dispatch a judge that reads both sketches, synthesizes the WINNER, and grafts the best of the runner-up where it strengthens the winner. Pin the judge to an explicit `subagent_type: "dev"` with `model: "opus"` (the synthesis is the high-reasoning step), e.g. `Agent({subagent_type: "dev", model: "opus", description: "Design bake-off judge for #<issue>", prompt: "..."})`. Like the sketches, its `subagent_type` is explicit so it never inherits the session model.
 
 The judge writes a `design.json` artifact at `ARTIFACT_DIR` with the chosen approach, the rationale, the rejected alternatives (and why), and the residual risks. Phase 3 Dev then implements `design.json`, not just the spec, so the implementation follows a vetted design rather than the first approach that compiles.
 
@@ -389,7 +389,7 @@ Read, in order:
 
 TRIPWIRE (hard rule): if implementation turns out to require a migration, an access-control change, a new auth surface, crypto, webhook verification, or a change to a shared contract's shape, STOP. Commit nothing further, write your partial state to tasks.json, and return to me with tripwire_reason. That work is architectural-tier and must not ship through the standard lane.
 
-Implement per your agent definition. Keep <ARTIFACT_DIR>/tasks.json updated. Run `<your checks>` (# CUSTOMIZE: e.g. `npm run typecheck && npm test && npm run lint`) before declaring done; declare done only at green.
+Implement per your agent definition. Keep <ARTIFACT_DIR>/tasks.json updated. Run `<your checks>` (# CUSTOMIZE: e.g. `npm run typecheck && npm test && npm run lint`) before declaring done; LOCAL green is the Phase-3 done gate. Open the PR and return WITHOUT waiting for remote CI: the panel reviews your finished diff while remote CI runs concurrently, and remote CI-green is verified at merge, not before the panel.
 
 Write <ARTIFACT_DIR>/impl-report.json at completion, including requirement_checks AND the qa_signoff coverage record of the tests you authored. Open a PR against the integration branch with Closes #<issue>.
 
@@ -443,7 +443,7 @@ QA has already authored and committed the failing behavioral test contract at co
 
 Implement per your agent definition until QA's tests pass. Do NOT weaken, skip, or delete QA's tests to force a pass. You MAY add tests for internal units QA could not see, held to the QA test-discipline (no mocked backing service, integration-style, behavioral assertions). If a QA test looks wrong, raise it to me rather than editing it.
 
-Keep <ARTIFACT_DIR>/tasks.json updated as you go. Run `<your checks>` (# CUSTOMIZE: e.g. `npm run typecheck && npm test && npm run lint`) before declaring done. Declare done only at green; there is no PENDING_CI hand-off.
+Keep <ARTIFACT_DIR>/tasks.json updated as you go. Run `<your checks>` (# CUSTOMIZE: e.g. `npm run typecheck && npm test && npm run lint`) before declaring done; LOCAL green is the Phase-3 done gate. There is no PENDING_CI hand-off: the tree is complete when you hand off. Open the PR and return WITHOUT waiting for remote CI; the panel reviews the finished diff while remote CI runs concurrently, and remote CI-green is a merge precondition, verified at merge.
 
 Write <ARTIFACT_DIR>/impl-report.json at completion, including the requirement_checks array AND the qa_signoff block (coverage record of QA-authored tests plus any internal-unit tests you added: test files, edge cases covered, acceptance mapping, verdict APPROVE). Open a PR against the integration branch with Closes #<issue>.
 
@@ -461,9 +461,11 @@ If Dev returns with `scope_drift.detected === true` (or discovers the spec rests
   ```
 - Execute BA's ruling before continuing. If the ruling rewrites requirements or acceptance criteria materially: at the architectural tier, re-run the affected Phase 2 reviewer(s), then re-run Phase 3 from 3a so QA re-authors tests for the changed criteria before Dev resumes; at the standard tier, re-extract constraints if domains changed, then re-dispatch the single Dev thread against the revised spec.
 
-If Dev completes with no drift, `qa_signoff.verdict === "APPROVE"`, and green checks:
+If Dev completes with no drift, `qa_signoff.verdict === "APPROVE"`, and green LOCAL checks:
 - Update `status.json` with `current_phase: "3-impl-complete"`, `pr_url: <url>`.
 - Proceed to Phase 4, where QA renders the binding adversarial test verdict.
+
+**Overlap the panel with remote CI (do not serialize the CI wait).** Dev opens the PR and returns on LOCAL green (the project checks), which stays the Phase-3 done gate; Dev does NOT wait for remote CI. The pre-Phase-4 gates below and the Phase 4 panel dispatch IMMEDIATELY, concurrently with remote CI. Remote CI-green is no longer a panel-entry precondition; it is a MERGE precondition, verified at merge time (the PR head SHA matches the reviewed HEAD, and the CI conclusion on that head is green). This drops a serialized multi-minute remote-CI wait from every run without reintroducing the `PENDING_CI` half-built-tree race: the tree is COMPLETE at hand-off, only the remote-CI WAIT is dropped.
 
 ---
 
@@ -533,11 +535,12 @@ Only on a clean (exit 0) gate, AND a recorded local pass for any data-migration 
 
 **Checkpoint first:** after the pre-Phase-4 gate passes, set `current_phase: "4-review"` and commit `status.json` BEFORE dispatching the panel.
 
-The panel reviews the finished diff, each agent through a distinct lens. This is the read-heavy, independent-perspective work where fan-out is a pure win, and where QA's adversarial test scrutiny lives: QA reviews the completed, CI-green implementation with fresh eyes and renders the **binding independent test verdict**.
+The panel reviews the finished diff, each agent through a distinct lens, while remote CI runs concurrently (CI-green is verified at merge, not required to enter the panel). This is the read-heavy, independent-perspective work where fan-out is a pure win, and where QA's adversarial test scrutiny lives: QA reviews the finished implementation with fresh eyes and renders the **binding independent test verdict**.
 
 **Panel composition by tier.** Resolve `PANEL_ROLES` before dispatching:
 
-- **architectural** (and **trivial**, which had no earlier review at all): the six standing roles. `PANEL_ROLES="ba dba devops secops dev qa"`.
+- **architectural**: the six standing roles. `PANEL_ROLES="ba dba devops secops dev qa"`.
+- **trivial**: `PANEL_ROLES="qa secops"` (QA's binding test verdict plus SecOps, which is never trimmed at any tier). A trivial change is a typo or one-line fix, so DBA/DevOps/BA/Dev add no independent lens worth a context spin-up; the mis-tier tripwire (unchanged) still catches a diff that turns out to touch a migration/access-control/auth surface, at which point it re-tiers and the full gates apply. Add the surface-conditional Design lens exactly as below when the diff touches a frontend surface.
 - **standard**: four always, `ba dev qa secops` (SecOps is never trimmed; it holds the veto and security drift is exactly what a pre-code triage can miss). Add the surface-conditional specialists from the diff, mechanically:
 
 ```bash
@@ -582,35 +585,70 @@ Write your verdict as a BARE block (verdict at the top level, no "<role>" wrappe
 ```
 
 ```
-Agent({subagent_type: "ba", description: "BA Phase 4 review", prompt: "<shared preamble, role=ba>. Read <ARTIFACT_DIR>/spec.json and <ARTIFACT_DIR>/impl-report.json. Verify: does implementation match spec intent? Any unflagged scope drift? Return verdict APPROVE | APPROVE_WITH_NOTES | REQUEST_CHANGES."})
+Agent({subagent_type: "ba", model: "sonnet", description: "BA Phase 4 review", prompt: "<shared preamble, role=ba>. Read <ARTIFACT_DIR>/spec.json and <ARTIFACT_DIR>/impl-report.json. Verify: does implementation match spec intent? Any unflagged scope drift? Return verdict APPROVE | APPROVE_WITH_NOTES | REQUEST_CHANGES."})
 Agent({subagent_type: "dba", description: "DBA Phase 4 review", prompt: "<shared preamble, role=dba>. Re-verify schema/migration/access-control diff against DBA checklist. Return verdict APPROVE | APPROVE_WITH_NOTES | REQUEST_CHANGES."})
 Agent({subagent_type: "devops", description: "DevOps Phase 4 review", prompt: "<shared preamble, role=devops>. Re-verify infrastructure config, workflows, deploy order, secrets. Return verdict APPROVE | APPROVE_WITH_NOTES | REQUEST_CHANGES."})
 Agent({subagent_type: "secops", description: "SecOps Phase 4 review", prompt: "<shared preamble, role=secops>. Re-verify auth/encryption/validation/logging. Return verdict APPROVE | APPROVE_WITH_NOTES | REQUEST_CHANGES | VETO."})
-Agent({subagent_type: "dev", description: "Dev Phase 4 review", prompt: "<shared preamble, role=dev>. Review code quality, DRY, SOLID, readability of the diff. Return verdict APPROVE | APPROVE_WITH_NOTES | REQUEST_CHANGES."})
+Agent({subagent_type: "dev", model: "sonnet", description: "Dev Phase 4 review", prompt: "<shared preamble, role=dev>. Review code quality, DRY, SOLID, readability of the diff. Return verdict APPROVE | APPROVE_WITH_NOTES | REQUEST_CHANGES."})
 Agent({subagent_type: "qa", description: "QA Phase 4 review", prompt: "<shared preamble, role=qa>. You are the binding independent test verdict. This is an ADVERSARIAL gap-check, not an auto-pass on green: green proves only that the tests that exist pass. Audit coverage against the diff and the Phase-3 behavioral test contract (you authored it at the architectural tier; Dev authored it at standard/trivial, which makes your fresh-eyes audit the FIRST independent look at those tests, so scrutinize them hardest): every changed path tested, webhooks cover idempotency/replay, integration tests hit a real backing service (not mocks), failure modes covered, behavior outside the existing tests not left untested (overfitting), and no test weakened to force a pass. Name specific missing tests. Return verdict APPROVE | APPROVE_WITH_NOTES | REQUEST_CHANGES | REQUEST_REFACTOR."})
 Agent({subagent_type: "design", description: "Design Phase 4 review", prompt: "<shared preamble, role=design_review>. You are dispatched ONLY because the diff touches a frontend surface. Run the three lenses per your agent definition: token conformance (binding, your token-lint rule; # CUSTOMIZE), accessibility (axe deterministic + the mandatory human-residual caveat), and critique/copy (advisory only). A REQUEST_CHANGES is valid ONLY when a concerns[] blocker/major cites a token_lint or axe failure; taste-only findings are advisory. Write your bare shard to <ARTIFACT_DIR>/peer-review.design_review.json. You hold NO veto. Return verdict APPROVE | APPROVE_WITH_NOTES | REQUEST_CHANGES."})
 ```
 
+**Phase 4 dispatch model overrides.** The BA and Dev lenses are pinned to `model: "sonnet"` (spec-conformance and code-quality re-reads are well within the sonnet tier's reach). QA and SecOps carry NO override, so they inherit `model: opus` from their frontmatter: QA holds the binding independent test verdict and SecOps holds the veto, and those stay on opus at every tier. DBA, DevOps, and Design also inherit their frontmatter models unchanged. The `opus` and `sonnet` values here and in the agent frontmatter are deliberate floating aliases, resolved by the harness to the latest model of each tier, never pinned full model IDs absent a specific regression, so the pipeline rides model upgrades without a rename pass.
+
 The Design row appears in the PR summary table and the merge loop only when `design_review` is in `PANEL_ROLES` (frontend-touching diffs); otherwise it is listed among the not-on-panel lenses, exactly like the surface-trimmed DBA/DevOps.
 
-After all dispatched reviewers return, **merge the shards into `peer-review.json`** with the same `unwrap` defense as Phase 2, so a wrapped or sibling-buried shard recovers its verdict instead of nulling out. The merge iterates the resolved `PANEL_ROLES`, so it works for any panel composition. Orchestrator note: run this loop via `bash -c '...'`; the session shell may be zsh, which does not word-split an unquoted `$PANEL_ROLES` (the whole string becomes one word and the loop iterates zero roles), and `bash -c` guarantees POSIX word-splitting. Avoid `status` and `path` as shell variable names here (zsh treats them specially).
+After all dispatched reviewers return, **merge the shards into `peer-review.json`** via `${CLAUDE_PLUGIN_ROOT}/scripts/merge-peer-review.mjs`, which folds each named role's bare shard into the target file with the same `unwrap` defense as Phase 2 (a wrapped or sibling-buried shard recovers its verdict instead of nulling out). The merge is ADDITIVE: it overwrites only the roles named on THIS invocation and preserves every other role already in the file. That is what makes a delta re-review round (below) safe, and it is the SAME script the manual `/phase peer-review` re-run calls, so the auto and manual paths cannot diverge. On a FULL round, start from a clean file so no stale shard survives; on a delta round, do NOT reset it (that is the whole point). Orchestrator note: run the loop that builds the argument list via `bash -c '...'`; the session shell may be zsh, which does not word-split an unquoted `$PANEL_ROLES` (the whole string becomes one word and the loop iterates zero roles), and `bash -c` guarantees POSIX word-splitting. Avoid `status` and `path` as shell variable names here (zsh treats them specially).
 
 ```bash
-echo '{}' > "$ARTIFACT_DIR/peer-review.json"
-for role in $PANEL_ROLES; do
+# Full round: reset, then fold every dispatched role. ROLES_TO_MERGE=$PANEL_ROLES here.
+rm -f "$ARTIFACT_DIR/peer-review.json"
+ARGS=()
+for role in $ROLES_TO_MERGE; do
   SHARD="$ARTIFACT_DIR/peer-review.$role.json"
-  if [ ! -f "$SHARD" ]; then echo "MISSING SHARD: $role" >&2; continue; fi   # missing shard = halt below
-  tmp=$(mktemp) && jq --slurpfile s "$SHARD" --arg k "$role" '
-    def unwrap($k): if type=="object" and has("verdict") then .
-                    elif type=="object" then (.[$k] // .)
-                    else . end;
-    .[$k] = ($s[0] | unwrap($k))' "$ARTIFACT_DIR/peer-review.json" > "$tmp" \
-    && mv "$tmp" "$ARTIFACT_DIR/peer-review.json"
-  rm -f "$SHARD"
+  if [ ! -f "$SHARD" ]; then echo "MISSING SHARD: $role" >&2; fi   # missing shard = halt (script exits 2)
+  ARGS+=("$role=$SHARD")
 done
+node "${CLAUDE_PLUGIN_ROOT}/scripts/merge-peer-review.mjs" "$ARTIFACT_DIR/peer-review.json" "${ARGS[@]}"
+for role in $ROLES_TO_MERGE; do rm -f "$ARTIFACT_DIR/peer-review.$role.json"; done
 ```
 
-A dispatched role whose block is absent or survives as `null` (an agent that never wrote, or wrote unrecoverable garbage) carries no verdict, so the rubric below cannot read it as `APPROVE`; treat it as a missing review and HALT rather than merge. A role that was never on the panel (trimmed at standard tier) is simply absent from `peer-review.json`; that is not a missing review.
+A dispatched role whose block is absent or survives as `null` (an agent that never wrote, or wrote unrecoverable garbage) carries no verdict, so the rubric below cannot read it as `APPROVE`; the script exits non-zero on a missing shard, and a recovered-but-null block (a shard present on disk that yields no verdict after unwrap) is treated as a missing review and HALTs without writing a partial merge. A role that was never on the panel (trimmed at standard/trivial tier) is simply absent from `peer-review.json`; that is not a missing review.
+
+### Delta re-review (a REQUEST_CHANGES / REQUEST_REFACTOR re-run, not a fresh panel)
+
+When Phase 4 loops back on a `REQUEST_CHANGES` (or a `REQUEST_REFACTOR`) and Dev has pushed fix commits, do NOT re-run the whole panel. Re-dispatch only the roles whose judgment the fix could have changed, and let the standing approvals of the untouched roles hold. Resolve `ROLES_TO_MERGE` for the delta round mechanically:
+
+```bash
+# The FULL panel is whatever was recorded in status.json panel_roles on the first
+# round; that set is authoritative for the rubric and the counts below. Do NOT
+# recompute or shrink panel_roles on a delta round.
+FULL_PANEL="$(jq -r '.panel_roles | join(" ")' "$PIPELINE_BASE/<issue>/status.json")"
+
+# Re-dispatch: SEED with QA AND SecOps unconditionally (both re-review the fix
+# commits on EVERY delta round; SecOps is never-trimmed, so its round-1 APPROVE must
+# never stand in on a delta round, exactly like QA's), THEN add every role that
+# objected last round, THEN add any role whose SURFACE the fix commits touched (reuse
+# the exact panel-composition greps above so detection never drifts from the first round).
+DELTA="qa secops"
+for role in $OBJECTING_ROLES; do case " $DELTA " in *" $role "*) ;; *) DELTA="$DELTA $role";; esac; done
+FIX_CHANGED="$(git -C "$WORKTREE_PATH" diff --name-only <first-round-head>...HEAD)"
+# CUSTOMIZE: the same data-layer glob the standard-tier panel composition uses.
+echo "$FIX_CHANGED" | grep -qE '^(migrations/|db/)' && case " $DELTA " in *" dba "*) ;; *) DELTA="$DELTA dba";; esac
+# CUSTOMIZE: the same infra/CI glob the standard-tier panel composition uses.
+echo "$FIX_CHANGED" | grep -qE '(^\.github/|^infra/|^deploy)' && case " $DELTA " in *" devops "*) ;; *) DELTA="$DELTA devops";; esac
+if node -e 'import(process.env.CLAUDE_PLUGIN_ROOT + "/scripts/frontend-surface.mjs").then(m=>process.exit(m.diffTouchesFrontend(process.argv.slice(1))?0:1))' $FIX_CHANGED; then
+  case " $DELTA " in *" design_review "*) ;; *) DELTA="$DELTA design_review";; esac
+fi
+ROLES_TO_MERGE="$DELTA"
+```
+
+SecOps is in the delta seed on EVERY delta round regardless of whether it objected, exactly like QA: its prior APPROVE never stands in on a delta round, so it freshly re-reviews the fix commits and the SecOps-never-trimmed invariant holds on delta rounds at every tier. (Its `VETO` semantics are unchanged; a SecOps VETO on a delta round halts to BA as always.) Dispatch ONLY `$ROLES_TO_MERGE` with the same Phase 4 prompts, then run the merge block above but WITHOUT the `rm -f "$ARTIFACT_DIR/peer-review.json"` line, so `merge-peer-review.mjs` folds the delta shards INTO the existing file and the standing approvals of the NON-delta roles survive. After the delta merge:
+
+- `peer-review.json` carries a verdict for the FULL panel: QA and SecOps are ALWAYS freshly re-reviewed (never counted as preserved standing approvals), the objecting and surface-touched roles are freshly re-reviewed, and only the NON-delta roles contribute preserved standing approvals.
+- Compute `peer_review_verdict_counts` over the FULL `$FULL_PANEL` (not the delta subset), via a `node -e` one-liner against the `countVerdicts` export of `${CLAUDE_PLUGIN_ROOT}/scripts/merge-peer-review.mjs` or by reading the merged file, so the tally reflects the whole panel.
+- Apply the final-verdict rubric below over the FULL panel, and list EVERY panel role in the PR summary table (the re-reviewed roles and the ones whose prior verdict held).
+- Record the delta round for audit: leave `panel_roles` as the original full panel, and note the re-dispatched subset in the phase event (`{"phase": "4-review", "note": "delta re-review: <ROLES_TO_MERGE>", ...}`), so the audit trail shows the full panel and the delta subset separately.
 
 Then:
 
@@ -623,8 +661,8 @@ Then:
    ```
    **[Orchestrator]:** PEER REVIEW VETO. SecOps blocked merge: <one-line reason>. Spec returns to BA for redesign. Resume with /pipeline --resume <issue>.
    ```
-2. **`REQUEST_REFACTOR`**: QA returned `REQUEST_REFACTOR` (testability blocked by code structure). Pipeline returns to the Dev implementation step (3b at the architectural tier, the single Dev thread otherwise); the existing behavioral test contract stands (QA-authored at architectural, Dev-authored at standard), so this re-runs Dev only and then re-runs the Phase 4 panel. `final_verdict: "REQUEST_REFACTOR"`. Do NOT merge.
-3. **`REQUEST_CHANGES`**: any agent returned `REQUEST_CHANGES`. `final_verdict: "REQUEST_CHANGES"`. Collect all blockers into the owner-facing summary. Do NOT merge. Dev and QA address, then re-run Phase 4 via `/phase peer-review --issue <n>`.
+2. **`REQUEST_REFACTOR`**: QA returned `REQUEST_REFACTOR` (testability blocked by code structure). Pipeline returns to the Dev implementation step (3b at the architectural tier, the single Dev thread otherwise); the existing behavioral test contract stands (QA-authored at architectural, Dev-authored at standard), so this re-runs Dev only and then re-runs Phase 4 as a **delta re-review** (QA and SecOps unconditionally, plus any role whose surface the refactor touched; see "Delta re-review" above), not a fresh full panel. `final_verdict: "REQUEST_REFACTOR"`. Do NOT merge.
+3. **`REQUEST_CHANGES`**: any agent returned `REQUEST_CHANGES`. `final_verdict: "REQUEST_CHANGES"`. Collect all blockers into the owner-facing summary. Do NOT merge. Dev addresses; on the re-run, dispatch a **delta re-review** (QA and SecOps unconditionally, plus the objecting role(s), plus any role whose surface the fix commits touched, per "Delta re-review" above) via `/phase peer-review --issue <n>`, additively merged so the standing approvals hold.
 4. **`APPROVE_WITH_NOTES`**: any agent returned `APPROVE_WITH_NOTES` (or the legacy alias `APPROVE_WITH_NITS`), no blockers above. `final_verdict: "APPROVE_WITH_NOTES"`. Nits must be fixed before merge; no re-run of the panel required after fixes.
 5. **`APPROVE`**: every dispatched panel role's verdict is `APPROVE`. `final_verdict: "APPROVE"`. Ready for human merge to the integration branch.
 
@@ -661,7 +699,7 @@ fi
 
 `cp -n` (no-clobber) is intentional: artifacts already present in the canonical dir (`spec.json`, `review.json`, `status.json`) are authoritative and must not be overwritten by the seeded/stale copies from the worktree. Do not remove the `-n` flag thinking it is unnecessary. The `"$SRC" != "$DST"` guard is a no-op safety for the case where a future change runs Phases 3-4 in the same checkout as the orchestrator.
 
-Do NOT merge. The owner merges to the integration branch. Merges to the integration branch follow your project's review policy; production/release promotion needs the owner's explicit go.
+Do NOT merge. The owner merges to the integration branch. Merges to the integration branch follow your project's review policy; production/release promotion needs the owner's explicit go. Remote CI-green is the MERGE precondition that ran concurrently with the panel: before presenting the PR as ready to merge, verify remote CI is green on the current head (the PR head SHA matches the reviewed HEAD, and the CI conclusion on that head is green), since the panel entered without waiting on it.
 
 **Merge guard (data-migration / security-sensitive changes):** if the diff adds or alters a migration touching access controls or a security-sensitive table, do not present it as ready to merge on CI-green alone when the live-verification suite only skipped. A recorded local pass (run against a real backing service; see the live-verification gate above) is required first; "CI green with the integration suite skipped" is NOT done for such a change. This mirrors the Phase 3 to 4 live-verification gate above.
 
@@ -680,7 +718,9 @@ git fetch origin main && git log origin/main --oneline | grep -q "#<issue>" && e
 
 If not merged: halt and tell the owner.
 
-Invoke Librarian:
+**Dispatch the Librarian NON-BLOCKING; do not hold the session on Phase 5.** Post-merge archival can run long while the owner waits on a step whose result is not a gate. `run_in_background` is a Bash-tool primitive and does NOT apply to an Agent dispatch, so the concrete non-blocking mechanism is: **checkpoint `5-archive`, dispatch the Librarian as the LAST action of the run, and return the completion summary to the owner in the SAME turn WITHOUT awaiting or reading the Librarian's result.** The archival is not a merge gate and its outcome does not change the pipeline verdict, so control returns to the owner immediately; the Librarian's knowledge-store and archive work completes out of band. If only the mechanical archival is wanted detached (not the Librarian's knowledge-store judgment), the fallback is to run `${CLAUDE_PLUGIN_ROOT}/scripts/archive-pipeline.mjs --issue <issue>` via a backgrounded Bash call (`run_in_background`) and skip the Agent dispatch. Either way the orchestrator session does not block on Phase 5.
+
+Invoke Librarian (dispatch, then return to the owner without awaiting the result):
 ```
 Agent({
   subagent_type: "librarian",
@@ -705,9 +745,9 @@ Write <PIPELINE_BASE>/<issue>/librarian-report.json. Return a short summary.
 
 `${CLAUDE_PLUGIN_ROOT}/scripts/archive-pipeline.mjs` reads from the orchestrator's `.pipeline/<issue>/` first. When an artifact is absent there, the script falls back to `<status.worktree_path>/.pipeline/<issue>/` and reads from the Phase 3 worktree (validated against the `<repo-root>/.claude/worktrees/` prefix). If the worktree has already been cleaned up the script logs a warning, archives whatever is recoverable, and exits 0. The Phase 4 sync step above is the primary mechanism; the archive-script fallback is defense-in-depth.
 
-After Librarian returns:
-- Update `status.json` with `current_phase: "5-archived"`, `completed_at: <iso>`.
-- Optional: remove `.pipeline/<issue>/status.json` or move the whole dir to `.pipeline/_archived/<issue>/` for audit.
+Because the Librarian is dispatched non-blocking, mark the run terminal at DISPATCH time, not on the Librarian's return:
+- Update `status.json` with `current_phase: "5-archived"`, `completed_at: <iso>` as part of the same turn that dispatches the Librarian, then return the completion summary to the owner. The Librarian finishes out of band.
+- Optional: the Librarian itself (or a later session) removes `.pipeline/<issue>/status.json` or moves the whole dir to `.pipeline/_archived/<issue>/` for audit after it verifies archival.
 
 ---
 
@@ -722,8 +762,8 @@ The flow is adaptive: a later phase can invalidate an earlier decision. When one
 | Mis-tier tripwire (migration/access-control/auth/contract surface in a trivial/standard run) | Phase 3 (Dev self-halt) or the Phase 3 to 4 gate | BA (re-tier to architectural) | Run the skipped phases (Phase 2 fan-out, Phase 2.5 if design-shaped) against the existing worktree, then re-enter the gate |
 | Scope drift / wrong spec assumption | Phase 3 | BA (ruling) | If requirements/acceptance criteria change materially: architectural re-runs affected Phase 2 reviewer(s) then Phase 3 from 3a (QA re-authors tests); standard re-extracts constraints then re-dispatches the single Dev thread |
 | Live-verification suite skipped, not recorded (data-migration / security-sensitive change) | Phase 3 to 4 gate | Phase 3 (Dev/QA) | Produce a recorded local pass against a real backing service, then re-run the gate |
-| `REQUEST_REFACTOR` (testability) | Phase 4 (QA) | Dev implementation step (3b at architectural; the single thread at standard) | The existing test contract stands; Dev refactors to keep it green. Re-run Phase 4 panel |
-| Any `REQUEST_CHANGES` | Phase 4 | Dev implementation step | Re-run Phase 4 panel (same `PANEL_ROLES`) |
+| `REQUEST_REFACTOR` (testability) | Phase 4 (QA) | Dev implementation step (3b at architectural; the single thread at standard) | The existing test contract stands; Dev refactors to keep it green. Re-run Phase 4 as a delta re-review (QA and SecOps unconditionally, plus surface-touched roles) |
+| Any `REQUEST_CHANGES` | Phase 4 | Dev implementation step | Delta re-review: re-dispatch QA and SecOps unconditionally, plus the objecting role(s), plus any role whose surface the fix touched; additively merge so standing approvals hold; `panel_roles` unchanged |
 | `APPROVE_WITH_NOTES` (nits) | Phase 4 | Phase 3 (Dev), same turn | Fix nits in place, no panel re-run |
 
 A loop-back is not a failure; it is the gate doing its job. Record each one as an event in `status.json` so the audit trail shows where the assumption broke. The compliance and safety gates (SecOps veto, DBA migration review, access-control rationale) are never bypassed to "save" a loop.

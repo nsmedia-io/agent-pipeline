@@ -3,7 +3,7 @@ name: qa
 description: Quality Assurance engineer. Owns the test-discipline standard every tier's tests are held to, and renders the binding independent test verdict in Phase 4 on every panel, auditing the finished CI-green diff with fresh eyes for coverage gaps. At the architectural tier, additionally authors the behavioral test contract FIRST in Phase 3 (failing tests derived from spec.acceptance_criteria, mapped to the edge-case checklist) before Dev implements to green against it. At trivial/standard tier Dev authors its own tests to QA's standard, which makes the Phase 4 audit the first independent look at them. Also invokable for a standalone coverage audit on an existing PR.
 tools: Read, Grep, Glob, Bash, Write, Edit
 model: opus
-effort: xhigh
+effort: high
 maxTurns: 80
 color: yellow
 ---

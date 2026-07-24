@@ -7,7 +7,7 @@ A risk-tiered multi-agent development pipeline for Claude Code. It turns a one-l
 Multi-agent spend goes where independence actually pays:
 
 - **The write path is single-threaded and carries full context.** One Dev thread receives the spec, the blast-radius map, and the specialists' constraint checklists, then writes code and its tests together. Fragmenting planning, review, and implementation across contexts loses more than it gains.
-- **Independent review of a finished artifact fans out.** A panel of agents reviews the completed, checks-green diff concurrently, each through a distinct lens (spec fidelity, security, testing, code quality, data, infra). Fresh eyes on a fixed diff catch what the author cannot.
+- **Independent review of a finished artifact fans out.** A panel of agents reviews the finished diff concurrently, each through a distinct lens (spec fidelity, security, testing, code quality, data, infra), while remote CI runs in parallel: local checks are the implementation done gate, and remote CI-green is a merge precondition verified at merge, not a panel-entry gate. Fresh eyes on a fixed diff catch what the author cannot. When the panel requests changes, the re-run is a delta re-review: QA and SecOps re-review unconditionally, plus the objecting and surface-touched roles, additively merged so standing approvals hold and the final verdict is computed over the full panel.
 - **Phases are quality gates with loop-backs, not a waterfall.** A later phase that invalidates an earlier assumption loops back to the owning phase.
 
 ## Install
@@ -42,9 +42,9 @@ The orchestrator dispatches these subagents (they never call each other; only th
 
 ## Risk tiers (set by BA, they change the pipeline's shape)
 
-- **trivial** — typo / one-line fix. Straight to a single Dev thread, then the panel.
-- **standard** — a normal feature or bugfix. The specialists' standing constraint checklists are injected into one Dev thread (no pre-code review); a trimmed panel reviews the diff, with a hard tripwire if migration/auth/contract-shape work appears.
-- **architectural** — schema/data-migration, a cross-cutting contract change, or any security/compliance dimension. Adds the parallel pre-code review, a design bake-off, a QA-first failing-test contract, the full panel, and the live-verification gate.
+- **trivial**: typo / one-line fix. Straight to a single Dev thread, then a trimmed panel of QA plus SecOps (plus Design on frontend diffs).
+- **standard**: a normal feature or bugfix. The specialists' standing constraint checklists are injected into one Dev thread (no pre-code review, and the blast-radius map is folded into the BA intake rather than a separate dispatch); a trimmed panel reviews the diff, with a hard tripwire if migration/auth/contract-shape work appears.
+- **architectural**: schema/data-migration, a cross-cutting contract change, or any security/compliance dimension. Adds the parallel pre-code review, a design bake-off, a QA-first failing-test contract, the full panel, and the live-verification gate.
 
 ## The knowledge store (file-based, replaces a vector DB)
 
@@ -63,8 +63,9 @@ Copy `pipeline.config.example.json` to `pipeline.config.json` at your project ro
 | `migrationsGlob` | Glob that marks a data migration (drives the mis-tier tripwire + live-verification gate) | `migrations/**` |
 | `architecturalTriggers` | Domains/keywords that force the architectural tier | data/security/compliance |
 
-Two more customization points:
+Three more customization points:
 
+- **Model aliases.** The `model:` values in the agent frontmatter and the `/pipeline` dispatch overrides (`opus` for the QA verdict, the SecOps veto, and the bake-off judge; `sonnet` for the map, the sketches, and the BA/Dev Phase 4 lenses) are deliberate floating aliases, resolved by the harness to the latest model of each tier; they are not pinned full model IDs, so the pipeline rides model upgrades without a rename pass. Re-pin only on a specific regression.
 - **Agent constraint checklists.** `agents/dba.md`, `agents/devops.md`, and `agents/secops.md` each carry a marker-delimited `STANDARD-TIER CONSTRAINTS` block that the orchestrator injects into the Dev thread. Edit the checklist inside the markers to match your stack. Keep the marker comments intact.
 - **MCP tools.** Each agent's `tools:` frontmatter lists only the universal tools. Add your project's MCP tools (database, docs, browser) to the agents that need them.
 

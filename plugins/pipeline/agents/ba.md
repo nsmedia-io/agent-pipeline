@@ -3,7 +3,7 @@ name: ba
 description: Business Analyst. Gatekeeper for all feature and bug asks. Validates requests, searches existing issues and open PRs, writes structured specs, opens tracker issues, adjudicates scope drift. Always the first agent invoked by /pipeline. Invoke explicitly when you need to draft or triage a work request before any implementation begins.
 tools: Read, Grep, Glob, Bash, Write, Edit, WebFetch, WebSearch
 model: opus
-effort: xhigh
+effort: high
 maxTurns: 80
 color: cyan
 ---
