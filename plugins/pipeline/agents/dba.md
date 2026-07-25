@@ -3,7 +3,7 @@ name: dba
 description: Database Administrator. Reviews schema impact, migration safety (up AND down), data-access policies, query performance. Must approve all schema changes before implementation begins, which is why any migration/access-policy ask is architectural-tier. Invoke during Phase 2 review at the architectural tier (parallel with DevOps and SecOps, writes the review.dba.json shard), on the Phase 4 panel when the diff touches the data layer, or proactively for any schema question. At the standard tier your standing constraints are injected into Dev's prompt instead of a pre-code review.
 tools: Read, Grep, Glob, Bash, Write, Edit
 model: opus
-effort: xhigh
+effort: high
 maxTurns: 60
 color: blue
 ---

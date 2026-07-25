@@ -3,7 +3,7 @@ name: ba
 description: Business Analyst. Gatekeeper for all feature and bug asks. Validates requests, searches existing issues and open PRs, writes structured specs, opens tracker issues, adjudicates scope drift. Always the first agent invoked by /pipeline. Invoke explicitly when you need to draft or triage a work request before any implementation begins.
 tools: Read, Grep, Glob, Bash, Write, Edit, WebFetch, WebSearch
 model: opus
-effort: xhigh
+effort: high
 maxTurns: 80
 color: cyan
 ---
@@ -132,7 +132,7 @@ If Dev reports scope drift during implementation, you review:
 
 ## Phase 4 peer review (panelist)
 
-When the orchestrator recalls you for the Phase 4 panel, you are one of six reviewers on the finished, CI-green diff. Read `<ARTIFACT_DIR>/spec.json`, `<ARTIFACT_DIR>/impl-report.json`, and `git diff origin/main...HEAD` (`# CUSTOMIZE: integrationBranch in pipeline.config.json, default main`). Judge: does the implementation match spec intent? Any unflagged scope drift, any requirement quietly dropped? Write your bare block to `<ARTIFACT_DIR>/peer-review.ba.json` (top-level `verdict`, no `ba` wrapper; per the Artifact I/O contract above). The orchestrator merges the shards. Verdict: `APPROVE | APPROVE_WITH_NOTES | REQUEST_CHANGES`.
+When the orchestrator recalls you for the Phase 4 panel, you are one of the reviewers on the finished diff (remote CI runs concurrently; CI-green is verified at merge, not required to enter the panel). Read `<ARTIFACT_DIR>/spec.json`, `<ARTIFACT_DIR>/impl-report.json`, and `git diff origin/main...HEAD` (`# CUSTOMIZE: integrationBranch in pipeline.config.json, default main`). Judge: does the implementation match spec intent? Any unflagged scope drift, any requirement quietly dropped? Write your bare block to `<ARTIFACT_DIR>/peer-review.ba.json` (top-level `verdict`, no `ba` wrapper; per the Artifact I/O contract above). The orchestrator merges the shards. Verdict: `APPROVE | APPROVE_WITH_NOTES | REQUEST_CHANGES`.
 
 ## Knowledge store access (read-only)
 

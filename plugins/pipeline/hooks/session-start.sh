@@ -122,8 +122,18 @@ if [[ -d .pipeline ]]; then
     [[ -d "$dir" ]] || continue
     [[ -f "$dir/status.json" ]] || continue
     ISSUE=$(basename "$dir")
-    PHASE=$(grep -o '"current_phase":"[^"]*"' "$dir/status.json" 2>/dev/null | head -1 | cut -d: -f2 | tr -d '"')
-    ACTIVE="${ACTIVE}  #${ISSUE}: ${PHASE:-?}"$'\n'
+    # status.json is pretty-printed ("current_phase": "..."), so the parse must tolerate
+    # whitespace around the colon (a no-space grep matches nothing and blanks the phase).
+    # A FINISHED run is not an active pipeline, so skip it: recognize finished by the
+    # phase-5 terminal set (any "5-" prefix, e.g. 5-archive, 5-archived) OR a non-empty
+    # completed_at, so a run left under any phase-5 variant or carrying completed_at is
+    # skipped without depending on one exact label. A non-terminal 4-* run (e.g.
+    # 4-review-complete) or a halted-error run is NOT finished and stays listed as active.
+    PHASE=$(grep -oE '"current_phase"[[:space:]]*:[[:space:]]*"[^"]*"' "$dir/status.json" 2>/dev/null | head -1 | sed -E 's/.*:[[:space:]]*"([^"]*)"/\1/')
+    [[ -z "$PHASE" ]] && PHASE="?"
+    COMPLETED=$(grep -oE '"completed_at"[[:space:]]*:[[:space:]]*"[^"]*"' "$dir/status.json" 2>/dev/null | head -1 | sed -E 's/.*:[[:space:]]*"([^"]*)"/\1/')
+    if [[ "$PHASE" == 5-* || -n "$COMPLETED" ]]; then continue; fi
+    ACTIVE="${ACTIVE}  #${ISSUE}: ${PHASE}"$'\n'
   done
   if [[ -n "$ACTIVE" ]]; then
     echo "Active pipelines:"
