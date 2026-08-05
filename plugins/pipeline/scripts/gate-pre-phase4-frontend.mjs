@@ -87,6 +87,16 @@ export function runFrontendGate({ touchesFrontend, evidence }) {
     const norm = shot.replace(/\\/g, "/").replace(/^\.\//, "");
     if (!norm.startsWith(".pipeline/")) {
       failures.push(`screenshot evidence path outside .pipeline/: "${norm.slice(0, 120)}"`);
+      continue;
+    }
+    // A `..` SEGMENT escapes the tree while satisfying the prefix, so the prefix alone is not
+    // containment. Segment-wise, not a substring test: `shot..png` is a legitimate filename.
+    // Deliberately string-only, no filesystem resolution: the gate runs outside the
+    // implementation worktree, where a screenshot that exists there does not exist here.
+    if (norm.split("/").includes("..")) {
+      failures.push(
+        `screenshot evidence path escapes .pipeline/ via a ".." segment: "${norm.slice(0, 120)}"`,
+      );
     }
   }
 
