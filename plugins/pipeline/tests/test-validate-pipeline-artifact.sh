@@ -59,8 +59,22 @@ suite "validate-pipeline-artifact: the shipped 56-case self-test runs under chec
 ( cd "$TEMP_PROJECT" && CLAUDE_PROJECT_DIR="$TEMP_PROJECT" node "$VALIDATOR" --self-test ) \
   > "$TEMP_PROJECT/selftest.out" 2>&1
 SELFTEST_RC=$?
+SELFTEST_OUT=$(cat "$TEMP_PROJECT/selftest.out")
 assert_eq "node validate-pipeline-artifact.mjs --self-test exits 0" "$SELFTEST_RC" "0"
-assert_contains "the self-test reports zero failures" "$(cat "$TEMP_PROJECT/selftest.out")" "0 failed"
+
+# This wrapper delegates 56 of the suite's cases, so it has to be able to tell 56 from ZERO.
+# Exit 0 cannot: a self-test whose cases never ran prints "self-test: 0 passed, 0 failed" and
+# exits 0. Neither can a substring test for "0 failed", which is also a substring of
+# "10 failed". Both numbers are therefore parsed out of the summary line and compared as
+# integers. The pass count is a FLOOR, not an equality, so ADDING a case to the self-test does
+# not turn this red -- but removing them all does.
+SELFTEST_PASSED=$(printf '%s' "$SELFTEST_OUT" | sed -n 's/^self-test: \([0-9][0-9]*\) passed, .*/\1/p')
+SELFTEST_FAILED=$(printf '%s' "$SELFTEST_OUT" | sed -n 's/^self-test: [0-9][0-9]* passed, \([0-9][0-9]*\) failed$/\1/p')
+assert_eq "the self-test prints a parseable summary line" \
+  "$([[ -n "$SELFTEST_PASSED" && -n "$SELFTEST_FAILED" ]] && echo parsed || echo unparseable)" "parsed"
+assert_eq "the self-test reports zero failures" "$SELFTEST_FAILED" "0"
+assert_eq "the self-test actually RAN its case list (>= 56 passed, not 0)" \
+  "$([[ "${SELFTEST_PASSED:-0}" -ge 56 ]] && echo ok || echo "only ${SELFTEST_PASSED:-0} ran")" "ok"
 
 suite "validate-pipeline-artifact: process contract (stdin -> stdout decision)"
 
