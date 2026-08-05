@@ -113,7 +113,16 @@ In the full `/pipeline` run the Librarian is dispatched NON-BLOCKING at Phase 5 
 After the subagent returns:
 1. Validate the expected artifact was written or updated.
 2. Update `.pipeline/<issue>/status.json` to append a `"phase-rerun"` event with timestamp.
-3. Return to the owner with the subagent's verdict.
+3. Return to the owner with the subagent's verdict, in your own words per `${CLAUDE_PLUGIN_ROOT}/voice.md`.
+
+**On voice.** You are invoked by hand, so the owner is sitting there waiting on this one result: you are talking to them directly, not to a parent orchestrator. Do not relay the subagent's raw text. It was written for a machine reader, in its specialist's register (table names, CVE severity, line numbers), and it assumes context the owner does not have.
+
+Match the register to the result, the same split `/pipeline` uses:
+
+- **A clean verdict** (`APPROVE`, or an artifact refreshed with nothing to decide) is a progress tick. One or two lines, no ceremony.
+- **A `VETO`, a `REQUEST_CHANGES`, or a `REQUEST_REFACTOR`** is a full voice mode report: the owner re-ran this phase to find out where they stand, and the answer is "blocked." Give them the shape from `voice.md`, and the decision block if a call is open.
+
+Fill the rating scales from what you have: `map.json` for blast radius (say so if it is absent on an ad-hoc run rather than guessing), the diff for reversibility, and the subagent's verdict plus whatever verification evidence exists for confidence. A single-phase re-run often cannot see the whole picture, and `voice.md` is explicit that an unknown is stated, not softened.
 
 ---
 
@@ -121,4 +130,5 @@ After the subagent returns:
 
 - Do not skip artifact validation. A phase that did not write its artifact did not complete.
 - Do not mutate artifacts directly. Only the subagent for that phase writes its own block.
-- If the phase is blocked (missing upstream artifact), halt and tell the owner which artifact is missing.
+- If the phase is blocked (missing upstream artifact), halt and tell the owner which artifact is missing, and which command produces it. A missing artifact is a mechanical halt, so it gets the reduced register: plain language, no analogy, no decision block.
+- Do not paste `voice.md` into the subagent prompt. It governs your text to the owner, not the specialist's shard.

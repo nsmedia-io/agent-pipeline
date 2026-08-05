@@ -63,8 +63,9 @@ Copy `pipeline.config.example.json` to `pipeline.config.json` at your project ro
 | `migrationsGlob` | Glob that marks a data migration (drives the mis-tier tripwire + live-verification gate) | `migrations/**` |
 | `architecturalTriggers` | Domains/keywords that force the architectural tier | data/security/compliance |
 
-Three more customization points:
+Four more customization points:
 
+- **The handoff voice.** [`voice.md`](voice.md) is the standard for orchestrator-to-human text: the report shape, the analogy rules, the Blast radius / Reversibility / Confidence scales, the decision block, and the feature complete report. It is wired into `/pipeline` and `/phase` only, deliberately. The subagents write typed JSON shards for the orchestrator to merge, and they each see one lens, so none of them can compute a blast radius or a confidence level; pushing voice mode down into them would trade away the precision (table names, CVE severity, line numbers) that makes their shards reviewable. Edit `voice.md` to change how the pipeline talks to you.
 - **Model aliases.** The `model:` values in the agent frontmatter and the `/pipeline` dispatch overrides (`opus` for the QA verdict, the SecOps veto, and the bake-off judge; `sonnet` for the map, the sketches, and the BA/Dev Phase 4 lenses) are deliberate floating aliases, resolved by the harness to the latest model of each tier; they are not pinned full model IDs, so the pipeline rides model upgrades without a rename pass. Re-pin only on a specific regression.
 - **Agent constraint checklists.** `agents/dba.md`, `agents/devops.md`, and `agents/secops.md` each carry a marker-delimited `STANDARD-TIER CONSTRAINTS` block that the orchestrator injects into the Dev thread. Edit the checklist inside the markers to match your stack. Keep the marker comments intact.
 - **MCP tools.** Each agent's `tools:` frontmatter lists only the universal tools. Add your project's MCP tools (database, docs, browser) to the agents that need them.

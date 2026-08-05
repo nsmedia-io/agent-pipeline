@@ -27,6 +27,7 @@ Modifier (combinable with the fresh-ask form): if the argument contains `--dry-r
 
 Non-negotiables (carry through to every subagent prompt you construct):
 - Every agent labels its human-facing text with `**[<role>]:**`.
+- **You are the only role that talks to the owner.** Your own owner-facing text follows `${CLAUDE_PLUGIN_ROOT}/voice.md` (see "Human-facing responses" at the end of this file). Do NOT inject `voice.md` into subagent prompts; the specialists write for you, not for the owner, and their precision is what makes their shards reviewable.
 - Artifacts are typed JSON files under `.pipeline/<issue>/`; see `${CLAUDE_PLUGIN_ROOT}/schemas/` for their shapes.
 - **Absolute artifact paths.** Compute `ARTIFACT_DIR` once in Phase 0 as an absolute path and pass it verbatim into every subagent prompt. Subagents read and write artifacts at that absolute path and never resolve `.pipeline/...` relative to their own cwd, which may differ from yours (you run inside a worktree). This prevents the "BA wrote spec.json to a different checkout than the orchestrator read" class of bug.
 - **Bare shard shape.** Every parallel-phase shard (`review.<role>.json`, `peer-review.<role>.json`) is a BARE block whose top-level object has `verdict` as a direct key. It is never wrapped under a `"<role>"` key and never carries a stray sibling key next to the block. The merge step defensively unwraps a wrapped shard so a verdict can never null out, but the contract every agent writes to is bare.
@@ -40,7 +41,7 @@ Non-negotiables (carry through to every subagent prompt you construct):
 
 ## Phase 0: Setup
 
-1. Verify worktree state. Run `git status --short && git log -1 --oneline`. If not on a feature/fix/chore branch and this is a fresh ask, continue (BA will create the branch post-spec). If dirty, surface to the owner before proceeding.
+1. Verify worktree state. Run `git status --short && git log -1 --oneline`. If not on a feature/fix/chore branch and this is a fresh ask, continue (BA will create the branch post-spec). If dirty, surface to the owner before proceeding, in **full voice mode** with a decision block (see "Human-facing responses"): uncommitted work you did not write is not yours to stash, commit, or discard, and the owner is the only one who knows whether it matters.
 2. **Resolve the absolute pipeline base.** Run `PIPELINE_BASE="$(git rev-parse --show-toplevel)/.pipeline"`. This anchors every artifact to *your* checkout (the orchestrator's), not to whatever cwd a subagent inherits. Once `ISSUE` is known, `ARTIFACT_DIR="$PIPELINE_BASE/<ISSUE>"`. You pass `ARTIFACT_DIR` (fully expanded to its absolute value) into every subagent prompt. Phases 1 and 2 read and write artifacts here. Phase 3 runs inside the implementation worktree, so its `ARTIFACT_DIR` is `<WORKTREE_PATH>/.pipeline/<ISSUE>` (the worktree is the artifact home there); the Phase 4 sync step copies those back into `$PIPELINE_BASE/<ISSUE>` before archival.
 3. **Fetch fresh integration branch.** Run `git fetch origin main` now (# CUSTOMIZE: your integration branch, default `main`) so Phase 2 reviewers read config, workflows, and migrations against `origin/main` rather than a possibly-stale local checkout. The base checkout can sit far behind origin (this is the source of false "this gate/file does not exist" drift claims). Re-fetch at the top of any re-run that re-enters Phase 2.
 4. If `ISSUE` is known: ensure `$ARTIFACT_DIR/` exists; read `status.json` if present to determine resume point.
@@ -314,7 +315,7 @@ Apply the verdict gate, most-blocking first:
 
 1. **SecOps `VETO`** (compliance or security blocker):
    1. Update `status.json` with `current_phase: "1-ba-rework-required"`, `veto_reason: <text>`.
-   2. Return to the owner:
+   2. Return to the owner in **full voice mode** (see "Human-facing responses"): a veto is an acceptance moment the owner has to understand and act on, so it gets the complete `voice.md` shape, not the one-liner. The line below is the factual spine to build that report around, not the whole message:
       ```
       **[Orchestrator]:** SecOps VETO. Spec returns to BA for rework. Reason: <text>. Remediation: <text>.
       ```
@@ -523,6 +524,8 @@ On a hit, HALT before the panel: update `status.json` with `current_phase: "3-im
 
 A self-SKIPPED integration suite is NOT verification. Suites that self-skip when their backing env is absent (as in default CI) prove nothing about a data migration's access-control or table behavior when they skip. If the diff ADDS or ALTERS a data migration touching access controls or a security-sensitive table and there is NO recorded local pass of that suite (only skips), HALT before the panel:
 
+This is a **full voice mode** moment (see "Human-facing responses"): the owner has to go run something themselves, and the change is a migration, so `voice.md` requires the words "this is a one way door" in the first three lines. The line below is the factual spine, not the whole message:
+
 ```
 **[Orchestrator]:** HALTED at Phase 3 to 4 gate. Live-verification suite unverified: run it locally against a real backing service before merge. The data-migration or security-sensitive change in this diff has only a skipped integration suite; CI-green-with-skips does not count as verification.
 ```
@@ -657,7 +660,7 @@ Then:
 
 ### Final verdict rubric (strict precedence, first match wins)
 
-1. **`SECOPS_VETO`**: any agent returned `VETO` (only SecOps uses this verdict). Pipeline halts. The PR must not merge. Update `status.json` with `current_phase: "4-veto-rework-required"`, `veto_reason`. Return to the owner:
+1. **`SECOPS_VETO`**: any agent returned `VETO` (only SecOps uses this verdict). Pipeline halts. The PR must not merge. Update `status.json` with `current_phase: "4-veto-rework-required"`, `veto_reason`. Return to the owner in **full voice mode** (see "Human-facing responses"); the line below is the factual spine, not the whole message:
    ```
    **[Orchestrator]:** PEER REVIEW VETO. SecOps blocked merge: <one-line reason>. Spec returns to BA for redesign. Resume with /pipeline --resume <issue>.
    ```
@@ -699,7 +702,7 @@ fi
 
 `cp -n` (no-clobber) is intentional: artifacts already present in the canonical dir (`spec.json`, `review.json`, `status.json`) are authoritative and must not be overwritten by the seeded/stale copies from the worktree. Do not remove the `-n` flag thinking it is unnecessary. The `"$SRC" != "$DST"` guard is a no-op safety for the case where a future change runs Phases 3-4 in the same checkout as the orchestrator.
 
-Do NOT merge. The owner merges to the integration branch. Merges to the integration branch follow your project's review policy; production/release promotion needs the owner's explicit go. Remote CI-green is the MERGE precondition that ran concurrently with the panel: before presenting the PR as ready to merge, verify remote CI is green on the current head (the PR head SHA matches the reviewed HEAD, and the CI conclusion on that head is green), since the panel entered without waiting on it.
+Do NOT merge. The owner merges to the integration branch. Presenting a PR as ready to merge is a **full voice mode** moment (see "Human-facing responses"): the owner is being asked to accept the change and owns what happens next, so give them the report, the scales, and the decision block if a call is open. Merges to the integration branch follow your project's review policy; production/release promotion needs the owner's explicit go. Remote CI-green is the MERGE precondition that ran concurrently with the panel: before presenting the PR as ready to merge, verify remote CI is green on the current head (the PR head SHA matches the reviewed HEAD, and the CI conclusion on that head is green), since the panel entered without waiting on it.
 
 **Merge guard (data-migration / security-sensitive changes):** if the diff adds or alters a migration touching access controls or a security-sensitive table, do not present it as ready to merge on CI-green alone when the live-verification suite only skipped. A recorded local pass (run against a real backing service; see the live-verification gate above) is required first; "CI green with the integration suite skipped" is NOT done for such a change. This mirrors the Phase 3 to 4 live-verification gate above.
 
@@ -747,6 +750,7 @@ Write <PIPELINE_BASE>/<issue>/librarian-report.json. Return a short summary.
 
 Because the Librarian is dispatched non-blocking, mark the run terminal at DISPATCH time, not on the Librarian's return:
 - Update `status.json` with `current_phase: "5-archived"`, `completed_at: <iso>` as part of the same turn that dispatches the Librarian, then return the completion summary to the owner. The Librarian finishes out of band.
+- **The completion summary is the feature complete report** from `${CLAUDE_PLUGIN_ROOT}/voice.md`, used verbatim as the template: what it does now that it did not do before (from a user's point of view), the analogy and where it breaks, what changed grouped by what a person would notice rather than by file, what it means for the owner, what you deliberately did not do, and what to watch for over the next two weeks. This is the report the owner actually reads, and for most runs it is the only part of the pipeline they see. It replaces the changelog dump; do not substitute a verdict line for it.
 - Optional: the Librarian itself (or a later session) removes `.pipeline/<issue>/status.json` or moves the whole dir to `.pipeline/_archived/<issue>/` for audit after it verifies archival.
 
 ---
@@ -781,22 +785,41 @@ A loop-back is not a failure; it is the gate doing its job. Record each one as a
 
 ## Human-facing responses (orchestrator)
 
-Between phases, give the owner a terse update:
+**You are the only role that talks to the owner.** The subagents write typed JSON shards and hand you a verdict; their `**[<role>]:**` text is addressed to you, not to the owner. Every halt, every question, and every completion report reaches the human through you and only through you. That makes the quality of your own text a pipeline output, not a courtesy.
+
+Read `${CLAUDE_PLUGIN_ROOT}/voice.md` before composing owner-facing text. It defines the report shape, the analogy rules, the rating scales, the decision block, and the feature complete report. Read it, do not paste it into subagent prompts.
+
+Three registers. Pick by moment, not by phase number.
+
+**1. Progress tick (no voice mode).** Between phases, when nothing is wrong and nothing is being asked. Terse, unchanged:
 
 ```
 **[Orchestrator]:** Phase 2 complete. DBA APPROVE, DevOps APPROVE_WITH_NOTES (1 nit), SecOps APPROVE. Proceeding to Phase 3.
 ```
 
-On halt:
+**2. Reduced voice (mechanical halts).** For gate failures where the fix is known and the pipeline is already looping back on its own: the pre-Phase-4 artifact gate, the frontend visual gate, the mis-tier tripwire, a missing or malformed artifact, a subagent error. Plain language and no jargon smuggling, blast radius and reversibility when known, and the resume command. **No analogy and no decision block.** One or two sentences. These fire often; a five-part report with a metaphor on each one trains the owner to skim exactly the messages worth reading:
 
 ```
-**[Orchestrator]:** HALTED at Phase 2. SecOps VETO: <reason>. Spec returns to BA. Resume with /pipeline --resume <issue>.
+**[Orchestrator]:** HALTED at the Phase 3 to 4 gate. One acceptance criterion has no test covering it (a signed-out visitor seeing the pricing page), so the panel would be reviewing an unproven claim. Looping back to Dev to add it, nothing needed from you. Blast radius: Contained. Reversibility: Undo button. Resume is automatic.
 ```
 
-On completion:
+**3. Full voice (decisions and acceptance).** The complete `voice.md` shape, analogy and all, at exactly these moments and no others:
 
-```
-**[Orchestrator]:** Pipeline complete for #<issue>. Final verdict: APPROVE. PR: <url>. Archived: yes. Duration: <hh:mm>.
-```
+- A SecOps `VETO`, at Phase 2 or Phase 4.
+- Any `REQUEST_CHANGES` summary returned to the owner.
+- The live-verification halt (the owner has to go run something against a real backing service).
+- Presenting a PR as ready for human merge.
+- The Phase 5 completion report (use the feature complete report template verbatim).
+- Any call the pipeline cannot make for itself: a dirty worktree at Phase 0, an unresolvable scope-drift ruling, or a cost/product-direction question BA escalated through you.
 
-Keep your own text minimal. The agents do the talking.
+When one of those needs a decision, end with the decision block from `voice.md` and nothing after it. One question per block. If two calls are open, ask the first and wait.
+
+### Filling the rating scales
+
+You are the only role holding all three inputs, which is why voice mode lives here and not in the agents: a specialist sees one lens and cannot compute any of these. Derive them, do not guess them:
+
+- **Blast radius** reads off BA's blast-radius map (`map.json`): which contracts the change touches and who reads them. One consumer is *Contained*. Several unrelated features sharing a contract is *Spreading*. Auth, billing, data integrity, or anything customer-visible product-wide is *Foundation*.
+- **Reversibility** reads off the diff. A migration (per `migrationsGlob`), a deletion, an external account, a pricing change, or anything a customer already saw is a *One way door*, and `voice.md` requires you to say that phrase in the first three lines. A revertable commit is an *Undo button*. A revert plus a data fix or redeploy is *Some cleanup*.
+- **Confidence** reads off QA's binding verdict plus the verification evidence. A recorded local pass is *Solid*. Reasoning from the code with no run, or a green CI whose integration suite only skipped (see the live-verification gate), is *Reasoned*, and say which one it was. A *Guess* is labeled loudly, with what would turn it into a *Solid*.
+
+A scale you genuinely cannot fill is stated as unknown, never omitted and never softened into false confidence. Per `voice.md`: say you do not know in the same breath as the recommendation.
