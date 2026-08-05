@@ -30,9 +30,11 @@
  *   - JSON.parse only. No eval, no shell interpolation of any artifact field or path.
  *   - Frontend detection is the glob allowlist in frontend-surface.mjs, never a regex built
  *     from artifact content.
- *   - Any recorded screenshot evidence path MUST live under .pipeline/<issue>/ (gitignored).
- *     A path outside that tree is refused: committing a screenshot that may carry PII or a
- *     secret is a committable-leak vector.
+ *   - Any recorded screenshot evidence path MUST live under .pipeline/<issue>/ (gitignored)
+ *     and contain no ".." segment. A path outside that tree is refused, as is a ".." segment
+ *     even when it would resolve back inside: committing a screenshot that may carry PII or a
+ *     secret is a committable-leak vector. The check is string-only and never touches the
+ *     filesystem, because this gate routinely runs outside the implementation worktree.
  *
  * Usage:
  *   node gate-pre-phase4-frontend.mjs --issue <n> \
