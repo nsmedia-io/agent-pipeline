@@ -10,3 +10,8 @@ scratch/
 # survive across machines, un-ignore just the checkpoint files:
 #   .pipeline/
 #   !.pipeline/*/status.json
+
+# Per-run pipeline state for THIS repo when the pipeline runs against itself.
+# Keep the resume checkpoints so `/pipeline --resume` survives a restart.
+.pipeline/
+!.pipeline/*/status.json
