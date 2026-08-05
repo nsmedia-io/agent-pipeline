@@ -10,6 +10,14 @@
 set -u
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
 
+# The app-inherited PATH can carry a stale nvm Node (v16) ahead of everything, breaking
+# pnpm-based checks in repos that require modern Node. Prefer the NEWEST installed nvm
+# Node explicitly; harmless no-op when nvm is absent.
+if [[ -d "$HOME/.nvm/versions/node" ]]; then
+  NEWEST_NODE=$(ls -1 "$HOME/.nvm/versions/node" 2>/dev/null | sort -V | tail -1)
+  [[ -n "$NEWEST_NODE" ]] && export PATH="$HOME/.nvm/versions/node/$NEWEST_NODE/bin:$PATH"
+fi
+
 PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$(pwd)}"
 cd "$PROJECT_DIR" 2>/dev/null || exit 0
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 || exit 0
