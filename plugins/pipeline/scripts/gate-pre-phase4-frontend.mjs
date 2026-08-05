@@ -30,9 +30,11 @@
  *   - JSON.parse only. No eval, no shell interpolation of any artifact field or path.
  *   - Frontend detection is the glob allowlist in frontend-surface.mjs, never a regex built
  *     from artifact content.
- *   - Any recorded screenshot evidence path MUST live under .pipeline/<issue>/ (gitignored).
- *     A path outside that tree is refused: committing a screenshot that may carry PII or a
- *     secret is a committable-leak vector.
+ *   - Any recorded screenshot evidence path MUST live under .pipeline/<issue>/ (gitignored)
+ *     and contain no ".." segment. A path outside that tree is refused, as is a ".." segment
+ *     even when it would resolve back inside: committing a screenshot that may carry PII or a
+ *     secret is a committable-leak vector. The check is string-only and never touches the
+ *     filesystem, because this gate routinely runs outside the implementation worktree.
  *
  * Usage:
  *   node gate-pre-phase4-frontend.mjs --issue <n> \
@@ -87,6 +89,16 @@ export function runFrontendGate({ touchesFrontend, evidence }) {
     const norm = shot.replace(/\\/g, "/").replace(/^\.\//, "");
     if (!norm.startsWith(".pipeline/")) {
       failures.push(`screenshot evidence path outside .pipeline/: "${norm.slice(0, 120)}"`);
+      continue;
+    }
+    // A `..` SEGMENT escapes the tree while satisfying the prefix, so the prefix alone is not
+    // containment. Segment-wise, not a substring test: `shot..png` is a legitimate filename.
+    // Deliberately string-only, no filesystem resolution: the gate runs outside the
+    // implementation worktree, where a screenshot that exists there does not exist here.
+    if (norm.split("/").includes("..")) {
+      failures.push(
+        `screenshot evidence path escapes .pipeline/ via a ".." segment: "${norm.slice(0, 120)}"`,
+      );
     }
   }
 

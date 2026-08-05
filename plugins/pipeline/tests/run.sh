@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Runs every hook test suite. Exit 0 only when all pass.
+# Runs every test suite under this directory: the bash hooks, the bundled .mjs scripts, and
+# the harness itself. Exit 0 only when all pass.
 #
 # Wire this as your checkCommand to gate the plugin's own development:
 #   { "checkCommand": "bash plugins/pipeline/tests/run.sh" }
@@ -16,7 +17,7 @@ done
 
 printf '\n'
 if [[ "$FAILED" -eq 0 ]]; then
-  printf 'All hook suites passed.\n'
+  printf 'All test suites passed.\n'
   exit 0
 fi
 printf '%s suite(s) FAILED.\n' "$FAILED"

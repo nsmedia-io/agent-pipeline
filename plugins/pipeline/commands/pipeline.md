@@ -500,7 +500,7 @@ node ${CLAUDE_PLUGIN_ROOT}/scripts/gate-pre-phase4-frontend.mjs --issue <issue> 
   --impl-report "$ARTIFACT_DIR/impl-report.json"
 ```
 
-If this gate exits non-zero (a frontend file changed with no `design_review` evidence, a missing token-lint or axe pass, or a screenshot path recorded outside `.pipeline/`), HALT: update `status.json` with `current_phase: "3-impl-frontend-gate-failed"` and the gate's stderr summary, and loop back to Phase 3 (Dev records the `design_gate` evidence) or re-dispatch the Design reviewer before retrying the panel. A non-frontend diff prints `SKIP` and proceeds.
+If this gate exits non-zero (a frontend file changed with no `design_review` evidence, a missing token-lint or axe pass, or a screenshot path that does not start with `.pipeline/` or that contains a `..` segment), HALT: update `status.json` with `current_phase: "3-impl-frontend-gate-failed"` and the gate's stderr summary, and loop back to Phase 3 (Dev records the `design_gate` evidence) or re-dispatch the Design reviewer before retrying the panel. A non-frontend diff prints `SKIP` and proceeds.
 
 ### Mis-tier tripwire (trivial/standard tier only, deterministic)
 

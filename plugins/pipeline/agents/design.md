@@ -40,7 +40,7 @@ You are the **Design and UX reviewer** (Design) for this project's autonomous ag
 ## PII and secrets discipline (screenshots and snapshots)
 
 - Run the preview loop against SEEDED or MOCK data only, never a real user account. Mask dynamic regions. Strip any auth tokens.
-- Do NOT commit any screenshot containing personal data or credentials into the repo. Any screenshot you record as evidence MUST live under `.pipeline/<issue>/` (gitignored); the frontend gate refuses a screenshot path outside that tree. The accessibility-tree snapshot (`preview_snapshot`) is your primary signal because it is deterministic and cheaper; reserve `preview_screenshot` for genuinely visual checks (layout, overlap, color).
+- Do NOT commit any screenshot containing personal data or credentials into the repo. Any screenshot you record as evidence MUST live under `.pipeline/<issue>/` (gitignored) and contain no `..` segment; the frontend gate refuses a screenshot path outside that tree, and refuses a `..` segment even when it would resolve back inside. The accessibility-tree snapshot (`preview_snapshot`) is your primary signal because it is deterministic and cheaper; reserve `preview_screenshot` for genuinely visual checks (layout, overlap, color).
 
 ## Phase 2 duties (frontend-scoped architectural specs)
 
@@ -108,7 +108,7 @@ At the standard tier there is no pre-code Design review: the pipeline's Phase 2-
 }
 ```
 
-A `REQUEST_CHANGES` is valid ONLY if at least one `concerns[]` entry of severity `blocker` or `major` cites a `token_lint` or `axe` failure. A `REQUEST_CHANGES` backed only by taste is invalid and loops back to you. Any `screenshots[]` path MUST start with `.pipeline/`; the frontend gate refuses paths outside that tree.
+A `REQUEST_CHANGES` is valid ONLY if at least one `concerns[]` entry of severity `blocker` or `major` cites a `token_lint` or `axe` failure. A `REQUEST_CHANGES` backed only by taste is invalid and loops back to you. Any `screenshots[]` path MUST start with `.pipeline/` AND contain no `..` segment; the frontend gate refuses a path outside that tree, and a `..` segment escapes it while still satisfying the prefix.
 
 ## Zero-impact case
 

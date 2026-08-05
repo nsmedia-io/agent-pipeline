@@ -186,4 +186,15 @@ function main() {
   fail("no command given. Use --search, --write, --archive-issue, or --list.");
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) main();
+// Match the script NAME, the idiom the gates and the validator already use. Every PATH-
+// comparing form of this guard has the same silent-no-op failure mode -- main() never runs,
+// nothing prints, exit 0 -- and each breaks on a different input: `file://${argv[1]}` on any
+// percent-encoded character (a space), and fileURLToPath(import.meta.url) under a symlink,
+// because it realpaths while argv[1] keeps the path as invoked. Plugin roots and macOS /tmp
+// are routinely symlinks, so both are reachable in production.
+const isMain = (() => {
+  if (!process.argv[1]) return false;
+  return process.argv[1].endsWith("knowledge-store.mjs");
+})();
+
+if (isMain) main();
