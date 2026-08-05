@@ -7,11 +7,18 @@ scratch/
 
 # Note for ADOPTING projects (not this repo): add `.pipeline/` to your project's
 # .gitignore. That is per-run pipeline state. If you want `/pipeline --resume` to
-# survive across machines, un-ignore just the checkpoint files:
-#   .pipeline/
+# survive across machines, keep just the checkpoint files. Git cannot re-include a
+# file whose PARENT DIRECTORY is excluded, so `.pipeline/` plus a negation does not
+# work; the directories have to stay walkable:
+#   .pipeline/*
+#   !.pipeline/*/
+#   .pipeline/*/*
 #   !.pipeline/*/status.json
 
 # Per-run pipeline state for THIS repo when the pipeline runs against itself.
-# Keep the resume checkpoints so `/pipeline --resume` survives a restart.
-.pipeline/
+# Keep the resume checkpoints so `/pipeline --resume` survives a restart. Each line
+# is load-bearing: excluding `.pipeline/` outright would make the negation inert.
+.pipeline/*
+!.pipeline/*/
+.pipeline/*/*
 !.pipeline/*/status.json
