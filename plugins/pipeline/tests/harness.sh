@@ -185,3 +185,14 @@ finish() {
   printf '\npassed=%s failed=%s\n' "$TESTS_PASSED" "$TESTS_FAILED"
   [[ "$TESTS_FAILED" -eq 0 ]]
 }
+
+# copy_script_with_deps <scripts-dir> <script.mjs> <dest-dir>
+# Copies a bundled script into a scratch dir ALONG WITH the shared lib.mjs it imports.
+# A scratch copy missing lib.mjs dies with ERR_MODULE_NOT_FOUND, which reads as a failure of
+# the behavior under test rather than of the fixture. Same false-red class as copying scripts/
+# without its schemas/ sibling, which is already recorded in the bite-proof notes.
+copy_script_with_deps() {
+  local src_dir="$1" script="$2" dest="$3"
+  cp "$src_dir/$script" "$dest/" || return 1
+  cp "$src_dir/lib.mjs" "$dest/" || return 1
+}

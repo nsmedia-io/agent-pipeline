@@ -81,7 +81,7 @@ Four more customization points:
 
 ## Artifacts
 
-Every phase writes typed JSON under `.pipeline/<id>/` in your project (add it to your `.gitignore`; keep `status.json` if you want cross-machine resume). Schemas are in [`schemas/`](schemas/). Validate with `node "${CLAUDE_PLUGIN_ROOT}/scripts/validate-pipeline-artifact.mjs" <type> <file>`.
+Every phase writes typed JSON under `.pipeline/<id>/` in your project (add it to your `.gitignore`; keep `status.json` if you want cross-machine resume). Schemas are in [`schemas/`](schemas/). The validator is a SubagentStop hook, not a general-purpose CLI: it reads the hook payload on stdin and validates the stopping agent's artifact, so it takes no `<type> <file>` arguments. Its only flag is `node "${CLAUDE_PLUGIN_ROOT}/scripts/validate-pipeline-artifact.mjs" --self-test`, which runs its built-in checks.
 
 ## Tests
 

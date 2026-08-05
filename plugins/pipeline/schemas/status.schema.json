@@ -27,7 +27,7 @@
       "items": {"type": "string", "enum": ["ba", "dba", "devops", "secops", "dev", "qa"]},
       "description": "The Phase 4 panel composition resolved by tier and diff surfaces. Recorded before dispatch so the merge, the rubric, and --resume agree on who was on the panel. The design_review lens is tracked via its own shard, added whenever the diff touches a frontend surface."
     },
-    "worktree_path": {"type": "string", "description": "Absolute path of the Phase 3 implementation worktree. Read by ${CLAUDE_PLUGIN_ROOT}/scripts/archive-pipeline.mjs as the artifact fallback location."},
+    "worktree_path": {"type": "string", "description": "Absolute path of the Phase 3 implementation worktree, recorded for audit and for --resume. NOTE: archive-pipeline.mjs does NOT currently read this as an artifact fallback; the Phase 4 sync step is the mechanism that preserves worktree artifacts. Being an absolute local path, it should be redacted before this file is archived into a public tree."},
     "phase3_qa_test_commit": {"type": "string", "description": "Architectural tier only: SHA of QA's committed failing-test contract, recorded before Dev dispatches."},
     "pr_url": {"type": "string", "format": "uri"},
     "final_verdict": {

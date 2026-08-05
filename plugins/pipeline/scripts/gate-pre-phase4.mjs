@@ -15,9 +15,19 @@
  *       # CUSTOMIZE: migration detection is OPT-IN and configurable. Added files are
  *       matched against `migrationGlobs` in pipeline.config.json (default
  *       ["**\/migrations/**"]). A project with no migrations directory matches nothing, so
- *       the check is a no-op. Set `migrationGlobs: []` to disable it entirely. The
+ *       the check is a no-op. `migrationGlobs: []` disables only the DISCOVERY of migrations
+ *       from the impl-report; a path passed explicitly via --migrations-added is still
+ *       checked, so the config cannot be used to disarm this gate for a named migration. The
  *       down-section marker defaults to a SQL line comment (`-- DOWN`); override it with
- *       `migrationDownMarker` if your rollback convention differs.
+ *       `migrationDownMarker` if your rollback convention differs. A configured marker is
+ *       ADDITIVE, not exclusive: the builtin `-- DOWN` keeps working alongside it.
+ *
+ *       KNOWN BOUNDARY, deliberate: this is a structural check for the PRESENCE of a down
+ *       section, not a proof that the section would execute. A file whose down region is
+ *       entirely commented out passes. Detecting that would mean parsing SQL per dialect and
+ *       would false-HALT projects whose rollback conventions differ, which on a fail-CLOSED
+ *       gate is the worse failure. Gate-green means "a down section is present", never
+ *       "rollback is known to work"; a human still reviews the migration.
  *
  * What it does NOT check (by design, so reviewers do not assume coverage exists):
  *   - Syntactic validity of migrations: that is your migration linter's job (CI).
@@ -39,6 +49,7 @@
  */
 
 import { readFileSync, existsSync } from "node:fs";
+import { isMain as isMainScript } from "./lib.mjs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { validate, tokens, acLabels } from "./validate-pipeline-artifact.mjs";
@@ -324,10 +335,7 @@ async function main() {
   process.exit(1);
 }
 
-const isMain = (() => {
-  if (!process.argv[1]) return false;
-  return process.argv[1].endsWith("gate-pre-phase4.mjs");
-})();
+const isMain = isMainScript("gate-pre-phase4.mjs");
 
 if (isMain) {
   main().catch((err) => {

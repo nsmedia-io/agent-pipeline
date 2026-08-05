@@ -15,20 +15,51 @@
     "ba_approved_at"
   ],
   "properties": {
-    "issue_number": {"type": "integer", "description": "Tracker issue number"},
-    "title": {"type": "string", "maxLength": 70, "description": "Short imperative title"},
-    "ask_source": {"type": "string", "enum": ["owner", "librarian", "internal-agent"]},
-    "problem": {"type": "string", "description": "One paragraph describing the problem"},
-    "root_cause": {"type": ["string", "null"], "description": "For bugs only. Null for features."},
+    "issue_number": {
+      "type": [
+        "integer",
+        "string",
+        "null"
+      ],
+      "description": "Tracker issue number. Accepts a string for an experiment run (/pipeline --dry-run), which uses an exp-<slug> placeholder instead of opening a tracker issue, and null before an id exists."
+    },
+    "title": {
+      "type": "string",
+      "maxLength": 70,
+      "description": "Short imperative title"
+    },
+    "ask_source": {
+      "type": "string",
+      "enum": [
+        "owner",
+        "librarian",
+        "internal-agent"
+      ]
+    },
+    "problem": {
+      "type": "string",
+      "description": "One paragraph describing the problem"
+    },
+    "root_cause": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "For bugs only. Null for features."
+    },
     "requirements": {
       "type": "array",
-      "items": {"type": "string"},
+      "items": {
+        "type": "string"
+      },
       "minItems": 1,
       "description": "What must be true when done"
     },
     "acceptance_criteria": {
       "type": "array",
-      "items": {"type": "string"},
+      "items": {
+        "type": "string"
+      },
       "minItems": 1,
       "description": "Testable criteria QA maps to tests"
     },
@@ -36,18 +67,31 @@
       "type": "array",
       "items": {
         "type": "string",
-        "enum": ["data", "api", "frontend", "infrastructure", "security", "compliance", "architecture", "testing"]
+        "enum": [
+          "data",
+          "api",
+          "frontend",
+          "infrastructure",
+          "security",
+          "compliance",
+          "architecture",
+          "testing"
+        ]
       },
       "minItems": 1
     },
     "impacted_packages": {
       "type": "array",
-      "items": {"type": "string"},
+      "items": {
+        "type": "string"
+      },
       "description": "Package or app paths the change touches"
     },
     "out_of_scope": {
       "type": "array",
-      "items": {"type": "string"},
+      "items": {
+        "type": "string"
+      },
       "description": "Explicitly excluded items to prevent drift"
     },
     "sibling_causes_considered": {
@@ -55,11 +99,28 @@
       "description": "Class-of-bug survey: when a fix targets one instance of a class-shaped bug (browser-bound state, retry idempotency, CSRF, timezone, access-control bypass, etc.), enumerate other instances in the same flow stage and record whether the same root cause applies. Optional but expected for spec quality on multi-instance bug classes. See the knowledge store's class-of-bug catalogs for a canonical example.",
       "items": {
         "type": "object",
-        "required": ["name", "applies", "reason"],
+        "required": [
+          "name",
+          "applies",
+          "reason"
+        ],
         "properties": {
-          "name": {"type": "string", "description": "Concrete name of the sibling surface, key, file, or pattern"},
-          "applies": {"type": "string", "enum": ["yes", "no", "partial"]},
-          "reason": {"type": "string", "description": "One sentence on why same root cause does or does not apply, and what was done about it"}
+          "name": {
+            "type": "string",
+            "description": "Concrete name of the sibling surface, key, file, or pattern"
+          },
+          "applies": {
+            "type": "string",
+            "enum": [
+              "yes",
+              "no",
+              "partial"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "description": "One sentence on why same root cause does or does not apply, and what was done about it"
+          }
         }
       }
     },
@@ -69,7 +130,11 @@
     },
     "risk_tier": {
       "type": "string",
-      "enum": ["trivial", "standard", "architectural"],
+      "enum": [
+        "trivial",
+        "standard",
+        "architectural"
+      ],
       "description": "Sets the pipeline shape. architectural is MANDATORY for data/security/compliance domains, schema migrations, access-control policy changes, shared-contract shape changes, and new auth/crypto/webhook/data-intake surfaces; the orchestrator promotes an under-tiered spec. standard runs constraint injection plus a single Dev thread plus a trimmed panel; trivial skips constraint injection too."
     },
     "ab_build": {
@@ -77,28 +142,57 @@
       "description": "Tier-3 escalation. When true, Phase 3 runs as a dual-build A/B (two independent implementations of the same fixed surface, judged blind, winner materialized with best-of-both grafts) instead of the single Dev thread. BA sets this ONLY when risk_tier is architectural AND two or more materially different implementation approaches are genuinely viable AND a wrong approach is expensive (blast radius or a safety/compliance surface). Roughly an order of magnitude more spend than the default single-writer-plus-adversarial-panel path, so it is a rare, deliberate instrument. Default false."
     },
     "ab_build_rationale": {
-      "type": ["string", "null"],
+      "type": [
+        "string",
+        "null"
+      ],
       "description": "Required when ab_build is true: one or two sentences naming the materially-different approaches in contention and why the wrong one is expensive. Null otherwise."
     },
     "knowledge_drift_claims": {
       "type": "array",
       "description": "Optional staleness claims for the Librarian to resolve at Phase 5.",
-      "items": {"type": "object"}
+      "items": {
+        "type": "object"
+      }
     },
-    "ba_approved_at": {"type": "string", "format": "date-time"},
-    "ba_notes": {"type": "string", "description": "One or two sentences of context for downstream agents"},
+    "ba_approved_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "ba_notes": {
+      "type": "string",
+      "description": "One or two sentences of context for downstream agents"
+    },
     "scope_drift_log": {
       "type": "array",
       "description": "Appended during Phase 3 if scope drift adjudicated",
       "items": {
         "type": "object",
         "properties": {
-          "at": {"type": "string", "format": "date-time"},
-          "observation": {"type": "string"},
-          "ruling": {"type": "string", "enum": ["extended-spec", "rolled-back", "escalated"]},
-          "notes": {"type": "string"}
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "observation": {
+            "type": "string"
+          },
+          "ruling": {
+            "type": "string",
+            "enum": [
+              "extended-spec",
+              "rolled-back",
+              "escalated"
+            ]
+          },
+          "notes": {
+            "type": "string"
+          }
         }
       }
+    },
+    "experiment_id": {
+      "type": "string",
+      "description": "Present only on an experiment run: the exp-<slug> placeholder id used in place of a tracker issue."
     }
   }
 }

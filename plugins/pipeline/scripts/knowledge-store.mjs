@@ -3,6 +3,7 @@
 // Search, write, list living-context docs, and archive finished pipeline runs. No network, no embeddings.
 
 import { readdirSync, readFileSync, writeFileSync, mkdirSync, existsSync, statSync } from "node:fs";
+import { isMain as isMainScript, assertPathSegment } from "./lib.mjs";
 import { join, resolve, basename } from "node:path";
 
 const COLLECTIONS = ["living-context", "issue-archive", "decisions"];
@@ -130,6 +131,10 @@ function cmdWrite(args) {
 
 // Exported so archive-pipeline.mjs is a thin re-dispatch of this exact logic.
 export function archiveIssue({ root, issue, from }) {
+  // The id lands in a filename below. Unchecked, `../../escaped` writes outside the archive
+  // directory. Orchestrator-supplied today, so this crosses no trust boundary, but the cost
+  // of being wrong about that later is a write anywhere the process can reach.
+  assertPathSegment(issue, "issue");
   const fromDir = resolve(from);
   if (!existsSync(fromDir) || !statSync(fromDir).isDirectory()) throw new Error(`artifact dir not found: ${fromDir}`);
   const archive = { issue_number: Number(issue), archived_at: new Date().toISOString() };
@@ -192,9 +197,6 @@ function main() {
 // percent-encoded character (a space), and fileURLToPath(import.meta.url) under a symlink,
 // because it realpaths while argv[1] keeps the path as invoked. Plugin roots and macOS /tmp
 // are routinely symlinks, so both are reachable in production.
-const isMain = (() => {
-  if (!process.argv[1]) return false;
-  return process.argv[1].endsWith("knowledge-store.mjs");
-})();
+const isMain = isMainScript("knowledge-store.mjs");
 
 if (isMain) main();

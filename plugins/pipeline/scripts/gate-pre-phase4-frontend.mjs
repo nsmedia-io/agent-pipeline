@@ -48,6 +48,7 @@
  */
 
 import { readFileSync, existsSync } from "node:fs";
+import { isMain as isMainScript } from "./lib.mjs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { diffTouchesFrontend } from "./frontend-surface.mjs";
@@ -250,10 +251,7 @@ async function main() {
   process.exit(1);
 }
 
-const isMain = (() => {
-  if (!process.argv[1]) return false;
-  return process.argv[1].endsWith("gate-pre-phase4-frontend.mjs");
-})();
+const isMain = isMainScript("gate-pre-phase4-frontend.mjs");
 
 if (isMain) {
   main().catch((err) => {

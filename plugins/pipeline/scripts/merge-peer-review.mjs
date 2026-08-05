@@ -10,6 +10,7 @@
 // (phase.md /phase peer-review) call, so the two cannot diverge.
 
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { isMain as isMainScript } from "./lib.mjs";
 
 // unwrap defends against a shard that wrapped its block under its role key
 // ({"dba": {...}}) instead of writing a bare block, so a wrapped verdict is
@@ -129,10 +130,7 @@ function main(argv) {
 // Match the script NAME, not a path: fileURLToPath(import.meta.url) realpaths while argv[1]
 // keeps the path as invoked, so under a symlinked plugin root the two differ, main() never
 // runs, and the merge silently no-ops with exit 0. See knowledge-store.mjs for the full note.
-const isMain = (() => {
-  if (!process.argv[1]) return false;
-  return process.argv[1].endsWith("merge-peer-review.mjs");
-})();
+const isMain = isMainScript("merge-peer-review.mjs");
 
 if (isMain) {
   main(process.argv.slice(2));

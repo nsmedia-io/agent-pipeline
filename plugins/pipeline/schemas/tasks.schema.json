@@ -4,24 +4,74 @@
   "title": "Tasks",
   "description": "Phase 3 task breakdown maintained by Dev.",
   "type": "object",
-  "required": ["issue_number", "tasks"],
+  "required": [
+    "issue_number",
+    "tasks"
+  ],
   "properties": {
-    "issue_number": {"type": "integer"},
+    "issue_number": {
+      "type": [
+        "integer",
+        "string",
+        "null"
+      ],
+      "description": "Tracker issue number. Accepts a string for an experiment run (/pipeline --dry-run), which uses an exp-<slug> placeholder instead of opening a tracker issue, and null before an id exists."
+    },
     "tasks": {
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["id", "description", "status"],
+        "required": [
+          "id",
+          "description",
+          "status"
+        ],
         "properties": {
-          "id": {"type": "string", "pattern": "^T[0-9]+$"},
-          "description": {"type": "string"},
-          "files_touched": {"type": "array", "items": {"type": "string"}},
-          "depends_on": {"type": "array", "items": {"type": "string"}},
-          "status": {"type": "string", "enum": ["pending", "in-progress", "done", "blocked"]},
-          "assigned_to": {"type": "string", "enum": ["dev", "qa", "dev+qa"]},
-          "notes": {"type": "string"}
+          "id": {
+            "type": "string",
+            "pattern": "^T[0-9]+$"
+          },
+          "description": {
+            "type": "string"
+          },
+          "files_touched": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "depends_on": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "in-progress",
+              "done",
+              "blocked"
+            ]
+          },
+          "assigned_to": {
+            "type": "string",
+            "enum": [
+              "dev",
+              "qa",
+              "dev+qa"
+            ]
+          },
+          "notes": {
+            "type": "string"
+          }
         }
       }
+    },
+    "experiment_id": {
+      "type": "string",
+      "description": "Present only on an experiment run: the exp-<slug> placeholder id used in place of a tracker issue."
     }
   }
 }

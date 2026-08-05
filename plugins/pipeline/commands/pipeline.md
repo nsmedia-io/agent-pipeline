@@ -746,7 +746,7 @@ Write <PIPELINE_BASE>/<issue>/librarian-report.json. Return a short summary.
 })
 ```
 
-`${CLAUDE_PLUGIN_ROOT}/scripts/archive-pipeline.mjs` reads from the orchestrator's `.pipeline/<issue>/` first. When an artifact is absent there, the script falls back to `<status.worktree_path>/.pipeline/<issue>/` and reads from the Phase 3 worktree (validated against the `<repo-root>/.claude/worktrees/` prefix). If the worktree has already been cleaned up the script logs a warning, archives whatever is recoverable, and exits 0. The Phase 4 sync step above is the primary mechanism; the archive-script fallback is defense-in-depth.
+`${CLAUDE_PLUGIN_ROOT}/scripts/archive-pipeline.mjs` reads the artifact directory it is given and archives whatever it finds there. **The Phase 4 sync step above is the ONLY mechanism that preserves worktree artifacts; there is no fallback behind it.** Earlier revisions of this file described the script also falling back to `<status.worktree_path>/.pipeline/<issue>/`, which it has never implemented. Do not skip the sync step on the assumption that archival will recover the files afterwards: once the Phase 3 worktree is removed, anything not synced is gone.
 
 Because the Librarian is dispatched non-blocking, mark the run terminal at DISPATCH time, not on the Librarian's return:
 - Update `status.json` with `current_phase: "5-archived"`, `completed_at: <iso>` as part of the same turn that dispatches the Librarian, then return the completion summary to the owner. The Librarian finishes out of band.

@@ -188,8 +188,8 @@ suite "knowledge-store: the module-entrypoint guard (AC11)"
 SPACED="$TEMP_PROJECT/plugin dir with spaces"
 PLAIN="$TEMP_PROJECT/plugindir"
 mkdir -p "$SPACED" "$PLAIN"
-cp "$STORE" "$SPACED/knowledge-store.mjs"
-cp "$STORE" "$PLAIN/knowledge-store.mjs"
+cp "$STORE" "$SPACED/knowledge-store.mjs" && cp "$(dirname "$STORE")/lib.mjs" "$SPACED/"
+cp "$STORE" "$PLAIN/knowledge-store.mjs" && cp "$(dirname "$STORE")/lib.mjs" "$PLAIN/"
 
 # Control: the same copy under a space-free path. If this one ever fails, the harness (not the
 # guard) is broken, and the case below would be measuring the wrong thing.
@@ -234,29 +234,25 @@ assert_contains "importing exposes archiveIssue" "$IMPORT_OUT" "imported:functio
 assert_not_contains "importing does NOT execute main()" "$IMPORT_OUT" "Usage:"
 assert_not_contains "importing prints no store output" "$IMPORT_OUT" "Knowledge store is empty."
 
-suite "knowledge-store: KNOWN COVERAGE BOUNDARY (not a guarantee)"
+suite "knowledge-store: the archiveIssue traversal is closed"
 
-# KNOWN GAP, recorded deliberately rather than left silent. archiveIssue joins the issue id
-# into the output path WITHOUT sanitizing it, so an id containing `..` escapes
-# knowledge/issue-archive/ entirely and writes wherever the traversal lands. Tracked as
-# follow-up issue 5.
+# This was a recorded KNOWN COVERAGE BOUNDARY: archiveIssue joined the issue id into the
+# output path unsanitized, so an id containing `..` escaped knowledge/issue-archive/ and wrote
+# wherever the traversal landed. The boundary case asserted that exit-0 escape and instructed
+# the next author to INVERT rather than delete it once the gap closed.
 #
-# Why this is RECORDED while the frontend gate's traversal is FIXED in the same change: that
-# gate makes an explicit documented containment PROMISE ("A path outside that tree is
-# refused"), so pinning its bypass would cement a broken control. archiveIssue makes no
-# containment claim anywhere, and its issue id comes from the orchestrator rather than from an
-# external caller.
-#
-# FUTURE AUTHOR: if this case goes RED, the gap was CLOSED. INVERT the assertion (expect a
-# non-zero exit and no file outside issue-archive/) and delete this boundary label. Do NOT
-# delete the case.
+# The gap is now closed (assertPathSegment in scripts/lib.mjs), so these are the inverted
+# assertions. Keeping the case is the point: it is the only thing that would notice if the
+# sanitization were ever removed. Cross-checked by test-scripts-lib.sh at the unit level; this
+# is the end-to-end half.
 ESCAPE_ROOT="$TEMP_PROJECT/escape-root"
 mkdir -p "$ESCAPE_ROOT"
 ( cd "$TEMP_PROJECT" && node "$STORE" --archive-issue '../../escaped' --from "$ART" --root "$ESCAPE_ROOT" ) \
   > "$TEMP_PROJECT/out.txt" 2>&1
 ESCAPE_RC=$?
-assert_eq "BOUNDARY: an unsanitized issue id exits 0 today" "$ESCAPE_RC" "0"
-assert_eq "BOUNDARY: and writes outside knowledge/issue-archive/" \
-  "$([[ -f "$ESCAPE_ROOT/escaped.json" ]] && echo escaped || echo contained)" "escaped"
+assert_eq "a traversing issue id is refused" "$ESCAPE_RC" "1"
+assert_eq "and writes nothing outside knowledge/issue-archive/" \
+  "$([[ -f "$ESCAPE_ROOT/escaped.json" ]] && echo escaped || echo contained)" "contained"
+assert_contains "and the refusal explains itself" "$(cat "$TEMP_PROJECT/out.txt")" "single path segment"
 
 finish

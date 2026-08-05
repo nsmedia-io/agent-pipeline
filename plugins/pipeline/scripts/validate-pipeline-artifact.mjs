@@ -60,6 +60,7 @@ import {
   utimesSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
+import { isMain as isMainScript } from "./lib.mjs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -1025,10 +1026,7 @@ async function main() {
   process.stdout.write(JSON.stringify({ decision: "block", reason }));
 }
 
-const isMain = (() => {
-  if (!process.argv[1]) return false;
-  return process.argv[1].endsWith("validate-pipeline-artifact.mjs");
-})();
+const isMain = isMainScript("validate-pipeline-artifact.mjs");
 
 if (isMain) {
   if (process.argv.includes("--self-test")) {

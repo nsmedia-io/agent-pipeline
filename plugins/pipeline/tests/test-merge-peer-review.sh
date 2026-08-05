@@ -150,7 +150,7 @@ suite "merge-peer-review: the module-entrypoint guard"
 MPLAIN="$TEMP_PROJECT/mergedir"
 MLINK="$TEMP_PROJECT/merge-link"
 mkdir -p "$MPLAIN"
-cp "$MERGE" "$MPLAIN/merge-peer-review.mjs"
+cp "$MERGE" "$MPLAIN/merge-peer-review.mjs" && cp "$(dirname "$MERGE")/lib.mjs" "$MPLAIN/"
 ln -s "$MPLAIN" "$MLINK"
 
 LINKED_ERR=$( cd "$TEMP_PROJECT" && node "$MLINK/merge-peer-review.mjs" 2>&1 )
