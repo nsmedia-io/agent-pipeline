@@ -1,0 +1,57 @@
+{
+  "issue_number": null,
+  "experiment_id": "exp-script-test-coverage",
+  "current_phase": "4-review-complete",
+  "started_at": "2026-08-04T00:00:00Z",
+  "updated_at": "2026-08-04T00:00:00Z",
+  "branch": "main",
+  "risk_tier": "architectural",
+  "ask_text": "add automated test coverage for the 8 bundled .mjs scripts",
+  "experiment_mode": true,
+  "events": [
+    {
+      "phase": "0-setup",
+      "note": "clone at 67351ff, tree clean, origin/main fetched"
+    },
+    {
+      "phase": "1-ba-complete",
+      "note": "tier=architectural, 9 reqs / 17 ACs; found knowledge-store entrypoint bug (verified by orchestrator)"
+    },
+    {
+      "phase": "2-review",
+      "note": "DBA REQUEST_CHANGES (AC6 mis-pins migration gate), SecOps REQUEST_CHANGES (AC7 would cement a traversal bypass), DevOps APPROVE_WITH_NOTES. Loop back to BA."
+    },
+    {
+      "phase": "1-ba-rework",
+      "note": "spec revision 2: 22 ACs, +security domain, AC18 folds in the traversal containment fix per owner ruling"
+    },
+    {
+      "phase": "2-review-delta",
+      "note": "DBA + SecOps re-reviewed rev2: both APPROVE_WITH_NOTES, 0 blockers. DevOps standing approval."
+    },
+    {
+      "phase": "4-review",
+      "note": "panel verdict REQUEST_CHANGES; QA binding REQUEST_CHANGES (2 blockers), Dev 2 majors, other four clean"
+    }
+  ],
+  "flags": [
+    "orchestrator-verified: knowledge-store.mjs entrypoint guard fails on paths containing a space",
+    "orchestrator-verified: gate-pre-phase4-frontend.mjs screenshot containment is a bare prefix test; traversal path exits 0",
+    "orchestrator-verified: .gitignore negation !.pipeline/*/status.json is INERT because .pipeline/ excludes the parent dir",
+    "SecOps low: status.json is now git-tracked and status.schema.json worktree_path is absolute; must not commit a /Users/<name> path to this public repo"
+  ],
+  "final_verdict": "REQUEST_CHANGES",
+  "peer_review_verdict_counts": {
+    "APPROVE_WITH_NOTES": 3,
+    "APPROVE": 2,
+    "REQUEST_CHANGES": 1
+  },
+  "panel_roles": [
+    "ba",
+    "dba",
+    "devops",
+    "secops",
+    "dev",
+    "qa"
+  ]
+}
