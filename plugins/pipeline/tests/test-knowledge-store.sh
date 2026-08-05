@@ -1,0 +1,240 @@
+#!/usr/bin/env bash
+# knowledge-store.mjs — the file-based knowledge store CLI.
+#
+# EVERY invocation below passes --root into a per-case temp dir. knowledge/ is NOT gitignored
+# and this repo is public: a case that forgot --root would commit test docs into the real
+# store, and run.sh executes as the Stop-hook checkCommand at every dirty-tree turn end.
+#
+# The suite also pins the module-entrypoint guard (AC11). session-start.sh:84 invokes this CLI
+# for warmup context and treats no-output as an empty store, so a guard that fails to fire
+# degrades SILENTLY: no error, no exit code, just a session that quietly lost its context.
+
+. "$(dirname "${BASH_SOURCE[0]}")/harness.sh"
+require_node
+
+STORE="$SCRIPTS_DIR/knowledge-store.mjs"
+
+make_temp_project || exit 90
+ROOT="$TEMP_PROJECT/root"
+LC="$ROOT/knowledge/living-context"
+IA="$ROOT/knowledge/issue-archive"
+mkdir -p "$LC" "$IA"
+
+JGET="$TEMP_PROJECT/jget.mjs"
+cat > "$JGET" <<'EOF'
+import { readFileSync } from "node:fs";
+const [file, dotted] = process.argv.slice(2);
+let cur = JSON.parse(readFileSync(file, "utf8"));
+for (const k of dotted.split(".")) cur = cur == null ? undefined : cur[k];
+console.log(typeof cur === "object" ? JSON.stringify(cur) : String(cur));
+EOF
+jget() { node "$JGET" "$1" "$2"; }
+
+# ks <args...> -> RC, OUT, ERR. --root is always inside the temp tree.
+ks() {
+  local outf="$TEMP_PROJECT/out.txt" errf="$TEMP_PROJECT/err.txt"
+  ( cd "$TEMP_PROJECT" && node "$STORE" "$@" --root "$ROOT" ) >"$outf" 2>"$errf"
+  RC=$?
+  OUT=$(cat "$outf")
+  ERR=$(cat "$errf")
+}
+
+cat > "$LC/testing--conventions.json" <<'EOF'
+{"title":"Testing conventions","status":"current","domain":"testing",
+ "tags":["fixtures","harness"],"content":"How this project writes suites.","last_updated":"2026-01-01T00:00:00Z"}
+EOF
+cat > "$LC/deploy--runbook.json" <<'EOF'
+{"title":"Deployment runbook","status":"current","domain":"devops",
+ "tags":["release"],"content":"testing testing testing happens before release.","last_updated":"2026-01-01T00:00:00Z"}
+EOF
+cat > "$LC/schema--pelican.json" <<'EOF'
+{"title":"Pelican schema","status":"superseded","domain":"data",
+ "tags":["pelican"],"content":"The pelican table shape.","last_updated":"2026-01-01T00:00:00Z"}
+EOF
+cat > "$IA/77.json" <<'EOF'
+{"issue_number":77,"archived_at":"2026-01-01T00:00:00Z","status":"superseded",
+ "spec":{"title":"Pelican rollout"}}
+EOF
+
+suite "knowledge-store: --search"
+
+ks --search "testing"
+assert_eq "a search exits 0" "$RC" "0"
+assert_contains "it matches a title" "$OUT" "Testing conventions"
+assert_contains "it matches body content" "$OUT" "Deployment runbook"
+# A title hit is the stronger signal: the doc whose TITLE names the term must come first, or a
+# passing search buries the canonical doc under every passing mention of the word.
+assert_contains "a title hit outranks a body hit" "$(printf '%s' "$OUT" | head -1)" "Testing conventions"
+
+ks --search "TESTING"
+assert_contains "search is case-insensitive on the query" "$OUT" "Testing conventions"
+
+ks --search "harness"
+assert_contains "search matches tags" "$OUT" "Testing conventions"
+
+ks --search "zzzznomatch"
+assert_contains "no matches says so rather than failing" "$OUT" "No matches"
+assert_eq "no matches still exits 0" "$RC" "0"
+
+ks --search "pelican"
+assert_not_contains "a superseded doc is hidden from search" "$OUT" "Pelican schema"
+
+# An archive doc has no current/superseded lifecycle: it is history, and history stays
+# searchable. This fixture carries status "superseded" precisely so the archive branch is
+# proven to win over the status filter rather than merely coinciding with it.
+ks --search "pelican" --collection issue-archive
+assert_contains "an archive doc is NOT hidden by the status filter" "$OUT" "Pelican rollout"
+
+ks --search "testing" --domain testing
+assert_contains "--domain keeps the matching domain" "$OUT" "Testing conventions"
+assert_not_contains "--domain drops the others" "$OUT" "Deployment runbook"
+
+ks --search "testing" --collection nonsense
+assert_eq "an unknown --collection exits 1" "$RC" "1"
+assert_contains "and prints the usage text" "$ERR" "Usage:"
+
+ks --search
+assert_eq "--search with no terms exits 1" "$RC" "1"
+assert_contains "and says what is missing" "$ERR" "requires quoted terms"
+
+suite "knowledge-store: --write"
+
+printf '%s' '{"status":"current","content":"no title here"}' > "$TEMP_PROJECT/no-title.json"
+ks --write --file "$TEMP_PROJECT/no-title.json"
+assert_eq "a doc with no title is rejected" "$RC" "1"
+assert_contains "and says which field" "$ERR" 'missing a "title"'
+
+printf '%s' '{"title":"No status","content":"x"}' > "$TEMP_PROJECT/no-status.json"
+ks --write --file "$TEMP_PROJECT/no-status.json"
+assert_eq "a doc with no status is rejected" "$RC" "1"
+assert_contains "and says which field" "$ERR" 'missing a "status"'
+
+ks --write --file "$TEMP_PROJECT/does-not-exist.json"
+assert_eq "an unreadable source file is rejected" "$RC" "1"
+
+printf '%s' '{"title":"Courier roster","status":"current","domain":"data","content":"roster rules"}' \
+  > "$TEMP_PROJECT/courier--roster.json"
+ks --write --file "$TEMP_PROJECT/courier--roster.json"
+assert_eq "a valid doc is written" "$RC" "0"
+assert_contains "the write is reported" "$OUT" "Wrote"
+assert_eq "it lands in living-context" \
+  "$([[ -f "$LC/courier--roster.json" ]] && echo written || echo missing)" "written"
+assert_not_contains "last_updated is stamped when absent" "$(jget "$LC/courier--roster.json" last_updated)" "undefined"
+
+ks --write --file "$TEMP_PROJECT/courier--roster.json" --supersede testing--conventions
+assert_eq "--supersede exits 0" "$RC" "0"
+assert_contains "the supersede is reported" "$OUT" "Superseded"
+assert_eq "the named doc is flipped to superseded" "$(jget "$LC/testing--conventions.json" status)" "superseded"
+assert_not_contains "and re-stamped" "$(jget "$LC/testing--conventions.json" last_updated)" "2026-01-01T00:00:00Z"
+
+ks --write --file "$TEMP_PROJECT/courier--roster.json" --supersede nothing-here
+assert_eq "--supersede on an unknown slug exits 1" "$RC" "1"
+
+suite "knowledge-store: --archive-issue"
+
+ART="$TEMP_PROJECT/artifacts"
+mkdir -p "$ART"
+printf '%s' '{"title":"Spec"}' > "$ART/spec.json"
+printf '%s' '{"dba":{"verdict":"APPROVE"}}' > "$ART/peer-review.json"
+ks --archive-issue 88 --from "$ART"
+assert_eq "an archive exits 0" "$RC" "0"
+assert_contains "it reports the resolved output path" "$OUT" "$IA/88.json"
+assert_contains "it reports which artifacts were found" "$OUT" "artifacts: spec, peer-review"
+assert_eq "the archive folds in each present artifact" "$(jget "$IA/88.json" spec.title)" "Spec"
+assert_eq "and stamps the issue number" "$(jget "$IA/88.json" issue_number)" "88"
+
+EMPTY="$TEMP_PROJECT/empty-artifacts"
+mkdir -p "$EMPTY"
+ks --archive-issue 89 --from "$EMPTY"
+assert_eq "an artifact-less source dir exits 1" "$RC" "1"
+assert_contains "and says so" "$ERR" "no pipeline artifacts found"
+
+ks --archive-issue 90 --from "$TEMP_PROJECT/not-a-dir"
+assert_eq "an absent source dir exits 1" "$RC" "1"
+assert_contains "and says so" "$ERR" "artifact dir not found"
+
+ks --archive-issue 91
+assert_eq "--archive-issue with no --from exits 1" "$RC" "1"
+
+suite "knowledge-store: --list and the no-command path"
+
+ks --list
+assert_eq "--list exits 0" "$RC" "0"
+assert_contains "it prints the living-context collection" "$OUT" "# living-context"
+assert_contains "it prints the issue-archive collection" "$OUT" "# issue-archive"
+assert_contains "it lists a doc by title" "$OUT" "Courier roster"
+
+EMPTYROOT="$TEMP_PROJECT/empty-root"
+mkdir -p "$EMPTYROOT"
+( cd "$TEMP_PROJECT" && node "$STORE" --list --root "$EMPTYROOT" ) > "$TEMP_PROJECT/out.txt" 2>&1
+assert_contains "an empty store says so" "$(cat "$TEMP_PROJECT/out.txt")" "Knowledge store is empty."
+
+ks
+assert_eq "no command exits 1" "$RC" "1"
+assert_contains "and prints the usage text" "$ERR" "Usage:"
+
+suite "knowledge-store: the module-entrypoint guard (AC11)"
+
+# The bug: `import.meta.url === \`file://\${process.argv[1]}\`` compares a URL-ENCODED module
+# URL against a raw filesystem path, so any character needing percent-encoding (a space is the
+# common one) makes the comparison false and main() never runs -- no output, exit 0.
+# session-start.sh:84 reads that silence as "the store is empty" and drops the warmup context.
+# The correct idiom is already in merge-peer-review.mjs:130:
+#     fileURLToPath(import.meta.url) === process.argv[1]
+SPACED="$TEMP_PROJECT/plugin dir with spaces"
+PLAIN="$TEMP_PROJECT/plugindir"
+mkdir -p "$SPACED" "$PLAIN"
+cp "$STORE" "$SPACED/knowledge-store.mjs"
+cp "$STORE" "$PLAIN/knowledge-store.mjs"
+
+# Control: the same copy under a space-free path. If this one ever fails, the harness (not the
+# guard) is broken, and the case below would be measuring the wrong thing.
+CONTROL_OUT=$( cd "$TEMP_PROJECT" && node "$PLAIN/knowledge-store.mjs" --list --root "$EMPTYROOT" 2>&1 )
+assert_contains "control: the CLI works from a space-free path" "$CONTROL_OUT" "Knowledge store is empty."
+
+SPACED_OUT=$( cd "$SPACED" && node "$SPACED/knowledge-store.mjs" --list --root "$EMPTYROOT" 2>&1 )
+assert_contains "the CLI still runs from a path containing a space" "$SPACED_OUT" "Knowledge store is empty."
+
+SPACED_SEARCH=$( cd "$SPACED" && node "$SPACED/knowledge-store.mjs" --search "courier" --root "$ROOT" 2>&1 )
+assert_contains "and --search still returns results from a spaced path" "$SPACED_SEARCH" "Courier roster"
+
+# The other half of the guard: repairing it must not mean REMOVING it. archive-pipeline.mjs
+# imports archiveIssue from this module, and an import that ran main() would print usage and
+# exit 1 in the middle of the importer.
+cat > "$TEMP_PROJECT/importer.mjs" <<EOF
+const m = await import("$PLAIN/knowledge-store.mjs");
+console.log("imported:" + typeof m.archiveIssue);
+EOF
+IMPORT_OUT=$( cd "$TEMP_PROJECT" && node "$TEMP_PROJECT/importer.mjs" 2>&1 )
+IMPORT_RC=$?
+assert_eq "importing the module exits 0" "$IMPORT_RC" "0"
+assert_contains "importing exposes archiveIssue" "$IMPORT_OUT" "imported:function"
+assert_not_contains "importing does NOT execute main()" "$IMPORT_OUT" "Usage:"
+assert_not_contains "importing prints no store output" "$IMPORT_OUT" "Knowledge store is empty."
+
+suite "knowledge-store: KNOWN COVERAGE BOUNDARY (not a guarantee)"
+
+# KNOWN GAP, recorded deliberately rather than left silent. archiveIssue joins the issue id
+# into the output path WITHOUT sanitizing it, so an id containing `..` escapes
+# knowledge/issue-archive/ entirely and writes wherever the traversal lands. Tracked as
+# follow-up issue 5.
+#
+# Why this is RECORDED while the frontend gate's traversal is FIXED in the same change: that
+# gate makes an explicit documented containment PROMISE ("A path outside that tree is
+# refused"), so pinning its bypass would cement a broken control. archiveIssue makes no
+# containment claim anywhere, and its issue id comes from the orchestrator rather than from an
+# external caller.
+#
+# FUTURE AUTHOR: if this case goes RED, the gap was CLOSED. INVERT the assertion (expect a
+# non-zero exit and no file outside issue-archive/) and delete this boundary label. Do NOT
+# delete the case.
+ESCAPE_ROOT="$TEMP_PROJECT/escape-root"
+mkdir -p "$ESCAPE_ROOT"
+( cd "$TEMP_PROJECT" && node "$STORE" --archive-issue '../../escaped' --from "$ART" --root "$ESCAPE_ROOT" ) \
+  > "$TEMP_PROJECT/out.txt" 2>&1
+ESCAPE_RC=$?
+assert_eq "BOUNDARY: an unsanitized issue id exits 0 today" "$ESCAPE_RC" "0"
+assert_eq "BOUNDARY: and writes outside knowledge/issue-archive/" \
+  "$([[ -f "$ESCAPE_ROOT/escaped.json" ]] && echo escaped || echo contained)" "escaped"
+
+finish
