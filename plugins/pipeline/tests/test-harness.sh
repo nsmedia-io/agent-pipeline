@@ -128,17 +128,29 @@ assert_eq "harness.sh executes exactly one rm -rf" "$RM_LINES" "1"
 assert_eq "that rm -rf carries no glob suffix" \
   "$(code_only "$TESTS_DIR/harness.sh" | grep 'rm -rf' | sed 's/#.*//' | grep -c '\*' | tr -d ' ')" "0"
 
-# The suites added by this change route every removal through the helper. The three
-# pre-existing hook suites keep their inline rm -rf and are deliberately exempt.
-NEW_SUITE_RM=0
-for f in "$TESTS_DIR"/test-validate-pipeline-artifact.sh "$TESTS_DIR"/test-gate-pre-phase4.sh \
-         "$TESTS_DIR"/test-gate-pre-phase4-frontend.sh "$TESTS_DIR"/test-frontend-surface.sh \
-         "$TESTS_DIR"/test-merge-peer-review.sh "$TESTS_DIR"/test-knowledge-store.sh \
-         "$TESTS_DIR"/test-archive-pipeline.sh "$TESTS_DIR"/test-pipeline-status.sh; do
+# The suites added by this change route every removal through the helper. Discovery is by the
+# SAME test-*.sh glob run.sh uses, with an explicit exemption list -- never an enumeration of
+# suite filenames. An enumeration leaves suite number 9 unguarded the day it lands, and a
+# renamed suite silently unguarded forever: a control that quietly stops firing, which is the
+# exact failure this file exists to catch. EXAMINED is asserted too, so a broken glob or a
+# swallowed rename goes red instead of passing vacuously against an empty loop.
+RM_VIOLATORS=""
+RM_EXAMINED=0
+for f in "$TESTS_DIR"/test-*.sh; do
   [[ -f "$f" ]] || continue
-  if code_only "$f" | grep -q 'rm -rf'; then NEW_SUITE_RM=$((NEW_SUITE_RM + 1)); fi
+  case "$(basename "$f")" in
+    # Pre-existing hook suites: they keep their inline rm -rf and AC16 requires them unedited.
+    test-stop-hook.sh | test-session-start-hook.sh | test-subagent-stop-hook.sh) continue ;;
+    # This file NAMES the string inside the assertions above rather than executing it; the
+    # single real removal in harness.sh is pinned by the two static checks a few lines up.
+    test-harness.sh) continue ;;
+  esac
+  RM_EXAMINED=$((RM_EXAMINED + 1))
+  if code_only "$f" | grep -q 'rm -rf'; then RM_VIOLATORS="$RM_VIOLATORS $(basename "$f")"; fi
 done
-assert_eq "no new script suite hand-rolls rm -rf" "$NEW_SUITE_RM" "0"
+assert_eq "no new script suite hand-rolls rm -rf" "${RM_VIOLATORS:-none}" "none"
+assert_eq "and the rm -rf check actually examined the script suites" \
+  "$([[ "$RM_EXAMINED" -ge 8 ]] && echo ok || echo "only $RM_EXAMINED examined")" "ok"
 
 suite "harness: node is REQUIRED, never skipped (AC3)"
 
