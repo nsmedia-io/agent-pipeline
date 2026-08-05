@@ -83,6 +83,20 @@ Four more customization points:
 
 Every phase writes typed JSON under `.pipeline/<id>/` in your project (add it to your `.gitignore`; keep `status.json` if you want cross-machine resume). Schemas are in [`schemas/`](schemas/). Validate with `node "${CLAUDE_PLUGIN_ROOT}/scripts/validate-pipeline-artifact.mjs" <type> <file>`.
 
+## Tests
+
+The three hooks have a dependency-free bash suite (no framework, no `node_modules`):
+
+```
+bash plugins/pipeline/tests/run.sh
+```
+
+It builds throwaway git repos and drives each hook end to end: that the Stop hook blocks a turn (exit 2) on a failing check and stays out of the way otherwise, that the SessionStart report degrades quietly outside a repo or with a broken config, and that the SubagentStop hook passes a `decision: block` through while fail-opening on every tooling gap.
+
+Each config-parsing case was recorded FAILING against the pre-fix hooks before it was recorded passing, per the gate-bites rule below. A control nobody has watched fail is indistinguishable from a no-op, and that is not hypothetical here: both hooks previously read `pipeline.config.json` with a regex that silently returned the default on a reformatted config, so the Stop hook's check gate could stop firing with nothing to indicate it had.
+
+This repo's own [`pipeline.config.json`](../../pipeline.config.json) wires that suite as `checkCommand`, so the Stop hook gates development of the plugin with the plugin's own machinery.
+
 ## Requirements
 
 - Claude Code with plugin support.

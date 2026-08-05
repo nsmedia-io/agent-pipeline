@@ -25,63 +25,11 @@ git rev-parse --is-inside-work-tree >/dev/null 2>&1 || exit 0
 # Opt-out for one-off iterations.
 [[ "${CLAUDE_HOOK_STOP_SKIP:-0}" == "1" ]] && exit 0
 
-# Read a TOP-LEVEL string key from pipeline.config.json.
-#
-# Uses node (already required by the plugin's bundled scripts) rather than a grep over JSON.
-# The previous regex matched a single-line quoted value ANYWHERE in the file, so a
-# reformatted config, a value containing an escaped quote, or a same-named key nested inside
-# another object all silently yielded the default. For `checkCommand` that default is empty,
-# which turns this entire gate into a no-op: the hook stops verifying and nothing says so.
-# A control that quietly stops firing is exactly what the gate-bites rule exists to catch,
-# so a config that exists but cannot be read now warns on stderr instead of passing silently.
-#
-# Still fail-OPEN by design (see the header): a malformed config must not permanently wedge
-# the owner out of ending a turn. It warns, falls back to the default, and lets the run stop.
-read_config() {
-  local key="$1" default="${2:-}" file="$PROJECT_DIR/pipeline.config.json" val="" errfile="" rc=0
-  [[ -f "$file" ]] || { printf '%s' "$default"; return; }
-
-  if ! command -v node >/dev/null 2>&1; then
-    echo "agent-pipeline Stop hook: node not found, cannot read $file. Check gate skipped." >&2
-    printf '%s' "$default"
-    return
-  fi
-
-  errfile=$(mktemp)
-  val=$(node -e '
-    const fs = require("fs");
-    const file = process.argv[1], key = process.argv[2];
-    let cfg;
-    try {
-      cfg = JSON.parse(fs.readFileSync(file, "utf8"));
-    } catch (e) {
-      console.error("is not valid JSON (" + e.message + ")");
-      process.exit(3);
-    }
-    if (cfg === null || typeof cfg !== "object" || Array.isArray(cfg)) {
-      console.error("does not have a JSON object at its top level");
-      process.exit(4);
-    }
-    const v = cfg[key];
-    if (v === undefined || v === null) process.exit(0);
-    if (typeof v !== "string") {
-      console.error("has a non-string value for \"" + key + "\"");
-      process.exit(5);
-    }
-    process.stdout.write(v);
-  ' "$file" "$key" 2>"$errfile")
-  rc=$?
-
-  if [[ $rc -ne 0 ]]; then
-    echo "agent-pipeline Stop hook: $file $(head -1 "$errfile" 2>/dev/null). Check gate skipped." >&2
-    rm -f "$errfile"
-    printf '%s' "$default"
-    return
-  fi
-  rm -f "$errfile"
-
-  [[ -n "$val" ]] && printf '%s' "$val" || printf '%s' "$default"
-}
+# Shared config reader (see hooks/lib.sh). A missing lib means a broken install, so no-op
+# rather than block a stop: this hook is fail-open by contract.
+LIB="$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+# shellcheck source=./lib.sh
+[[ -f "$LIB" ]] && . "$LIB" || exit 0
 
 # CUSTOMIZE: set "checkCommand" in pipeline.config.json to your verify command, e.g.
 #   "npm run typecheck && npm test && npm run lint"

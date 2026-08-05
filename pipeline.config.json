@@ -1,0 +1,22 @@
+{
+  "_comment": "Config for developing THIS repo (the plugin itself). Adopting projects copy plugins/pipeline/pipeline.config.example.json instead. Keys omitted here fall back to their documented defaults; the frontend and migration globs are left at their defaults because a plugin repo has neither, so they never match.",
+
+  "integrationBranch": "main",
+
+  "checkCommand": "bash plugins/pipeline/tests/run.sh",
+
+  "architecturalTriggers": {
+    "_comment": "What forces the deep tier when the pipeline runs against its own source. The gates, the hooks, and the agent contracts are this repo's equivalent of a schema: a wrong edit there degrades every downstream project silently.",
+    "domains": ["security", "compliance"],
+    "keywords": [
+      "hook",
+      "gate",
+      "veto",
+      "schema",
+      "agent contract",
+      "artifact shape",
+      "risk tier",
+      "panel composition"
+    ]
+  }
+}

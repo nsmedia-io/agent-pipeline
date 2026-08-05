@@ -18,14 +18,11 @@ git rev-parse --is-inside-work-tree >/dev/null 2>&1 || exit 0
 
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-}"
 
-# Dependency-free reader for a top-level string key in pipeline.config.json. Fail-open to default.
-read_config() {
-  local key="$1" default="${2:-}" file="$PROJECT_DIR/pipeline.config.json" val=""
-  [[ -f "$file" ]] || { printf '%s' "$default"; return; }
-  val=$(grep -oE "\"$key\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" "$file" 2>/dev/null \
-        | head -1 | sed -E 's/.*:[[:space:]]*"([^"]*)"$/\1/')
-  [[ -n "$val" ]] && printf '%s' "$val" || printf '%s' "$default"
-}
+# Shared config reader (see hooks/lib.sh). A missing lib means a broken install; stay silent
+# rather than emit a half-formed warmup report.
+LIB="$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+# shellcheck source=./lib.sh
+[[ -f "$LIB" ]] && . "$LIB" || exit 0
 
 # CUSTOMIZE: set "integrationBranch" in pipeline.config.json if yours is not "main".
 INTEGRATION_BRANCH="$(read_config integrationBranch main)"
