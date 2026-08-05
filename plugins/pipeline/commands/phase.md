@@ -1,6 +1,6 @@
 ---
 description: Run a single pipeline phase for resume, retry, or targeted re-review. Wraps the Agent tool dispatch with artifact validation. Accepts a phase name and issue number.
-argument-hint: <phase: ba|dba|devops|secops|design-review|dev|qa|peer-review|librarian> --issue <number> [extra context]
+argument-hint: "<phase: ba|dba|devops|secops|design-review|dev|qa|peer-review|librarian> --issue <number> [extra context]"
 allowed-tools: Read, Grep, Glob, Bash, Write, Edit, Agent
 ---
 
