@@ -139,4 +139,36 @@ assert_contains "verdict matching is case-insensitive" "$TALLY" '"approve":1'
 TALLY=$(counts '{"dba":{"verdict":42}}' '["dba"]')
 assert_contains "a non-string verdict is counted nowhere" "$TALLY" '"approve":0'
 
+suite "merge-peer-review: the module-entrypoint guard"
+
+# The twin of the knowledge-store guard, and the reason both now match on the script NAME:
+# a path-comparing guard is false whenever a component of the invocation path is a symlink,
+# because fileURLToPath(import.meta.url) realpaths while process.argv[1] does not. Here that
+# silence would mean a delta round merges NOTHING and exits 0, and the orchestrator then counts
+# the rubric over the pre-merge file. Not canonicalized, on purpose: `pwd -P` would resolve the
+# link away and the case would measure nothing.
+MPLAIN="$TEMP_PROJECT/mergedir"
+MLINK="$TEMP_PROJECT/merge-link"
+mkdir -p "$MPLAIN"
+cp "$MERGE" "$MPLAIN/merge-peer-review.mjs"
+ln -s "$MPLAIN" "$MLINK"
+
+LINKED_ERR=$( cd "$TEMP_PROJECT" && node "$MLINK/merge-peer-review.mjs" 2>&1 )
+LINKED_RC=$?
+assert_eq "invoked through a symlink it still runs (exit 1 on no args, not a silent 0)" "$LINKED_RC" "1"
+assert_contains "and still prints its usage line through the symlink" "$LINKED_ERR" "usage: merge-peer-review.mjs"
+
+# Repairing the guard must not mean removing it: countVerdicts is imported by the orchestrator
+# and by the counts helper above, and an import that ran main() would print usage mid-import.
+MIMPORT="$TEMP_PROJECT/merge-importer.mjs"
+cat > "$MIMPORT" <<EOF
+const m = await import("$MPLAIN/merge-peer-review.mjs");
+console.log("imported:" + typeof m.countVerdicts);
+EOF
+IMPORT_OUT=$( cd "$TEMP_PROJECT" && node "$MIMPORT" 2>&1 )
+IMPORT_RC=$?
+assert_eq "importing the module exits 0" "$IMPORT_RC" "0"
+assert_contains "importing exposes countVerdicts" "$IMPORT_OUT" "imported:function"
+assert_not_contains "importing does NOT execute main()" "$IMPORT_OUT" "usage: merge-peer-review.mjs"
+
 finish

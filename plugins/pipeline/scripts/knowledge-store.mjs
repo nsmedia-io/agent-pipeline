@@ -4,7 +4,6 @@
 
 import { readdirSync, readFileSync, writeFileSync, mkdirSync, existsSync, statSync } from "node:fs";
 import { join, resolve, basename } from "node:path";
-import { fileURLToPath } from "node:url";
 
 const COLLECTIONS = ["living-context", "issue-archive", "decisions"];
 // Pipeline artifacts folded into an issue archive, in phase order; each read only if present.
@@ -187,7 +186,15 @@ function main() {
   fail("no command given. Use --search, --write, --archive-issue, or --list.");
 }
 
-// Decode the module URL rather than string-building one from argv: import.meta.url is
-// percent-encoded, so a plugin root containing a space made this compare false and the CLI
-// exited 0 having printed nothing.
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) main();
+// Match the script NAME, the idiom the gates and the validator already use. Every PATH-
+// comparing form of this guard has the same silent-no-op failure mode -- main() never runs,
+// nothing prints, exit 0 -- and each breaks on a different input: `file://${argv[1]}` on any
+// percent-encoded character (a space), and fileURLToPath(import.meta.url) under a symlink,
+// because it realpaths while argv[1] keeps the path as invoked. Plugin roots and macOS /tmp
+// are routinely symlinks, so both are reachable in production.
+const isMain = (() => {
+  if (!process.argv[1]) return false;
+  return process.argv[1].endsWith("knowledge-store.mjs");
+})();
+
+if (isMain) main();

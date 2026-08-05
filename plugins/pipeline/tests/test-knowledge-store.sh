@@ -179,8 +179,12 @@ suite "knowledge-store: the module-entrypoint guard (AC11)"
 # URL against a raw filesystem path, so any character needing percent-encoding (a space is the
 # common one) makes the comparison false and main() never runs -- no output, exit 0.
 # session-start.sh:84 reads that silence as "the store is empty" and drops the warmup context.
-# The correct idiom is already in merge-peer-review.mjs:130:
-#     fileURLToPath(import.meta.url) === process.argv[1]
+# EVERY path-comparing form of this guard has that same silent no-op, differing only in which
+# input trips it, so the shipped guard compares the script NAME instead:
+#     process.argv[1].endsWith("knowledge-store.mjs")
+# as gate-pre-phase4.mjs:328, gate-pre-phase4-frontend.mjs:252 and
+# validate-pipeline-artifact.mjs:1029 already do. The spaced-path cases below cover the
+# percent-encoding trigger; the symlink cases after them cover the realpath trigger.
 SPACED="$TEMP_PROJECT/plugin dir with spaces"
 PLAIN="$TEMP_PROJECT/plugindir"
 mkdir -p "$SPACED" "$PLAIN"
@@ -197,6 +201,24 @@ assert_contains "the CLI still runs from a path containing a space" "$SPACED_OUT
 
 SPACED_SEARCH=$( cd "$SPACED" && node "$SPACED/knowledge-store.mjs" --search "courier" --root "$ROOT" 2>&1 )
 assert_contains "and --search still returns results from a spaced path" "$SPACED_SEARCH" "Courier roster"
+
+# The SYMLINK trigger of the same silent no-op. fileURLToPath(import.meta.url) returns the
+# REALPATH while process.argv[1] keeps the path as invoked, so any path-comparing guard is
+# false whenever a component is a link -- and plugin roots, dev-marketplace installs, and
+# macOS /tmp and /var are routinely links. Under the librarian's `--write`, that silence means
+# the doc is never written and the agent believes it landed.
+#
+# DELIBERATELY NOT CANONICALIZED. new_tmpdir runs `pwd -P`, which resolves links away; if this
+# case reached the store through the resolved path it would measure nothing. The link is built
+# here, inside the temp tree, and invoked through the link on purpose.
+LINKED="$TEMP_PROJECT/linked-plugin-dir"
+ln -s "$PLAIN" "$LINKED"
+
+LINKED_OUT=$( cd "$TEMP_PROJECT" && node "$LINKED/knowledge-store.mjs" --list --root "$EMPTYROOT" 2>&1 )
+assert_contains "the CLI still runs through a symlinked directory" "$LINKED_OUT" "Knowledge store is empty."
+
+LINKED_SEARCH=$( cd "$LINKED" && node "$LINKED/knowledge-store.mjs" --search "courier" --root "$ROOT" 2>&1 )
+assert_contains "and --search still returns results through a symlink" "$LINKED_SEARCH" "Courier roster"
 
 # The other half of the guard: repairing it must not mean REMOVING it. archive-pipeline.mjs
 # imports archiveIssue from this module, and an import that ran main() would print usage and
