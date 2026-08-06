@@ -38,6 +38,7 @@ The orchestrator dispatches these subagents (they never call each other; only th
 | **DBA** | Data model, migrations, query safety. Conditional. |
 | **DevOps** | Infra, CI/CD, deploy safety. Conditional. |
 | **Design** | Frontend/UX/accessibility/copy. Conditional (frontend diffs only). |
+| **Art Director** | Owns the RESULT of a visual surface, not its conformance. Authors a binding visual contract before implementation, rules on the gap after. Conditional (only when a contract exists). Its `REQUEST_CHANGES` binds solely on a cited clause plus its own rendered evidence; preference stays advisory. |
 | **Librarian** | Post-merge knowledge persistence. Writes the file-based knowledge store. |
 
 ## Risk tiers (set by BA, they change the pipeline's shape)

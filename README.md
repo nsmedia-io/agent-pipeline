@@ -20,7 +20,7 @@ Then run `/pipeline <your ask>` in any project. Full usage, agents, tiers, gates
 plugins/pipeline/
   .claude-plugin/plugin.json         # plugin manifest
   commands/                          # /pipeline, /phase, /warmup
-  agents/                            # ba, dba, devops, secops, dev, qa, design, librarian
+  agents/                            # ba, dba, devops, secops, dev, qa, design, art-director, librarian
   hooks/                             # session-start, stop, subagent-stop (all fail-open, opt-in)
   scripts/                           # gates, artifact validator, file-based knowledge store
   schemas/                           # typed artifact JSON schemas
