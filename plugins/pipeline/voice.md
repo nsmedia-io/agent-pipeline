@@ -93,7 +93,9 @@ hides the change, and how to tell]
 **Cannot be seen this way:** [what these steps do not cover, and what covers it
 instead]
 
-**Put it back:** [the exact command or steps to restore the starting state]
+**Put it back** (only when the steps above changed data): [the exact command or
+steps to restore the starting state. This is NEVER a revert of the change
+itself; omit the line entirely when the steps only read.]
 ```
 
 The rules that make this worth reading:
@@ -102,7 +104,7 @@ The rules that make this worth reading:
 - **Steps are actions, not assertions.** "Log in, open the reports page, switch to the hourly view" is a step. "Verify the grid does not overflow" is not; that is the next section.
 - **Always give the before.** A change is only visible against a baseline. If they never saw the old behaviour, describe it so the difference means something.
 - **Name what this cannot show.** If part of the work is only provable by a test, a query, or a log, say so and say which. A surface nobody could render, a race that needs two sessions, a state no fixture reaches: name it rather than letting the steps imply full coverage. Never let a walkthrough stand in for evidence it does not provide.
-- **Make it reversible.** If following the steps changes data, hand them the exact way back in the same message. Do not make them ask.
+- **Make it reversible, and only when it needs to be.** If following the steps changes data, hand them the exact way back in the same message; do not make them ask. If the steps only read, leave the line out. **It is never a revert of the change itself.** Filling it with a revert command reads as a recommendation to roll back, which is how this field misfired the first time it was used.
 - **If you could not verify it yourself, say so here**, and say what you did instead. "I could not render this; the tests cover the logic but nobody has looked at it" is a legitimate and useful line.
 
 ## The decision block
