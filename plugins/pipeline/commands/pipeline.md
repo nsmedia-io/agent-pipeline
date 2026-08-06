@@ -555,6 +555,23 @@ echo "$CHANGED" | grep -qE '^(migrations/|db/)' && PANEL_ROLES="$PANEL_ROLES dba
 echo "$CHANGED" | grep -qE '(^\.github/|^infra/|^deploy)' && PANEL_ROLES="$PANEL_ROLES devops"
 ```
 
+**Art Director is contract-conditional, at every tier.** It is NOT a standing panel role and NOT a taste second-opinion on Design. It joins only when a binding visual contract exists for this issue, and it owns that contract.
+
+**Duty A, before Phase 3.** When the spec is frontend-scoped AND the ask is a redesign, a rejected surface, or a new visual surface (not a bugfix on an existing one), dispatch `art-director` ONCE after the spec locks and before Dev starts. It writes `<ARTIFACT_DIR>/visual-contract.json`: a thesis, three to six falsifiable clauses each carrying how it would be checked, `would_be_failure`, `inherited_unexamined`, and `the_risk`. Dev then treats that file as a Phase-2-equivalent hard constraint, exactly like `constraints.md`.
+
+Two rules that make the contract worth having, both paid for on the run that produced this role:
+
+- **A clause must bind on a measurable property, never on a proposed fix.** Asked to either build a control or downgrade an untested claim, the Art Director built three variants and its control proved its own instinct wrong: the fix it wanted to mandate measured as a regression on a second axis. Had the clause named the fix, the contract would have caused the defect it existed to prevent. Clause text that names a solution is a defect in the clause.
+- **The binding marker is the STRING `"BINDING"`, not a boolean.** A `=== true` check reads zero clauses and every gate silently passes.
+
+**Duty B, on the Phase 4 panel.** Add `art_director` to `PANEL_ROLES` when, and only when, `<ARTIFACT_DIR>/visual-contract.json` exists:
+
+```bash
+[ -f "$ARTIFACT_DIR/visual-contract.json" ] && PANEL_ROLES="$PANEL_ROLES art_director"
+```
+
+It renders the result itself, rules clause by clause, and writes a bare `peer-review.art_director.json`. Its `REQUEST_CHANGES` is BINDING on one narrow ground: the result materially fails a CITED clause, with rendered evidence it captured itself. Pure preference stays advisory no matter how strongly held, and it must say which it is doing every time. It may also return `ESCALATE`, meaning the contract itself was wrong; that is a finding, not a failure, and it returns the question to BA.
+
 **Design is surface-conditional at EVERY tier.** Add `design_review` to `PANEL_ROLES` (on top of the architectural/trivial six or the standard four-plus) when, and only when, the diff touches a frontend surface. Use the SAME allowlist the gate uses, so detection and dispatch never diverge:
 
 ```bash
@@ -564,6 +581,9 @@ echo "$CHANGED" | grep -qE '(^\.github/|^infra/|^deploy)' && PANEL_ROLES="$PANEL
 if node -e 'import(process.env.CLAUDE_PLUGIN_ROOT + "/scripts/frontend-surface.mjs").then(m=>process.exit(m.diffTouchesFrontend(process.argv.slice(1))?0:1))' $CHANGED; then
   PANEL_ROLES="$PANEL_ROLES design_review"
 fi
+
+# Art Director sits only when it authored a contract for this issue (Duty A above).
+[ -f "$ARTIFACT_DIR/visual-contract.json" ] && PANEL_ROLES="$PANEL_ROLES art_director"
 ```
 
 Record the resolved `PANEL_ROLES` in `status.json` so the merge, the rubric, and a `--resume` all agree on who was on the panel. When `design_review` is in the panel, dispatch the `design` reviewer with the shared Phase 4 preamble plus its lens line (it writes a bare `peer-review.design_review.json` shard), and fold that shard into `peer-review.json` under the `design_review` key in the merge loop with the same `unwrap` defense the other roles use. A standard-tier panel reviewer additionally verifies the diff against `<ARTIFACT_DIR>/constraints.md` (the injected constraints Dev was held to).
@@ -813,6 +833,18 @@ Three registers. Pick by moment, not by phase number.
 - Any call the pipeline cannot make for itself: a dirty worktree at Phase 0, an unresolvable scope-drift ruling, or a cost/product-direction question BA escalated through you.
 
 When one of those needs a decision, end with the decision block from `voice.md` and nothing after it. One question per block. If two calls are open, ask the first and wait.
+
+### Replication steps are not optional
+
+Every full-voice completion report carries the **See it yourself** block from `${CLAUDE_PLUGIN_ROOT}/voice.md`, filled in. A report that says what changed without saying how to check it asks the owner to take your word for it, and "it is deployed" is not a way to verify anything.
+
+Three parts of that block are the ones that actually get skipped, so derive them deliberately:
+
+- **The state the account must be in.** Go and read the branch their account will render before you write the steps. The most common way a walkthrough wastes someone's time is sending them to look at a surface their own data hides: an existing row, a completed step, a flag, a populated column. If a precondition suppresses the new behaviour, it belongs in "you need" AND in "will look broken when it is not".
+- **What it looked like before.** A change is only visible against a baseline. If they never saw the old behaviour, describe it.
+- **What these steps cannot show.** A surface nobody could render, a race needing two sessions, a state no fixture reaches, anything only a test or a query proves. Name it and name what covers it instead. QA's `known_gaps` and any `design_gate` shortfall are the inputs; a walkthrough must never imply coverage it does not provide.
+
+If you could not verify the change yourself, say that here and say what you did instead. That is a useful sentence, not an admission.
 
 ### Filling the rating scales
 

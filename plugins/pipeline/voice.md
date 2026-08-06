@@ -64,6 +64,47 @@ Bad: "We optimized throughput via horizontal scaling of the consumer group."
 
 Always state blast radius and reversibility before asking for a call. If it is a *one way door*, say the words "this is a one way door" in the first three lines.
 
+## How to see it yourself
+
+**Every completed change ships with replication steps. No exceptions, including for changes you are certain about.**
+
+A report that says what changed and not how to see it asks the owner to take your word for it. They cannot verify your work from a description, and "it is deployed" is not a way to check anything. This is the section that turns a claim into something they can confirm or disprove in three minutes.
+
+Write it for someone who has the app open and nothing else.
+
+```
+### See it yourself
+
+**Where:** [environment and the exact surface: which page, which screen, which email]
+
+**You need:** [the account, and the STATE that account must be in]
+
+**Steps:**
+  1. [an action a person takes, not a component that renders]
+  2. ...
+
+**What you should see:** [the observation, in plain language]
+
+**What it looked like before:** [the same observation, on the old behaviour]
+
+**This will look broken when it is not, if:** [the precondition that silently
+hides the change, and how to tell]
+
+**Cannot be seen this way:** [what these steps do not cover, and what covers it
+instead]
+
+**Put it back:** [the exact command or steps to restore the starting state]
+```
+
+The rules that make this worth reading:
+
+- **Preconditions are the whole game.** The most common way a walkthrough wastes someone's time is sending them to look at something their account state hides. If a branch, a flag, an existing row, or a completed step suppresses the new behaviour, that belongs in "you need" and in "will look broken when it is not". Go and check which branch their account will actually render before you write the steps; do not assume the happy path.
+- **Steps are actions, not assertions.** "Log in, open the reports page, switch to the hourly view" is a step. "Verify the grid does not overflow" is not; that is the next section.
+- **Always give the before.** A change is only visible against a baseline. If they never saw the old behaviour, describe it so the difference means something.
+- **Name what this cannot show.** If part of the work is only provable by a test, a query, or a log, say so and say which. A surface nobody could render, a race that needs two sessions, a state no fixture reaches: name it rather than letting the steps imply full coverage. Never let a walkthrough stand in for evidence it does not provide.
+- **Make it reversible.** If following the steps changes data, hand them the exact way back in the same message. Do not make them ask.
+- **If you could not verify it yourself, say so here**, and say what you did instead. "I could not render this; the tests cover the logic but nobody has looked at it" is a legitimate and useful line.
+
 ## The decision block
 
 When you need a human call, end with this and nothing after it:
@@ -113,6 +154,8 @@ When work finishes, this replaces the changelog dump:
 **What changed:** [3 to 5 bullets, plain language, grouped by what a person would
 notice, not by file]
 
+**See it yourself:** [the replication block above, in full]
+
 **What this means for you:**
   - [ongoing cost or maintenance this adds]
   - [what you can now tell a customer or put on the site]
@@ -144,12 +187,20 @@ and how you would notice it]
 - Bad: "Idempotency is handled at the consumer."
 - Good: "If the same message arrives twice (which happens), we now process it once instead of double charging."
 
+**Unverifiable claims**
+- Bad: "Deployed, ready for review."
+- Good: the replication block: where, what account, what state, the steps, and what they should see.
+
+**Steps that hide their preconditions**
+- Bad: "Run onboarding and check the new field on step two."
+- Good: "Run onboarding as X. Note: if the account already has a record, step two shows an 'already on file' notice instead and you will not see the new field at all. Remove it first, or use an account without one."
+
 **Silent one way doors**
 - Bad: "Applied the migration."
 - Good: "This is a one way door. The old column is gone. Restoring it means a restore from backup, so if the shape is wrong, tell me now."
 
 ## The test before you send
 
-Read your own message and ask: could someone who has never seen this codebase make a good decision from this alone, and would they be angry in a month about something I left out?
+Read your own message and ask: could someone who has never seen this codebase make a good decision from this alone, could they go and check my work without asking me a follow-up question, and would they be angry in a month about something I left out?
 
 If no, rewrite it. If yes, send it.
