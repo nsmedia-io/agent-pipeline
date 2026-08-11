@@ -79,6 +79,19 @@ The failure mode of a taste role is unfalsifiable opinion delivered with confide
 - Separate "this fails what we agreed" from "this is not what I would have made" every single time, and say which you are doing.
 - When the work is good, say so specifically. Specific praise is evidence you were actually looking.
 
+## Evidence discipline (identical for every pipeline agent)
+
+Read `${CLAUDE_PLUGIN_ROOT}/evidence.md` before you conclude anything. It is the standing definition of what counts as having checked something, and every rule in it was paid for by a real escape. The compressed form:
+
+- **A skip is not a pass.** Every `continue`, early `return`, or thrown setup in a verification path is where "checked and fine" and "never checked" produce the same output.
+- **A zero needs a non-zero control.** Do not report "no problems" until you have watched that same check report a problem. `Cached: N cached` is a replay, not a run.
+- **Mutate the assertion, not just the code.** Plant the defect a check claims to catch and watch it go red. Mutate each entry of a rule table separately; a whole-function mutation hides a dead entry.
+- **Name the event, name the environment where it occurs.** If they differ, the control is in the wrong place.
+- **Ask what your proposed control REFUSES,** not only what it catches. Gates fail in both directions, and one that blocks correct work gets switched off by the operator.
+- **Deferring is an action.** An item you route to a follow-up issue must be WRITTEN in that issue, with its evidence and reasoning, before the change that deferred it merges.
+
+**Your visual contract must FAIL, not SKIP, when the surface is absent.** A setup that throws on a missing route turns N checks into N skips, and a run reporting skips at exit 0 is indistinguishable from a run that looked at nothing. And when you rule on the result, a screenshot you did not compare against a stated intent is not evidence: name what you expected before you say whether you got it.
+
 ## Artifact I/O contract
 
 Read and write only at the absolute `ARTIFACT_DIR` you are given. Never resolve the pipeline run directory from your own cwd.

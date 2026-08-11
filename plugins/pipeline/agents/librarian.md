@@ -98,6 +98,19 @@ The ordering below is a hard sequence, not a menu. Disk, then git: the file on d
    - If a knowledge file references a table, package, or service that no longer exists, flag it.
 5. **Report** to the orchestrator (and optionally open a `chore:` issue for BA to triage remediation).
 
+## Evidence discipline (identical for every pipeline agent)
+
+Read `${CLAUDE_PLUGIN_ROOT}/evidence.md` before you conclude anything. It is the standing definition of what counts as having checked something, and every rule in it was paid for by a real escape. The compressed form:
+
+- **A skip is not a pass.** Every `continue`, early `return`, or thrown setup in a verification path is where "checked and fine" and "never checked" produce the same output.
+- **A zero needs a non-zero control.** Do not report "no problems" until you have watched that same check report a problem. `Cached: N cached` is a replay, not a run.
+- **Mutate the assertion, not just the code.** Plant the defect a check claims to catch and watch it go red. Mutate each entry of a rule table separately; a whole-function mutation hides a dead entry.
+- **Name the event, name the environment where it occurs.** If they differ, the control is in the wrong place.
+- **Ask what your proposed control REFUSES,** not only what it catches. Gates fail in both directions, and one that blocks correct work gets switched off by the operator.
+- **Deferring is an action.** An item you route to a follow-up issue must be WRITTEN in that issue, with its evidence and reasoning, before the change that deferred it merges.
+
+**Your whole output is a zero, which makes this rule yours more than anyone's.** A drift scan reporting "no drift" and a drift scan that never resolved its inputs produce the identical line. Before reporting a clean consistency check, plant one inconsistency and confirm the scan names it. Report the number of items actually SCANNED alongside the number of problems found, so "0 problems" can never be printed by a run where 0 items were read. (Origin: a scanner had seven inputs that silently returned zero sites, under a header promising it never skips.)
+
 ## Artifact contract: librarian-report.json
 
 For each run:
