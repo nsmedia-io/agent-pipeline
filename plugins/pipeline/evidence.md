@@ -176,7 +176,30 @@ rather than accepted it.*
 the sentence comes out. Prefer a repair that makes a wrong value **unconstructible** over one that
 adds a check someone must remember.
 
-## 9. Deferring is an action, not a decision
+## 9. A ratchet only bites on the axis it is keyed on
+
+An exhaustiveness check over enum A does not constrain a change that extends member B. Before you
+rely on "the compiler will stop the next person", confirm the change you are protecting against
+actually moves the axis the check is keyed on.
+
+Origin, caught one issue later by the agent authoring the next contract. A rule table was declared
+`Record<OutboundWriteKind, Rule | null>`, exhaustive over three write kinds, and was described to the
+owner as a forcing function: the next feature could not ship without deciding its entry. But that
+feature added new **members to one kind's payload**, not a new kind. It compiled cleanly. The
+forcing function was keyed on a different axis than the change moved, and nobody would have been
+stopped.
+
+**The second half is worse, and generalises further: a `replace` that does not match is a silent
+no-op.** The same table's rule hard-coded the exact shape of the sentence it stripped. A change that
+legitimately extends that sentence makes the pattern stop matching, the sanitiser quietly does
+nothing, and the unsanitised value ships — with a green typecheck, past the very table that was
+supposed to be the ratchet.
+
+**Any sanitiser whose pattern encodes the CURRENT shape of its input fails open when the input
+changes.** Assert that it DID something (the input contained X, the output does not, the output is
+shorter), never that it merely ran or merely compiles.
+
+## 10. Deferring is an action, not a decision
 
 "Routed to the follow-up issue" is not a deferral. **Writing it in the follow-up issue is the
 deferral.** Until then it lives in a review artifact nobody reads again and it evaporates.
@@ -191,7 +214,7 @@ recorded only in a test comment or a pull request body is buried on merge. If th
 deferred is interesting, that reasoning is the most valuable part; record it, because the next person
 will otherwise re-derive it and reach the other conclusion.
 
-## 10. Your artifact is read by an operator, not just by a reviewer
+## 11. Your artifact is read by an operator, not just by a reviewer
 
 Commands you write into a review, a runbook, or a report get run.
 
@@ -205,7 +228,7 @@ sequence, **inside the review whose subject was that deploy**.
 agent's artifact.** And if a document contains a command, the test for that document must RUN it, not
 match it.
 
-## 11. Numbers about live systems carry provenance or a warning label
+## 12. Numbers about live systems carry provenance or a warning label
 
 Stale figures propagate through an entire panel without resistance, because every downstream agent
 repeats them faithfully.
