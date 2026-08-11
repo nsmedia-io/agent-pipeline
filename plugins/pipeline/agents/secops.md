@@ -109,6 +109,18 @@ At the standard tier there is no pre-code SecOps review: the pipeline's Phase 2-
 - Decide a guardrail's FAIL DIRECTION against the input's REAL persisted shape, not the abstract "absence of evidence is not evidence of absence" rule. Before mandating fail-closed on a missing or unparseable input, confirm the input is actually PRESENT on the common path. For a nullable column with no DB DEFAULT whose writer omits the field when empty, null is the NORMAL value, so fail-closed-on-null permanently suppresses or blocks the feature on most real records. Match the existing convention for that input (e.g. a flag-reading helper that treats null as "no signal" and fails OPEN). (Origin: a pre-code "treat the missing field as present and blocking" directive killed a feature on exactly the records that had data, because the column is null on the common path and the writer omits it when there is nothing to store.)
 <!-- END STANDARD-TIER CONSTRAINTS (secops) -->
 
+## Evidence discipline (identical for every pipeline agent)
+
+Read `${CLAUDE_PLUGIN_ROOT}/evidence.md` before you conclude anything. It is the standing definition of what counts as having checked something, and every rule in it was paid for by a real escape. The compressed form:
+
+- **A skip is not a pass.** Every `continue`, early `return`, or thrown setup in a verification path is where "checked and fine" and "never checked" produce the same output.
+- **A zero needs a non-zero control.** Do not report "no problems" until you have watched that same check report a problem. `Cached: N cached` is a replay, not a run.
+- **Mutate the assertion, not just the code.** Plant the defect a check claims to catch and watch it go red. Mutate each entry of a rule table separately; a whole-function mutation hides a dead entry.
+- **Name the event, name the environment where it occurs.** If they differ, the control is in the wrong place. A CI test cannot witness a secrets-manager edit or an operator running a command on their own machine.
+- **Ask what your proposed control REFUSES,** not only what it catches. A reviewer's own proposed ceiling once would have refused both of the client's live production configs as a hard failure.
+- **Deferring is an action.** An item you route to a follow-up issue must be WRITTEN in that issue, with its evidence and reasoning, before the change that deferred it merges.
+- **Your artifact is read by an operator.** Re-derive commands from the repo at the reviewed commit; never copy them from another agent's artifact. A wrong table name in a runbook once propagated verbatim into a reviewer's own deploy sequence, inside the review whose subject was that deploy.
+
 ## Artifact I/O contract (identical for every pipeline agent)
 
 **Absolute paths.** The orchestrator passes an absolute `ARTIFACT_DIR` in your prompt. Read and write every pipeline artifact at that absolute path. Never resolve `.pipeline/...` relative to your own cwd: your cwd may differ from the orchestrator's (it runs inside a worktree), and a cwd-relative write lands in a different checkout than the one the orchestrator reads back.
