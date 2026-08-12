@@ -362,6 +362,63 @@ can actually construct the outcome it demands. For each invariant an acceptance 
 **state why it holds**, then check whether the change repeals that reason. An invariant asserted
 without its mechanism is a coincidence you have promoted to a test.
 
+## 16. Your enumeration and your oracle are both checks that can fail
+
+Two ways a verification pass reports a confident zero while proving nothing, both observed in one
+afternoon on one fix.
+
+**An attack table proves nothing about a class it does not contain.** A reviewer verified a proposed
+security fix against eight bypass variants and reported "0 escapes". All eight were *authority*
+hijacks — a hostile host. None was a *path* retarget, where the host stays correct and the path walks
+backwards into a different page. The table could not have caught the surviving hole. Worse, the same
+reviewer had **watched** a path retarget resolve one command earlier, noted it in passing, and then
+built a table without it.
+
+> When a fix rests on a proposition, test the **proposition** over a generated space, not a list of
+> examples you thought of. Enumerate the *classes* first, and say which class each case belongs to;
+> a table with two cases in each of four classes beats twelve cases in one.
+
+**And your oracle can be wrong in the direction that flatters you.** The reviewer that later did this
+properly ran a 2.36-million-candidate differential hunt — and caught its own oracle wrong **twice**,
+both times in its own favour. Round two reported 49,058 survivors that were entirely a mis-modelling
+of how the parser treats redundant slashes. Round three silently normalised the input before
+comparing, which made an entire attack class invisible to its own check.
+
+Note what did NOT save it: a non-zero control **passed** in both broken rounds. The control proves
+the harness can fire. It says nothing about whether the oracle classifies correctly. When your check
+is "did the output match what I expected", a wrong expectation is indistinguishable from a pass.
+
+**How to satisfy it.** Run the harness against a deliberately broken subject and confirm the count is
+not merely non-zero but the **right** non-zero. Then check a handful of individual verdicts by hand,
+especially the ones that came out the way you hoped.
+
+## 17. Guard where it landed, not how it was spelled
+
+When a parser, normaliser, or decoder sits between the input and the effect, **no blocklist over the
+input can be complete**, because the thing you are inspecting is not the thing that acts.
+
+Origin: a guard refused a hostile URL by testing the raw string's second character. WHATWG URL
+parsing's *first step* removes every ASCII tab and newline from the input, before the state machine
+sees the leading slashes — so the guard read a string the parser never parsed, and a single tab
+walked through it onto another host. The dot-segment guard failed the same way, because the parser
+also honours percent-encoded spellings the literal comparison missed.
+
+The fix that worked stated an **outcome property** instead: the resolved host must equal the expected
+host, and the resolved path may not have fewer segments than the author wrote. That second one catches
+encodings nobody enumerated, because it names *what retargeting does* rather than *how it is written*.
+
+> A blocklist cannot enumerate what a parser normalises. A postcondition does not have to.
+
+**The tell:** if closing a bypass means adding another spelling to a list, the control is on the wrong
+side of the transformation. Move it after.
+
+**Corollary, for judging a line that looks redundant.** One clause was provably dead: deleting it left
+the whole suite green, and a 60,480-case fuzz found nothing that needed it. But the **reciprocal** was
+also true — delete the *other* clause and every leg the first one covers stays green too. Each is the
+sole guard against the other's regression, and neither can be pinned by a test, *by definition of
+redundancy*. Before deleting a clause because nothing fails, delete its counterpart and see whether
+the same argument acquits that one too. If it does, they are a pair, not a spare.
+
 ---
 
 ## Applying this
