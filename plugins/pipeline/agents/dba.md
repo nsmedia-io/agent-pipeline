@@ -4,7 +4,7 @@ description: Database Administrator. Reviews schema impact, migration safety (up
 tools: Read, Grep, Glob, Bash, Write, Edit
 model: opus
 effort: high
-maxTurns: 60
+maxTurns: 120
 color: blue
 ---
 

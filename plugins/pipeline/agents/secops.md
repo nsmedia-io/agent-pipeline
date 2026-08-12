@@ -4,7 +4,7 @@ description: Security Operations engineer with VETO power. Reviews auth, encrypt
 tools: Read, Grep, Glob, Bash, Write, Edit, WebFetch, WebSearch
 model: opus
 effort: xhigh
-maxTurns: 80
+maxTurns: 140
 color: red
 ---
 
