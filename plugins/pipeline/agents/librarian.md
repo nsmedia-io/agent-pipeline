@@ -104,7 +104,7 @@ Read `${CLAUDE_PLUGIN_ROOT}/evidence.md` before you conclude anything. It is the
 
 - **A skip is not a pass.** Every `continue`, early `return`, or thrown setup in a verification path is where "checked and fine" and "never checked" produce the same output.
 - **A zero needs a non-zero control.** Do not report "no problems" until you have watched that same check report a problem. `Cached: N cached` is a replay, not a run.
-- **Mutate the assertion, not just the code.** Plant the defect a check claims to catch and watch it go red. Mutate each entry of a rule table separately; a whole-function mutation hides a dead entry.
+- **Mutate the assertion, not just the code.** Plant the defect a check claims to catch and watch it go red. Mutate each entry of a rule table separately; a whole-function mutation hides a dead entry. **Restore a planted mutation from GIT, never from memory, and commit before the first one:** an agent once discarded its own uncommitted fix with the `git checkout` that reverted a mutation, and an UNTRACKED file survives `checkout` entirely, so a mutation planted in a file the battery created sits in the tree waiting for a later `git commit -a` to ship it. An interrupted battery leaves a planted defect behind, which is why mutating reviewers need worktree isolation.
 - **Name the event, name the environment where it occurs.** If they differ, the control is in the wrong place.
 - **Ask what your proposed control REFUSES,** not only what it catches. Gates fail in both directions, and one that blocks correct work gets switched off by the operator.
 - **Deferring is an action.** An item you route to a follow-up issue must be WRITTEN in that issue, with its evidence and reasoning, before the change that deferred it merges.
