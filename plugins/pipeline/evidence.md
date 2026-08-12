@@ -345,6 +345,19 @@ every time it misjudges that budget, and it cannot see the budget running out.
 This happened repeatedly in one session, twice to a binding verdict that would have blocked a merge,
 and once to an investigation that had already found its answer and reported nothing.
 
+**A stub is not a checkpoint. Commit to a VERDICT early, then revise it.** This rule was already in
+force, and three agents in one night still lost an entire pass — one at 71 tool calls, one at 91, one
+at 86 — because each honoured the letter of it. They wrote a placeholder artifact first, exactly as
+instructed, then investigated until the budget ended, and the placeholder said nothing.
+
+Writing the *file* early protects the file. What gets lost is the **judgement**, and that is the only
+part nobody else can reconstruct. One of the three had already found two blockers; they survived only
+because it happened to summarise them in its reply.
+
+So the checkpoint is a **verdict with its current reason**, written as soon as you have one and
+rewritten as it changes — not a scaffold you intend to fill in. If you would be embarrassed to be cut
+off right now, you are already past the point where you should have written one down.
+
 **Write the artifact first and update it as you go.** An interim verdict you revise beats a perfect
 one that never lands. When the deliverable IS the analysis, keep a running version and append after
 each substantive step.
