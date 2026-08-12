@@ -73,6 +73,22 @@ Run it in both directions:
 carry one dead entry and still pass a whole-function mutation. That distinction caught a live defect
 one round after a whole-function mutation had "confirmed" the same code.
 
+**Restore a planted mutation from GIT, never from memory, and commit before you start.** A mutation
+battery edits the code under test and puts it back N times; the putting-back is where the work gets
+destroyed.
+
+- **From memory is not a restore.** One agent ran `git checkout` to revert a planted mutation and
+  discarded its own uncommitted fix along with it. It re-applied from context and proved the rebuild
+  byte-identical, which is luck, not method: the general case has no such proof and the loss is
+  silent.
+- **An untracked file survives `git checkout`.** A mutation planted in a file the battery itself
+  created is not reverted by it, so it sits in the tree waiting for a later `git commit -a` to ship
+  it. **Commit the implementation before the first mutation** so `checkout` owns every file. One agent
+  did exactly this, deliberately, and said why.
+- **An interrupted battery leaves a planted defect in the tree.** This is the concrete reason mutating
+  reviewers need worktree isolation: three of them sharing one tree corrupted each other's evidence,
+  and one watched a gate sit disabled mid-review because a neighbour had disabled it.
+
 **A mutation that survives once is where the next one hides.** When a planted mutation unexpectedly
 lives, do not move on: work out which input family exposes it, add that case, and kill it.
 
