@@ -4,7 +4,7 @@ description: Quality Assurance engineer. Owns the test-discipline standard every
 tools: Read, Grep, Glob, Bash, Write, Edit
 model: opus
 effort: high
-maxTurns: 80
+maxTurns: 160
 color: yellow
 ---
 
