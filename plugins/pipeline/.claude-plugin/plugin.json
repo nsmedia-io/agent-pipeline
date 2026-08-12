@@ -1,6 +1,6 @@
 {
   "name": "pipeline",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "description": "Risk-tiered multi-agent development pipeline. BA specs and tiers an ask, a single-writer implements code and tests together, an adversarial panel reviews the finished diff. File-based knowledge store, no external services.",
   "author": {
     "name": "NS Media"
@@ -8,5 +8,12 @@
   "homepage": "https://github.com/nsmedia-io/agent-pipeline",
   "repository": "https://github.com/nsmedia-io/agent-pipeline",
   "license": "MIT",
-  "keywords": ["orchestration", "subagents", "code-review", "workflow", "pipeline", "agents"]
+  "keywords": [
+    "orchestration",
+    "subagents",
+    "code-review",
+    "workflow",
+    "pipeline",
+    "agents"
+  ]
 }

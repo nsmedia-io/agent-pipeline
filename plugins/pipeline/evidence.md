@@ -125,6 +125,15 @@ and feeds it through the consumer's real code path**, asserting on the rendered 
 fixture. Then confirm the cache invalidation covers every file that test imports across the boundary,
 or a warm cache replays green over the very format change it exists to catch.
 
+**When a fixture is unavoidable, capture it from the real system and give it a rot detector.** A
+captured fixture beats a hand-written one, because it records what the system *did* rather than what
+its author believed. But it still freezes, and a suite built on a stale capture goes on passing
+confidently about a world that no longer exists. So pin one assertion to a fact the capture asserts
+about the **present** — a count, a distribution, a known-failing case — that must hold both before
+and after the change. Origin: a contract carried a permanently-passing leg asserting that under the
+CURRENT behaviour exactly 2 of 16 inputs resolve. Its author's note is the rule: *if it ever reports
+16, the capture has rotted and the other 25 tests are proving nothing.*
+
 ## 6. Ask what your proposed control REFUSES, not only what it catches
 
 Before holding a condition or demanding a guardrail, check it against real inputs and name the
