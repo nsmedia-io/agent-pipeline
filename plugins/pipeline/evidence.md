@@ -185,6 +185,42 @@ failing test, and it lands in the next customer-facing document.
 trigger-holder and the harm? If the same actor can produce the same outcome by another route the
 control never covered, the residual is not what protects anyone, and it ships.
 
+**And when reachability does not separate two defects, direction does.** Two gaps in one file were
+both defeatable only by a future edit, so the rule above graded them the same — yet one had already
+shipped a bug and the other could not. The separator was which way each one failed.
+
+One mutation *lowered* a computed count, which let a hostile input match a page it should not have
+and steal that page's numbers into a client report: it made the system **claim more than it knew**.
+The other could only *raise* the same count, and a higher count can only produce more refusals: it
+made the system **claim less than it knew**. The first is a defect that ships a falsehood; the second
+is a defect that ships a silence.
+
+**Ask what a defect lets the system SAY, not only who can trigger it.** Over-claiming closes now;
+over-refusing can be filed, with the cost stated — an honest input silently refusing itself reads to
+a user as "no data" on something that has data, which is not free, only cheaper.
+
+## 3b. A battery where every mutation reddens cannot tell coverage from a rubber stamp
+
+Keep a mutation you expect to **survive**, documented as expected and with its reason recorded.
+
+This is rule 2 turned inward. A zero result needs a non-zero control, and a mutation battery reporting
+"all red" is exactly a zero result about your own harness — it is indistinguishable from a harness that
+reddens indiscriminately.
+
+Origin, and it is the strongest possible one: an agent's battery reported every mutation caught. The
+reading was correct-looking and wrong. Its substitution had collapsed a `\\` to a single backslash, so
+one mutation silently became a **copy of an earlier one** and was "caught" by that one's tests. The
+harness bug **produced the expected answer**. The only instrument that could have exposed it was a
+mutation expected to survive — and when the agent added one, the real result appeared.
+
+Two conditions, both cheap:
+
+- **Prove the mutation you applied is the mutation you meant.** Print the changed line and check it —
+  a character count of the thing you were editing is enough. Prefer literal string replacement over a
+  regex, and avoid stacking a shell-escaping layer under it.
+- **Document the survivor as expected, with its reason and its issue.** Otherwise the next reader
+  takes it for an unfixed hole of unknown severity, and the control becomes a worry.
+
 ## 8. Falsify the explanation, not just the code
 
 When an author explains why something passes, test the explanation.
