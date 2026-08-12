@@ -189,6 +189,13 @@ feature added new **members to one kind's payload**, not a new kind. It compiled
 forcing function was keyed on a different axis than the change moved, and nobody would have been
 stopped.
 
+It fired again one issue later, on a different axis, and this time a reviewer checked before relying
+on it: a scanner enforcing tenant scoping covered the operations `findUnique` / `findFirst` /
+`update` / `delete` / `upsert` and anchored on an `id` key. A new client-facing read using `findMany`
+and `aggregate`, whose where clause never carried an `id`, was invisible to it. Not an exemption
+anyone granted — just an axis the ratchet was never keyed on, leaving the tenant predicate on that
+read guarded by nothing mechanical at all.
+
 **The second half is worse, and generalises further: a `replace` that does not match is a silent
 no-op.** The same table's rule hard-coded the exact shape of the sentence it stripped. A change that
 legitimately extends that sentence makes the pattern stop matching, the sanitiser quietly does
@@ -229,6 +236,20 @@ live state in a prompt, treat it as unverified until you check it, and check it 
 load-bearing for a refusal or a threshold. Memory files and prior artifacts are point-in-time
 observations, not current state.
 
+**A number needs its window and its grain, not only its timestamp.** A freshly-read, correctly-run
+query still produces a wrong figure if it sums two tables that answer different questions. "79 rows,
+466 impressions" went into an issue as the acceptance target; it was a page-level table (10 rows, 382
+impressions) added to a query-by-page matrix (69 and 84). A developer chasing 466 drops the grain
+filter and ships a double-count of a single page — the defect written into the criterion meant to
+prevent it.
+
+**And the correction inherits the burden.** In the same issue, the justification for rejecting a
+broader matching rule cited an over-matching host at "31 days, 68 impressions". That was an
+**all-time** figure; inside the window that actually applied it was 4 rows and 5 impressions. The
+decision was right and its evidence was fifteen times overstated, so the next person who checks "68"
+concludes the concern was fabricated and reverses a correct call. A wrong number replaced by another
+wrong number is the same defect one round later, living inside its own fix.
+
 ## 12. A test can pass because of the order its file runs in
 
 A shared fixture store plus a test runner that orders files by size means a test asserting an
@@ -247,6 +268,13 @@ suspect.** Ask what creates the thing you are asserting is absent, and when. If 
 it is filtered**, so the assertion runs against a store that provably contained it. Then confirm the
 test fails when the filtering is removed — an absence test that cannot fail is the purest form of
 [[a check that cannot fail has not passed]].
+
+**The same defect wears a second costume: a fixture that never constructs the collision.** A tenancy
+criterion seeded two tenants "holding the same path under a **different host**" to prove a tenant
+filter was load-bearing. But the match key **was** host-plus-path, so the two seeds were already
+distinct keys, the filter never had to separate anything, and the leg stayed green under its own
+named mutation. A test for a discriminator needs two things that genuinely **must** be
+discriminated. Ask what your fixture makes collide, not what it contains.
 
 ## 13. A turn budget is a deadline, so bank findings as you go
 
@@ -295,6 +323,35 @@ failure record. That is the standard.
 text. And never copy a command from another agent's artifact — re-derive it from the repository at
 the reviewed commit. One broken drain query propagated verbatim into a reviewer's own deploy
 sequence, inside the review whose subject was that deploy.
+
+## 15. Your own change is a hostile input to your own spec
+
+A spec is written one requirement at a time, and every requirement can be individually correct while
+the **set** is inconsistent. The inconsistency does not announce itself. It surfaces later as an
+acceptance criterion that passes without doing anything.
+
+Two shapes, both found in a single review round on one spec.
+
+**A requirement whose outcome another requirement's approach cannot construct.** Requirement 7
+demanded a three-way discriminator with a middle bucket: "this key exists, but has no rows in the
+window". Requirement 9's implementation note recommended a **date-bounded** fetch filtered in memory.
+Under a date-bounded read, that middle bucket and "no such key anywhere" are indistinguishable **by
+construction** — nothing in the fetched set can separate them. The criterion would have passed with
+the buckets silently merged, and no live input would ever have exposed it, because the middle bucket
+had zero live instances.
+
+**An invariant that is true today, where your change is what repeals it.** A criterion asserted
+"days equals total row count". That was true, and correctly observed: a unique constraint with three
+empty discriminator columns made the table one row per (page, date) **under exact equality**. The
+change under review replaced exact equality with a canonical union, after which 23 of 81 groups had
+more rows than distinct dates — one homepage held 75 rows across 52 dates. Worse, the criterion's own
+fixture seeded its three variants on three **different** dates, where the two counts agree either
+way. It was vacuous against precisely the defect it was named for.
+
+**How to satisfy it.** For each requirement, ask whether the approach this same document recommends
+can actually construct the outcome it demands. For each invariant an acceptance criterion asserts,
+**state why it holds**, then check whether the change repeals that reason. An invariant asserted
+without its mechanism is a coincidence you have promoted to a test.
 
 ---
 
