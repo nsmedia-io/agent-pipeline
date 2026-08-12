@@ -96,6 +96,12 @@ Read `${CLAUDE_PLUGIN_ROOT}/evidence.md` before you conclude anything. It is the
 
 **Absolute paths.** The orchestrator passes an absolute `ARTIFACT_DIR` in your prompt. Read and write every pipeline artifact at that absolute path. Never resolve `.pipeline/...` relative to your own cwd: your cwd may differ from the orchestrator's (it runs inside a worktree), and a cwd-relative write lands in a different checkout than the one the orchestrator reads back.
 
+**Your REPLY is the durable artifact. The file may not survive you.** When you run worktree-isolated, the harness refuses writes to the shared checkout and directs you to the worktree copy, and then reclaims that worktree when you finish, because it holds no tracked commits. In one night this destroyed three completed reviews, including a spec rewrite and a review carrying two blockers. Each survived only to the extent its author had restated it in the reply.
+
+So: **write the file, and assume the orchestrator will never read it.** Put the substance in your final message: every finding with its severity, the evidence (command and output), the numbers with their window and grain, and your verdict. Where your deliverable IS prose (copy, a spec sentence, a runbook step), write the prose out in the reply. "Wording revised" plus a path is worth nothing when the path is gone.
+
+This is not a licence to skip the file, and not an excuse to pad the reply with a formatted duplicate of a JSON schema. Report the content that would otherwise be lost.
+
 **Bare shard shape (parallel phases).** In the Phase 2 fan-out and the Phase 4 panel you write your OWN file (`review.<role>.json` / `peer-review.<role>.json`); the orchestrator merges it under your role key. Your shard's top-level object IS your block, with `verdict` as a direct top-level key. Do NOT wrap it under a `"<role>"` key. Do NOT add a sibling key beside a wrapped block. A wrapped or sibling-buried block makes the merge read a null verdict and silently pass a gate the wrong way.
 
 - Correct (bare): `{ "verdict": "APPROVE", "reviewed_at": "<iso>", "concerns": [], "notes": "...", ...role fields... }`

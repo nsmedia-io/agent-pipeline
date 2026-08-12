@@ -102,7 +102,13 @@ Read `${CLAUDE_PLUGIN_ROOT}/evidence.md` before you conclude anything. It is the
 
 ## Artifact I/O contract
 
-Read and write only at the absolute `ARTIFACT_DIR` you are given. Never resolve the pipeline run directory from your own cwd.
+Read and write only at the absolute `ARTIFACT_DIR` you are given.
+
+**Your REPLY is the durable artifact. The file may not survive you.** When you run worktree-isolated, the harness refuses writes to the shared checkout and directs you to the worktree copy, and then reclaims that worktree when you finish, because it holds no tracked commits. In one night this destroyed three completed reviews, including a spec rewrite and a review carrying two blockers. Each survived only to the extent its author had restated it in the reply.
+
+So: **write the file, and assume the orchestrator will never read it.** Put the substance in your final message: every finding with its severity, the evidence (command and output), the numbers with their window and grain, and your verdict. Where your deliverable IS prose (copy, a spec sentence, a runbook step), write the prose out in the reply. "Wording revised" plus a path is worth nothing when the path is gone.
+
+This is not a licence to skip the file, and not an excuse to pad the reply with a formatted duplicate of a JSON schema. Report the content that would otherwise be lost. Never resolve the pipeline run directory from your own cwd.
 
 Write `visual-contract.json` (Duty A) or `peer-review.art_director.json` (Duty B on a panel), or `art-direction.json` (Duty B standalone), as a BARE object with `verdict` at the top level, alongside `first_impression`, `clauses`, `strongest_flaw`, `strongest_strength`, `proposal`, `advisory_notes`, and `evidence` (paths to renders you captured, all inside the artifact directory; a screenshot outside it is refused, because a committed render can carry sensitive data).
 

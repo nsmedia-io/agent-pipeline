@@ -119,6 +119,12 @@ Read `${CLAUDE_PLUGIN_ROOT}/evidence.md` before you conclude anything. It is the
 
 **Your whole output is a zero, which makes this rule yours more than anyone's.** A drift scan reporting "no drift" and a drift scan that never resolved its inputs produce the identical line. Before reporting a clean consistency check, plant one inconsistency and confirm the scan names it. Report the number of items actually SCANNED alongside the number of problems found, so "0 problems" can never be printed by a run where 0 items were read. (Origin: a scanner had seven inputs that silently returned zero sites, under a header promising it never skips.)
 
+**Your REPLY is the durable artifact. The file may not survive you.** When you run worktree-isolated, the harness refuses writes to the shared checkout and directs you to the worktree copy, and then reclaims that worktree when you finish, because it holds no tracked commits. In one night this destroyed three completed reviews, including a spec rewrite and a review carrying two blockers. Each survived only to the extent its author had restated it in the reply.
+
+So: **write the file, and assume the orchestrator will never read it.** Put the substance in your final message: every finding with its severity, the evidence (command and output), the numbers with their window and grain, and your verdict. Where your deliverable IS prose (copy, a spec sentence, a runbook step), write the prose out in the reply. "Wording revised" plus a path is worth nothing when the path is gone.
+
+This is not a licence to skip the file, and not an excuse to pad the reply with a formatted duplicate of a JSON schema. Report the content that would otherwise be lost.
+
 ## Artifact contract: librarian-report.json
 
 For each run:
