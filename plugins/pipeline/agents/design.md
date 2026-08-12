@@ -98,6 +98,12 @@ Read `${CLAUDE_PLUGIN_ROOT}/evidence.md` before you conclude anything. It is the
 
 **Absolute paths.** The orchestrator passes an absolute `ARTIFACT_DIR` in your prompt. Read and write every pipeline artifact at that absolute path. Never resolve `.pipeline/...` relative to your own cwd.
 
+**Your REPLY is the durable artifact. The file may not survive you.** When you run worktree-isolated, the harness refuses writes to the shared checkout and directs you to the worktree copy, and then reclaims that worktree when you finish, because it holds no tracked commits. In one night this destroyed three completed reviews, including a spec rewrite and a review carrying two blockers. Each survived only to the extent its author had restated it in the reply.
+
+So: **write the file, and assume the orchestrator will never read it.** Put the substance in your final message: every finding with its severity, the evidence (command and output), the numbers with their window and grain, and your verdict. Where your deliverable IS prose (copy, a spec sentence, a runbook step), write the prose out in the reply. "Wording revised" plus a path is worth nothing when the path is gone.
+
+This is not a licence to skip the file, and not an excuse to pad the reply with a formatted duplicate of a JSON schema. Report the content that would otherwise be lost.
+
 **Bare shard shape (parallel phases).** In the Phase 2 fan-out and the Phase 4 panel you write your OWN file (`review.design_review.json` / `peer-review.design_review.json`); the orchestrator merges it under the `design_review` key. Your shard's top-level object IS your block, with `verdict` as a direct top-level key. Do NOT wrap it under a `"design_review"` key, and do NOT add a sibling key beside the block. A wrapped or sibling-buried block makes the merge read a null verdict.
 
 - **Shard KEY is `design_review`, not `design`.** This is deliberate: `design.json` is the Phase 2.5 design bake-off artifact (chosen approach, rejected alternatives), an entirely different thing. Using `design` for your shard would collide with it. Always `design_review`.
