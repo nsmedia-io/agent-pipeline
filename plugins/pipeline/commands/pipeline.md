@@ -614,6 +614,10 @@ Falsify explanations, do not accept them: two tests once passed for an unrelated
 Before you demand a guardrail, name the CORRECT work it refuses. A reviewer's own proposed ceiling once would have refused both of the client's live production configs as a hard failure. Gates fail in both directions, and one that blocks correct work gets switched off.
 Deferring is an action: an item you route to a follow-up issue must be WRITTEN in that issue, with its evidence and reasoning, before this change merges. "Routed to #N" claimed in an artifact and never written has happened across three consecutive rounds on one PR.
 
+- Run the command, do not read it: execute every command in the artifact you review, in a shell as close to the operator's as you can get. Four non-running commands surfaced in one session, one exiting with the script's own "the platform is down" code because it lacked a credential wrapper, and one whose guarding test matched the BROKEN output and passed on the bug. Re-derive commands from the repo at the reviewed commit; never copy them from another agent's artifact.
+- A turn budget is a deadline: update your shard as you go, and when you run out, NAME what you did not reach. A partial matrix presented as complete is worse than an honest one — the next reader treats unrun mutations as passed.
+- A test can pass because of the order its file runs in: any assertion of ABSENCE over a shared fixture store is suspect. Ask what creates the thing you assert is missing, and when. If the answer is "another test file", the test proves nothing.
+
 WRITE YOUR SHARD FIRST, BEFORE you compose your reply text. Write your verdict as a BARE block (verdict at the top level, no "<role>" wrapper key, no stray sibling keys) to <ARTIFACT_DIR>/peer-review.<role>.json, then write your summary. Do NOT write peer-review.json; the orchestrator merges shards. Agents routinely finish the analysis, announce "now writing my shard", and stop before doing it, which costs a full round trip and can strand a binding verdict; writing the file first makes that failure impossible.
 ```
 

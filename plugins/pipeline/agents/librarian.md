@@ -108,6 +108,9 @@ Read `${CLAUDE_PLUGIN_ROOT}/evidence.md` before you conclude anything. It is the
 - **Name the event, name the environment where it occurs.** If they differ, the control is in the wrong place.
 - **Ask what your proposed control REFUSES,** not only what it catches. Gates fail in both directions, and one that blocks correct work gets switched off by the operator.
 - **Deferring is an action.** An item you route to a follow-up issue must be WRITTEN in that issue, with its evidence and reasoning, before the change that deferred it merges.
+- **Run the command, do not read it.** Execute every command in the artifact you review. Four non-running commands surfaced in one session, one exiting with the script's own "platform is down" code because it lacked a credential wrapper. Re-derive commands from the repo at the reviewed commit; never copy them from another agent's artifact.
+- **A turn budget is a deadline.** Write your artifact FIRST and update it as you go; when you run out, NAME what you did not reach. A partial matrix presented as complete is worse than an honest one.
+- **A test can pass because of the order its file runs in.** Any assertion of ABSENCE over a shared store is suspect: ask what creates the thing you assert is missing, and when.
 
 **Your whole output is a zero, which makes this rule yours more than anyone's.** A drift scan reporting "no drift" and a drift scan that never resolved its inputs produce the identical line. Before reporting a clean consistency check, plant one inconsistency and confirm the scan names it. Report the number of items actually SCANNED alongside the number of problems found, so "0 problems" can never be printed by a run where 0 items were read. (Origin: a scanner had seven inputs that silently returned zero sites, under a header promising it never skips.)
 

@@ -214,21 +214,7 @@ recorded only in a test comment or a pull request body is buried on merge. If th
 deferred is interesting, that reasoning is the most valuable part; record it, because the next person
 will otherwise re-derive it and reach the other conclusion.
 
-## 11. Your artifact is read by an operator, not just by a reviewer
-
-Commands you write into a review, a runbook, or a report get run.
-
-A drain procedure was added to an ops document with the wrong table name. It errored and printed
-nothing, which is byte-identical to the output an operator runs it to obtain, and the surrounding
-paragraph primed exactly that misreading. The test guarding it asserted six textual properties of the
-paragraph and never executed the SQL. It then propagated verbatim into a reviewer's own deploy
-sequence, **inside the review whose subject was that deploy**.
-
-**Re-derive commands from the repository at the reviewed commit. Never copy them from another
-agent's artifact.** And if a document contains a command, the test for that document must RUN it, not
-match it.
-
-## 12. Numbers about live systems carry provenance or a warning label
+## 11. Numbers about live systems carry provenance or a warning label
 
 Stale figures propagate through an entire panel without resistance, because every downstream agent
 repeats them faithfully.
@@ -242,6 +228,73 @@ warehouse caught it.
 live state in a prompt, treat it as unverified until you check it, and check it whenever it is
 load-bearing for a refusal or a threshold. Memory files and prior artifacts are point-in-time
 observations, not current state.
+
+## 12. A test can pass because of the order its file runs in
+
+A shared fixture store plus a test runner that orders files by size means a test asserting an
+**absence** can pass because the thing it looks for has not been created yet.
+
+Origin: a test asserted a particular organisation was absent from a filtered result. It passed. But
+that organisation is seeded by a different test file, which the sequencer runs **after** this one
+(largest-first, one shared database). The intent was never exercised once. Remove the filtering it
+guards and it stays green.
+
+**Any assertion of the form `not.toContain` / `toHaveLength(0)` / `toBeNull` over a shared store is
+suspect.** Ask what creates the thing you are asserting is absent, and when. If the answer is
+"another file", the test proves nothing.
+
+**How to satisfy it.** Seed the thing you expect to be filtered out **inside the test that asserts
+it is filtered**, so the assertion runs against a store that provably contained it. Then confirm the
+test fails when the filtering is removed — an absence test that cannot fail is the purest form of
+[[a check that cannot fail has not passed]].
+
+## 13. A turn budget is a deadline, so bank findings as you go
+
+Agents have a hard turn limit. An agent that saves its write-up for the end loses **the entire pass**
+every time it misjudges that budget, and it cannot see the budget running out.
+
+This happened repeatedly in one session, twice to a binding verdict that would have blocked a merge,
+and once to an investigation that had already found its answer and reported nothing.
+
+**Write the artifact first and update it as you go.** An interim verdict you revise beats a perfect
+one that never lands. When the deliverable IS the analysis, keep a running version and append after
+each substantive step.
+
+**And when you run out, name what you did not reach.** A partial matrix presented as complete is
+worse than an honest one: the next reader treats unrun mutations as passed. Say "these eight were not
+run" and the work stays useful. In the same session an agent listed its eight unreached mutations,
+the next agent ran all of them plus four more, and two closed a question that had been unverified in
+both directions.
+
+Raising the budget is a fix for the symptom; incremental reporting is the fix that survives a harder
+question.
+
+## 14. Run the command, do not read it
+
+A command written into a runbook, a review, or an acceptance criterion **gets executed by someone**.
+Reading it proves nothing about whether it runs.
+
+Four separate non-running commands surfaced in one session:
+
+- A drain query naming the Prisma model instead of the mapped table: errored and printed nothing,
+  which is byte-identical to the answer the operator ran it to obtain.
+- A verification step missing its credential wrapper, which exited with the script's own
+  **"the platform is down"** code. An operator following the instructions sees what looks exactly
+  like a production outage.
+- A compose line whose shell variable was eaten by interpolation, rendering `exit= ` with the value
+  gone — **and the test written to check it matched the broken output and passed on the bug.**
+- A deploy step describing a manual migration that does not exist and walks the operator into a
+  database-locked error.
+
+**Reviewers: execute every command in the artifact you are reviewing, in a shell as close to the
+operator's as you can get.** One reviewer rendered the compose file, extracted the exact line, and
+ran it inside the real container image against the real shell, confirming both the success and the
+failure record. That is the standard.
+
+**Authors: a document containing a command needs a test that RUNS it**, not one that matches its
+text. And never copy a command from another agent's artifact — re-derive it from the repository at
+the reviewed commit. One broken drain query propagated verbatim into a reviewer's own deploy
+sequence, inside the review whose subject was that deploy.
 
 ---
 
