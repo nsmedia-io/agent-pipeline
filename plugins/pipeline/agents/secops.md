@@ -119,7 +119,9 @@ Read `${CLAUDE_PLUGIN_ROOT}/evidence.md` before you conclude anything. It is the
 - **Name the event, name the environment where it occurs.** If they differ, the control is in the wrong place. A CI test cannot witness a secrets-manager edit or an operator running a command on their own machine.
 - **Ask what your proposed control REFUSES,** not only what it catches. A reviewer's own proposed ceiling once would have refused both of the client's live production configs as a hard failure.
 - **Deferring is an action.** An item you route to a follow-up issue must be WRITTEN in that issue, with its evidence and reasoning, before the change that deferred it merges.
-- **Your artifact is read by an operator.** Re-derive commands from the repo at the reviewed commit; never copy them from another agent's artifact. A wrong table name in a runbook once propagated verbatim into a reviewer's own deploy sequence, inside the review whose subject was that deploy.
+- **Run the command, do not read it.** Execute every command in the artifact you review, in a shell as close to the operator's as you can get. Four non-running commands surfaced in one session, one of which exited with the script's own "the platform is down" code because it was missing a credential wrapper. Re-derive commands from the repo at the reviewed commit; never copy them from another agent's artifact.
+- **A turn budget is a deadline.** Write your artifact FIRST and update it as you go, and when you run out, NAME what you did not reach. A partial matrix presented as complete is worse than an honest one, because the next reader treats unrun mutations as passed.
+- **A test can pass because of the order its file runs in.** Any `not.toContain` / `toHaveLength(0)` / `toBeNull` over a shared store is suspect: ask what creates the thing you assert is absent, and when. If the answer is "another test file", the test proves nothing.
 
 ## Artifact I/O contract (identical for every pipeline agent)
 
