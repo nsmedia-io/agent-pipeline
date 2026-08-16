@@ -193,6 +193,107 @@
     "experiment_id": {
       "type": "string",
       "description": "Present only on an experiment run: the exp-<slug> placeholder id used in place of a tracker issue."
+    },
+    "measured_state": {
+      "type": "array",
+      "description": "Every number this spec asserts about the live system, each with its GRAIN stated. A figure whose grain is unstated is the shape that ships a double count: 'terminix.com 27' was entries across rows, while the question it was quoted to answer needed 18 distinct searches. Required at the architectural tier, and it is the ONLY authoritative source for numbers in the spec. Implementers treat any figure arriving in a message rather than this block as unverified and re-derive it. See evidence.md rule 11.",
+      "items": {
+        "type": "object",
+        "required": [
+          "label",
+          "value",
+          "grain",
+          "window",
+          "source"
+        ],
+        "properties": {
+          "label": {
+            "type": "string",
+            "description": "What the number is about"
+          },
+          "value": {
+            "description": "The figure itself"
+          },
+          "grain": {
+            "type": "string",
+            "description": "What it counts, in words: rows, entries, distinct terms, blocks, nested elements. Two figures at different grains are never subtracted; a remainder between them is the grain difference wearing the costume of a finding."
+          },
+          "window": {
+            "type": "string",
+            "description": "The time span and population it was measured over"
+          },
+          "source": {
+            "type": "string",
+            "description": "How it was derived, precisely enough to re-run: query, endpoint, or script, plus when"
+          }
+        }
+      }
+    },
+    "falsifiability_pass": {
+      "type": "object",
+      "description": "The can-this-redden audit over the acceptance criteria, run BEFORE implementation begins. Its first run on one issue found four criteria that could not fail, including two written specifically to prevent unfalsifiable tests; two more surfaced in later rounds. Required at the architectural tier. See evidence.md rules 3, 3b and 18.",
+      "properties": {
+        "one_mutation_per_criterion": {
+          "type": "array",
+          "description": "One named mutation per criterion, machine-checked to match the criterion list exactly. The mutation names the PROPERTY that must break, not the fix: a control worded as 'delete the rule and confirm it reddens' passed while proving nothing, because deleting the rule produced a third distinct value rather than a collision.",
+          "items": {
+            "type": "object",
+            "required": [
+              "criterion",
+              "mutation"
+            ],
+            "properties": {
+              "criterion": {
+                "type": "string"
+              },
+              "mutation": {
+                "type": "string",
+                "description": "The edit that must redden this criterion"
+              },
+              "fixture_matrix": {
+                "type": "string",
+                "description": "For a criterion governing a COMPOUND predicate, the cross product of cells its fixtures must cover. A battery can only mutate the code its fixtures reach; every fixture sitting in one cell of a conjunction is how a veto-grade defect survives a green battery."
+              }
+            }
+          }
+        },
+        "unmutable": {
+          "type": "array",
+          "description": "Criteria with genuinely no available mutation, labelled ON PURPOSE with the reason. Labelling one weak beats giving it a mutation line that implies coverage it does not have. Beware the common false member: a criterion discharged by something being WRITTEN DOWN (an impl-report quote, a provenance trace, a file-shape reading) reports rather than tests, and usually has an assertion available.",
+          "items": {
+            "type": "object",
+            "required": [
+              "criterion",
+              "why",
+              "discharged_by"
+            ],
+            "properties": {
+              "criterion": {
+                "type": "string"
+              },
+              "why": {
+                "type": "string"
+              },
+              "discharged_by": {
+                "type": "string",
+                "description": "What stands in for a mutation: a human read, a provenance record, a structural impossibility"
+              }
+            }
+          }
+        },
+        "expected_survivor": {
+          "type": "object",
+          "description": "The documented survivor required by evidence.md rule 3b. Confirm the assertion can DISTINGUISH the case before recording one: a survivor that survives because nothing looked is an unfalsifiable clause wearing the label.",
+          "properties": {
+            "criterion": {
+              "type": "string"
+            },
+            "why_it_survives": {
+              "type": "string"
+            }
+          }
+        }
+      }
     }
   }
 }

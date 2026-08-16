@@ -354,6 +354,10 @@ Phase 3 is coupled write-work and always runs as **a single coherent thread on o
 
 All of these shapes preserve the property that killed the old `PENDING_CI` race: no agent ever builds against or reviews a half-built tree owned by a concurrent agent.
 
+**Falsifiability gate (architectural tier, before any Phase 3 dispatch).** Read `spec.falsifiability_pass`. Every acceptance criterion must carry either a named mutation that reddens it or an entry in `unmutable` with its reason; the table is machine-checked against the criterion list so the two cannot drift. If it is absent or short, loop back to BA rather than proceeding — a criterion that cannot fail is a criterion Dev will implement to and QA will write a test for, and neither will find out.
+
+This gate is cheap and it pays. Its first run on one issue found **four** criteria that could not fail, two of them written specifically to prevent unfalsifiable tests; two more surfaced in later rounds; and the one defect that still reached a panel veto was a criterion whose fixtures all sat in one cell of a conjunction (evidence.md rule 18). Also check `spec.measured_state` is present and that every number the spec asserts appears there with its grain — figures relayed through prompts have been wrong often enough that the spec should carry its own.
+
 **Hard sequencing gate (architectural tier, do not violate):** QA's failing-test commit MUST be fully committed and its SHA recorded in `status.json` BEFORE the Dev Agent call is dispatched. Do NOT dispatch QA and Dev in the same message (this is NOT a Phase-2-style fan-out). Dispatch QA, wait for it to return, record the SHA, THEN dispatch Dev. If QA's commit is not present, halt and re-run QA; never start Dev against an unwritten or partial test tree.
 
 Before dispatching, the orchestrator resolves the active worktree path:

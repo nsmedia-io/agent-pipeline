@@ -484,6 +484,59 @@ sole guard against the other's regression, and neither can be pinned by a test, 
 redundancy*. Before deleting a clause because nothing fails, delete its counterpart and see whether
 the same argument acquits that one too. If it does, they are a pair, not a spare.
 
+## 18. A mutation battery can only mutate the code its fixtures reach
+
+Rule 3 says mutate the assertion, and its second costume says a fixture must actually construct the
+collision. Both are about **one** discriminator. This is the same failure at the next size up: when a
+criterion governs a **compound predicate**, a fixture set can satisfy every clause of the criterion,
+pass every named mutation, hold a verified non-zero control, and still never enter the branch that is
+broken.
+
+Origin: a fail-closed rule read
+
+```js
+if (webPaidIdentityMissing || (profileIdentityMissing && rivalCount === 0 && !ownAd))
+  state = "identity-withheld";
+```
+
+Every fixture written for that criterion had `rivalCount === 0`, so all of them exercised the left
+disjunct, which closes unconditionally. The right disjunct — a profile gap **with** a finding already
+earned — never ran once. Three mutations were planted, all caught. The battery was honest. Rendered
+against the real corpus the page **declared the advertiser names withheld and then printed them**,
+naming the client as his own competitor on three searches, because a second renderer keyed on a
+different field than the first. It reached a client-facing document past 23 acceptance criteria and 90
+tests, and the trigger was one endpoint returning empty — what a 404 yields, which a stale build
+produces on its own.
+
+**Reading the assertions could never have found it. The assertions were correct. The fixture
+population was the limit.**
+
+**How to satisfy it.**
+
+- Where a criterion governs a compound predicate, the criterion names a **fixture matrix** over the
+  cross product of its terms, not a representative fixture. State the cells. A cell nobody wrote is a
+  branch nobody ran.
+- Where two consumers share a population, assert the **partition property over the whole artifact** —
+  every item lands in exactly one group — rather than checking each consumer. No per-consumer check
+  can see two consumers disagreeing about a predicate, and the whole-artifact form also catches a
+  third consumer added later. This is rule 5 applied to a state machine.
+- Make the trigger fixture the **real** failure mode, not a blanked field, so the test documents how
+  the thing actually happens.
+- The membership check can only find the shape it scans for. When one consumer is a list item and
+  another is a prose sentence, one property cannot reach both; say so rather than letting the coverage
+  read as complete.
+
+**Sibling, and it is counter-intuitive: a control added to make another control falsifiable can blind
+it.** A reviewer required an exact-match twin in a fixture so a near-miss identity check could assert
+all outcomes in one render. Correct in itself. But the twin `"Acme Pest Control LLC"` *contains* the
+near miss `"Acme Pest Control"`, so a `toContain` on the near miss was satisfied by the twin and could
+never separate them. Check for this whenever a reviewer requires an **addition to a fixture** rather
+than a change to an assertion. Fix by pinning the set exactly, and keep the twin.
+
+**Corollary for rule 3b.** A documented expected survivor that survives because the assertion cannot
+see the difference is not a survivor, it is an unfalsifiable clause wearing the label. Before
+recording one, confirm the assertion can distinguish the case at all.
+
 ---
 
 ## Applying this
