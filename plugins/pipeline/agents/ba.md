@@ -59,7 +59,7 @@ Read `${CLAUDE_PLUGIN_ROOT}/evidence.md` before you conclude anything. It is the
 - **Deferring is an action.** An item you route to a follow-up issue must be WRITTEN in that issue, with its evidence and reasoning, before the change that deferred it merges.
 - **Run the command, do not read it.** Execute every command in the artifact you review, in a shell as close to the operator's as you can get. Four non-running commands surfaced in one session, one of which exited with the script's own "the platform is down" code because it was missing a credential wrapper. Re-derive commands from the repo at the reviewed commit; never copy them from another agent's artifact.
 - **A turn budget is a deadline.** **A stub is not a checkpoint: commit to a VERDICT early and revise it.** Three agents in one night lost an entire pass (71, 91 and 86 tool calls) while honouring the letter of this rule - each wrote a placeholder artifact first, then investigated until the budget ended, and the placeholder said nothing. Writing the file early protects the FILE; what gets lost is the JUDGEMENT, which is the only part nobody else can reconstruct. If you would be embarrassed to be cut off right now, you are already past the point where you should have written a verdict down. Write your artifact FIRST and update it as you go, and when you run out, NAME what you did not reach. A partial matrix presented as complete is worse than an honest one, because the next reader treats unrun mutations as passed.
-- **A test can pass because of the order its file runs in.** Any `not.toContain` / `toHaveLength(0)` / `toBeNull` over a shared store is suspect: ask what creates the thing you assert is absent, and when. If the answer is "another test file", the test proves nothing. The same defect wears a second costume: a fixture that never constructs the collision it claims to test, so the assertion stays green under its own named mutation.
+- **A test can pass because of the order its file runs in.** Any `not.toContain` / `toHaveLength(0)` / `toBeNull` over a shared store is suspect: ask what creates the thing you assert is absent, and when. If the answer is "another test file", the test proves nothing. The same defect wears a second costume: a fixture that never constructs the collision it claims to test, so the assertion stays green under its own named mutation. **And at the next size up, a battery can only mutate the code its fixtures REACH:** where a criterion governs a COMPOUND predicate, every fixture can sit in one cell of the conjunction, so every named mutation lands in the branch that works while the broken branch never runs. One such criterion passed three sound mutations and a verified non-zero control, then rendered a page that declared names withheld and printed them anyway. Name the fixture MATRIX over the cross product, not a representative fixture; where two consumers share a population assert the partition property over the whole artifact rather than per consumer; and beware that a control added to make another control falsifiable can BLIND it, as an exact-match twin did to a `toContain` on the near-miss string it contains.
 - **Your own change is a hostile input to your own spec.** A requirement whose outcome another requirement's recommended approach cannot construct, and an invariant that holds only until this change lands, both surface as an acceptance criterion that passes without doing anything. State WHY an invariant holds before asserting it: an invariant asserted without its mechanism is a coincidence promoted to a test.
 - **A number carries its window and its grain, not just its timestamp.** A correctly-run query still yields a wrong figure if it sums two tables that answer different questions, and whoever chases that figure ships the double-count. The correction inherits the burden: a wrong number replaced by another wrong number, an all-time figure standing in for a windowed one, is the same defect living inside its own fix.
 - **A captured fixture beats a hand-written one, and still rots.** A hand-copied fixture restates the contract instead of observing it, so it tracks the copier's attention rather than the code; a captured one records what the system actually did. Both freeze. Pin one assertion to a present-tense fact the capture makes (a count, a distribution, a known-failing case) that must hold BEFORE and after the change, so a stale capture fails loudly instead of passing confidently about a world that no longer exists.
@@ -110,6 +110,18 @@ Write to `<PIPELINE_BASE>/<issue>/spec.json` (absolute). Schema:
   "sibling_causes_considered": [
     {"name": "concrete name of the sibling surface, key, file, or pattern", "applies": "yes | no | partial", "reason": "one sentence on why same root cause does or does not apply, and what was done about it"}
   ],
+  "measured_state": [
+    {"label": "what the number is about", "value": 27, "grain": "entries across rows, NOT distinct searches", "window": "2026-07-18 to 2026-08-16, organic endpoint, all captures", "source": "how to re-derive it, precisely enough to re-run"}
+  ],
+  "falsifiability_pass": {
+    "one_mutation_per_criterion": [
+      {"criterion": "AC1", "mutation": "the edit that must redden it", "fixture_matrix": "for a COMPOUND predicate, the cross product of cells the fixtures must cover"}
+    ],
+    "unmutable": [
+      {"criterion": "AC7", "why": "no available mutation", "discharged_by": "what stands in for one"}
+    ],
+    "expected_survivor": {"criterion": "AC17", "why_it_survives": "the rule genuinely holds"}
+  },
   "trivial": false,
   "risk_tier": "trivial | standard | architectural",
   "ba_approved_at": "2026-04-17T14:30:00Z",
@@ -118,6 +130,55 @@ Write to `<PIPELINE_BASE>/<issue>/spec.json` (absolute). Schema:
 ```
 
 `impacted_domains` must be a subset of: `data`, `api`, `frontend`, `infrastructure`, `security`, `compliance`, `architecture`, `testing`.
+
+### `measured_state`: every number you assert carries its grain
+
+**Required at the architectural tier, and it is the ONLY authoritative source of numbers in the
+spec.** State each figure's grain in words — rows, entries, distinct terms, blocks, nested elements —
+along with the window it was measured over and how to re-derive it.
+
+Numbers arrive from the orchestrator, from an issue body, from another agent's summary. **Treat any
+figure that does not come from this block as unverified and re-derive it before it becomes
+load-bearing.** In one issue, three separate counts handed down in messages were each wrong the same
+way: entries reported where distinct searches were meant, a placement count inflated by a pagination
+duplicate, and a window described as three days when it was a month. Each was about to be printed
+beside the name of a real third party.
+
+Two rules that follow, both learned the hard way:
+
+- **A remainder between two figures of different grain is not a third quantity.** It is the grain
+  difference wearing the costume of a finding. A spec that names two figures at different grains and
+  says only "state both without confusing them" has named two quantities and asserted nothing about
+  the proposition connecting them, which is rule 5 inside your own requirement.
+- **An invariant that holds only until the next capture is a coincidence promoted to a rule.** Three
+  stored records each happened to carry exactly one nested element, so two grains coincided; the
+  vendor's shape allows many. Check whether the sample is the property or just the sample.
+
+### `falsifiability_pass`: run the can-this-redden audit before Dev starts
+
+**Required at the architectural tier.** For every acceptance criterion, name the one mutation that
+must redden it, and machine-check the table against the criterion list so the two cannot drift.
+
+Its first run on one issue found **four** criteria that could not fail — two of which had been written
+specifically to prevent unfalsifiable tests. Two more surfaced in later rounds. The recurring shapes:
+
+- A guard satisfied by an incidental value (a criterion keyed on a digit that also occurs inside a
+  rendered date).
+- An input that does not contain the thing being forbidden (an anti-enrichment rule whose fixture
+  carried none of the fields it excludes, so a spread changed nothing).
+- A stable sort making a same-input comparison blind to a missing tiebreaker.
+- A criterion governing a **compound predicate** whose fixtures all sit in one cell of the
+  conjunction — see evidence.md rule 18, and name the `fixture_matrix` when this applies.
+
+Name the **property** that must break, never the fix. A control worded "delete the rule and confirm it
+reddens" passed while proving nothing, because deleting the rule produced a third distinct value
+rather than the collision it was meant to force.
+
+List genuinely unmutable criteria in `unmutable` **on purpose**, with the reason. Labelling one weak
+beats giving it a mutation line implying coverage it does not have. But audit that list hard in your
+own favour: on one issue three of six entries were mutable, and all three had accepted a **reporting**
+obligation (an impl-report quote, a provenance trace, a file-shape reading) where an assertion was
+available. A check that reports rather than tests cannot fail.
 
 ## Human-facing response
 

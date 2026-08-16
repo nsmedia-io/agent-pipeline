@@ -1,6 +1,6 @@
 {
   "name": "pipeline",
-  "version": "0.15.0",
+  "version": "0.16.0",
   "description": "Risk-tiered multi-agent development pipeline. BA specs and tiers an ask, a single-writer implements code and tests together, an adversarial panel reviews the finished diff. File-based knowledge store, no external services.",
   "author": {
     "name": "NS Media"
