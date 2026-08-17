@@ -1,0 +1,28 @@
+# The only CI this repo has, and it exists because of a specific failure.
+#
+# `plugins/pipeline/.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json` each carry a
+# version, and the marketplace's copy is the one a consumer is offered an update from. They drifted
+# for TWELVE releases: plugin.json reached 0.17.0 while marketplace.json still advertised 0.6.1, so
+# every release after 2026-08-06 was invisible to anyone installing from the marketplace.
+#
+# Nothing failed. There was nothing to fail. A repo of markdown and JSON has no test suite, so a
+# hand-copied number in a second file was asserted twice and only one copy was ever looked at.
+# This is the check that makes the second copy answerable.
+name: manifests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # No package.json, no dependencies, no install step. The check is one file of plain Node using
+      # only node:fs, so the runner's bundled Node is enough. Keeping it dependency-free is
+      # deliberate: a release gate that can break on someone else's package is a gate that gets
+      # disabled the first time it does.
+      - name: marketplace.json agrees with plugin.json
+        run: node scripts/sync-manifests.mjs --check
