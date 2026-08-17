@@ -22,8 +22,27 @@ PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$(pwd)}"
 cd "$PROJECT_DIR" 2>/dev/null || exit 0
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 || exit 0
 
+# The Stop payload arrives on stdin and carries transcript_path, which the voice lint needs.
+# Read it ONCE here: stdin is not re-readable, and the check command below must not inherit it.
+PAYLOAD=""
+if [[ ! -t 0 ]]; then PAYLOAD=$(cat 2>/dev/null || true); fi
+
 # Opt-out for one-off iterations.
 [[ "${CLAUDE_HOOK_STOP_SKIP:-0}" == "1" ]] && exit 0
+
+# Voice lint. Runs BEFORE the project check because it is the cheaper of the two and its
+# failure is about the message the owner is about to read, not the code. It self-limits to
+# pipeline phases that voice.md calls full-voice moments; every other stop is a silent no-op,
+# which is what keeps it from being switched off. Fail-open on any tooling error.
+VOICE_LINT="$(dirname "${BASH_SOURCE[0]}")/../scripts/voice-lint.mjs"
+if [[ -n "$PAYLOAD" && -f "$VOICE_LINT" ]] && command -v node >/dev/null 2>&1; then
+  VOICE_ERR=$(printf '%s' "$PAYLOAD" | node "$VOICE_LINT" 2>&1 >/dev/null)
+  VOICE_RC=$?
+  if [[ "$VOICE_RC" -eq 2 && -n "$VOICE_ERR" ]]; then
+    printf '%s\n' "$VOICE_ERR" >&2
+    exit 2
+  fi
+fi
 
 # Shared config reader (see hooks/lib.sh). A missing lib means a broken install, so no-op
 # rather than block a stop: this hook is fail-open by contract.

@@ -8,8 +8,7 @@
     "designed_at",
     "chosen_approach",
     "rationale",
-    "rejected_alternatives",
-    "owner_decision"
+    "rejected_alternatives"
   ],
   "properties": {
     "issue_number": {
@@ -94,7 +93,7 @@
     },
     "owner_decision": {
       "type": "object",
-      "description": "The judge's ruling on whether the two assigned stances produced a MATERIAL divergence: a difference the owner would plausibly answer differently from the way the judge did, on cost, timeline, reversibility, or product direction. Drives the Phase 2.5 design-lock gate. NOTE: only `required` is schema-enforced here, because the artifact validator does not implement if/then; the orchestrator enforces that question/option_a/option_b/recommendation are all present and non-empty when `required` is true, and HALTs to re-dispatch the judge when they are not.",
+      "description": "The judge's ruling on whether the two assigned stances produced a MATERIAL divergence: a difference the owner would plausibly answer differently from the way the judge did, on cost, timeline, reversibility, or product direction. Drives the Phase 2.5 design-lock gate. DELIBERATELY OPTIONAL at the top level, and the reason is a bug this schema already shipped once: making it required ALSO made every design.json written before this field existed fail validation, and the block landed at the Phase 3 DEV stop (seeding refreshes the mtime), on the one role that does not own this artifact and cannot legitimately fix it. The orchestrator enforces presence instead, immediately after the judge returns, where the party that CAN act is the one that hears about it. That check also covers the conditional completeness the validator cannot express: question/option_a/option_b/recommendation must all be present and non-empty when `required` is true.",
       "required": [
         "required"
       ],

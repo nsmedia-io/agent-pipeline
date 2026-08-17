@@ -175,7 +175,7 @@
           },
           "blocking": {
             "type": "boolean",
-            "description": "true HALTS the run at the Phase 1 gate. Set true ONLY if you can name TWO DIFFERENT acceptance criteria that follow from two different answers; write them into why_it_matters. If you cannot write the two criteria it is not blocking, it is a preference: recommend a default, set false, and proceed. This bar exists because the failure mode of a question gate is not too few questions, it is enough worthless ones that the owner switches the gate off."
+            "description": "true HALTS the run at the Phase 1 gate. TWO tests, and it must pass BOTH. (1) Falsifiability: you can name two DIFFERENT acceptance criteria that follow from two different answers; write them into why_it_matters. (2) Owner-only: the difference between those two criteria turns on something only the owner can settle, meaning cost, timeline, reversibility, or product direction. Test 1 alone is not enough, and the gap is not theoretical: 'which agent's stop should this schema check fire at' passes test 1 cleanly and is a pure engineering call no owner can answer. Fail either test and it is not blocking: recommend a default, set false, and proceed. This bar exists because the failure mode of a question gate is not too few questions, it is enough worthless ones that the owner switches the gate off."
           },
           "resolution": {
             "type": "object",

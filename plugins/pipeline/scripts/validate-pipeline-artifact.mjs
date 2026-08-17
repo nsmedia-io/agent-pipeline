@@ -101,10 +101,14 @@ const AGENT_RULES = {
   secops: reviewerRules("secops"),
   dev: [
     // The Phase 2.5 bake-off judge is dispatched as subagent_type "dev", so design.json is
-    // validated at ITS stop. It is re-checked at every architectural Phase 3 Dev stop too:
-    // seeding the worktree copies design.json, which refreshes mtime and puts it inside
-    // RECENT_MS. That is deliberate. A design.json that no longer satisfies its schema should
-    // block the thread implementing from it, and the seeded copy is the one Dev actually reads.
+    // validated at ITS stop. There is no way to check it at the judge's stop but NOT at Dev's:
+    // they are the same agent_type, and seeding the worktree refreshes design.json's mtime into
+    // RECENT_MS anyway. That constraint is why `owner_decision` is NOT in the schema's required
+    // list. Making it required here blocks at the DEV stop, telling the one role that does not
+    // own this artifact to "fix the artifact before finishing" — with no recovery path, since
+    // the judge wrote it. The orchestrator enforces that field's presence instead, right after
+    // the judge returns. What stays enforced here is the shape every reader depends on
+    // (chosen_approach, rationale, rejected_alternatives), which Dev CAN act on by halting.
     { artifact: "design.json", schema: "design.schema.json", schemaPtr: "#", dataPtr: "" },
     { artifact: "tasks.json", schema: "tasks.schema.json", schemaPtr: "#", dataPtr: "" },
     { artifact: "impl-report.json", schema: "impl-report.schema.json", schemaPtr: "#", dataPtr: "" },
@@ -512,6 +516,42 @@ function groundTestSignal(data, ev, failures) {
   }
 }
 
+// spec.open_questions carries the one field whose whole purpose is to stop BA handing the
+// judgement back: ba_recommendation. The schema walker implements `required` and `type`, so a
+// key present with the empty string satisfies both — and "" is then the CHEAPEST valid value on
+// the field the feature rests on, in a change whose entire point was removing a gradient where
+// a blank failed and a plausible guess passed. That is the same defect one level up, and it is
+// worse than a blank, because the artifact still CLAIMS a recommendation exists.
+//
+// minLength is not implemented by the walker (see the header) and adding it there would change
+// every schema at once, so this is a bespoke check, in the same spirit as groundImplReport's
+// blank-test-name rule. Only non-blank-ness is enforced; whether the recommendation is any
+// GOOD is not machine-checkable and is not attempted.
+export function groundOpenQuestions(data, failures = []) {
+  const questions = data && data.open_questions;
+  if (!Array.isArray(questions)) return failures; // absent is the normal case: fail open
+  questions.forEach((q, i) => {
+    if (!q || typeof q !== "object") return;
+    for (const field of ["question", "why_it_matters", "ba_recommendation"]) {
+      if (typeof q[field] === "string" && q[field].trim() === "") {
+        failures.push(
+          `spec.json open_questions[${i}].${field} is present but empty; a blank ${field} claims an answer exists where none does`,
+        );
+      }
+    }
+    // A resolution's answer carries the same weight once written: Phase 4 checks the build
+    // against it and Phase 5 grades confidence on answered_by.
+    if (q.resolution && typeof q.resolution === "object") {
+      if (typeof q.resolution.answer === "string" && q.resolution.answer.trim() === "") {
+        failures.push(
+          `spec.json open_questions[${i}].resolution.answer is present but empty; an empty answer records a decision nobody made`,
+        );
+      }
+    }
+  });
+  return failures;
+}
+
 export function groundImplReport(data, ev, failures = []) {
   if (!data || typeof data !== "object") return failures;
   groundFilesChanged(data, ev, failures);
@@ -640,6 +680,14 @@ export function checkArtifacts(agentType, input, now = Date.now(), rootsOverride
             groundImplReport(data, evidenceFor(issueDir, now, data), failures);
           } catch {
             // grounding must never wedge a stop; swallow and continue
+          }
+        }
+
+        if (rule.artifact === "spec.json" && rule.dataPtr === "") {
+          try {
+            groundOpenQuestions(data, failures);
+          } catch {
+            // same contract as groundImplReport: never wedge a stop
           }
         }
       }
