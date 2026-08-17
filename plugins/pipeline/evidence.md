@@ -539,6 +539,115 @@ recording one, confirm the assertion can distinguish the case at all.
 
 ---
 
+## 19. A check that reads what ran cannot see what never ran
+
+Rule 1 says a skip is not a pass. This is the version that hides for a month, because there is no
+skip to notice: **a stage that never started leaves no record, and the absence of a record is
+indistinguishable from the absence of an obligation.**
+
+Origin: a client sat half-onboarded for a month with zero rank checks, zero competitors and zero
+backlinks. Three independent checks passed the entire time, and each was correct about its own
+question:
+
+| check | why it passed |
+| --- | --- |
+| health prober | judges runs as stale / stuck / failed. A collector that never ran has no run to judge. |
+| preflight row counts | printed `[EMPTY]`, and empty is not a failure |
+| trust gate | means "data exists but rendered empty". No data existed, so nothing mismatched. |
+
+Every one asks *did what ran, run correctly*. None asks *did everything that should run, run at
+all*. The documentation even said a young client **should** have empty sections, so never-ran and
+legitimately-empty were the same observation.
+
+**The expectation already existed in prose.** An archetype table stated the client's configuration
+as "Full". Nothing ever compared that claim to the world. **A written expectation that no code reads
+is a comment.**
+
+**How to satisfy it.**
+
+- For any mechanism that judges records, ask what it does when the record set is EMPTY. If the answer
+  is "passes", it needs a companion that knows the expected set independently.
+- Derive "expected" from **configuration, not from history**. Inferring what a thing should do from
+  what it has done makes an incomplete thing look like a smaller complete thing, and the check agrees
+  with the gap it exists to find.
+- Build the expected set from names **actually observed in the system**, never from names you believe
+  exist. A matrix that expects something the code never emits fails forever and gets switched off.
+- Distinguish **never ran** from **ran and never produced**. Both are incomplete; only the first is
+  invisible. A first version of this check matched one verdict spelling out of twelve and reported a
+  client "complete" while four of its stages had failed every time they ran. That is rule 16 (your
+  enumeration is itself a check) inside the very tool written to enforce this rule.
+
+## 20. A control anchored to a live defect has a shelf life
+
+Rule 2 prefers a **live** defect to a planted one as your non-zero control, and that is still right:
+a planted control proves the check finds what you designed it to find, and says nothing about the
+kind nobody designed around. But a live defect is a moving part of the system, and the correct
+outcome for a defect is that somebody fixes it.
+
+Origin: a control asserted that a class was emitted into a stylesheet that styled nothing, using a
+real shipped defect as its subject. A different change fixed that defect, which was the right thing
+to do, and the control silently lost the thing it was measuring. It failed loudly only because its
+author had written the expiry into the assertion message itself:
+
+```js
+expect(css.includes(".paid-row"),
+  "the premise: paid-row is emitted and styled nowhere. If this is false the precedent was " +
+  "fixed and this control needs a new subject").toBe(false);
+```
+
+**How to satisfy it.**
+
+- Anchor to a live defect, and **write its expiry condition into the assertion message**. Without
+  that sentence the control either goes green for the wrong reason or fails with a message nobody can
+  act on.
+- When you re-anchor, make the replacement **discriminate** rather than merely fire. A check that
+  reported every case would also "find" the defect while proving nothing. Pin a positive and a
+  negative and require exactly the negative back.
+- Assert the premises rather than assuming them, so a rename cannot leave the control comparing two
+  cases that are both negative and calling that a discrimination.
+- The tell that this is happening: a check fails immediately after an **unrelated** fix lands.
+
+## 21. A threshold on a rendered measurement measures the runner
+
+Rule 11 says numbers about live systems carry provenance. This is its environment half: **a
+measurement taken from a rendering engine is a fact about the machine that rendered it**, and a
+threshold tuned on one machine is a claim about that host until proven otherwise.
+
+Origin: a visual contract gated "at least **3.00x** fewer pixels per record". On the author's machine
+the gated table measured 3.30x and passed. The first CI run measured **2.94x** and failed, on the
+same commit, with nothing changed. A per-family fingerprint printed each run located it exactly:
+
+| family | author machine | CI |
+| --- | --- | --- |
+| mono | 328.7px | 328.7px (identical) |
+| sans | 265.8px | 256.0px (3.7%) |
+| **serif** | **257.4px** | **232.9px (9.5%)** |
+
+Serif was the family the wrapped prose used, and that prose **was** the unstable term's height. The
+one family that moved was the one the measurement depended on.
+
+**The asymmetry is the fix.** The new layout measured within 0.4% on both machines; the old one swung
+11%. All the instability lived in the term the change **deletes**.
+
+**How to satisfy it.**
+
+- **A ratio against an artifact you are removing is not a durable invariant.** Once it ships, the
+  denominator exists only in a fixture, and the gate measures something no reader will ever see.
+- Gate the term that will still exist, **absolutely**, and set it by a stated rule rather than by
+  whatever passes. Report the ratio; it is the number that says what changed. It is not a gate.
+- **Print an environment fingerprint every run**, so a swing is attributable instead of mysterious.
+- **Assert the probe, do not print it.** A probe that only ever prints is a zero result about the
+  harness. Force a known-wrong environment and require the run to FAIL with a calibration message,
+  otherwise a runner-image bump silently recalibrates every threshold downstream.
+- Any constant in the formula is itself a measurement. This one was taken from an adjacent element
+  three times before anyone measured it in place, and it was wrong by 3px in the forgiving direction.
+  Measure it off the render every run and assert the constant against it.
+- **Agreement is not corroboration when it shares an environment.** Three reviewers agreed on the
+  threshold to two decimals. They were not confirming each other; they were running the same
+  unexamined setup. Treat "it passed locally and two people agreed" as one observation.
+
+---
+
 ## Applying this
 
 **Authors** state, for every mechanism they ship, its **vacuous form**: the specific circumstance
