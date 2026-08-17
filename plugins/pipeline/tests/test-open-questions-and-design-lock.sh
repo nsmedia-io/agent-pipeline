@@ -218,4 +218,49 @@ else
   assert_eq "CONTROL: the phase pattern rejects an underscored string" "rejected" "rejected"
 fi
 
+# ---------------------------------------------------------------------------
+suite "experiment runs are validated too (they were the pipeline's one blind cell)"
+
+# The gap this closes: ISSUE_DIR_RE was /^\d+$/, so an exp-<slug> dir matched nothing and the
+# mtime scan skipped it. An experiment run therefore had NO artifact validation at all — while
+# pipeline.md ALSO switches the open-questions halt off for experiment runs by design. Both
+# halves of the gate went inert simultaneously, on exactly the runs nobody is watching. The
+# retroactive spec for this very change was written to an exp- dir and was never validated.
+EXP_DIR="$TEMP_PROJECT/.pipeline/exp-two-owner-gates"
+mkdir -p "$EXP_DIR"
+printf '%s' '{"current_phase":"1-ba"}' > "$EXP_DIR/status.json"
+
+exp_hook() {
+  local outf="$TEMP_PROJECT/expout.txt"
+  printf '{"agent_type":"ba","cwd":"%s","active_issue":"exp-two-owner-gates"}' "$TEMP_PROJECT" \
+    | ( cd "$TEMP_PROJECT" && CLAUDE_PROJECT_DIR="$TEMP_PROJECT" node "$VALIDATOR" ) \
+      >"$outf" 2>/dev/null
+  RC=$?
+  OUT=$(cat "$outf")
+}
+
+printf '%s' "$SPEC_HEAD,\"open_questions\":[{\"id\":\"q1\",\"question\":\"q\",\"why_it_matters\":\"w\",\"blocking\":false}]}" \
+  > "$EXP_DIR/spec.json"
+exp_hook
+assert_eq "an invalid spec in an exp- dir STILL exits 0 (fail open)" "$RC" "0"
+assert_contains "an invalid spec in an exp- dir now blocks" "$OUT" '"decision"'
+assert_contains "and names the field" "$OUT" "ba_recommendation"
+
+# CONTROL: a VALID spec in the same exp- dir must stay quiet, or the case above would only be
+# proving that exp- dirs block indiscriminately.
+printf '%s' "$SPEC_HEAD,\"open_questions\":[{\"id\":\"q1\",\"question\":\"q\",\"why_it_matters\":\"w\",\"ba_recommendation\":\"rec\",\"blocking\":false}]}" \
+  > "$EXP_DIR/spec.json"
+exp_hook
+assert_eq "CONTROL: a valid spec in an exp- dir stays quiet" "$OUT" ""
+
+# CONTROL: widening the pattern must not have started admitting non-issue siblings.
+mkdir -p "$TEMP_PROJECT/.pipeline/schemas"
+printf '%s' '{"current_phase":"1-ba"}' > "$TEMP_PROJECT/.pipeline/schemas/status.json"
+printf '%s' 'not even json' > "$TEMP_PROJECT/.pipeline/schemas/spec.json"
+printf '{"agent_type":"ba","cwd":"%s","active_issue":"schemas"}' "$TEMP_PROJECT" \
+  | ( cd "$TEMP_PROJECT" && CLAUDE_PROJECT_DIR="$TEMP_PROJECT" node "$VALIDATOR" ) \
+    >"$TEMP_PROJECT/schemaout.txt" 2>/dev/null
+assert_not_contains "CONTROL: a 'schemas' sibling is still never selected" \
+  "$(cat "$TEMP_PROJECT/schemaout.txt")" "not valid JSON"
+
 finish

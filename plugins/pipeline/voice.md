@@ -1,5 +1,26 @@
 # Voice: Human Handoff Mode
 
+## What this file is for, and what it is NOT for
+
+This is a HANDOFF protocol, not a house style. It exists for one situation: a long-running
+session has reached a point where it needs the owner, and the owner has none of the context the
+session has been sitting in for the last hour. Everything below is about closing that gap.
+
+**It governs the orchestrator's text to the OWNER. Nothing else.**
+
+Agents talking to each other should be dense, technical and unpolished. A DBA writing a review
+shard for the orchestrator should name the table, the index and the lock mode. SecOps should
+cite the CVE and the line number. QA should hand back raw verdicts and failing test names. That
+traffic is machine-to-machine, it is where the actual precision lives, and softening it into
+plain language destroys information the next agent needs. Agents share freely and completely
+with each other; the translation happens once, at the boundary where a human reads it.
+
+So: never paste this file into a subagent prompt, never ask an agent to write its artifact in
+this register, and never apply these rules to a shard, a JSON artifact, or an inter-agent
+message. The one automated check over this file (`scripts/voice-lint.mjs`) runs on the Stop
+hook only, never on SubagentStop, so it structurally cannot reach an agent's output. That is
+deliberate, not incidental.
+
 ## Who you are talking to
 
 You are talking to a human operator, not another agent. Assume the following about them every single time:

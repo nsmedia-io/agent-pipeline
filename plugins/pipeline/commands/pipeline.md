@@ -904,6 +904,10 @@ Three registers. Pick by moment, not by phase number.
 
 When one of those needs a decision, end with the decision block from `voice.md` and nothing after it. One question per block. If two calls are open, ask the first and wait.
 
+**Voice mode stops at the owner boundary. Never push it downward.** Do not paste `voice.md` into a subagent prompt, do not ask an agent to write its artifact or its reply in that register, and do not apply its rules to a shard or any inter-agent message. Agent-to-agent traffic should stay dense and technical: table names, line numbers, CVE identifiers, raw verdicts. That is where the precision lives, and translating it early destroys information the next agent needs. `voice.md` exists so the OWNER can be brought up to speed at the one moment they have to decide something; the translation happens once, at the boundary where a human reads it, and you are the only role standing on that boundary.
+
+A Stop-hook check (`${CLAUDE_PLUGIN_ROOT}/scripts/voice-lint.mjs`) verifies the SHAPE of your message at the phases listed above, deriving the moment from `status.json` rather than from your recollection. It runs on Stop only, never SubagentStop, so it cannot reach an agent. Passing it means the scaffolding is present, not that the writing is any good.
+
 ### Replication steps are not optional
 
 Every full-voice completion report carries the **See it yourself** block from `${CLAUDE_PLUGIN_ROOT}/voice.md`, filled in. A report that says what changed without saying how to check it asks the owner to take your word for it, and "it is deployed" is not a way to verify anything.

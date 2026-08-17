@@ -21,12 +21,20 @@
  * a grade, and the analogy rules, the "explain it twice" rule, and the jargon-gloss rule are
  * not machine-checkable at all. Treat a pass as "the owner-facing scaffolding is present".
  *
- * KNOWN LIMIT, stated rather than hidden (evidence.md rule 19's own trap): a phase NOT in
- * VOICE_MOMENTS is not linted, and an unrecognised phase therefore passes silently. The table
- * is keyed on the phase strings pipeline.md actually writes; if a phase is renamed and the
- * table is not updated, this check goes quiet rather than loud. The companion that would close
- * it is a test asserting every full-voice moment listed in pipeline.md has a table entry, and
- * that test is in tests/test-voice-lint.sh.
+ * WHAT IT DOES NOT GOVERN, and this is the important half: agent-to-agent traffic. voice.md
+ * exists so the OWNER can be brought up to speed when a long-running session needs a decision
+ * they have no context for. It is not a house style, and specialists talking to each other
+ * should stay dense and technical: table names, line numbers, CVE severities, raw verdicts.
+ * This lint runs on the Stop hook ONLY, never SubagentStop, so it structurally cannot reach a
+ * subagent's shard or reply. Nothing here should ever be pushed down into an agent prompt.
+ *
+ * THE LIMIT THAT WAS CLOSED, kept here because the failure is instructive: a phase not in
+ * VOICE_MOMENTS is not linted, so an unrecognised phase passes silently rather than loudly.
+ * The first version of this table was written from memory and invented four phases that no
+ * checkpoint writes, which meant those checks could never fire while the REAL completion report
+ * and live-verification halt went uncovered. tests/test-voice-lint.sh now derives the phase set
+ * from pipeline.md itself and fails when a phase is neither a listed moment nor explicitly
+ * declared non-voice, so the table is pinned to configuration rather than to recollection.
  *
  * FAIL-OPEN by contract, exactly like validate-pipeline-artifact.mjs: any missing input,
  * unreadable transcript, unparseable payload or thrown error exits 0 silently. A voice lint
@@ -35,23 +43,52 @@
 
 import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { isMain as isMainScript } from "./lib.mjs";
+
+const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 
 const ISSUE_DIR_RE = /^\d+$/;
 
 // current_phase -> what voice.md requires of the message that accompanies it.
-// Keys are matched EXACTLY against status.current_phase. Sourced from the checkpoint strings
-// pipeline.md writes and the "Full voice mode" list it keeps.
+//
+// Keys are matched EXACTLY against status.current_phase and every one is a string pipeline.md
+// actually writes. That is not a stylistic note: the first version of this table invented four
+// keys ("5-complete", "5-pr-ready", "4-request-changes", "3-live-verification-required") that
+// no phase ever writes, so those checks could never fire, while the real completion report
+// ("5-archived") and the real live-verification halt ("3-impl-live-verify-unverified") went
+// uncovered. A table asserted from memory rather than derived from the source is the exact
+// defect this plugin keeps re-learning. tests/test-voice-lint.sh now parses every
+// `current_phase: "..."` out of pipeline.md and fails when one is neither listed here nor
+// explicitly declared non-voice, so the table cannot drift from the orchestrator again.
 const VOICE_MOMENTS = {
   "1-ba-open-questions": { decision: true, label: "a blocking open question" },
+  "1-ba-rework-required": { scales: true, label: "a veto rework halt" },
   "2.5-design-owner-decision": { decision: true, label: "the design-lock" },
+  "3-impl-live-verify-unverified": { scales: true, label: "the live-verification halt" },
   "4-veto-rework-required": { scales: true, label: "a SecOps veto" },
-  "4-request-changes": { scales: true, label: "a REQUEST_CHANGES panel result" },
-  "3-live-verification-required": { label: "the live-verification halt" },
-  "5-pr-ready": { scales: true, replication: true, label: "a PR presented as ready to merge" },
-  "5-complete": { scales: true, replication: true, label: "the completion report" },
-  "halted-error": { label: "a halted run" },
+  "4-review-complete": { scales: true, label: "the panel result handed to the owner" },
+  "5-archived": { scales: true, replication: true, label: "the completion report" },
 };
+
+// Phases that are deliberately NOT voice moments: internal checkpoints the owner never sees.
+// Listed explicitly so the drift test can tell "decided this is silent" from "forgot about it".
+const NON_VOICE_PHASES = new Set([
+  "0.5-map", "0.5-map-complete",
+  "1-ba", "1-ba-complete",
+  "2-constraints", "2-constraints-complete",
+  "2-review", "2-review-complete",
+  "2.5-design", "2.5-design-complete",
+  "3-impl", "3-impl-complete", "3-impl-tripwire",
+  "3-impl-gate-failed", "3-impl-frontend-gate-failed",
+  "4-review",
+  "5-archive",
+]);
+
+/** An `<phase>-error` / `halted-error` checkpoint: always owner-facing, shape-checked lightly. */
+function errorMoment(phase) {
+  return /-error$/.test(phase) ? { label: "a halted run" } : null;
+}
 
 // voice.md, "Language rules": these phrases all assume the reader was in the thread.
 const BANNED_PHRASES = ["as discussed", "as noted above", "per the spec", "as you know"];
@@ -166,14 +203,47 @@ export function lintVoice(text, moment) {
   return failures;
 }
 
-export function run(payload, projectDir) {
+/**
+ * status.json's current_phase, checked for SHAPE against the pattern in status.schema.json.
+ *
+ * Nothing else validates this file. status.json is written by the ORCHESTRATOR, not a subagent,
+ * so SubagentStop never sees it, and it appears in no AGENT_RULES entry; the schema walker does
+ * not implement `pattern` either, so its one constraint has never been enforced anywhere. That
+ * matters here specifically: a malformed phase matches no entry in VOICE_MOMENTS, and this
+ * whole check would go SILENT rather than loud. So the guard lives beside the thing it
+ * protects. The pattern is read from the schema rather than copied, so the two cannot drift.
+ */
+function phaseShapeFailure(phase, scriptDir) {
+  let pattern;
+  try {
+    const schema = JSON.parse(
+      readFileSync(path.resolve(scriptDir, "..", "schemas", "status.schema.json"), "utf8"),
+    );
+    pattern = schema?.properties?.current_phase?.pattern;
+  } catch {
+    return null; // no schema readable: fail open
+  }
+  if (!pattern) return null;
+  let re;
+  try {
+    re = new RegExp(pattern);
+  } catch {
+    return null;
+  }
+  if (re.test(phase)) return null;
+  return `status.json current_phase "${phase}" does not match status.schema.json's pattern ${pattern}. Nothing else validates this file, and a malformed phase silently disables the voice check rather than failing it.`;
+}
+
+export function run(payload, projectDir, scriptDir = SCRIPT_DIR) {
   // Already inside a stop-hook continuation: never block twice, or a stubborn message loops.
   if (payload?.stop_hook_active) return { failures: [], phase: null };
   const status = resolveStatus(projectDir, process.env.CLAUDE_PIPELINE_ACTIVE_ISSUE);
   const phase = status?.current_phase;
   if (!phase) return { failures: [], phase: null };
-  const moment = VOICE_MOMENTS[phase];
-  if (!moment) return { failures: [], phase }; // not a voice moment (see KNOWN LIMIT above)
+  const shapeFailure = phaseShapeFailure(phase, scriptDir);
+  if (shapeFailure) return { failures: [shapeFailure], phase };
+  const moment = VOICE_MOMENTS[phase] || errorMoment(phase);
+  if (!moment) return { failures: [], phase }; // a declared non-voice checkpoint
   const transcript = payload?.transcript_path;
   if (!transcript) return { failures: [], phase };
   const text = lastAssistantText(transcript);
@@ -224,7 +294,7 @@ function selfTest() {
   const has = (t, m) => lintVoice(t, m).length > 0;
 
   const DECISION = VOICE_MOMENTS["2.5-design-owner-decision"];
-  const REPORT = VOICE_MOMENTS["5-complete"];
+  const REPORT = VOICE_MOMENTS["5-archived"];
 
   const goodDecision = "Some prose.\n\n### I need a decision\n\nWhat I'm asking: pick one.";
   check("decision moment with the block passes", has(goodDecision, DECISION), false);
@@ -262,13 +332,14 @@ function selfTest() {
   check("a null moment lints nothing", lintVoice(goodDecision, null).length, 0);
   check("empty text lints nothing", lintVoice("", DECISION).length, 0);
 
-  // The table must cover every phase pipeline.md checkpoints as a full-voice moment. This is
-  // the companion for the KNOWN LIMIT: an unrecognised phase passes silently, so the set of
-  // recognised phases is asserted from CONFIGURATION, not inferred from what has been seen.
-  const required = ["1-ba-open-questions", "2.5-design-owner-decision", "halted-error"];
-  for (const r of required) {
-    check(`VOICE_MOMENTS covers "${r}"`, Object.prototype.hasOwnProperty.call(VOICE_MOMENTS, r), true);
+  // Every key must be a phase pipeline.md actually writes. The bash suite proves that against
+  // the file; this asserts the two halves of the partition never overlap, which would make a
+  // phase both a voice moment and declared silent.
+  for (const k of Object.keys(VOICE_MOMENTS)) {
+    check(`"${k}" is not also declared non-voice`, NON_VOICE_PHASES.has(k), false);
   }
+  check("an -error phase resolves to a moment", errorMoment("3-error") !== null, true);
+  check("a normal phase does not", errorMoment("3-impl") !== null, false);
 
   console.log(`\nself-test: ${pass} passed, ${fail} failed`);
   return fail === 0;

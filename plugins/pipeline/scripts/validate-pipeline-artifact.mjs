@@ -258,12 +258,20 @@ function pipelineDirs(input, rootsOverride) {
   return dirs;
 }
 
-// A .pipeline issue dir is named by its numeric issue number. Constraining both derivation
-// paths to this convention (rather than just excluding "schemas") means a non-issue sibling
-// like "schemas" or a hypothetical "_archived" can never be selected as the active issue: the
-// marker path rejects such a name (fail-open, falls back to mtime) and the mtime scan never
-// enumerates it.
-const ISSUE_DIR_RE = /^\d+$/;
+// A .pipeline issue dir is named by its numeric issue number, OR by the `exp-<slug>` placeholder
+// an experiment run uses in place of a tracker issue (/pipeline --dry-run, EXPERIMENT_MODE, an
+// ab_build harness). Constraining both derivation paths to this convention (rather than just
+// excluding "schemas") means a non-issue sibling like "schemas" or a hypothetical "_archived"
+// can never be selected as the active issue: the marker path rejects such a name (fail-open,
+// falls back to mtime) and the mtime scan never enumerates it.
+//
+// The exp- half was missing until now, and its absence was worse than it looks. An experiment
+// run had NO artifact validation at all: the pattern did not match, so the mtime scan skipped
+// the dir entirely and every schema check silently passed. Paired with pipeline.md's deliberate
+// "experiment runs never block" carve-out for the open-questions gate, that meant BOTH halves
+// of a gate went inert on exactly the runs nobody is watching. The alternation stays anchored
+// and separator-free, so `..`, `a/b`, `schemas` and `_archived` are all still rejected.
+const ISSUE_DIR_RE = /^(\d+|exp-[a-z0-9]+(-[a-z0-9]+)*)$/;
 
 function issueDirs(pipelineDir) {
   try {
@@ -1039,12 +1047,36 @@ function selfTest() {
 
       check("active-issue: mtime scan ignores non-issue dirs and picks the numeric issue",
         activeIssueDir(pipe, {}) === issue ? [] : ["expected numeric issue dir by mtime"], false);
-      check("active-issue: marker 'schemas' rejected (non-numeric), falls back to mtime",
-        activeIssueDir(pipe, { active_issue: "schemas" }) === issue ? [] : ["expected mtime fallback for non-numeric marker"], false);
-      check("active-issue: marker '_archived' rejected (non-numeric), falls back to mtime",
+      check("active-issue: marker 'schemas' rejected (not an issue-dir name), falls back to mtime",
+        activeIssueDir(pipe, { active_issue: "schemas" }) === issue ? [] : ["expected mtime fallback for non-issue marker"], false);
+      check("active-issue: marker '_archived' rejected (not an issue-dir name), falls back to mtime",
         activeIssueDir(pipe, { active_issue: "_archived" }) === issue ? [] : ["expected mtime fallback for _archived marker"], false);
       check("active-issue: numeric marker still resolves its issue dir",
         activeIssueDir(pipe, { active_issue: "1965" }) === issue ? [] : ["expected numeric marker to resolve"], false);
+
+      // exp-<slug>: an experiment run's placeholder dir. Until this was added to ISSUE_DIR_RE
+      // an experiment run had NO artifact validation whatsoever, on exactly the runs nobody is
+      // watching. The rejection cases above are the control: widening the pattern must not
+      // start admitting "schemas" or "_archived".
+      const expDir = path.join(pipe, "exp-two-owner-gates");
+      mkdirSync(expDir, { recursive: true });
+      writeFileSync(path.join(expDir, "status.json"), JSON.stringify({ current_phase: "1-ba" }));
+      check("active-issue: an exp-<slug> marker resolves its dir",
+        activeIssueDir(pipe, { active_issue: "exp-two-owner-gates" }) === expDir ? [] : ["expected exp- marker to resolve"], false);
+      // These assert against expDir, not `issue`: expDir's status.json is now the newest in the
+      // root, so it is what the mtime fallback legitimately resolves to. What each case proves
+      // is that the MALFORMED MARKER was rejected and the fallback ran at all, which is why the
+      // basename check below carries the actual claim.
+      const rejects = (marker) => {
+        const got = activeIssueDir(pipe, { active_issue: marker });
+        return got === expDir && path.basename(got) !== marker
+          ? []
+          : [`expected "${marker}" to be rejected and fall back to mtime, got ${got}`];
+      };
+      check("active-issue: a bare 'exp-' with no slug is rejected", rejects("exp-"), false);
+      check("active-issue: an exp- marker with a separator is rejected (traversal guard)", rejects("exp-a/../b"), false);
+      check("active-issue: an uppercase exp- marker is rejected (convention is kebab)", rejects("exp-Two-Owner"), false);
+      check("active-issue: a double-hyphen exp- marker is rejected", rejects("exp--bad"), false);
     } finally {
       rmSync(root, { recursive: true, force: true });
       if (prevEnv.a === undefined) delete process.env.CLAUDE_PIPELINE_ACTIVE_ISSUE;
