@@ -8,7 +8,8 @@
     "designed_at",
     "chosen_approach",
     "rationale",
-    "rejected_alternatives"
+    "rejected_alternatives",
+    "owner_decision"
   ],
   "properties": {
     "issue_number": {
@@ -89,6 +90,66 @@
       "type": "array",
       "items": {
         "type": "string"
+      }
+    },
+    "owner_decision": {
+      "type": "object",
+      "description": "The judge's ruling on whether the two assigned stances produced a MATERIAL divergence: a difference the owner would plausibly answer differently from the way the judge did, on cost, timeline, reversibility, or product direction. Drives the Phase 2.5 design-lock gate. NOTE: only `required` is schema-enforced here, because the artifact validator does not implement if/then; the orchestrator enforces that question/option_a/option_b/recommendation are all present and non-empty when `required` is true, and HALTs to re-dispatch the judge when they are not.",
+      "required": [
+        "required"
+      ],
+      "properties": {
+        "required": {
+          "type": "boolean",
+          "description": "true when the stances materially diverged and the call is the owner's. false when both sketches converged on substantially the same approach; the pipeline proceeds without stopping. Do not set true to be safe: a decision block raised on a non-decision trains the owner to rubber-stamp the ones that matter."
+        },
+        "question": {
+          "type": "string",
+          "description": "The call, phrased as one question a non-engineer can answer. Becomes the decision block's 'What I'm asking'."
+        },
+        "option_a": {
+          "type": "string",
+          "description": "Sketch A (smallest blast radius) as rendered, in plain language: what it buys, what it costs, what it forecloses. Never the stance label alone."
+        },
+        "option_b": {
+          "type": "string",
+          "description": "Sketch B (cleanest seam) as rendered, same shape as option_a."
+        },
+        "recommendation": {
+          "type": "string",
+          "description": "The judge's winner and why, in one or two sentences. Becomes the decision block's 'My recommendation'."
+        },
+        "resolution": {
+          "type": "object",
+          "description": "Written by the orchestrator AFTER the owner answers. Absent while the question is open.",
+          "required": [
+            "chosen",
+            "reasoning",
+            "resolved_at"
+          ],
+          "properties": {
+            "chosen": {
+              "type": "string",
+              "enum": [
+                "option_a",
+                "option_b",
+                "variant"
+              ]
+            },
+            "reasoning": {
+              "type": "string",
+              "description": "The owner's stated reasoning, in their words where possible. The reason a design was chosen is the part that stops the next person quietly reverting it."
+            },
+            "variant_description": {
+              "type": "string",
+              "description": "Present only when chosen is 'variant': what the owner actually asked for, which the judge then re-materialized design.json around."
+            },
+            "resolved_at": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        }
       }
     },
     "experiment_id": {

@@ -124,6 +124,88 @@
         }
       }
     },
+    "open_questions": {
+      "type": "array",
+      "description": "Ambiguities in the ask that BA did NOT resolve by guessing. This array is the reason BA can ask instead of inventing: requirements and acceptance_criteria are schema-required, so before this field existed a spec with a blank in it failed validation while a spec with a plausible invented answer passed, and the artifact contract rewarded guessing. A blocking entry HALTS the run at the Phase 1 gate. Empty or absent means BA found no ambiguity worth the owner's time, which is the normal case at trivial and standard tier.",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "question",
+          "why_it_matters",
+          "ba_recommendation",
+          "blocking"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Stable handle (q1, q2, ...) so a resolution and a later reference name the same question."
+          },
+          "question": {
+            "type": "string",
+            "description": "One question, in plain language, answerable by a non-engineer. Not a menu of three questions joined by 'and'."
+          },
+          "why_it_matters": {
+            "type": "string",
+            "description": "What changes in the BUILD depending on the answer. If nothing does, this is not a question, it is a preference: default it and note it in ba_notes."
+          },
+          "options": {
+            "type": "array",
+            "description": "The candidate answers, when the question has a small closed set. Omit for open-ended questions.",
+            "items": {
+              "type": "object",
+              "required": [
+                "label",
+                "implication"
+              ],
+              "properties": {
+                "label": {
+                  "type": "string"
+                },
+                "implication": {
+                  "type": "string",
+                  "description": "What picking this one means for scope, cost, or what it forecloses"
+                }
+              }
+            }
+          },
+          "ba_recommendation": {
+            "type": "string",
+            "description": "REQUIRED, and never empty. BA's pick and its reasoning. A question raised without a recommendation is BA handing its judgement back to the owner, which is the job it was invoked to do. It also makes 'your call' a free answer, so an owner who does not care pays one word instead of a paragraph."
+          },
+          "blocking": {
+            "type": "boolean",
+            "description": "true HALTS the run at the Phase 1 gate. Set true ONLY if you can name TWO DIFFERENT acceptance criteria that follow from two different answers; write them into why_it_matters. If you cannot write the two criteria it is not blocking, it is a preference: recommend a default, set false, and proceed. This bar exists because the failure mode of a question gate is not too few questions, it is enough worthless ones that the owner switches the gate off."
+          },
+          "resolution": {
+            "type": "object",
+            "description": "Written by the ORCHESTRATOR after the owner answers (or after a non-blocking default stands). Absent while the question is open.",
+            "required": [
+              "answer",
+              "answered_by",
+              "at"
+            ],
+            "properties": {
+              "answer": {
+                "type": "string"
+              },
+              "answered_by": {
+                "type": "string",
+                "enum": [
+                  "owner",
+                  "ba_default"
+                ],
+                "description": "'owner' means a human chose. 'ba_default' means BA's recommendation stood unchallenged (a non-blocking question, or an experiment run). An acceptance criterion resting on a ba_default is a different confidence level from one the owner picked, and the Phase 5 report says so."
+              },
+              "at": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          }
+        }
+      }
+    },
     "trivial": {
       "type": "boolean",
       "description": "Legacy boolean, kept for backward compatibility. trivial: true implies risk_tier trivial."

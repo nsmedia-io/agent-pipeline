@@ -100,6 +100,12 @@ const AGENT_RULES = {
   devops: reviewerRules("devops"),
   secops: reviewerRules("secops"),
   dev: [
+    // The Phase 2.5 bake-off judge is dispatched as subagent_type "dev", so design.json is
+    // validated at ITS stop. It is re-checked at every architectural Phase 3 Dev stop too:
+    // seeding the worktree copies design.json, which refreshes mtime and puts it inside
+    // RECENT_MS. That is deliberate. A design.json that no longer satisfies its schema should
+    // block the thread implementing from it, and the seeded copy is the one Dev actually reads.
+    { artifact: "design.json", schema: "design.schema.json", schemaPtr: "#", dataPtr: "" },
     { artifact: "tasks.json", schema: "tasks.schema.json", schemaPtr: "#", dataPtr: "" },
     { artifact: "impl-report.json", schema: "impl-report.schema.json", schemaPtr: "#", dataPtr: "" },
     { artifact: "peer-review.dev.json", schema: "peer-review.schema.json", schemaPtr: "#/definitions/panelVerdict", dataPtr: "" },

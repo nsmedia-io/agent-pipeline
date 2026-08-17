@@ -138,7 +138,7 @@ You are invoked by the /pipeline orchestrator.
 
 Ask from the owner: <full ask text>
 
-Experiment mode: <EXPERIMENT_MODE>. If true, do NOT create a tracker issue; use a local exp-<slug> placeholder id and write spec.json under it, so this run does not pollute the production tracker.
+Experiment mode: <EXPERIMENT_MODE>. If true, do NOT create a tracker issue; use a local exp-<slug> placeholder id and write spec.json under it, so this run does not pollute the production tracker. If true, ALSO set blocking: false on every open_questions entry and record your recommendation as the answer: an experiment or A/B harness runs unattended, and a blocking question would hang it waiting for a human who is not watching.
 
 Pipeline base (absolute): <PIPELINE_BASE>
 Once you create the issue, your artifact directory is <PIPELINE_BASE>/<new-issue-number>. Write spec.json to that absolute path. Do NOT resolve .pipeline relative to your own cwd; it may differ from mine.
@@ -146,7 +146,7 @@ Once you create the issue, your artifact directory is <PIPELINE_BASE>/<new-issue
 Your job:
 1. Research the ask (read code, grep, check logs, read the knowledge store).
 2. Search existing tracker issues for duplicates.
-3. Challenge the ask if underspecified; escalate to the owner via me if unresolvable.
+3. Challenge the ask. Where it is genuinely ambiguous, record the ambiguity in spec.open_questions with your recommendation rather than inventing an answer to keep the artifact valid. Set blocking: true ONLY where you can name two different acceptance criteria following from two different answers; otherwise recommend a default, set blocking: false, and proceed. Do not stall the run on a preference.
 4. Triage severity. Set trivial: true only for typos, one-line logic fixes, no data/infra/security impact.
 5. Create the tracker issue (skip this if Experiment mode is true; use a local exp-<slug> placeholder instead).
 6. Write the full spec to <PIPELINE_BASE>/<issue-or-placeholder>/spec.json per the contract in your agent definition.
@@ -161,7 +161,26 @@ After BA returns:
 - Read `$PIPELINE_BASE/<issue>/spec.json` (the absolute path BA wrote to; your own checkout, so a cwd-relative `.pipeline/<issue>/spec.json` resolves to the same file, but read it absolutely to avoid the exact divergence this hardening fixes).
 - Validate required fields present: `issue_number`, `title`, `problem`, `requirements`, `acceptance_criteria`, `impacted_domains`, `trivial`.
 - If validation fails: report to the owner and halt.
+- **Run the open-questions gate (below) before anything else.** It comes before tier routing, because a blocking question can change the tier.
 - Update `status.json` with `current_phase: "1-ba-complete"`, `issue_number: <n>`, append event.
+
+### Open-questions gate
+
+Read `spec.open_questions`. Absent or empty: progress tick, proceed to tier routing.
+
+The gate exists because the artifact contract used to reward guessing. `requirements` and `acceptance_criteria` are schema-required, so a spec with a blank in it FAILED validation while a spec with a plausible invented answer PASSED, and no instruction to "ask rather than guess" survives that gradient. `open_questions` is where an unresolved ambiguity can live in a valid artifact; this gate is what makes it cost something.
+
+For each entry with `blocking: false`: no stop. Write `resolution` with `answered_by: "ba_default"`, `answer` set to `ba_recommendation`, and the current timestamp. The default is now recorded rather than assumed, which is what lets Phase 4 check the build against it and the Phase 5 report grade its confidence honestly.
+
+If ANY entry has `blocking: true`:
+
+1. Update `status.json` with `current_phase: "1-ba-open-questions"` and commit.
+2. **Ask ONE question, the first blocking one, in full voice mode** with the decision block from `${CLAUDE_PLUGIN_ROOT}/voice.md`. `question` is **What I'm asking**, `why_it_matters` is **Why I'm asking**, `options` (plus the always-present "do nothing for now") are **Options**, and `ba_recommendation` is **My recommendation**. Serial, not batched: voice.md's "if two calls are open, ask the first and wait" applies with force here, because answers to early questions routinely dissolve the later ones outright, and a batch of five questions gets one skimmed answer.
+3. HALT. Do not proceed to tier routing, and do not answer on the owner's behalf. `ba_recommendation` exists so an owner who does not care can reply "your call" in two words, and *that* is the cheap path, not you deciding for them.
+4. On the answer: write `resolution` (`answered_by: "owner"`, or `"ba_default"` if they explicitly deferred to the recommendation). If blocking questions remain, return to step 2 with the next one.
+5. When none remain, **re-dispatch BA** to fold every resolution into `requirements`, `acceptance_criteria`, `out_of_scope`, and the tier. Do NOT edit the spec yourself: BA owns scope, and an orchestrator that rewrites acceptance criteria has quietly taken the one job the gate was built to protect. BA re-writes `spec.json` in place, keeping the `open_questions` array with its resolutions intact as the record of what was asked and what came back.
+
+**Experiment runs never block.** When `EXPERIMENT_MODE` is true, treat every entry as `blocking: false` regardless of what BA wrote, resolving each to `answered_by: "ba_default"`. An unattended A/B harness cannot answer a question, and a run that hangs waiting for one produces no result at all. The artifact then shows plainly that the run stood on defaults.
 
 Route by tier:
 - `risk_tier: "trivial"` (or legacy `trivial: true`): skip Phase 2-lite and Phase 2, go directly to Phase 3.
@@ -333,12 +352,32 @@ This phase runs ONLY when `spec.risk_tier === "architectural"`. For trivial and 
 
 For an architectural-tier spec, dispatch a competitive design bake-off rather than letting Phase 3 improvise an approach:
 
-1. **Two INDEPENDENT design sketches, in parallel.** Send a single message with two Agent calls, each asked to sketch an end-to-end approach (data model, contract changes, control flow, failure modes, migration shape) against `spec.json`, `review.json`, and `map.json`. They do not see each other's sketch; independence is the point. Pin BOTH sketch dispatches to an explicit `subagent_type: "dev"` (the architectural-approach reasoning role) with `model: "sonnet"`, e.g. `Agent({subagent_type: "dev", model: "sonnet", description: "Design sketch A for #<issue>", prompt: "..."})`. The explicit `subagent_type` is what stops these dispatches from inheriting the session model (which can be a non-opus/non-sonnet session default); they must never inherit the session default.
+1. **Two design sketches with OPPOSING ASSIGNED STANCES, in parallel.** Send a single message with two Agent calls, each asked to sketch an end-to-end approach (data model, contract changes, control flow, failure modes, migration shape) against `spec.json`, `review.json`, and `map.json`. They do not see each other's sketch. **Separate contexts alone do not make them independent:** two samples of one model against one identical prompt correlate, and a bake-off between two versions of the same idea is a bake-off in name only. Assign each sketch a named stance and put it in the prompt verbatim, for exactly the reason the Phase 4 panel assigns non-overlapping lenses:
+   - **Sketch A, smallest blast radius.** The least change that satisfies every acceptance criterion. Maximum reuse of existing contracts; additive, backward-compatible shapes preferred; a migration only when nothing else works. Accept coupling you would rather not have. Optimize for: this is cheap to revert.
+   - **Sketch B, cleanest seam.** The right abstraction for the next three changes in this area, even when it costs a wider migration or a contract change. Accept a larger diff and a longer review. Optimize for: the next person to change this does not have to fight it.
+
+   Two poles, not three. The pragmatic middle is what the JUDGE produces by grafting, so pre-generating it as a third sketch spends a context to pre-empt the step whose whole job is to make that call. Pin BOTH sketch dispatches to an explicit `subagent_type: "dev"` (the architectural-approach reasoning role) with `model: "sonnet"`, e.g. `Agent({subagent_type: "dev", model: "sonnet", description: "Design sketch A (smallest blast radius) for #<issue>", prompt: "..."})`. The explicit `subagent_type` is what stops these dispatches from inheriting the session model (which can be a non-opus/non-sonnet session default); they must never inherit the session default.
 2. **One judge, after both return.** Dispatch a judge that reads both sketches, synthesizes the WINNER, and grafts the best of the runner-up where it strengthens the winner. Pin the judge to an explicit `subagent_type: "dev"` with `model: "opus"` (the synthesis is the high-reasoning step), e.g. `Agent({subagent_type: "dev", model: "opus", description: "Design bake-off judge for #<issue>", prompt: "..."})`. Like the sketches, its `subagent_type` is explicit so it never inherits the session model.
 
-The judge writes a `design.json` artifact at `ARTIFACT_DIR` with the chosen approach, the rationale, the rejected alternatives (and why), and the residual risks. Phase 3 Dev then implements `design.json`, not just the spec, so the implementation follows a vetted design rather than the first approach that compiles.
+   The judge ALSO rules on whether the two stances produced a **material divergence**: a difference the OWNER would plausibly answer differently from the way the judge did, on cost, timeline, reversibility, or product direction. It records that ruling as the `owner_decision` block in `design.json`. Two sketches that converged on substantially the same approach carry `required: false`: there is no call to surface, and manufacturing one trains the owner to rubber-stamp the block that matters.
 
-After `design.json` is written, update `status.json` with `current_phase: "2.5-design-complete"` and proceed to Phase 3.
+The judge writes a `design.json` artifact at `ARTIFACT_DIR` with the chosen approach, the rationale, the rejected alternatives (and why), the residual risks, and the `owner_decision` block. Phase 3 Dev then implements `design.json`, not just the spec, so the implementation follows a vetted design rather than the first approach that compiles.
+
+### Design-lock: the owner's call when the stances materially diverged
+
+This is the one decision on the HAPPY path that the pipeline does not make for itself, and the reason is not deference. It is the moment with the lowest reversibility (the approach constrains every phase after it, and by Phase 4 the cost of switching is the entire diff) and the highest owner-only content: roadmap, urgency, and what else is landing in this area are inputs the judge cannot read out of the repo. Every other full-voice moment in this file is an exception (a veto, a halt) or a terminus (PR ready, Phase 5). This one is a standing gate, and it is the cheapest point in the run at which the answer can still change.
+
+Read `design.owner_decision`:
+
+- **`required === false`**: no stop. Progress tick only, then Phase 3.
+- **`required === true`, but any of `question`, `option_a`, `option_b`, `recommendation` is missing or empty**: HALT and re-dispatch the judge. The artifact validator does NOT implement `if/then` (see the header of `${CLAUDE_PLUGIN_ROOT}/scripts/validate-pipeline-artifact.mjs`), so schema validation cannot enforce this conditional completeness and this orchestrator check is the only thing that does. Do not "fill in" the missing half yourself: you did not read the sketches, and a decision block composed by the role that is supposed to be neutral about the outcome is not a decision block.
+- **`required === true` and complete**:
+  1. Update `status.json` with `current_phase: "2.5-design-owner-decision"` and commit.
+  2. Return to the owner in **full voice mode**, ending with the decision block from `${CLAUDE_PLUGIN_ROOT}/voice.md`. Options A and B are the two sketches AS RENDERED, in plain language, never the stance labels: what each buys, what each costs, what each forecloses. The judge's winner is your **My recommendation** line, carrying its reasoning. Fill Reversibility from the migration and contract shape each option implies, and say plainly that this is the last cheap moment to change the answer.
+  3. HALT and await the owner. Do NOT dispatch Phase 3 on the recommendation while the question is open. A decision block the pipeline answers for itself is a progress tick wearing a costume, and it costs more trust than it saves time.
+  4. On the answer: if the owner picked the judge's winner, proceed to Phase 3 unchanged. If they picked the other option, or a variant of it, re-dispatch the JUDGE (not the sketches; they are still valid, only the ruling changed) to re-materialize `design.json` around the chosen approach, keeping whichever grafts still apply. Either way, write the owner's answer AND their stated reasoning into `owner_decision.resolution` before proceeding: the reason a design was chosen is the part that stops the next person quietly reverting it.
+
+After `design.json` is written (and resolved, when a decision was required), update `status.json` with `current_phase: "2.5-design-complete"` and proceed to Phase 3.
 
 ---
 
@@ -810,6 +849,8 @@ The flow is adaptive: a later phase can invalidate an earlier decision. When one
 | SecOps `VETO` | Phase 2 or Phase 4 | BA (spec redesign) | Re-run Phase 2 (architectural) or Phase 2-lite (standard), then forward |
 | Any `REQUEST_CHANGES` | Phase 2 | BA (spec rework) | Re-run Phase 2 |
 | Mis-tier tripwire (migration/access-control/auth/contract surface in a trivial/standard run) | Phase 3 (Dev self-halt) or the Phase 3 to 4 gate | BA (re-tier to architectural) | Run the skipped phases (Phase 2 fan-out, Phase 2.5 if design-shaped) against the existing worktree, then re-enter the gate |
+| Owner answers a blocking open question | Phase 1 (gate) | Phase 1 (BA only) | Re-dispatch BA to fold every `resolution` into requirements, acceptance criteria, out-of-scope, and the tier. The orchestrator never edits the spec itself; `open_questions` and its resolutions stay in the artifact as the record |
+| Owner picks the runner-up (or a variant) at design-lock | Phase 2.5 (owner answer) | Phase 2.5 (judge only) | Re-dispatch the JUDGE to re-materialize `design.json` around the chosen approach, keeping the grafts that still apply; the sketches stand and are NOT re-run. Record `owner_decision.resolution`, then forward to Phase 3 |
 | Scope drift / wrong spec assumption | Phase 3 | BA (ruling) | If requirements/acceptance criteria change materially: architectural re-runs affected Phase 2 reviewer(s) then Phase 3 from 3a (QA re-authors tests); standard re-extracts constraints then re-dispatches the single Dev thread |
 | Live-verification suite skipped, not recorded (data-migration / security-sensitive change) | Phase 3 to 4 gate | Phase 3 (Dev/QA) | Produce a recorded local pass against a real backing service, then re-run the gate |
 | `REQUEST_REFACTOR` (testability) | Phase 4 (QA) | Dev implementation step (3b at architectural; the single thread at standard) | The existing test contract stands; Dev refactors to keep it green. Re-run Phase 4 as a delta re-review (QA and SecOps unconditionally, plus surface-touched roles) |
@@ -852,6 +893,8 @@ Three registers. Pick by moment, not by phase number.
 **3. Full voice (decisions and acceptance).** The complete `voice.md` shape, analogy and all, at exactly these moments and no others:
 
 - A SecOps `VETO`, at Phase 2 or Phase 4.
+- A Phase 1 **blocking open question** (`spec.open_questions[].blocking === true`). One question per block, first one first, `ba_recommendation` as the recommendation.
+- The Phase 2.5 **design-lock**, when `design.owner_decision.required` is true. With the blocking open question above, one of only two standing gates on the happy path: everything else in this list is an exception or a terminus. Present the two sketches as rendered, recommend the judge's winner, and wait.
 - Any `REQUEST_CHANGES` summary returned to the owner.
 - The live-verification halt (the owner has to go run something against a real backing service).
 - Presenting a PR as ready for human merge.
@@ -878,6 +921,6 @@ You are the only role holding all three inputs, which is why voice mode lives he
 
 - **Blast radius** reads off BA's blast-radius map (`map.json`): which contracts the change touches and who reads them. One consumer is *Contained*. Several unrelated features sharing a contract is *Spreading*. Auth, billing, data integrity, or anything customer-visible product-wide is *Foundation*.
 - **Reversibility** reads off the diff. A migration (per `migrationsGlob`), a deletion, an external account, a pricing change, or anything a customer already saw is a *One way door*, and `voice.md` requires you to say that phrase in the first three lines. A revertable commit is an *Undo button*. A revert plus a data fix or redeploy is *Some cleanup*.
-- **Confidence** reads off QA's binding verdict plus the verification evidence. A recorded local pass is *Solid*. Reasoning from the code with no run, or a green CI whose integration suite only skipped (see the live-verification gate), is *Reasoned*, and say which one it was. A *Guess* is labeled loudly, with what would turn it into a *Solid*.
+- **Confidence** reads off QA's binding verdict plus the verification evidence. A recorded local pass is *Solid*. Reasoning from the code with no run, or a green CI whose integration suite only skipped (see the live-verification gate), is *Reasoned*, and say which one it was. A *Guess* is labeled loudly, with what would turn it into a *Solid*. **Then check `spec.open_questions` for any resolution with `answered_by: "ba_default"` that a load-bearing acceptance criterion rests on, and name it in the report.** The tests can be green and the criterion still be answering a question the owner never saw: that is a *Reasoned* about the requirement wearing a *Solid* about the code, and the owner is the only one who can tell you the default was wrong.
 
 A scale you genuinely cannot fill is stated as unknown, never omitted and never softened into false confidence. Per `voice.md`: say you do not know in the same breath as the recommendation.
