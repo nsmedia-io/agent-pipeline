@@ -17,7 +17,9 @@
     "**/styles/**"
   ],
 
-  "migrationsGlob": "migrations/**",
+  "migrationGlobs": ["**/migrations/**"],
+
+  "migrationDownMarker": "-- DOWN",
 
   "architecturalTriggers": {
     "_comment": "Domains/keywords that force the architectural tier (deep review). Tailor to your stack.",

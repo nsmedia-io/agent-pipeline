@@ -31,7 +31,7 @@ plugins/pipeline/
 
 ## Customize
 
-Copy `plugins/pipeline/pipeline.config.example.json` to `pipeline.config.json` at your project root and edit. Grep the plugin for `CUSTOMIZE` to find every knob (build command, integration branch, frontend globs, migration glob, tier triggers). Edit the `STANDARD-TIER CONSTRAINTS` blocks in the DBA/DevOps/SecOps agents to match your stack.
+Copy `plugins/pipeline/pipeline.config.example.json` to `pipeline.config.json` at your project root and edit. The session-start warmup checks that file every session and tells you if a key is misspelled, wrongly typed, or missing in a way that silently disables a gate; it stays quiet when the config is sound. Grep the plugin for `CUSTOMIZE` to find every knob (build command, integration branch, frontend globs, migration glob, tier triggers). Edit the `STANDARD-TIER CONSTRAINTS` blocks in the DBA/DevOps/SecOps agents to match your stack.
 
 ## License
 

@@ -144,6 +144,17 @@ fi
 # Example:
 #   echo "Data sources: <your logs backend>, <your database>, <your platform docs>"
 
+# --- Config health ---
+# Every knob in this plugin fails SOFT: a missing key takes a default, a misspelled key is
+# ignored, a wrong-typed value falls back. That is correct at runtime and it is exactly why a
+# broken config is invisible. Report it once, here, where the owner is actually looking.
+# Advisory only: a bad config must never wedge a session, so any failure is silent.
+DOCTOR="$PLUGIN_ROOT/scripts/config-doctor.mjs"
+if [[ -n "$PLUGIN_ROOT" ]] && [[ -f "$DOCTOR" ]] && command -v node >/dev/null 2>&1; then
+  CONFIG_REPORT=$(CLAUDE_PROJECT_DIR="$PROJECT_DIR" node "$DOCTOR" 2>/dev/null)
+  [[ -n "$CONFIG_REPORT" ]] && { printf '%s\n' "$CONFIG_REPORT"; echo ""; }
+fi
+
 echo "=== Pipeline primitives loaded ==="
 echo "  Subagents: ba, dba, devops, secops, dev, qa, design, librarian"
 echo "  Commands: /pipeline, /phase, /warmup"
