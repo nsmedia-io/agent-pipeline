@@ -72,16 +72,30 @@
  *           per-line substitution to `--` across the migrations this pipeline touches, not a
  *           one-line edit. The marker fix in (d) does not rescue it: that lifts the marker
  *           LINE out of the region, never a `#`-written body.
- *         - `--x` with no following whitespace IS stripped although MySQL requires the space.
- *           This is not a halt at all: the region passes and the cost lands as a syntax error
- *           at apply time on MySQL, never as destruction.
+ *         - `--x` with no following whitespace IS stripped although MySQL/MariaDB require the
+ *           space. This is not a halt: the region passes. On a line that carries nothing else
+ *           the cost lands as a syntax error at apply time on MySQL. ON A LINE THAT CARRIES A
+ *           SECOND STATEMENT IT IS WORSE THAN THAT, and this is the boundary's real edge:
+ *           `--x; drop table users;` reaches a `;`-splitting runner as a failing first
+ *           statement followed by a live `drop table users`, so a runner that continues past
+ *           an error (`mysql --force`, or any runner that does not abort) executes it. The
+ *           earlier wording here ruled destruction out unconditionally, which was true only of
+ *           the single-statement line it had in mind.
+ *           DO NOT close this by requiring whitespace after `--`: that refuses `-----` section
+ *           dividers and `--drop the index`, which are ordinary and legitimate, and would
+ *           false-halt a large share of real down regions to catch a shape that needs BOTH a
+ *           MySQL-family target AND a continue-past-error runner. The cost is stated here and
+ *           fixtured in test-gate-down-classifier.sh instead, so it is a known boundary rather
+ *           than a sentence promising more than the code does.
  *         - A genuinely-commented region containing a NESTED block comment false-halts on
  *           PostgreSQL and T-SQL. Cost: a one-to-two-line mechanical delimiter edit.
  *         - SQLite accepts an unterminated `/*` to EOF as a comment, so `indeterminate` is a
  *           false-halt there. Do NOT "fix" that by consuming to EOF: on PostgreSQL and MySQL
  *           that flips a `/*` followed by a DROP from a halt to a pass.
- *       All four fail in the safe direction. Gate-green means "a down section is present and
- *       reads as documentation", never "rollback is known to work"; a human still reviews it.
+ *       THREE OF THE FOUR fail in the safe direction. The `--x` boundary is the exception, in
+ *       the narrow shape named above, and it is the first thing to re-weigh if this project
+ *       ever targets MySQL/MariaDB. Gate-green means "a down section is present and reads as
+ *       documentation", never "rollback is known to work"; a human still reviews it.
  *
  * What it does NOT check (by design, so reviewers do not assume coverage exists):
  *   - Syntactic validity of migrations: that is your migration linter's job (CI).
