@@ -26,16 +26,58 @@
  *       `migrationDownMarker` if your rollback convention differs. A configured marker is
  *       ADDITIVE, not exclusive: the builtin `-- DOWN` keeps working alongside it.
  *
- *       KNOWN BOUNDARY, deliberate: this is a structural check for the PRESENCE of a down
- *       section, not a proof that the section would execute. A file whose down region is
- *       entirely commented out passes. Detecting that would mean parsing SQL per dialect and
- *       would false-HALT projects whose rollback conventions differ, which on a fail-CLOSED
- *       gate is the worse failure. Gate-green means "a down section is present", never
- *       "rollback is known to work"; a human still reviews the migration.
+ *   (d) the down REGION of such a migration is COMMENTED-OUT DOCUMENTATION, not live SQL.
+ *       The region begins at the first newline at or after the marker's line, so the marker
+ *       text itself is never classified (a project configuring a non-comment marker such as
+ *       `# DOWN` would otherwise fail every migration it ever writes). The region is then
+ *       classified `clean`, `executable` or `indeterminate`; the latter two both halt, with
+ *       DIFFERENT messages, so the fail-closed direction is pinned by what the gate SAYS and
+ *       not by an accident of remainder length.
+ *
+ *       THE SCAN IS ONE LEFT-TO-RIGHT PASS AND THE FIRST-ENCOUNTERED TOKEN WINS. Inside a
+ *       `--` line comment a `/*` is inert; inside a block comment a `--` is inert. Two-pass
+ *       regex stripping is forbidden in either order: on the comment-toggle shape (a `-- /*`
+ *       line, a bare `drop table foo;` line, and a `--` close-toggle line) stripping block
+ *       comments first reads all three as commented and hands a database a live DROP.
+ *
+ *       Block comments do not nest here: the first close delimiter closes, whatever the depth.
+ *       That is not a PostgreSQL emulation, it is the >= strict reading. PostgreSQL and SQL
+ *       Server (T-SQL) count nesting; MySQL/MariaDB, SQLite and Oracle do not, so where an
+ *       outer block encloses an inner `/*`, those servers end the comment at the INNER close
+ *       delimiter and execute whatever follows it. Strip only what every target dialect agrees
+ *       is a comment and classify executable on divergence. Because the non-nesting close is
+ *       never later than the depth-matching one, divergence can only ADD residue: it can HALT
+ *       a migration a nesting dialect would have run, never pass one it would have refused.
+ *
+ *       A BLOCK OPENER IMMEDIATELY FOLLOWED BY `!` OR `M!` IS NOT STRIPPED. `/*!`, `/*!NNNNN`
+ *       and MariaDB's `/*M!` are MySQL/MariaDB conditional-execution comments whose bodies the
+ *       server RUNS, so both candidate scans above would call them clean. `/*!40101 SET NAMES
+ *       utf8` is ordinary mysqldump output, so an author pasting dump text in as documentation
+ *       reaches this with no adversarial intent. The clause does NOT extend to a `/*+ hint`
+ *       opener: an optimizer hint cannot be a standalone destructive statement, and refusing
+ *       it would false-halt legitimate documentation.
+ *
+ *       DIALECT BOUNDARIES, DOCUMENTED AND DELIBERATELY NOT FIXED, each with its own cost:
+ *         - MySQL `#` line comments are NOT stripped (`#` is not a comment in PostgreSQL,
+ *           SQLite, Oracle or T-SQL, so stripping it would violate the rule above). A
+ *           `#`-convention down BODY therefore has EVERY line refused, and the remedy is a
+ *           per-line substitution to `--` across the migrations this pipeline touches, not a
+ *           one-line edit. The marker fix in (d) does not rescue it: that lifts the marker
+ *           LINE out of the region, never a `#`-written body.
+ *         - `--x` with no following whitespace IS stripped although MySQL requires the space.
+ *           This is not a halt at all: the region passes and the cost lands as a syntax error
+ *           at apply time on MySQL, never as destruction.
+ *         - A genuinely-commented region containing a NESTED block comment false-halts on
+ *           PostgreSQL and T-SQL. Cost: a one-to-two-line mechanical delimiter edit.
+ *         - SQLite accepts an unterminated `/*` to EOF as a comment, so `indeterminate` is a
+ *           false-halt there. Do NOT "fix" that by consuming to EOF: on PostgreSQL and MySQL
+ *           that flips a `/*` followed by a DROP from a halt to a pass.
+ *       All four fail in the safe direction. Gate-green means "a down section is present and
+ *       reads as documentation", never "rollback is known to work"; a human still reviews it.
  *
  * What it does NOT check (by design, so reviewers do not assume coverage exists):
  *   - Syntactic validity of migrations: that is your migration linter's job (CI).
- *   - This gate verifies structural reversibility (an up section AND a down section) ONLY.
+ *   - Whether the documented rollback would actually restore the data.
  *
  * Fail-closed contract (inverse of validate-pipeline-artifact.mjs):
  *   - An absent or unparseable impl-report.json exits non-zero and halts.
@@ -129,6 +171,127 @@ export function downMarkerIndex(sql, marker = DEFAULT_DOWN_MARKER) {
 
 export function hasDownSection(sql, marker = DEFAULT_DOWN_MARKER) {
   return downMarkerIndex(sql, marker) !== -1;
+}
+
+// The down REGION starts at the first newline at or after the marker's index, i.e. after the
+// end of the marker LINE. downMarkerIndex returns the index of the START of that line, so
+// slicing from it would leave the marker text itself inside the classified region -- and a
+// project configuring a non-comment marker (`# DOWN`, `DOWN:`) would then fail every migration
+// it ever writes, permanently, from its first upgrade.
+export function downRegionStart(sql, marker = DEFAULT_DOWN_MARKER) {
+  const idx = downMarkerIndex(sql, marker);
+  if (idx === -1) return -1;
+  const nl = sql.indexOf("\n", idx);
+  return nl === -1 ? sql.length : nl + 1;
+}
+
+function lineColAt(sql, index) {
+  let line = 1;
+  let lastNewline = -1;
+  for (let i = 0; i < index; i++) {
+    if (sql[i] === "\n") {
+      line++;
+      lastNewline = i;
+    }
+  }
+  return { line, column: index - lastNewline };
+}
+
+function lineTextAt(sql, index) {
+  const from = sql.lastIndexOf("\n", index) + 1;
+  const to = sql.indexOf("\n", index);
+  return sql.slice(from, to === -1 ? sql.length : to).replace(/\r$/, "");
+}
+
+/**
+ * Classify a migration's down region as `clean`, `executable` or `indeterminate`.
+ *
+ * ONE left-to-right scan; the first-encountered token wins. See the module docstring for why
+ * two-pass stripping, nesting, and stripping a `/*!` opener each pass a live DROP.
+ *
+ * @returns {null | {kind: "clean"} | {kind: "executable"|"indeterminate", ...}} null when the
+ *          migration has no down marker at all (the missing-down rule reports that instead).
+ */
+export function classifyDownRegion(sql, marker = DEFAULT_DOWN_MARKER) {
+  if (typeof sql !== "string") return null;
+  const start = downRegionStart(sql, marker);
+  if (start === -1) return null;
+
+  let closedBlock = null;
+  let i = start;
+  while (i < sql.length) {
+    const ch = sql[i];
+    if (ch === " " || ch === "\t" || ch === "\r" || ch === "\n") {
+      i++;
+      continue;
+    }
+    if (ch === "-" && sql[i + 1] === "-") {
+      const nl = sql.indexOf("\n", i);
+      i = nl === -1 ? sql.length : nl + 1;
+      continue;
+    }
+    if (ch === "/" && sql[i + 1] === "*") {
+      const opener = sql.slice(i + 2, i + 4);
+      if (opener.startsWith("!") || opener.startsWith("M!")) {
+        return {
+          kind: "executable",
+          reason: "conditional-execution",
+          ...lineColAt(sql, i),
+          lineText: lineTextAt(sql, i),
+        };
+      }
+      const open = lineColAt(sql, i);
+      const close = sql.indexOf("*/", i + 2);
+      if (close === -1) {
+        return { kind: "indeterminate", ...open, lineText: lineTextAt(sql, i) };
+      }
+      closedBlock = { open, close: lineColAt(sql, close) };
+      i = close + 2;
+      continue;
+    }
+    return {
+      kind: "executable",
+      reason: "residue",
+      ...lineColAt(sql, i),
+      lineText: lineTextAt(sql, i),
+      closedBlock,
+    };
+  }
+  return { kind: "clean" };
+}
+
+const REFLOW_REMEDY = "reflow the region to `--` line comments";
+
+function classificationFailure(rel, result) {
+  const where = `line ${result.line}, column ${result.column}`;
+  if (result.kind === "indeterminate") {
+    return (
+      `migration "${rel}" down region is indeterminate: unterminated block comment opened at ` +
+      `${where}: ${result.lineText}\n` +
+      `    remedy: close the block, or ${REFLOW_REMEDY}.`
+    );
+  }
+  if (result.reason === "conditional-execution") {
+    return (
+      `migration "${rel}" down region is executable: ${where} opens a MySQL/MariaDB ` +
+      `conditional-execution comment, whose body the server RUNS rather than ignoring: ` +
+      `${result.lineText}\n` +
+      `    remedy: remove the \`!\`/\`M!\` from the opener so it is an ordinary block comment, ` +
+      `or ${REFLOW_REMEDY}.`
+    );
+  }
+  let msg =
+    `migration "${rel}" down region contains executable SQL at ${where}: ${result.lineText}`;
+  if (result.closedBlock) {
+    msg +=
+      `\n    the block comment opened at line ${result.closedBlock.open.line}, column ` +
+      `${result.closedBlock.open.column} was ended by the first */ at line ` +
+      `${result.closedBlock.close.line}, column ${result.closedBlock.close.column}; block ` +
+      `comments do not nest in MySQL/MariaDB, SQLite or Oracle, so the first */ closes and ` +
+      `everything after it is live SQL`;
+  }
+  msg += `\n    remedy: remove the inner \`/* */\` delimiters, or ${REFLOW_REMEDY}.`;
+  return msg;
 }
 
 // A migration has an up section when it carries any non-comment, non-blank SQL line that
@@ -240,6 +403,11 @@ export function runGate({ report, spec, schema, migrationSources, downMarker = D
     }
     if (!hasDownSection(sql, downMarker)) {
       failures.push(`migration "${mig.rel}" has no down section (expected a "${downMarker}" marker)`);
+      continue;
+    }
+    const classified = classifyDownRegion(sql, downMarker);
+    if (classified.kind !== "clean") {
+      failures.push(classificationFailure(mig.rel, classified));
     }
   }
 

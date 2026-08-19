@@ -394,19 +394,17 @@ gate --issue "$ISSUE"
 assert_eq "a per-commit exemption does not leak to a later commit" "$RC" "1"
 assert_contains "the re-added migration is reported" "$ERR" 'migration "migrations/022_bad.sql" has no down section'
 
-suite "pre-Phase-4 gate: KNOWN COVERAGE BOUNDARY (not a guarantee)"
+suite "pre-Phase-4 gate: the executable down region is a GUARANTEE, not a boundary"
 
-# KNOWN GAP, recorded deliberately rather than left silent. hasUpSection only inspects the
-# text BEFORE the down marker, and nothing after the marker is examined at all, so a down
-# region of UNCOMMENTED, EXECUTABLE SQL passes this gate today. dba.md requires a down region
-# to be commented-out documentation, never executable SQL (an executable down block is a live
-# data-destruction statement sitting in a migration file), so the gate is silent on a rule the
-# project actually enforces. Tracked as follow-up issue #16.
-#
-# FUTURE AUTHOR: if this case goes RED, the gap was CLOSED. INVERT the assertion (expect 1)
-# and delete this boundary label. Do NOT delete the case: a boundary that silently disappears
-# when it moves leaves the next reader with no way to tell coverage from a guarantee.
-new_project boundary-executable-down
+# INVERTED IN PLACE, per this case's own FUTURE AUTHOR instruction, when issue #16 closed. The
+# gate now classifies the down REGION (everything after the marker LINE) as clean, executable
+# or indeterminate, and both non-clean values halt. dba.md requires a down region to be
+# commented-out documentation, never executable SQL -- an executable down block is a live
+# data-destruction statement sitting in a migration file -- and the gate now enforces that
+# rather than being silent on it. The full classifier matrix lives in
+# test-gate-down-classifier.sh; this case stays here so the site that recorded the gap also
+# records that it closed, and a reader can tell coverage from a guarantee.
+new_project guarantee-executable-down
 write_spec "AC1: migrations are reversible"
 write_report "AC1 handled" '[{"sha":"a1","message":"m","files_changed":["migrations/023_exec_down.sql"]}]'
 write_migration "migrations/023_exec_down.sql" 'create table foo (id int);
@@ -414,6 +412,6 @@ write_migration "migrations/023_exec_down.sql" 'create table foo (id int);
 drop table foo;
 '
 gate --issue "$ISSUE"
-assert_eq "BOUNDARY: an executable (uncommented) down region passes today" "$RC" "0"
+assert_eq "GUARANTEE: an executable (uncommented) down region now halts" "$RC" "1"
 
 finish
