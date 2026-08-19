@@ -424,8 +424,14 @@ else
   fi
   # The count is kept alongside the names: a transcript whose suite headers were mangled would
   # yield an empty name list and an "all-green" that means nothing.
+  #
+  # ANCHORED TO THE RESULT LINE, not to the substring anywhere in the transcript. An unanchored
+  # `grep -c failed=0` counts any ASSERTION NAME that happens to quote the token, and the
+  # #30 suites carry two ("AC19: the gate suite reports failed=0" and its telemetry twin), so
+  # the count read 31 against 29 suites and this case went red while every suite was green. The
+  # guard belonged on the line the runner emits, not on the spelling that reaches the pipe.
   assert_eq "and the failed=0 count agrees with the suite count, independently of the names" \
-    "$(printf '%s' "$FRESH_OUT" | grep -c 'failed=0' | tr -d ' ')" "$FRESH_SUITES"
+    "$(printf '%s' "$FRESH_OUT" | grep -c '^passed=.*failed=0$' | tr -d ' ')" "$FRESH_SUITES"
   # NON-ZERO CONTROL for the extractor, through the SAME function: it must be able to name a
   # failure, and must not name a suite that passed.
   assert_eq "CONTROL: the same extractor names the failing suite in a transcript that has one" \
