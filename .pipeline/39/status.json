@@ -1,0 +1,37 @@
+{
+  "issue_number": 39,
+  "current_phase": "3-impl",
+  "started_at": "2026-08-19T20:00:00Z",
+  "updated_at": "2026-08-19T23:56:46.082Z",
+  "branch": "feat/phase-guard",
+  "ask_text": "Make phase entry granted by a script rather than assumed by the orchestrator, plus typed provenance fields and evidence admissibility.",
+  "risk_tier": "architectural",
+  "review_rounds": 1,
+  "events": [
+    {
+      "phase": "0.5-map",
+      "verdict": "complete",
+      "at": "2026-08-19T20:00:00Z",
+      "note": "26 phase literals / ~20 sequencing rules; corrected the enforcement table; voice-lint rule-table rot is the precedent"
+    },
+    {
+      "phase": "1-ba",
+      "verdict": "complete",
+      "at": "2026-08-19T23:27:49.563Z",
+      "note": "issue #39; 12 reqs, 18 ACs; completion DERIVED not written; both folded items cut to #38"
+    },
+    {
+      "phase": "2-review",
+      "verdict": "REQUEST_CHANGES",
+      "at": "2026-08-19T23:56:46.082Z",
+      "note": "dba RC (3 blockers) + secops RC (3 high) + devops AWN; token comparison undefined, -complete bypass, staleness wedge"
+    },
+    {
+      "phase": "1-ba-rework",
+      "verdict": "complete",
+      "at": "2026-08-19T23:56:46.082Z",
+      "note": "spec rev2: 18 reqs, 31 ACs, gate 31/31 orchestrator-verified; OWNER RULING on OQ4: guard applies to /phase, refusal names the override, phase.md:34 corrected"
+    }
+  ],
+  "flags": []
+}
