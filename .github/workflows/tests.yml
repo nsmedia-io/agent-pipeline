@@ -1,0 +1,25 @@
+# The plugin's own test suite, run by CI.
+#
+# Until this file existed, every suite under plugins/pipeline/tests/ was verified ONLY by
+# hooks/stop.sh: it fires inside a Claude Code session, only on a dirty working tree, is
+# opt-out via CLAUDE_HOOK_STOP_SKIP=1, and is bypassed completely by a human running
+# `git commit && git push` from a terminal. A check that only runs when someone happens to be
+# in the right environment is the same defect class the suites themselves exist to catch.
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  suite:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # No package.json, no dependencies, no install step, matching manifests.yml's own
+      # deliberate constraint: a gate that can break on someone else's package is a gate that
+      # gets disabled the first time it does. run.sh is bash plus the runner's bundled Node.
+      # A non-zero exit from run.sh fails the build; that is the whole point of the job.
+      - name: plugin test suite
+        run: bash plugins/pipeline/tests/run.sh
