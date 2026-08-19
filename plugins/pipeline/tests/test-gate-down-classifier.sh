@@ -490,6 +490,54 @@ assert_not_contains "AC22 CONTROL: and stops at the block, not somewhere in the 
 
 assert_not_contains "AC22: the docstring no longer claims a commented-out down region passes" \
   "$DOCSTRING" "entirely commented out passes"
+
+# THE SECOND DOCBLOCK, and the one the criterion's own window missed. `classifyDownRegion`
+# carries its own JSDoc, and that docblock is the single most likely place a future editor
+# restates the rule -- it is the block that says "See the module docstring for why". The banned
+# sentence planted there left this suite at 74/0. Same derivation discipline as the window
+# above: read from the file, both ends pinned.
+CLASSIFIER_FN_LINE=$(grep -n '^export function classifyDownRegion' "$GATE_SRC" | head -1 | cut -d: -f1)
+assert_eq "AC22(b) CONTROL: the classifier's own docblock was located" \
+  "$([[ "${CLASSIFIER_FN_LINE:-0}" -gt 1 ]] && echo ok || echo "line=$CLASSIFIER_FN_LINE")" "ok"
+CLASSIFIER_DOC=$(awk '
+  /^\/\*\*/ { buf = $0 "\n"; inblock = 1; next }
+  inblock   { buf = buf $0 "\n"; if ($0 ~ /^ \*\//) { inblock = 0; last = buf } ; next }
+  /^export function classifyDownRegion/ { printf "%s", last; exit }
+' "$GATE_SRC")
+# The far end, by an independent derivation: the line two above the `export` is the docblock's
+# last substantive line. Pinned with a LENGTH FLOOR, because the day that line becomes a bare
+# ` *` the needle is contained in every non-empty window and this control passes vacuously.
+CLASSIFIER_DOC_LAST=$(sed -n "$((CLASSIFIER_FN_LINE - 2))p" "$GATE_SRC")
+assert_eq "AC22(b) CONTROL: and its last substantive line is substantive, not a bare \` *\`" \
+  "$([[ "${#CLASSIFIER_DOC_LAST}" -ge 20 ]] && echo ok || echo "needle is ${#CLASSIFIER_DOC_LAST} chars: [$CLASSIFIER_DOC_LAST]")" "ok"
+assert_contains "AC22(b) CONTROL: the window reaches that last line" \
+  "$CLASSIFIER_DOC" "$CLASSIFIER_DOC_LAST"
+# BOTH ENDS, and the near end is not the same risk as the far end. The module docstring's
+# window was pinned at the tail because its historical defect was a `1,60p` that stopped short.
+# A window ANCHORED at the function and read backwards fails the other way -- it starts too
+# late -- and a docblock whose first half is missing is not visibly different from one that is
+# whole. The opener is located by an independent scan for the last `/**` above the function.
+CLASSIFIER_DOC_OPEN=$(awk -v n="$CLASSIFIER_FN_LINE" 'NR < n && /^\/\*\*/ { l = NR } END { print l }' "$GATE_SRC")
+CLASSIFIER_DOC_FIRST=$(sed -n "$((CLASSIFIER_DOC_OPEN + 1))p" "$GATE_SRC")
+assert_eq "AC22(b) CONTROL: its first substantive line is substantive too" \
+  "$([[ "${#CLASSIFIER_DOC_FIRST}" -ge 20 ]] && echo ok || echo "needle is ${#CLASSIFIER_DOC_FIRST} chars: [$CLASSIFIER_DOC_FIRST]")" "ok"
+assert_contains "AC22(b) CONTROL: and the window reaches back to it" \
+  "$CLASSIFIER_DOC" "$CLASSIFIER_DOC_FIRST"
+assert_not_contains "AC22(b) CONTROL: and stops at the block, not in the function body below" \
+  "$CLASSIFIER_DOC" "export function"
+assert_not_contains "AC22(b): the classifier's own docblock does not restate the old predicate either" \
+  "$CLASSIFIER_DOC" "entirely commented out passes"
+
+# DOCUMENTED EXPECTED SURVIVOR, so that a battery reporting "everything reddens" is not the
+# only reading available. The same banned sentence written as a `//` comment ANYWHERE ELSE in
+# the module -- e.g. immediately below the docstring -- leaves this suite green, and that is
+# the intended boundary rather than an unclosed hole: AC22 is about the two blocks that STATE
+# the rule (the module docstring and the classifier's docblock). A ban over every comment in
+# the file would also forbid a comment EXPLAINING why the old predicate was wrong, which is
+# exactly the sentence a future reader most needs to find. If that judgement is ever revised,
+# the change is to grep "$GATE_SRC" whole rather than to widen either window -- and the shape
+# is already in this file: AC7(b) bans its sentence file-wide, because that one has no
+# legitimate restatement.
 assert_contains "AC22: it states that block comments do not nest" "$DOCSTRING" "not nest"
 assert_contains "AC22: naming MySQL as a reason" "$DOCSTRING" "MySQL"
 assert_contains "AC22: naming SQLite as a reason" "$DOCSTRING" "SQLite"
