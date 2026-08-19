@@ -1,0 +1,147 @@
+{
+  "issue_number": 17,
+  "current_phase": "3-impl-complete",
+  "started_at": "2026-08-18T00:00:00Z",
+  "updated_at": "2026-08-19T04:15:29.941Z",
+  "branch": "claude/data-layer-divergence-review-eed95b",
+  "ask_text": "Consolidate surface-detection and dispatch-model selection into single imported predicates; add self-telemetry. Four bundled changes: data-layer/DevOps surface predicates, two verified defects (vacuous shard fallback, panel_roles schema gap), telemetry, dispatch routing table.",
+  "risk_tier": "architectural",
+  "events": [
+    {
+      "phase": "0.5-map",
+      "verdict": "complete",
+      "at": "2026-08-19T01:21:04.632Z",
+      "note": "deep map, sonnet; 7 contracts; corrected 2 brief claims"
+    },
+    {
+      "phase": "0.5-map",
+      "verdict": "complete",
+      "at": "2026-08-19T01:21:11.177Z",
+      "note": "deep map, sonnet; 7 contracts; corrected 2 brief claims"
+    },
+    {
+      "phase": "1-ba",
+      "verdict": "complete",
+      "at": "2026-08-19T01:30:28.308Z",
+      "note": "issue #17; architectural; 24 ACs; filed #16 for out-of-scope gate gap"
+    },
+    {
+      "phase": "2-review",
+      "verdict": "REQUEST_CHANGES",
+      "at": "2026-08-19T01:44:07.445Z",
+      "note": "dba RC (3 blockers), devops AWN, secops RC (2 high); loop back to BA"
+    },
+    {
+      "phase": "1-ba-rework",
+      "verdict": "complete",
+      "at": "2026-08-19T02:02:12.394Z",
+      "note": "spec rev2: 24 reqs, 36 ACs; both blockers closed by taking reviewer remedies; presets + loud match-nothing"
+    },
+    {
+      "phase": "2-review-r2",
+      "verdict": "REQUEST_CHANGES",
+      "at": "2026-08-19T02:12:18.206Z",
+      "note": "round 2: dba RC (3 new blockers), devops AWN, secops RC (3 high); all NEW, rev-1 blockers confirmed closed"
+    },
+    {
+      "phase": "1-ba-rework-r2",
+      "verdict": "complete",
+      "at": "2026-08-19T02:41:49.314Z",
+      "note": "spec rev3: 26 req numbers, 45 ACs, falsifiability verified by orchestrator (45/45, 2 unmutable, no orphans)"
+    },
+    {
+      "phase": "2.5-design",
+      "verdict": "SKIPPED",
+      "at": "2026-08-19T02:41:49.314Z",
+      "note": "DELIBERATE DEVIATION, recorded not silent: architectural tier normally runs the design bake-off. Skipped because the design space is closed - module shape is dictated by the shipped frontend-surface.mjs precedent and the routing table shape by the harness constraint that only model is overridable per-invocation. BA set ab_build:false for the same reason. Owner informed."
+    },
+    {
+      "phase": "3a-qa-tests",
+      "verdict": "complete",
+      "at": "2026-08-19T03:07:21.453Z",
+      "note": "284 assertions in 3 suites, all red; 16 pre-existing suites unchanged at 531 passed/0 failed (orchestrator-verified, not relayed)"
+    },
+    {
+      "phase": "3b-dev",
+      "verdict": "complete",
+      "at": "2026-08-19T04:15:29.941Z",
+      "note": "7 commits, PR #18; 999 passed/0 failed after QA repaired 2 of its own assertions; both pre-phase-4 gates pass"
+    }
+  ],
+  "flags": [
+    {
+      "phase": "0.5-map",
+      "agent": "ba",
+      "verdict": "complete",
+      "summary": "model-override restated at ~7 sites not 1; archive DOES retain status.json; config-doctor needs new key registered",
+      "at": "2026-08-19T01:21:04.632Z"
+    },
+    {
+      "phase": "0.5-map",
+      "agent": "ba",
+      "verdict": "complete",
+      "summary": "model-override restated at ~7 sites not 1; archive DOES retain status.json; config-doctor needs new key registered",
+      "at": "2026-08-19T01:21:11.177Z"
+    },
+    {
+      "phase": "1-ba",
+      "agent": "ba",
+      "verdict": "complete",
+      "summary": "supabase/migrations seats NO dba at all; Q1 resolved as two independent keys not alias; tripwire widens (fail-closed)",
+      "at": "2026-08-19T01:30:28.308Z"
+    },
+    {
+      "phase": "2-dba",
+      "agent": "dba",
+      "verdict": "REQUEST_CHANGES",
+      "summary": "migrationGlobs:[] becomes a config off-switch for the tripwire; AC3 ratchet; R16 rests on an already-fixed docstring",
+      "at": "2026-08-19T01:44:07.445Z"
+    },
+    {
+      "phase": "2-devops",
+      "agent": "devops",
+      "verdict": "APPROVE_WITH_NOTES",
+      "summary": "deploy glob wrong both directions; proposed 4-glob default; resolver fail-direction unspecified",
+      "at": "2026-08-19T01:44:07.445Z"
+    },
+    {
+      "phase": "2-secops",
+      "agent": "secops",
+      "verdict": "REQUEST_CHANGES",
+      "summary": "same config off-switch found independently; floor clamp fails open on unranked model id, pin secops/qa in code instead",
+      "at": "2026-08-19T01:44:07.445Z"
+    },
+    {
+      "phase": "1-ba-rework",
+      "agent": "ba",
+      "verdict": "complete",
+      "summary": "union-only tripwire globs; floor machinery deleted for pin; globToRegExp is case-sensitive so EF Core needs its own row",
+      "at": "2026-08-19T02:02:12.394Z"
+    },
+    {
+      "phase": "3a-qa",
+      "agent": "qa",
+      "verdict": "complete",
+      "summary": "AC18 unsatisfiable: sketch+judge collide on (dev,architectural,2.5); AC27 policies row shadowed; 19 criteria unreached",
+      "at": "2026-08-19T03:07:21.453Z"
+    },
+    {
+      "phase": "3b-dev",
+      "agent": "dev",
+      "verdict": "complete",
+      "summary": "AC18 resolved with a 4th --site key dimension; 15-row leave-one-out battery NOT run; R19b status.json half is prose only",
+      "at": "2026-08-19T04:15:29.941Z"
+    }
+  ],
+  "review_rounds": 1,
+  "phase3_qa_test_commit": "b606a84559e8d78c06ee2f1e1e0fd123a3ad2f5e",
+  "pr_url": "https://github.com/nsmedia-io/agent-pipeline/pull/18",
+  "panel_roles": [
+    "ba",
+    "dba",
+    "devops",
+    "secops",
+    "dev",
+    "qa"
+  ]
+}
