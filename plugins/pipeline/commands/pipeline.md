@@ -555,15 +555,25 @@ A standard-tier spec has, by definition, no schema/migration dimension, so a mig
 The predicate is the surface module's, not a hand-typed regex: `migrationGlobsForTripwire` is the built-in framework-preset union WIDENED by `migrationGlobs` and `extraMigrationGlobs`, so a project config can only ever widen this halt, never narrow it. (# CUSTOMIZE: widen it with `extraMigrationGlobs` in `pipeline.config.json`; narrowing the tripwire is deliberately impossible, because binding a halting control to a narrowing knob lets a four-character edit disarm it while the config still reports healthy.)
 
 ```bash
-CHANGED="$(git -C "$WORKTREE_PATH" diff --name-only origin/main...HEAD)"
-TRIPWIRE_OUT="$(node -e 'import(process.env.CLAUDE_PLUGIN_ROOT + "/scripts/data-layer-surface.mjs").then(m=>{const r=m.tripwireReport(process.argv.slice(1));if(r.note)console.error("TRIPWIRE-NOTE: "+r.note);if(r.hits.length)console.log(r.hits.join(" "))}).catch(e=>{console.log("unevaluable: "+(e&&e.message));process.exit(1)})' $CHANGED)"
+CHANGED_PATHS="$(mktemp)"
+git -C "$WORKTREE_PATH" diff --name-only -z origin/main...HEAD > "$CHANGED_PATHS"
+GIT_RC=$?
+if [ "$GIT_RC" -ne 0 ]; then : > "$CHANGED_PATHS"; fi
+TRIPWIRE_OUT="$(node -e 'const fs=require("node:fs");new Promise(r=>r(fs.readFileSync(0,"utf8").split("\0").filter(Boolean))).then(paths=>{if(paths.length===0)throw new Error("empty path list: an unread diff is not a clean diff");return import(process.env.CLAUDE_PLUGIN_ROOT + "/scripts/data-layer-surface.mjs").then(m=>{const r=m.tripwireReport(paths);if(r.note)console.error("TRIPWIRE-NOTE: "+r.note);if(r.hits.length)console.log(r.hits.join(" "))})}).catch(e=>{console.log("unevaluable: "+(e&&e.message));process.exit(1)})' < "$CHANGED_PATHS")"
 TRIPWIRE_RC=$?
-if [ "$TRIPWIRE_RC" -ne 0 ]; then
+rm -f "$CHANGED_PATHS"
+if [ "$GIT_RC" -ne 0 ]; then
+  echo "3-impl-tripwire-indeterminate: git diff --name-only -z exited $GIT_RC, so the changed-path list is UNKNOWN rather than empty."
+elif [ "$TRIPWIRE_RC" -ne 0 ]; then
   echo "3-impl-tripwire-indeterminate: the data-layer surface module under ${CLAUDE_PLUGIN_ROOT}/scripts/ could not be evaluated (exit $TRIPWIRE_RC). $TRIPWIRE_OUT"
 elif [ -n "$TRIPWIRE_OUT" ]; then
   echo "MIS-TIER: data-layer path in a $RISK_TIER diff: $TRIPWIRE_OUT"
 fi
 ```
+
+**The path list crosses the seam NUL-delimited on stdin, never through an unquoted shell variable.** `zsh` does not word-split an unquoted parameter expansion, and zsh is what the orchestrator's own shell tool runs. The previous `... $CHANGED` therefore handed a MULTI-FILE diff to the predicate as ONE newline-joined argument; the surface globs compile to `.`-based regexes and `.` does not match a newline, so the predicate matched nothing and the tripwire proceeded silently. Measured on `{db/migrate/001_add_users.rb, src/app.ts}`: bash halted, zsh did not. A single-file diff was correct under both shells, which is why every one-path fixture in the suite passed while the control was inert. This file already warns about the same zsh behavior for `PANEL_ROLES`; a NUL-delimited list read on stdin removes the shell from the path entirely rather than adding a third warning.
+
+**`git`'s own exit status is captured and branched on.** `CHANGED="$(git ...)"` discarded it, and a bad `WORKTREE_PATH` or a missing `origin/main` ref yields `fatal: bad revision 'origin/main...HEAD'` on stderr with an EMPTY list on stdout: byte-identical to a clean diff. That failure appears in this repository's own CI log, so it is a live condition. **An empty or unreadable path list is INDETERMINATE, never no-match**, at all three call sites: the probe throws on a zero-length list rather than answering false, and here that lands in the fail-closed halt. An empty diff at this gate is itself anomalous, because there is nothing for the panel to review.
 
 **Capture the exit status, then branch on it; never pipe this invocation.** Written as `<the node call> | grep -q ...`, a pipe would discard the module's exit status, so an absent or throwing module exits non-zero with empty stdout, the condition reads false, and NO halt fires: silently restoring the exact pre-fix state this tripwire exists to remove. ${CLAUDE_PLUGIN_ROOT} resolving to a stale installed plugin cache that predates the module is a live condition, not a hypothetical.
 
@@ -605,24 +615,33 @@ The panel reviews the finished diff, each agent through a distinct lens, while r
 
 ```bash
 PANEL_ROLES="ba dev qa secops"
-CHANGED="$(git -C "$WORKTREE_PATH" diff --name-only origin/main...HEAD)"
+# NUL-delimited into a FILE, read by the probe on stdin. Not an unquoted shell variable: see
+# the mis-tier tripwire above for the zsh word-splitting defect that shape carries, and for
+# why git's exit status is captured rather than discarded.
+CHANGED_PATHS="$(mktemp)"
+git -C "$WORKTREE_PATH" diff --name-only -z origin/main...HEAD > "$CHANGED_PATHS"
+GIT_RC=$?
+if [ "$GIT_RC" -ne 0 ]; then
+  : > "$CHANGED_PATHS"
+  echo "SURFACE-INDETERMINATE: git diff --name-only -z exited $GIT_RC; the changed-path list is UNKNOWN, not empty." >&2
+fi
 # The data-layer and infra surfaces are read from ${CLAUDE_PLUGIN_ROOT}/scripts/data-layer-surface.mjs,
 # the same module the mis-tier tripwire uses, so detection and dispatch never diverge.
 # (# CUSTOMIZE: `dataLayerGlobs` and `infraGlobs` in pipeline.config.json describe YOUR layout.)
 # The panel predicate is the BROAD one deliberately: a panel seat is cheap and reversible,
 # where the tripwire's narrow halt is not.
-surface_probe() {  # $1 = predicate export name; remaining args = the changed paths
-  node -e 'import(process.env.CLAUDE_PLUGIN_ROOT + "/scripts/data-layer-surface.mjs").then(m=>{const f=m[process.argv[1]];if(typeof f!=="function")throw new Error("missing export "+process.argv[1]);process.exit(f(process.argv.slice(2))?0:10)}).catch(e=>{console.error("SURFACE-INDETERMINATE: "+process.argv[1]+": "+(e&&e.message));process.exit(1)})' "$@"
+surface_probe() {  # $1 = predicate export name; the NUL-delimited path list arrives on STDIN
+  node -e 'const fs=require("node:fs");new Promise(r=>r(fs.readFileSync(0,"utf8").split("\0").filter(Boolean))).then(paths=>import(process.env.CLAUDE_PLUGIN_ROOT + "/scripts/data-layer-surface.mjs").then(m=>{const f=m[process.argv[1]];if(typeof f!=="function")throw new Error("missing export "+process.argv[1]);if(paths.length===0)throw new Error("empty path list: an unread diff is not a clean diff");process.exit(f(paths)?0:20)})).catch(e=>{console.error("SURFACE-INDETERMINATE: "+process.argv[1]+": "+(e&&e.message));process.exit(1)})' "$1"
 }
-surface_probe diffTouchesDataLayer $CHANGED; RC=$?
-if [ "$RC" -ne 10 ]; then
+surface_probe diffTouchesDataLayer < "$CHANGED_PATHS"; RC=$?
+if [ "$RC" -ne 20 ]; then
   PANEL_ROLES="$PANEL_ROLES dba"
   if [ "$RC" -ne 0 ]; then
     echo "PANEL-NOTE: dba SEATED on an INDETERMINATE data-layer probe (exit $RC; see SURFACE-INDETERMINATE on stderr), not on a match."
   fi
 fi
-surface_probe diffTouchesInfra $CHANGED; RC=$?
-if [ "$RC" -ne 10 ]; then
+surface_probe diffTouchesInfra < "$CHANGED_PATHS"; RC=$?
+if [ "$RC" -ne 20 ]; then
   PANEL_ROLES="$PANEL_ROLES devops"
   if [ "$RC" -ne 0 ]; then
     echo "PANEL-NOTE: devops SEATED on an INDETERMINATE infra probe (exit $RC; see SURFACE-INDETERMINATE on stderr), not on a match."
@@ -630,7 +649,9 @@ if [ "$RC" -ne 10 ]; then
 fi
 ```
 
-**Three outcomes, never two, and the third one SEATS.** `surface_probe` exits 0 on a MATCH, **10** on a NO-MATCH, and anything else means INDETERMINATE: the module was absent, it threw, an export was renamed, or `node` itself was missing. The seat is therefore withheld only on the ONE code that means "the predicate ran and said no". 10 is the no-match code deliberately, so every unforeseen failure (node's own exit 1 on an uncaught throw or a syntax error, 127 for a missing binary) lands in the indeterminate branch instead of impersonating a clean diff. `${CLAUDE_PLUGIN_ROOT}` resolving to a stale installed plugin cache that predates the module is a live condition, not a hypothetical, and a bare `process.exit(pred?0:1)` returns rc=1 with zero bytes on both streams in exactly that case: byte-identical to "the diff is clean", which silently drops the specialist the change exists to seat.
+**Three outcomes, never two, and the third one SEATS.** `surface_probe` exits 0 on a MATCH, **20** on a NO-MATCH, and anything else means INDETERMINATE: the module was absent, it threw, an export was renamed, the path list could not be read, or `node` itself was missing. The seat is therefore withheld only on the ONE code that means "the predicate ran and said no", so every unforeseen failure (node's own exit 1 on an uncaught throw or a syntax error, 127 for a missing binary) lands in the indeterminate branch instead of impersonating a clean diff.
+
+**20 is the no-match code because node RESERVES 1 through 14 for itself** (`doc/api/process.md`, "Exit codes": 9 Invalid Argument, **10 Internal JavaScript Run-Time Failure**, 13 Unsettled Top-Level Await, 14 Snapshot Failure), and 126/127/128+n belong to the shell and to signals. The sentinel was 10, which collides with a code node emits on its own: a runtime failure inside node's bootstrap would have been read as "the predicate ran and said no", the exact impersonation the three-outcome shape exists to prevent. 20 sits above node's reserved band and below the shell's, so nothing but this block can produce it. `${CLAUDE_PLUGIN_ROOT}` resolving to a stale installed plugin cache that predates the module is a live condition, not a hypothetical, and a bare `process.exit(pred?0:1)` returns rc=1 with zero bytes on both streams in exactly that case: byte-identical to "the diff is clean", which silently drops the specialist the change exists to seat.
 
 **Never write this as `surface_probe ... | grep -q ...`.** A pipe discards the exit status, which is the entire mechanism here.
 
@@ -658,16 +679,20 @@ It renders the result itself, rules clause by clause, and writes a bare `peer-re
 **Design is surface-conditional at EVERY tier.** Add `design_review` to `PANEL_ROLES` (on top of the architectural/trivial six or the standard four-plus) when, and only when, the diff touches a frontend surface. Use the SAME allowlist the gate uses, so detection and dispatch never diverge:
 
 ```bash
-# $CHANGED is the diff path list (set above for standard; compute it the same way for
-# architectural/trivial). diffTouchesFrontend in ${CLAUDE_PLUGIN_ROOT}/scripts/frontend-surface.mjs
-# is the single source of truth; this one-liner reuses it so the panel and the gate agree.
-if node -e 'import(process.env.CLAUDE_PLUGIN_ROOT + "/scripts/frontend-surface.mjs").then(m=>process.exit(m.diffTouchesFrontend(process.argv.slice(1))?0:1))' $CHANGED; then
+# $CHANGED_PATHS is the NUL-delimited diff path list (written above for standard; produce it
+# the same way for architectural/trivial). diffTouchesFrontend in
+# ${CLAUDE_PLUGIN_ROOT}/scripts/frontend-surface.mjs is the single source of truth; this
+# one-liner reuses it so the panel and the gate agree.
+if node -e 'const fs=require("node:fs");import(process.env.CLAUDE_PLUGIN_ROOT + "/scripts/frontend-surface.mjs").then(m=>process.exit(m.diffTouchesFrontend(fs.readFileSync(0,"utf8").split("\0").filter(Boolean))?0:1))' < "$CHANGED_PATHS"; then
   PANEL_ROLES="$PANEL_ROLES design_review"
 fi
 
 # Art Director sits only when it authored a contract for this issue (Duty A above).
 [ -f "$ARTIFACT_DIR/visual-contract.json" ] && PANEL_ROLES="$PANEL_ROLES art_director"
+rm -f "$CHANGED_PATHS"
 ```
+
+The frontend probe above is still on the TWO-outcome shape, which the data-layer and infra probes are not: an unevaluable `frontend-surface.mjs` reads as "no frontend file changed" and silently drops the Design lens. That is issue #20 and is deliberately not fixed here; only its path plumbing moved onto the NUL-delimited list, because the variable it used to read no longer exists.
 
 Record the resolved `PANEL_ROLES` in `status.json` so the merge, the rubric, and a `--resume` all agree on who was on the panel. At the same checkpoint, increment `review_rounds` (1 on the first full panel, +1 per delta round; events[] carries no round field, so this cannot be inferred later) and refresh the derived telemetry and the effective-config audit record:
 
@@ -778,30 +803,39 @@ FULL_PANEL="$(jq -r '.panel_roles | join(" ")' "$PIPELINE_BASE/<issue>/status.js
 # the exact panel-composition greps above so detection never drifts from the first round).
 DELTA="qa secops"
 for role in $OBJECTING_ROLES; do case " $DELTA " in *" $role "*) ;; *) DELTA="$DELTA $role";; esac; done
-FIX_CHANGED="$(git -C "$WORKTREE_PATH" diff --name-only <first-round-head>...HEAD)"
+FIX_CHANGED_PATHS="$(mktemp)"
+git -C "$WORKTREE_PATH" diff --name-only -z <first-round-head>...HEAD > "$FIX_CHANGED_PATHS"
+GIT_RC=$?
+if [ "$GIT_RC" -ne 0 ]; then
+  : > "$FIX_CHANGED_PATHS"
+  echo "SURFACE-INDETERMINATE: git diff --name-only -z exited $GIT_RC; the changed-path list is UNKNOWN, not empty." >&2
+fi
 # The SAME module AND the SAME three-outcome probe the first-round panel composition uses, so a
 # delta round cannot drift from it, and an unevaluable probe SEATS the specialist here too.
-# This definition is byte-identical to the one above on purpose; keep them that way.
-surface_probe() {  # $1 = predicate export name; remaining args = the changed paths
-  node -e 'import(process.env.CLAUDE_PLUGIN_ROOT + "/scripts/data-layer-surface.mjs").then(m=>{const f=m[process.argv[1]];if(typeof f!=="function")throw new Error("missing export "+process.argv[1]);process.exit(f(process.argv.slice(2))?0:10)}).catch(e=>{console.error("SURFACE-INDETERMINATE: "+process.argv[1]+": "+(e&&e.message));process.exit(1)})' "$@"
+# This definition is byte-identical to the one above on purpose; keep them that way. The path
+# list is passed by REDIRECTION at the call site rather than named inside the function, which
+# is what lets the two definitions stay byte-identical across two differently-named lists.
+surface_probe() {  # $1 = predicate export name; the NUL-delimited path list arrives on STDIN
+  node -e 'const fs=require("node:fs");new Promise(r=>r(fs.readFileSync(0,"utf8").split("\0").filter(Boolean))).then(paths=>import(process.env.CLAUDE_PLUGIN_ROOT + "/scripts/data-layer-surface.mjs").then(m=>{const f=m[process.argv[1]];if(typeof f!=="function")throw new Error("missing export "+process.argv[1]);if(paths.length===0)throw new Error("empty path list: an unread diff is not a clean diff");process.exit(f(paths)?0:20)})).catch(e=>{console.error("SURFACE-INDETERMINATE: "+process.argv[1]+": "+(e&&e.message));process.exit(1)})' "$1"
 }
-surface_probe diffTouchesDataLayer $FIX_CHANGED; RC=$?
-if [ "$RC" -ne 10 ]; then
+surface_probe diffTouchesDataLayer < "$FIX_CHANGED_PATHS"; RC=$?
+if [ "$RC" -ne 20 ]; then
   case " $DELTA " in *" dba "*) ;; *) DELTA="$DELTA dba";; esac
   if [ "$RC" -ne 0 ]; then
     echo "PANEL-NOTE: dba SEATED on an INDETERMINATE data-layer probe (exit $RC; see SURFACE-INDETERMINATE on stderr), not on a match."
   fi
 fi
-surface_probe diffTouchesInfra $FIX_CHANGED; RC=$?
-if [ "$RC" -ne 10 ]; then
+surface_probe diffTouchesInfra < "$FIX_CHANGED_PATHS"; RC=$?
+if [ "$RC" -ne 20 ]; then
   case " $DELTA " in *" devops "*) ;; *) DELTA="$DELTA devops";; esac
   if [ "$RC" -ne 0 ]; then
     echo "PANEL-NOTE: devops SEATED on an INDETERMINATE infra probe (exit $RC; see SURFACE-INDETERMINATE on stderr), not on a match."
   fi
 fi
-if node -e 'import(process.env.CLAUDE_PLUGIN_ROOT + "/scripts/frontend-surface.mjs").then(m=>process.exit(m.diffTouchesFrontend(process.argv.slice(1))?0:1))' $FIX_CHANGED; then
+if node -e 'const fs=require("node:fs");import(process.env.CLAUDE_PLUGIN_ROOT + "/scripts/frontend-surface.mjs").then(m=>process.exit(m.diffTouchesFrontend(fs.readFileSync(0,"utf8").split("\0").filter(Boolean))?0:1))' < "$FIX_CHANGED_PATHS"; then
   case " $DELTA " in *" design_review "*) ;; *) DELTA="$DELTA design_review";; esac
 fi
+rm -f "$FIX_CHANGED_PATHS"
 ROLES_TO_MERGE="$DELTA"
 ```
 

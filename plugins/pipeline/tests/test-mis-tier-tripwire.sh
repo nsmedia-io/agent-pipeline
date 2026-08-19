@@ -438,6 +438,152 @@ assert_eq "surface module PRESENT + resolver PRESENT: the resolver EMITS a token
 assert_eq "surface module PRESENT + resolver PRESENT: and the tripwire is silent on a clean diff" \
   "$(classify "$OUT_CLEAN")" "silent"
 
+# =============================================================================
+# THE SECOND ESCAPE: SHELL crossed with PATH COUNT.
+# =============================================================================
+#
+# Every fixture above this line is a ONE-PATH diff and every run above this line is `bash`.
+# Both dimensions that produce the defect were pinned to their safe value in every assertion,
+# so this whole suite passed while the control it guards did not fire on the orchestrator's
+# own shell.
+#
+# The defect: the block passed the path list to the module through an UNQUOTED `$CHANGED`,
+# which relies on the shell word-splitting a parameter expansion. zsh does not do that, and
+# zsh is what the orchestrator's shell tool runs. A multi-file diff therefore arrived as ONE
+# newline-joined argument; the surface globs compile to `.`-based regexes and `.` does not
+# match a newline, so tripwireReport returned no hits and the run PROCEEDED. Measured on
+# `{db/migrate/001_add_users.rb, src/app.ts}`: bash halted, zsh was silent. This is the
+# control the whole issue exists to protect, so it gets the matrix nobody had.
+
+RUNNERS=(bash bash-nosplit)
+ZSH_PRESENT=no
+if command -v zsh >/dev/null 2>&1; then RUNNERS+=(zsh); ZSH_PRESENT=yes; fi
+
+# `bash-nosplit` is bash with IFS emptied, i.e. field splitting off: the defect condition
+# itself, in a shell every checkout has, so this dimension is never skipped for want of zsh.
+run_tripwire_in() {  # $1 = runner, $2 = plugin root, $3 = repo, $4 = block file (default: the extracted one)
+  local body=". \"${4:-$TRIPWIRE_BLOCK}\""
+  (
+    cd "$3" || return 1
+    export CLAUDE_PLUGIN_ROOT="$2" WORKTREE_PATH="$3" CLAUDE_PROJECT_DIR="$3" \
+           RISK_TIER="standard" ARTIFACT_DIR="$3/.pipeline/17"
+    case "$1" in
+      bash)         bash -c "$body" ;;
+      bash-nosplit) bash -c "IFS=; $body" ;;
+      zsh)          zsh  -c "$body" ;;
+    esac
+  ) 2>&1
+}
+
+# MULTI-path fixtures: the dimension that did not exist. Each pairs a migration path with an
+# ordinary one, which is what a real mis-tiered diff looks like.
+REPO_MULTI=$(make_diff_repo multi 'db/migrate/001_add_users.rb' 'src/app.ts')
+REPO_MULTI_CLEAN=$(make_diff_repo multiclean 'src/app.ts' 'docs/notes.txt')
+# Built directly rather than through make_diff_repo: with no paths to add, that helper's final
+# `git commit` finds nothing to commit and prints "nothing to commit" to STDOUT, which the
+# helper's `$(...)` capture folds into the returned directory name. The `cd` then fails and
+# every case reads as SILENT -- a fixture that never constructs the state it claims to test.
+REPO_EMPTY="$TEMP_PROJECT/repo-emptydiff"
+mkdir -p "$REPO_EMPTY"
+git -C "$REPO_EMPTY" init -q
+git -C "$REPO_EMPTY" -c user.email=t@t -c user.name=t commit -q --allow-empty -m base
+git -C "$REPO_EMPTY" update-ref refs/remotes/origin/main HEAD
+git -C "$REPO_EMPTY" -c user.email=t@t -c user.name=t commit -q --allow-empty -m change
+assert_eq "the empty-diff fixture really has an empty diff (else the cases below test nothing)" \
+  "$(git -C "$REPO_EMPTY" diff --name-only origin/main...HEAD | wc -l | tr -d ' ')" "0"
+
+suite "NON-ZERO CONTROL FIRST: the pre-fix shape is OBSERVED failing on exactly this matrix"
+
+# Without this, "the new block halts in every cell" is equally satisfied by a matrix that
+# cannot tell the cells apart. This is the shipped shape as of d35da61, verbatim.
+OLD_TRIPWIRE="$TEMP_PROJECT/old-tripwire-block.sh"
+cat > "$OLD_TRIPWIRE" <<'EOF'
+CHANGED="$(git -C "$WORKTREE_PATH" diff --name-only origin/main...HEAD)"
+TRIPWIRE_OUT="$(node -e 'import(process.env.CLAUDE_PLUGIN_ROOT + "/scripts/data-layer-surface.mjs").then(m=>{const r=m.tripwireReport(process.argv.slice(1));if(r.note)console.error("TRIPWIRE-NOTE: "+r.note);if(r.hits.length)console.log(r.hits.join(" "))}).catch(e=>{console.log("unevaluable: "+(e&&e.message));process.exit(1)})' $CHANGED)"
+TRIPWIRE_RC=$?
+if [ "$TRIPWIRE_RC" -ne 0 ]; then
+  echo "3-impl-tripwire-indeterminate: could not be evaluated (exit $TRIPWIRE_RC). $TRIPWIRE_OUT"
+elif [ -n "$TRIPWIRE_OUT" ]; then
+  echo "MIS-TIER: data-layer path in a $RISK_TIER diff: $TRIPWIRE_OUT"
+fi
+EOF
+
+assert_eq "the pre-fix shape HALTS on a one-path migration diff under bash (which is why it shipped)" \
+  "$(classify "$(run_tripwire_in bash "$ROOT_OK" "$REPO_DBMIG" "$OLD_TRIPWIRE")")" "mis-tier"
+assert_eq "and halts on a MULTI-path diff under bash, the only cell the old suite ever ran" \
+  "$(classify "$(run_tripwire_in bash "$ROOT_OK" "$REPO_MULTI" "$OLD_TRIPWIRE")")" "mis-tier"
+assert_eq "and on a one-path diff under a NON-SPLITTING shell: there is nothing to split" \
+  "$(classify "$(run_tripwire_in bash-nosplit "$ROOT_OK" "$REPO_DBMIG" "$OLD_TRIPWIRE")")" "mis-tier"
+# THE CELL. Both dimensions are needed; neither alone shows anything.
+assert_eq "THE DEFECT: a MULTI-path migration diff under a NON-SPLITTING shell is SILENT" \
+  "$(classify "$(run_tripwire_in bash-nosplit "$ROOT_OK" "$REPO_MULTI" "$OLD_TRIPWIRE")")" "silent"
+if [[ "$ZSH_PRESENT" == yes ]]; then
+  assert_eq "real zsh -- the orchestrator's own shell -- reproduces it: the halting control does not fire" \
+    "$(classify "$(run_tripwire_in zsh "$ROOT_OK" "$REPO_MULTI" "$OLD_TRIPWIRE")")" "silent"
+  # On the PARAMETER-expansion form -- which is the shipped defect -- the two agree exactly.
+  # They diverge on unquoted command substitution, where zsh splits and the stand-in does not;
+  # that boundary is measured and pinned in test-panel-composition-fail-direction.sh, and the
+  # divergence runs in the safe direction (the stand-in splits strictly less, so it reddens on
+  # every shape zsh reddens on).
+  assert_eq "and the stand-in reproduces it byte-for-byte on this form" \
+    "$(run_tripwire_in zsh "$ROOT_OK" "$REPO_MULTI" "$OLD_TRIPWIRE")" \
+    "$(run_tripwire_in bash-nosplit "$ROOT_OK" "$REPO_MULTI" "$OLD_TRIPWIRE")"
+else
+  assert_eq "zsh is ABSENT on this machine: the real-zsh cells were NOT RUN (the stand-in covers the condition)" \
+    "not-run" "not-run"
+fi
+
+suite "THE FIX: the shipped tripwire gives the same verdict in every cell of shell x path count"
+
+for runner in "${RUNNERS[@]}"; do
+  assert_eq "[$runner] one-path migration diff HALTS" \
+    "$(classify "$(run_tripwire_in "$runner" "$ROOT_OK" "$REPO_DBMIG")")" "mis-tier"
+  assert_eq "[$runner] MULTI-path migration diff HALTS (the cell the escape lived in)" \
+    "$(classify "$(run_tripwire_in "$runner" "$ROOT_OK" "$REPO_MULTI")")" "mis-tier"
+  # OVER-REFUSAL CONTROL in the same column: a block that halted unconditionally would pass
+  # both cells above, so each column carries its own negative at both path counts.
+  assert_eq "[$runner] one-path clean diff is SILENT" \
+    "$(classify "$(run_tripwire_in "$runner" "$ROOT_OK" "$REPO_CLEAN")")" "silent"
+  assert_eq "[$runner] MULTI-path clean diff is SILENT" \
+    "$(classify "$(run_tripwire_in "$runner" "$ROOT_OK" "$REPO_MULTI_CLEAN")")" "silent"
+  # And the fail-closed direction survives the new plumbing, at both path counts.
+  assert_eq "[$runner] a stale plugin root still halts as INDETERMINATE on a multi-path diff" \
+    "$(classify "$(run_tripwire_in "$runner" "$ROOT_STALE" "$REPO_MULTI")")" "indeterminate"
+done
+
+suite "an unreadable or empty path list is INDETERMINATE, never a clean diff"
+
+# git's own exit status, which `CHANGED="$(git ...)"` discarded. A WORKTREE_PATH that is not a
+# repository and a repository with no origin/main ref both print `fatal:` and yield an EMPTY
+# list on stdout -- byte-identical to a clean diff. The second appears in this repository's own
+# CI log, so it is not hypothetical.
+REPO_NO_REMOTE="$TEMP_PROJECT/repo-no-origin-main"
+mkdir -p "$REPO_NO_REMOTE"
+git -C "$REPO_NO_REMOTE" init -q
+git -C "$REPO_NO_REMOTE" -c user.email=t@t -c user.name=t commit -q --allow-empty -m only
+for runner in "${RUNNERS[@]}"; do
+  assert_eq "[$runner] a diff with NO paths at all HALTS as indeterminate, not as clean" \
+    "$(classify "$(run_tripwire_in "$runner" "$ROOT_OK" "$REPO_EMPTY")")" "indeterminate"
+  assert_eq "[$runner] a repo with no origin/main ref HALTS as indeterminate" \
+    "$(classify "$(run_tripwire_in "$runner" "$ROOT_OK" "$REPO_NO_REMOTE")")" "indeterminate"
+done
+assert_contains "and the git failure is named with its own exit status, distinct from the module's" \
+  "$(run_tripwire_in bash "$ROOT_OK" "$REPO_NO_REMOTE")" \
+  "3-impl-tripwire-indeterminate: git diff --name-only -z exited"
+# The two indeterminate causes stay DISTINGUISHABLE: they need different operator responses
+# (fix your worktree, versus fix your plugin root).
+assert_contains "a stale plugin root names the module instead" \
+  "$(run_tripwire_in bash "$ROOT_STALE" "$REPO_DBMIG")" \
+  "the data-layer surface module under"
+# NON-ZERO CONTROL for the pair above: the same block, same runner, on a healthy repo and root,
+# says neither -- so "names the git failure" is a verdict rather than a string that always appears.
+assert_eq "CONTROL: a healthy root and a readable one-path clean diff say neither" \
+  "$(classify "$(run_tripwire_in bash "$ROOT_OK" "$REPO_CLEAN")")" "silent"
+# The halt message carries no absolute filesystem path: it is recorded into status.json, which
+# is committed and archived verbatim.
+assert_eq "the git-failure halt message carries no absolute path (status.json is archived verbatim)" \
+  "$(run_tripwire_in bash "$ROOT_OK" "$REPO_NO_REMOTE" | grep -c "$TEMP_PROJECT" | tr -d ' ')" "0"
+
 suite "DBA nit: tripwireReport never returns a HIT and 'it cannot fire here' at the same time"
 
 # tripwireReport() had zero direct coverage. It returned `hits` and the zero-match note
