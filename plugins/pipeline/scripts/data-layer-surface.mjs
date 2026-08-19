@@ -267,10 +267,17 @@ export function tripwireReport(changedPaths, dir) {
   const globs = migrationGlobsForTripwire(cfg);
   const hits = (changedPaths || []).filter((p) => isMigrationPath(p, globs));
   let note = null;
-  const tracked = trackedPaths(root);
-  if (tracked && !tracked.some((p) => isMigrationPath(p, globs))) {
-    note =
-      "the mis-tier tripwire's effective glob set matches zero tracked files in this repository, so it cannot fire here";
+  // The note is SUPPRESSED whenever there are hits, because pipeline.md tells the orchestrator
+  // to file it in status.json (`flags`): a run that halted ON a tripwire hit would otherwise
+  // record a flag saying the tripwire cannot fire here. The two statements were computed over
+  // different populations (the changed paths, and the tracked tree), so they could both be
+  // emitted and contradict each other in the same object.
+  if (hits.length === 0) {
+    const tracked = trackedPaths(root);
+    if (tracked && !tracked.some((p) => isMigrationPath(p, globs))) {
+      note =
+        "the mis-tier tripwire's effective glob set matches zero tracked files in this repository, so it cannot fire here";
+    }
   }
   return { hits, note };
 }
