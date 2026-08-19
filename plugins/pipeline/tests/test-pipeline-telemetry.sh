@@ -137,10 +137,17 @@ LEAK_CHECK="$TEMP_PROJECT/leak-check.mjs"
 cat > "$LEAK_CHECK" <<'EOF'
 // Counts strings in a telemetry-shaped object that are neither a declared field name nor a
 // declared phase label. Run over telemetry() output, and over a crafted object as its control.
+import { readFileSync } from "node:fs";
 const d = await import(process.env.DISPATCH);
+// The field names come from the SCHEMA, not from a list hand-copied into this file. A copied
+// list tracks whoever last remembered to update it: adding a field to telemetry() without
+// touching this line used to redden here for the wrong reason, reporting a "leak" that was
+// really a stale allowlist. Read from the schema, the check stays about leaks, and a field
+// that telemetry() emits without declaring is still caught -- by the closed-object assertion
+// and the emitted-keys-are-declared assertion further down, which are its two other halves.
+const schema = JSON.parse(readFileSync(process.env.SCHEMA, "utf8"));
 const allowed = new Set([
-  "phase_elapsed_ms", "total_lead_time_ms", "unattributed_ms", "unattributed_events",
-  "review_rounds", "events_counted", ...d.KNOWN_PHASES,
+  ...Object.keys(schema.properties.telemetry.properties), ...d.KNOWN_PHASES,
 ]);
 let obj;
 if (process.env.OBJ) {
@@ -151,13 +158,13 @@ if (process.env.OBJ) {
 }
 console.log(JSON.stringify(obj).match(/"[^"]*"/g).map((s) => s.slice(1, -1)).filter((s) => !allowed.has(s)).length);
 EOF
-notes_leaked() { MOD="$TELEMETRY" DISPATCH="$SCRIPTS_DIR/dispatch-model.mjs" FIX="$1" node "$LEAK_CHECK"; }
+notes_leaked() { MOD="$TELEMETRY" DISPATCH="$SCRIPTS_DIR/dispatch-model.mjs" SCHEMA="$SCHEMA" FIX="$1" node "$LEAK_CHECK"; }
 assert_eq "and nothing it emits is a free-text note, a path, or a command string" \
   "$(notes_leaked "$FIX")" "0"
 assert_eq "including on the suffixed 3a/3b shape, whose keys are declared phases and not free text" \
   "$(notes_leaked "$FIX_SUFFIXED")" "0"
 assert_eq "CONTROL: the same check reports 4 on an object carrying a note and a path (two keys, two values)" \
-  "$(DISPATCH="$SCRIPTS_DIR/dispatch-model.mjs" OBJ='{"phase_elapsed_ms":{"3a":1},"note":"loop back to BA","worktree_path":"/Users/x/wt"}' node "$LEAK_CHECK")" \
+  "$(DISPATCH="$SCRIPTS_DIR/dispatch-model.mjs" SCHEMA="$SCHEMA" OBJ='{"phase_elapsed_ms":{"3a":1},"note":"loop back to BA","worktree_path":"/Users/x/wt"}' node "$LEAK_CHECK")" \
   "4"
 
 # =============================================================================
@@ -191,6 +198,7 @@ const balances = sum + t.unattributed_ms === t.total_lead_time_ms;
 console.log(JSON.stringify({
   balances, sum, unattributed_ms: t.unattributed_ms,
   unattributed_events: t.unattributed_events,
+  untimed_events: t.untimed_events, events_counted: t.events_counted,
   total: t.total_lead_time_ms, keys: Object.keys(t.phase_elapsed_ms).sort().join(","),
   gap: t.total_lead_time_ms - sum,
 }));
@@ -276,6 +284,89 @@ assert_eq "events with no timestamps yield a null lead time" \
      const t = m.telemetry({events:[{phase:"1-ba"},{phase:"3a-qa-tests"}]});
      console.log(String(t.total_lead_time_ms) + "/" + t.unattributed_ms + "/" + t.events_counted);
    ')" "null/0/0"
+
+# (4c) THE MIXED CASE, which is where the partition was VACUOUS. Only the all-untimed shape
+# above was ever tested, and it is the one shape where the omission cannot show: with zero
+# timed events there is no lead time at all, so the honest null is returned either way.
+#
+# The defect: every figure -- total_lead_time_ms INCLUDED -- is computed over the SURVIVING
+# events, so a dropped event shrinks the numerator and the denominator together. The partition
+# then balances perfectly and reports unattributed_ms: 0 while an event has vanished. It is a
+# true statement about a population that quietly lost a member, and the balance is what makes
+# it convincing. QA's fixture, exactly: three events, the middle one with an unparseable `at`.
+MIXED='{"events":[
+  {"phase":"1-ba","at":"2026-08-01T00:00:00Z"},
+  {"phase":"3a-qa-tests","at":"not-a-date"},
+  {"phase":"5-archive","at":"2026-08-01T02:00:00Z"}]}'
+MIXED_OUT=$(part "$MIXED")
+assert_eq "the mixed record still balances -- which is exactly why the balance alone proves nothing" \
+  "$(field "$MIXED_OUT" balances)" "true"
+assert_eq "and reports zero unattributed time, because the dropped event carried no duration" \
+  "$(field "$MIXED_OUT" unattributed_ms)" "0"
+# THE REPAIR: the drop is now a visible number instead of an absence.
+assert_eq "the dropped event is COUNTED, so the balance above is read against what it covered" \
+  "$(MOD="$TELEMETRY" FIX="$MIXED" node --input-type=module -e '
+     const m = await import(process.env.MOD);
+     console.log(String(m.telemetry(JSON.parse(process.env.FIX)).untimed_events));
+   ')" "1"
+assert_eq "and events_counted says how many survived, so the two numbers can be compared" \
+  "$(field "$MIXED_OUT" events_counted)" "2"
+# NON-ZERO CONTROL, and it is what makes untimed_events a verdict rather than a constant: a
+# record whose every event parses reports ZERO.
+assert_eq "CONTROL: a record with no dropped events reports untimed_events 0" \
+  "$(MOD="$TELEMETRY" FIX="$REAL" node --input-type=module -e '
+     const m = await import(process.env.MOD);
+     console.log(String(m.telemetry(JSON.parse(process.env.FIX)).untimed_events));
+   ')" "0"
+# The second spelling of "dropped": a non-string phase. Both filters feed the same counter, so
+# a battery over one spelling does not stand in for the other.
+assert_eq "an event with a NON-STRING phase is counted as dropped too, not only a bad timestamp" \
+  "$(MOD="$TELEMETRY" node --input-type=module -e '
+     const m = await import(process.env.MOD);
+     const t = m.telemetry({events:[
+       {phase:"1-ba",at:"2026-08-01T00:00:00Z"},
+       {phase:42,at:"2026-08-01T01:00:00Z"},
+       {phase:"5-archive",at:"2026-08-01T02:00:00Z"}]});
+     console.log(t.untimed_events + "/" + t.events_counted + "/" + t.total_lead_time_ms);
+   ')" "1/2/7200000"
+# The all-untimed shape, which is the one the suite already had: it must ALSO report the count,
+# or the repair covers every case except the one that was already tested.
+assert_eq "the all-untimed record reports its drops as well" \
+  "$(MOD="$TELEMETRY" node --input-type=module -e '
+     const m = await import(process.env.MOD);
+     const t = m.telemetry({events:[{phase:"1-ba"},{phase:"3a-qa-tests"}]});
+     console.log(t.untimed_events + "/" + String(t.total_lead_time_ms));
+   ')" "2/null"
+# And the schema admits the field, or the orchestrator's write of this record is refused.
+assert_eq "the schema declares untimed_events as a bounded integer" \
+  "$(SCHEMA="$SCHEMA" node --input-type=module -e '
+     import { readFileSync } from "node:fs";
+     const s = JSON.parse(readFileSync(process.env.SCHEMA, "utf8"));
+     const p = s.properties.telemetry.properties.untimed_events;
+     console.log(p ? p.type + "/" + p.minimum : "ABSENT");
+   ')" "integer/0"
+# ...and telemetry is a CLOSED object, so an undeclared field would be a validation failure
+# rather than a silently accepted one. That closure is what makes the assertion above matter.
+assert_eq "telemetry is closed (additionalProperties false), so a new field must be declared" \
+  "$(SCHEMA="$SCHEMA" node --input-type=module -e '
+     import { readFileSync } from "node:fs";
+     const s = JSON.parse(readFileSync(process.env.SCHEMA, "utf8"));
+     console.log(String(s.properties.telemetry.additionalProperties));
+   ')" "false"
+# Every key telemetry() emits is declared, checked as a SET rather than one remembered name:
+# the next field added is caught here whether or not anyone remembers this assertion.
+assert_eq "every key telemetry() returns is declared in the schema" \
+  "$(MOD="$TELEMETRY" SCHEMA="$SCHEMA" node --input-type=module -e '
+     import { readFileSync } from "node:fs";
+     const m = await import(process.env.MOD);
+     const s = JSON.parse(readFileSync(process.env.SCHEMA, "utf8"));
+     const declared = Object.keys(s.properties.telemetry.properties);
+     const emitted = Object.keys(m.telemetry({events:[
+       {phase:"1-ba",at:"2026-08-01T00:00:00Z"},{phase:"5-archive",at:"2026-08-01T01:00:00Z"}]}));
+     const undeclared = emitted.filter(k => !declared.includes(k));
+     console.log(undeclared.length ? "undeclared:" + undeclared.join(",") : "all-declared");
+   ')" "all-declared"
+
 assert_eq "no phase is credited a negative duration" \
   "$(MOD="$TELEMETRY" FIX="$BACKWARDS" node --input-type=module -e '
      const m = await import(process.env.MOD);

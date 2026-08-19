@@ -77,6 +77,7 @@
         "total_lead_time_ms": {"type": ["integer", "null"], "minimum": 0},
         "unattributed_ms": {"type": "integer", "description": "Milliseconds between events that no phase key could absorb. sum(phase_elapsed_ms) + unattributed_ms == total_lead_time_ms holds by construction, so a phase label this pipeline writes but KNOWN_PHASES does not declare shows up here as a visible number instead of being silently dropped. Negative only when events[] timestamps run backwards, which is itself the signal."},
         "unattributed_events": {"type": "integer", "minimum": 0, "description": "How many event boundaries contributed to unattributed_ms."},
+        "untimed_events": {"type": "integer", "minimum": 0, "description": "How many events[] entries were DROPPED before any figure above was computed, because their `at` was unparseable or their `phase` was not a string. Every other number here, total_lead_time_ms INCLUDED, is computed over the surviving events, so the partition balances whether this is 0 or 20 -- a true statement about a population that quietly lost a member. It cannot be folded into unattributed_ms, because an event with no timestamp contributes no duration to attribute, so it is reported as its own count."},
         "review_rounds": {"type": "integer", "minimum": 0},
         "events_counted": {"type": "integer", "minimum": 0}
       }
