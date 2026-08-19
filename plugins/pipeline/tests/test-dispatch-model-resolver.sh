@@ -219,8 +219,17 @@ assert_eq "raising design_review from its default to opus is HONORED (not clampe
   "$(emission "$R_RAISE" design_review standard 4)" "emit:opus"
 assert_eq "lowering ba to an allowlisted haiku is HONORED (the pin is not a global floor)" \
   "$(emission "$R_LOWER" ba standard 4)" "emit:haiku"
-assert_eq "and the no-key rule did NOT become 'emit no key for anyone'" \
-  "$(emission "$R_NONE" dev 4 4 2>/dev/null; emission "$R_NONE" ba standard 4)" "emit:sonnet"
+# The no-key rule did NOT become "emit no key for anyone". That is a DISCRIMINATION claim, so
+# it needs both directions asserted separately: a resolver that omits for everyone passes the
+# negative alone, and one that emits for everyone passes the positive alone. Only the pair
+# pins the boundary. (These were one assertion whose two `emission` calls shared a command
+# substitution, so their outputs concatenated -- `omitemit:sonnet` against a single-token
+# expectation, unsatisfiable by any implementation, since `emission` never prints an empty
+# string in any cell of its input space.)
+assert_eq "not-for-anyone, negative half: a malformed risk_tier omits the key (caller bug)" \
+  "$(emission "$R_NONE" dev 4 4)" "omit"
+assert_eq "not-for-anyone, positive half: the SAME resolver still emits for a healthy call" \
+  "$(emission "$R_NONE" ba standard 4)" "emit:sonnet"
 
 # =============================================================================
 # AC30 -- RESOLVER FAILURE OMITS THE MODEL KEY. One rule, five failure classes.

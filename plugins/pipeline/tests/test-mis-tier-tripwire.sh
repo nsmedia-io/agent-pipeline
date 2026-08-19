@@ -412,8 +412,25 @@ assert_eq "half 2 (FAIL OPEN): the SAME absent-module condition makes the dispat
 
 suite "AC38: the other three cells of the matrix, so the composite is not a single lucky cell"
 
-assert_eq "surface module PRESENT + resolver ABSENT: the dispatch still omits" \
-  "$(emission "$ROOT_ABSENT" dev standard 4)" "omit"
+# THE DECOUPLING CELL, and the only one in either suite that can catch C1 being violated.
+# ROOT_ABSENT is the surface module removed with the resolver left healthy, so it is the SAME
+# root that halts the tripwire at the two assertions above (surface absent => indeterminate, on
+# both a data-layer diff and a clean one). The two fail directions therefore meet on one root:
+# the condition that HALTS the tripwire must leave the dispatch EMITTING. An implementer who
+# unifies the directions -- importing the surface module from the resolver, or guarding both
+# consumers behind one presence check -- reddens here and nowhere else: both-absent (composite,
+# above) and both-present (control, below) stay green under that defect because neither
+# separates the two modules.
+#
+# THE FOURTH CELL (resolver ABSENT + surface PRESENT) IS DELETED RATHER THAN ASSERTED. It is
+# not a cell that can fail independently: with the resolver gone there is no code left to
+# consult the surface module, so the observation is `node <missing file>` either way. Measured
+# on both fixtures, the rc and stdout are identical -- rc=1, empty stdout -- which is byte for
+# byte what ROOT_STALE already asserts as half 2 of the composite, and what the resolver
+# suite's own absent-script case asserts again. Keeping it would add a green that no defect can
+# turn red: coverage in appearance, a duplicate in fact.
+assert_eq "surface module ABSENT + resolver PRESENT: the dispatch still EMITS (the fail directions stay separate)" \
+  "$(emission "$ROOT_ABSENT" dev standard 4)" "emit"
 # NON-ZERO CONTROL for the whole omit column: a healthy resolver must be observed EMITTING,
 # or every "omit" above is satisfied by a resolver that can never emit anything.
 assert_eq "surface module PRESENT + resolver PRESENT: the resolver EMITS a token" \
