@@ -13,11 +13,15 @@
  *       requirement_checks entry in impl-report.json.
  *   (c) any migration file ADDED in the diff has BOTH an up section and a down section.
  *       # CUSTOMIZE: migration detection is OPT-IN and configurable. Added files are
- *       matched against `migrationGlobs` in pipeline.config.json (default
- *       ["**\/migrations/**"]). A project with no migrations directory matches nothing, so
- *       the check is a no-op. `migrationGlobs: []` disables only the DISCOVERY of migrations
- *       from the impl-report; a path passed explicitly via --migrations-added is still
- *       checked, so the config cannot be used to disarm this gate for a named migration. The
+ *       matched by migrationGlobsForGate in data-layer-surface.mjs: `migrationGlobs` from
+ *       pipeline.config.json REPLACES the built-in framework-preset union (Rails, Django,
+ *       Alembic, Prisma, Drizzle, Supabase, Flyway, Liquibase, EF Core, Laravel), and
+ *       `extraMigrationGlobs` unions on top of whichever set applies. A project with no
+ *       migrations matches nothing, so the check is a no-op. `migrationGlobs: []` disables
+ *       only the DISCOVERY of migrations from the impl-report; a path passed explicitly via
+ *       --migrations-added is still checked, so the config cannot be used to disarm this
+ *       gate for a named migration, and it does NOT disable the mis-tier tripwire, which
+ *       reads the same key through a UNION resolver. The
  *       down-section marker defaults to a SQL line comment (`-- DOWN`); override it with
  *       `migrationDownMarker` if your rollback convention differs. A configured marker is
  *       ADDITIVE, not exclusive: the builtin `-- DOWN` keeps working alongside it.
@@ -53,7 +57,11 @@ import { isMain as isMainScript } from "./lib.mjs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { validate, tokens, acLabels } from "./validate-pipeline-artifact.mjs";
-import { globToRegExp } from "./frontend-surface.mjs";
+import {
+  DEFAULT_MIGRATION_GLOBS,
+  isMigrationPath,
+  migrationGlobsForGate,
+} from "./data-layer-surface.mjs";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 // Schemas ship WITH the plugin (../schemas), independent of the user's project.
@@ -61,8 +69,8 @@ const SCHEMA_DIR = path.resolve(SCRIPT_DIR, "..", "schemas");
 // Runtime artifacts live in the USER project's .pipeline/<issue>/ (gitignored).
 const PROJECT_ROOT = process.env.CLAUDE_PROJECT_DIR || process.cwd();
 
-// # CUSTOMIZE: which added files count as migrations, and the down-section marker.
-const DEFAULT_MIGRATION_GLOBS = ["**/migrations/**"];
+// # CUSTOMIZE: which added files count as migrations lives in data-layer-surface.mjs (the
+// SINGLE source of truth for that predicate); only the down-section marker is local.
 const DEFAULT_DOWN_MARKER = "-- DOWN";
 
 // Read pipeline.config.json (project root). A missing or malformed config is not an error:
@@ -77,12 +85,16 @@ function readPipelineConfig() {
   }
 }
 
-function migrationGlobsFromConfig(cfg) {
-  const globs = cfg && cfg.migrationGlobs;
-  // An explicit [] disables the migration check; anything invalid falls back to the default.
-  if (Array.isArray(globs) && globs.every((g) => typeof g === "string")) return globs;
-  return DEFAULT_MIGRATION_GLOBS;
-}
+// Glob resolution is migrationGlobsForGate's, in data-layer-surface.mjs: REPLACE semantics,
+// so an explicit [] disables DISCOVERY of migrations from the impl-report and a custom array
+// matches only what it names. It does NOT disable the check for a path passed explicitly via
+// --migrations-added, which is read before any glob test.
+//
+// TWO OTHER CONSUMERS READ THE SAME KEY WITH DIFFERENT SEMANTICS, so a narrowing here is not
+// a narrowing everywhere: migrationGlobsForTripwire UNIONS `migrationGlobs` with the built-in
+// presets (the mis-tier tripwire can only ever be WIDENED by config, never narrowed, and an
+// explicit [] does not disable it), and `extraMigrationGlobs` unions additively into this
+// resolver as well as that one.
 
 function downMarkerFromConfig(cfg) {
   const m = cfg && cfg.migrationDownMarker;
@@ -180,12 +192,9 @@ function loadSchema() {
 // in collectMigrationSources) would falsely HALT the gate. This mirrors the exemption
 // groundFilesChanged() applies in validate-pipeline-artifact.mjs.
 export function migrationFilesFromReport(report, rootDir, globs = DEFAULT_MIGRATION_GLOBS) {
-  const regexes = (globs || []).map(globToRegExp);
-  if (regexes.length === 0) return []; // migrations disabled: nothing to infer
-  const isMig = (f) => {
-    const norm = f.replace(/\\/g, "/").replace(/^\.\//, "");
-    return regexes.some((re) => re.test(norm));
-  };
+  const list = globs || [];
+  if (list.length === 0) return []; // migrations disabled: nothing to infer
+  const isMig = (f) => isMigrationPath(f, list);
   const out = new Set();
   const topRemoved = new Set((report.files_removed || []).filter((f) => typeof f === "string"));
   for (const commit of report.commits || []) {
@@ -320,7 +329,7 @@ async function main() {
   const specData = loadJsonOrThrow(spec, "spec.json");
   const schema = loadSchema();
   const cfg = readPipelineConfig();
-  const globs = migrationGlobsFromConfig(cfg);
+  const globs = migrationGlobsForGate(cfg);
   const downMarker = downMarkerFromConfig(cfg);
   const migrationSources = collectMigrationSources(args, report, globs);
 

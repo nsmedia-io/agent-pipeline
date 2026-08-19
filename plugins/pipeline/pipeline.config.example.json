@@ -17,7 +17,7 @@
     "**/styles/**"
   ],
 
-  "migrationGlobs": ["**/migrations/**"],
+  "_migrationGlobs_comment": "NOT SET ON PURPOSE. The built-in fifteen-row framework-preset union (Rails, Django, Alembic, Prisma, Drizzle, Supabase, Flyway, Liquibase, EF Core, Laravel, plus the generic declarative dumps) already applies. Setting `migrationGlobs` REPLACES that union for the pre-Phase-4 gate's migration discovery, so a copied one-pattern value would make the gate discover nothing for most layouts while the mis-tier tripwire still fires. To ADD your own layout, set `extraMigrationGlobs` (additive everywhere, never replaces). Set `migrationGlobs` only when you specifically want to NARROW gate discovery.",
 
   "migrationDownMarker": "-- DOWN",
 
