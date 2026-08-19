@@ -531,7 +531,7 @@ node ${CLAUDE_PLUGIN_ROOT}/scripts/gate-pre-phase4.mjs --issue <issue> \
   --spec "$ARTIFACT_DIR/spec.json"
 ```
 
-If the gate exits non-zero (absent or unparseable artifact, schema violation, an acceptance criterion with no covering `requirement_check`, or a migration missing its down section), HALT:
+If the gate exits non-zero (absent or unparseable artifact, schema violation, an acceptance criterion with no covering `requirement_check`, a migration missing its down section, a down region that contains executable SQL, or a down region the gate cannot classify because of an unterminated block comment), HALT:
 - Update `status.json` with `current_phase: "3-impl-gate-failed"` and the gate's stderr summary.
 - Return to the owner, loop back to Phase 3 (Dev) to fix the artifact or implementation. Re-run the gate before retrying the panel.
 

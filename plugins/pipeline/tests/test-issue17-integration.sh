@@ -959,17 +959,26 @@ assert_contains "the behavioral rationale survives" "$(cat "$GATE_SUITE")" \
   "a discovery FILTER must never override an"
 assert_contains "and so does the 'if this case ever goes red' instruction" "$(cat "$GATE_SUITE")" \
   "that change would be a bypass on a fail-closed gate"
-assert_eq "the executable-down boundary now points at #16" \
-  "$(grep -c 'Tracked as follow-up issue #16' "$GATE_SUITE" | tr -d ' ')" "1"
-assert_eq "and no longer at issue 4" "$(grep -c 'Tracked as follow-up issue 4' "$GATE_SUITE" | tr -d ' ')" "0"
+# UPDATED, not deleted, when issue #30 closed the executable-down gap: the site no longer
+# points at a TRACKED gap, because there is no longer a gap to track. It now asserts the
+# CLOSED state -- the case survives, inverted, stating the guarantee. Asserting the absence of
+# the tracking pointer AND the presence of the guarantee is what keeps "the gap closed" and
+# "somebody deleted the case" from looking the same from this file.
+assert_eq "the executable-down case no longer points at a tracked follow-up" \
+  "$(grep -c 'Tracked as follow-up issue' "$GATE_SUITE" | tr -d ' ')" "0"
+assert_contains "and states the executable-down GUARANTEE in its place" "$(cat "$GATE_SUITE")" \
+  "an executable (uncommented) down region now halts"
 
 # The pointer is resolved against the ISSUE'S TITLE, not by asserting a digit is present: #4
-# is a merged voice fix, and a digit-only check would have accepted it. Skipped, loudly, when
+# is a merged voice fix, and a digit-only check would have accepted it. It stays a LIVE lookup
+# after the close, because the title is what identifies WHICH gap the guarantee above closed;
+# a hand-copied title would restate the contract instead of observing it. Skipped, loudly, when
 # no GitHub CLI credential is available, because an unauthenticated `gh` cannot distinguish
 # "the title does not match" from "I could not look".
 if gh issue view 16 --json title >/dev/null 2>&1; then
   TITLE16="$(gh issue view 16 --json title -q .title 2>/dev/null)"
-  assert_contains "#16's live title is about the gap the comment describes" "$TITLE16" "executable down section"
+  assert_contains "#16's live title names the executable down section the gate now refuses" \
+    "$TITLE16" "executable down section"
 else
   assert_eq "gh is unavailable, so the title resolution is UNVERIFIED here (not passed)" \
     "gh-unavailable: title not resolved" "gh-unavailable: title not resolved"
