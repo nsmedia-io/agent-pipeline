@@ -1,0 +1,12 @@
+{
+  "issue_number": null,
+  "current_phase": "1-ba",
+  "started_at": "2026-08-19T18:00:00Z",
+  "updated_at": "2026-08-19T18:00:00Z",
+  "branch": "fix/enforce-what-we-claim",
+  "ask_text": "Close the remaining controls that claim more than they enforce: #16 gate accepts an executable down section, #21 config-path tier trigger unenforced, #22 corpus blind to untracked records, #23 telemetry attributes every phase to the wrong slot.",
+  "risk_tier": "architectural",
+  "review_rounds": 0,
+  "events": [{"phase":"0.5-map","verdict":"complete","at":"2026-08-19T18:00:00Z","note":"sonnet map via dispatch-model.mjs; #22 stale, #23 reproduced (10 failures), #16 convention authoritative in 3 places"}],
+  "flags": []
+}
