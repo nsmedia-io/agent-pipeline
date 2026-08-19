@@ -315,6 +315,54 @@ assert_contains "AC4: and its own remedy (close the block, or reflow to \`--\`)"
 # two classifications are distinguishable only to a reader who already knows the answer.
 assert_not_contains "AC4: and is NOT reported as the executable case" "$ERR" "executable SQL"
 
+suite "gate down-region classifier: AC4(b) -- a lone CR ends a \`--\` comment, as PostgreSQL says"
+
+# THE FOURTH FAIL-OPEN OF THIS CLASS, and the same shape as (g), (h) and (k): a token a target
+# dialect treats as ENDING a comment that the scan did not. PostgreSQL's lexer defines the body
+# of a line comment as `[^\n\r]`, so a lone CR (0x0D) ends it and the server parses what follows
+# as SQL. A scan that ran to the next LF strips that SQL as commentary: the cell below
+# classified CLEAN and the gate exited 0 on a live DROP, against this project's own dialect.
+#
+# The pair is ONE BYTE APART, which is the whole finding: the LF twin below was refused all
+# along, so nothing about the shape of the text made it safe -- only the byte.
+run_cell ac4b-cr "migrations/04l.sql" "-- rollback note"$'\r'"drop table users;
+"
+assert_eq "AC4(b): a lone CR mid-comment-line => executable, RC=1" "$RC" "1"
+assert_not_schema "AC4(b)"
+assert_contains "AC4(b): the halt names the classification" "$ERR" "executable"
+assert_contains "AC4(b): and the line the CR is on" "$ERR" "line 3"
+assert_contains "AC4(b): and quotes the SQL that follows the CR" "$ERR" "drop table users;"
+# MESSAGE AXIS. The quoted line is the only place the CR is visible, and a RAW CR returns the
+# terminal's cursor to column 1: the halt would render as `drop table users;` alone, hiding the
+# `--` the author believed commented it out and making the message argue AGAINST itself.
+assert_contains "AC4(b) MESSAGE: the CR is shown escaped in the quoted line" "$ERR" '\r'
+assert_not_contains "AC4(b) MESSAGE: and not emitted raw, which would overwrite the quoted line" \
+  "$ERR" $'\r'
+
+# CONTROL 1, THE ONE-BYTE TWIN: the identical text with LF instead of CR. It was refused before
+# this rule and is refused after it, at line 4 rather than line 3. Without it, the cell above
+# could be reddening because the region contains `drop table users;` at all.
+run_cell ac4b-lf "migrations/04l2.sql" "-- rollback note
+drop table users;
+"
+assert_eq "AC4(b) CONTROL: the LF twin is refused too (it always was)" "$RC" "1"
+assert_contains "AC4(b) CONTROL: but one line LATER, so the two cells are distinguishable" "$ERR" "line 4"
+
+# CONTROL 2, WHAT THE RULE REFUSES AND NOTHING MORE: a CR that ends a comment line with only
+# more commentary after it stays CLEAN. The refusal is the RESIDUE after the CR, not the CR.
+run_cell ac4b-cr-clean "migrations/04l3.sql" "-- rollback note"$'\r'"-- restore via PITR
+"
+assert_eq "AC4(b) CONTROL: a CR followed by more commentary still classifies clean, RC=0" "$RC" "0"
+
+# CONTROL 3, THE POPULATION THIS COULD HAVE BROKEN: a wholly CRLF file. Every line ends CR LF,
+# so a rule that treated CR as anything but a terminator would false-halt every migration
+# written on Windows -- a far larger population than the one the cell above refuses.
+run_cell ac4b-crlf "migrations/04l4.sql" $'-- rollback note\r\n-- restore via PITR\r\n'
+assert_eq "AC4(b) CONTROL: a CRLF region of pure comments is untouched, RC=0" "$RC" "0"
+run_cell ac4b-crlf-exec "migrations/04l5.sql" $'-- rollback note\r\ndrop table users;\r\n'
+assert_eq "AC4(b) CONTROL: and a CRLF region with real SQL still halts, RC=1" "$RC" "1"
+assert_contains "AC4(b) CONTROL: naming the SQL line, not the comment above it" "$ERR" "line 4"
+
 suite "gate down-region classifier: AC21 -- the region starts at the end of the marker LINE"
 
 # AC21 restates cell (j) as its own criterion because the failure it prevents is total: under
@@ -371,5 +419,10 @@ assert_contains "AC22: naming SQLite as a reason" "$DOCSTRING" "SQLite"
 assert_contains "AC22: naming SQL Server (T-SQL) among the NESTING dialects" "$DOCSTRING" "T-SQL"
 assert_contains "AC22: and stating that \`/*!\` openers are refused" "$DOCSTRING" "/*!"
 assert_contains "AC22: and \`/*M!\` openers too" "$DOCSTRING" "/*M!"
+# The CR rule is prose the next reader is most likely to "simplify" back: scanning a line
+# comment to the newline is what everybody writes, and the byte that makes it wrong is
+# invisible in a diff. So the docstring must keep SAYING which characters end the comment.
+assert_contains "AC22: and that a \`--\` comment ends at the first CR **or** LF" \
+  "$DOCSTRING" '`[^\n\r]`'
 
 finish

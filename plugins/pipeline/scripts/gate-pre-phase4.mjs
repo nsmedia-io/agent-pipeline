@@ -40,6 +40,14 @@
  *       line, a bare `drop table foo;` line, and a `--` close-toggle line) stripping block
  *       comments first reads all three as commented and hands a database a live DROP.
  *
+ *       A `--` COMMENT ENDS AT THE FIRST CR **OR** LF, not at LF alone. PostgreSQL's lexer
+ *       defines the comment body as `[^\n\r]`, so on a lone CR (0x0D) the server resumes
+ *       parsing SQL mid-line while MySQL/MariaDB and SQLite read on to the LF. That is a
+ *       divergence, so it resolves the strict way per the rule below: `-- note<CR>drop table
+ *       users;` is EXECUTABLE. Scanning to LF alone made those bytes classify `clean` and the
+ *       gate accept a live DROP, one byte away from the same text with an LF, which it refused.
+ *       CRLF is unaffected -- the CR ends the comment and the LF is skipped as whitespace.
+ *
  *       Block comments do not nest here: the first close delimiter closes, whatever the depth.
  *       That is not a PostgreSQL emulation, it is the >= strict reading. PostgreSQL and SQL
  *       Server (T-SQL) count nesting; MySQL/MariaDB, SQLite and Oracle do not, so where an
@@ -200,7 +208,14 @@ function lineColAt(sql, index) {
 function lineTextAt(sql, index) {
   const from = sql.lastIndexOf("\n", index) + 1;
   const to = sql.indexOf("\n", index);
-  return sql.slice(from, to === -1 ? sql.length : to).replace(/\r$/, "");
+  // A CR that TERMINATES the line is CRLF and carries no information. One in the MIDDLE is why
+  // the line is being quoted at all, and printing it raw makes the terminal overwrite the text
+  // before it -- the quoted line would render as the live SQL alone, hiding the `--` the author
+  // thought commented it out.
+  return sql
+    .slice(from, to === -1 ? sql.length : to)
+    .replace(/\r$/, "")
+    .replace(/\r/g, "\\r");
 }
 
 /**
@@ -226,8 +241,13 @@ export function classifyDownRegion(sql, marker = DEFAULT_DOWN_MARKER) {
       continue;
     }
     if (ch === "-" && sql[i + 1] === "-") {
-      const nl = sql.indexOf("\n", i);
-      i = nl === -1 ? sql.length : nl + 1;
+      // PostgreSQL's lexer defines a line comment's body as `[^\n\r]`, so a LONE CR ends it
+      // there and everything after the CR on that line is live SQL. Scanning to the next \n
+      // only would strip that SQL as if it were commentary. Stop at whichever comes first and
+      // leave the terminator itself to the whitespace skip, so CRLF is unaffected.
+      let end = i + 2;
+      while (end < sql.length && sql[end] !== "\n" && sql[end] !== "\r") end++;
+      i = end;
       continue;
     }
     if (ch === "/" && sql[i + 1] === "*") {
