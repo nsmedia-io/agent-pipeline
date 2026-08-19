@@ -314,9 +314,7 @@ gate --issue "$ISSUE" --migrations-added "migrations/014_bad.sql"
 # migrationGlobs: []. collectMigrationSources reads explicit --migrations-added paths before
 # any glob test, and that ordering is deliberate: a path passed on the command line is the
 # orchestrator asserting "this IS a migration", and a discovery FILTER must never override an
-# explicit assertion. The script's own docstring (gate-pre-phase4.mjs:18, "Set
-# migrationGlobs: [] to disable it entirely") is WRONG on this point; tracked as follow-up doc
-# issue 3. If this case ever goes red, check whether the code changed to match the docstring
+# explicit assertion. If this case ever goes red, check whether the code changed to match the docstring
 # before assuming the test is stale -- that change would be a bypass on a fail-closed gate.
 assert_eq "migrationGlobs: [] does NOT disarm an explicitly-named migration" "$RC" "1"
 assert_contains "the explicit path is still checked for a down section" "$ERR" \
@@ -403,7 +401,7 @@ suite "pre-Phase-4 gate: KNOWN COVERAGE BOUNDARY (not a guarantee)"
 # region of UNCOMMENTED, EXECUTABLE SQL passes this gate today. dba.md requires a down region
 # to be commented-out documentation, never executable SQL (an executable down block is a live
 # data-destruction statement sitting in a migration file), so the gate is silent on a rule the
-# project actually enforces. Tracked as follow-up issue 4.
+# project actually enforces. Tracked as follow-up issue #16.
 #
 # FUTURE AUTHOR: if this case goes RED, the gap was CLOSED. INVERT the assertion (expect 1)
 # and delete this boundary label. Do NOT delete the case: a boundary that silently disappears
