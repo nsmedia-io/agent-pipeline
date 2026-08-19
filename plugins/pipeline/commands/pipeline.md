@@ -609,13 +609,32 @@ CHANGED="$(git -C "$WORKTREE_PATH" diff --name-only origin/main...HEAD)"
 # (# CUSTOMIZE: `dataLayerGlobs` and `infraGlobs` in pipeline.config.json describe YOUR layout.)
 # The panel predicate is the BROAD one deliberately: a panel seat is cheap and reversible,
 # where the tripwire's narrow halt is not.
-if node -e 'import(process.env.CLAUDE_PLUGIN_ROOT + "/scripts/data-layer-surface.mjs").then(m=>process.exit(m.diffTouchesDataLayer(process.argv.slice(1))?0:1))' $CHANGED; then
+surface_probe() {  # $1 = predicate export name; remaining args = the changed paths
+  node -e 'import(process.env.CLAUDE_PLUGIN_ROOT + "/scripts/data-layer-surface.mjs").then(m=>{const f=m[process.argv[1]];if(typeof f!=="function")throw new Error("missing export "+process.argv[1]);process.exit(f(process.argv.slice(2))?0:10)}).catch(e=>{console.error("SURFACE-INDETERMINATE: "+process.argv[1]+": "+(e&&e.message));process.exit(1)})' "$@"
+}
+surface_probe diffTouchesDataLayer $CHANGED; RC=$?
+if [ "$RC" -ne 10 ]; then
   PANEL_ROLES="$PANEL_ROLES dba"
+  if [ "$RC" -ne 0 ]; then
+    echo "PANEL-NOTE: dba SEATED on an INDETERMINATE data-layer probe (exit $RC; see SURFACE-INDETERMINATE on stderr), not on a match."
+  fi
 fi
-if node -e 'import(process.env.CLAUDE_PLUGIN_ROOT + "/scripts/data-layer-surface.mjs").then(m=>process.exit(m.diffTouchesInfra(process.argv.slice(1))?0:1))' $CHANGED; then
+surface_probe diffTouchesInfra $CHANGED; RC=$?
+if [ "$RC" -ne 10 ]; then
   PANEL_ROLES="$PANEL_ROLES devops"
+  if [ "$RC" -ne 0 ]; then
+    echo "PANEL-NOTE: devops SEATED on an INDETERMINATE infra probe (exit $RC; see SURFACE-INDETERMINATE on stderr), not on a match."
+  fi
 fi
 ```
+
+**Three outcomes, never two, and the third one SEATS.** `surface_probe` exits 0 on a MATCH, **10** on a NO-MATCH, and anything else means INDETERMINATE: the module was absent, it threw, an export was renamed, or `node` itself was missing. The seat is therefore withheld only on the ONE code that means "the predicate ran and said no". 10 is the no-match code deliberately, so every unforeseen failure (node's own exit 1 on an uncaught throw or a syntax error, 127 for a missing binary) lands in the indeterminate branch instead of impersonating a clean diff. `${CLAUDE_PLUGIN_ROOT}` resolving to a stale installed plugin cache that predates the module is a live condition, not a hypothetical, and a bare `process.exit(pred?0:1)` returns rc=1 with zero bytes on both streams in exactly that case: byte-identical to "the diff is clean", which silently drops the specialist the change exists to seat.
+
+**Never write this as `surface_probe ... | grep -q ...`.** A pipe discards the exit status, which is the entire mechanism here.
+
+The direction is the same rule the mis-tier tripwire states, applied to a third consumer: *an unevaluable check cannot know the answer is negative.* The tripwire halts because it cannot know the diff was clean; panel composition seats because it cannot know the diff misses the surface. Over-seating costs one reviewer's context and refuses no correct work; under-seating removes the exact lens the diff needed while `status.json` records a panel and the PR summary claims it reviewed the diff.
+
+If either block prints a `PANEL-NOTE:` line, record that sentence in `status.json` (`flags`) alongside `panel_roles`, and say it in the PR summary: the recorded panel then contains a role seated by indeterminacy rather than by a match, and an auditor reading `panel_roles` later cannot tell those apart from the array alone. Fixing the stale `${CLAUDE_PLUGIN_ROOT}` is the real remedy; the seat is the safe default while it is broken.
 
 **Art Director is contract-conditional, at every tier.** It is NOT a standing panel role and NOT a taste second-opinion on Design. It joins only when a binding visual contract exists for this issue, and it owns that contract.
 
@@ -758,12 +777,25 @@ FULL_PANEL="$(jq -r '.panel_roles | join(" ")' "$PIPELINE_BASE/<issue>/status.js
 DELTA="qa secops"
 for role in $OBJECTING_ROLES; do case " $DELTA " in *" $role "*) ;; *) DELTA="$DELTA $role";; esac; done
 FIX_CHANGED="$(git -C "$WORKTREE_PATH" diff --name-only <first-round-head>...HEAD)"
-# The SAME module the first-round panel composition uses, so a delta round cannot drift from it.
-if node -e 'import(process.env.CLAUDE_PLUGIN_ROOT + "/scripts/data-layer-surface.mjs").then(m=>process.exit(m.diffTouchesDataLayer(process.argv.slice(1))?0:1))' $FIX_CHANGED; then
+# The SAME module AND the SAME three-outcome probe the first-round panel composition uses, so a
+# delta round cannot drift from it, and an unevaluable probe SEATS the specialist here too.
+# This definition is byte-identical to the one above on purpose; keep them that way.
+surface_probe() {  # $1 = predicate export name; remaining args = the changed paths
+  node -e 'import(process.env.CLAUDE_PLUGIN_ROOT + "/scripts/data-layer-surface.mjs").then(m=>{const f=m[process.argv[1]];if(typeof f!=="function")throw new Error("missing export "+process.argv[1]);process.exit(f(process.argv.slice(2))?0:10)}).catch(e=>{console.error("SURFACE-INDETERMINATE: "+process.argv[1]+": "+(e&&e.message));process.exit(1)})' "$@"
+}
+surface_probe diffTouchesDataLayer $FIX_CHANGED; RC=$?
+if [ "$RC" -ne 10 ]; then
   case " $DELTA " in *" dba "*) ;; *) DELTA="$DELTA dba";; esac
+  if [ "$RC" -ne 0 ]; then
+    echo "PANEL-NOTE: dba SEATED on an INDETERMINATE data-layer probe (exit $RC; see SURFACE-INDETERMINATE on stderr), not on a match."
+  fi
 fi
-if node -e 'import(process.env.CLAUDE_PLUGIN_ROOT + "/scripts/data-layer-surface.mjs").then(m=>process.exit(m.diffTouchesInfra(process.argv.slice(1))?0:1))' $FIX_CHANGED; then
+surface_probe diffTouchesInfra $FIX_CHANGED; RC=$?
+if [ "$RC" -ne 10 ]; then
   case " $DELTA " in *" devops "*) ;; *) DELTA="$DELTA devops";; esac
+  if [ "$RC" -ne 0 ]; then
+    echo "PANEL-NOTE: devops SEATED on an INDETERMINATE infra probe (exit $RC; see SURFACE-INDETERMINATE on stderr), not on a match."
+  fi
 fi
 if node -e 'import(process.env.CLAUDE_PLUGIN_ROOT + "/scripts/frontend-surface.mjs").then(m=>process.exit(m.diffTouchesFrontend(process.argv.slice(1))?0:1))' $FIX_CHANGED; then
   case " $DELTA " in *" design_review "*) ;; *) DELTA="$DELTA design_review";; esac
