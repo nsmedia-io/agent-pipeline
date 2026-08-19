@@ -80,6 +80,10 @@ const NON_VOICE_PHASES = new Set([
   "2-review", "2-review-complete",
   "2.5-design", "2.5-design-complete",
   "3-impl", "3-impl-complete", "3-impl-tripwire",
+  // The tripwire could not be EVALUATED (the surface module is absent, unloadable, or exited
+  // non-zero). It loops back to BA exactly as a tripwire hit does, so it is the same internal
+  // checkpoint as its sibling above, not an owner-facing moment.
+  "3-impl-tripwire-indeterminate",
   "3-impl-gate-failed", "3-impl-frontend-gate-failed",
   "4-review",
   "5-archive",

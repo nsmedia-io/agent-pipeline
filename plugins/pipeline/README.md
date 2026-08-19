@@ -61,7 +61,12 @@ Copy `pipeline.config.example.json` to `pipeline.config.json` at your project ro
 | `checkCommand` | The command Dev and the Stop hook run to prove green | `npm run typecheck && npm test && npm run lint` |
 | `knowledgeDir` | Where the knowledge store lives | `knowledge` |
 | `frontendSurface` | Globs that mark a diff as frontend-touching (drives the Design lens + visual gate) | a generic component/style set |
-| `migrationsGlob` | Glob that marks a data migration (drives the mis-tier tripwire + live-verification gate) | `migrations/**` |
+| `migrationGlobs` | Globs the pre-Phase-4 gate uses to DISCOVER migrations in the impl-report. REPLACES the built-in preset union, so setting it NARROWS gate discovery. It does NOT narrow the mis-tier tripwire, which unions the same key with the presets; widen both with `extraMigrationGlobs` instead | the fifteen-row framework-preset union in `scripts/data-layer-surface.mjs` |
+| `extraMigrationGlobs` | Additive globs that union into gate discovery, the mis-tier tripwire, and the DBA panel seat. Never replaces anything | `[]` |
+| `dataLayerGlobs` | Broad globs that seat DBA on the Phase 4 panel (schema, queries, policies, generated DB types). Empty or invalid means defaults | the tripwire union plus the broad extras in `scripts/data-layer-surface.mjs` |
+| `infraGlobs` | Globs that seat DevOps on the Phase 4 panel (CI, deploy scripts, infra config). Empty or invalid means defaults | the infra set in `scripts/data-layer-surface.mjs` |
+| `migrationDownMarker` | The line that marks a migration's down section for the reversibility gate | `-- DOWN` |
+| `dispatchModels` | Per-role model overrides for the orchestrator's dispatches, allowlisted to `opus`/`sonnet`/`haiku`. `secops` and `qa` are pinned in code and ignore this key | the built-in table in `scripts/dispatch-model.mjs` |
 | `architecturalTriggers` | Domains/keywords that force the architectural tier | data/security/compliance |
 
 Four more customization points:

@@ -29,7 +29,7 @@ You are the **DevOps engineer** for this project's autonomous agent pipeline.
 ## Where you sit in the tiered pipeline
 
 - **Architectural tier**: pre-code spec review in Phase 2 (parallel fan-out) plus the full Phase 4 panel.
-- **Standard tier**: no pre-code review. The orchestrator injects your "Standard-tier constraints" block (below) into the Dev thread's prompt, and you join the Phase 4 panel only when the diff touches CI config, service/deploy config, deploy scripts, or infra. Keep that block current; it reviews in your absence. `# CUSTOMIZE: your CI/deploy/infra paths`
+- **Standard tier**: no pre-code review. The orchestrator injects your "Standard-tier constraints" block (below) into the Dev thread's prompt, and you join the Phase 4 panel only when the diff touches CI config, service/deploy config, deploy scripts, or infra, as decided by `diffTouchesInfra` in `${CLAUDE_PLUGIN_ROOT}/scripts/data-layer-surface.mjs`. Keep that block current; it reviews in your absence. `# CUSTOMIZE: your CI/deploy/infra paths live in that module's defaults and in the infraGlobs config key`
 - **Trivial tier**: full Phase 4 panel only.
 
 ## Phase 2 duties

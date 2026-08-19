@@ -550,15 +550,26 @@ If this gate exits non-zero (a frontend file changed with no `design_review` evi
 
 A standard-tier spec has, by definition, no schema/migration dimension, so a migration appearing in the diff means the tier call was wrong and the never-skip DBA migration gate was bypassed. Check mechanically, not by judgment:
 
+The predicate is the surface module's, not a hand-typed regex: `migrationGlobsForTripwire` is the built-in framework-preset union WIDENED by `migrationGlobs` and `extraMigrationGlobs`, so a project config can only ever widen this halt, never narrow it. (# CUSTOMIZE: widen it with `extraMigrationGlobs` in `pipeline.config.json`; narrowing the tripwire is deliberately impossible, because binding a halting control to a narrowing knob lets a four-character edit disarm it while the config still reports healthy.)
+
 ```bash
-# CUSTOMIZE: your migration path glob (e.g. '^db/migrations/'). If your project has no
-# migrations, this tripwire is a harmless no-op.
-if git -C "$WORKTREE_PATH" diff --name-only origin/main...HEAD | grep -qE '^migrations/'; then
-  echo "MIS-TIER: migration in a $RISK_TIER diff"
+CHANGED="$(git -C "$WORKTREE_PATH" diff --name-only origin/main...HEAD)"
+TRIPWIRE_OUT="$(node -e 'import(process.env.CLAUDE_PLUGIN_ROOT + "/scripts/data-layer-surface.mjs").then(m=>{const r=m.tripwireReport(process.argv.slice(1));if(r.note)console.error("TRIPWIRE-NOTE: "+r.note);if(r.hits.length)console.log(r.hits.join(" "))}).catch(e=>{console.log("unevaluable: "+(e&&e.message));process.exit(1)})' $CHANGED)"
+TRIPWIRE_RC=$?
+if [ "$TRIPWIRE_RC" -ne 0 ]; then
+  echo "3-impl-tripwire-indeterminate: the data-layer surface module under ${CLAUDE_PLUGIN_ROOT}/scripts/ could not be evaluated (exit $TRIPWIRE_RC). $TRIPWIRE_OUT"
+elif [ -n "$TRIPWIRE_OUT" ]; then
+  echo "MIS-TIER: data-layer path in a $RISK_TIER diff: $TRIPWIRE_OUT"
 fi
 ```
 
+**Capture the exit status, then branch on it; never pipe this invocation.** Written as `<the node call> | grep -q ...`, a pipe would discard the module's exit status, so an absent or throwing module exits non-zero with empty stdout, the condition reads false, and NO halt fires: silently restoring the exact pre-fix state this tripwire exists to remove. ${CLAUDE_PLUGIN_ROOT} resolving to a stale installed plugin cache that predates the module is a live condition, not a hypothetical.
+
+**It fails CLOSED.** A non-zero exit means the tripwire was never evaluated, which is not the same as a clean diff: the run cannot know the path was clean, because the thing that would have decided did not run. HALT with `current_phase: "3-impl-tripwire-indeterminate"` and loop back to BA exactly as on a hit, recording the module path and the failure in the transcript. Never proceed to the panel on an unevaluated tripwire. (The model resolver in Phase 4 fails the OPPOSITE way, open to frontmatter; both directions are deliberate.)
+
 On a hit, HALT before the panel: update `status.json` with `current_phase: "3-impl-tripwire"`, loop back to BA to re-tier the spec to `architectural`, then on resume run the phases the original tier skipped (Phase 2 fan-out; Phase 2.5 if the change is design-shaped) against the existing worktree before re-entering the gate. DBA's migration review and the live-verification rule below then apply in full. Diffs touching infrastructure/CI config, auth/crypto/webhook-verification surfaces, or the data layer are standard-legal but change the Phase 4 panel composition (see below); they do not halt here.
+
+If the block prints a `TRIPWIRE-NOTE:` line, the effective tripwire set matches zero tracked files in this repository, so this control cannot fire here: put that sentence in the run transcript and record it in `status.json` (`flags`), because the session-start config report that says the same thing may have scrolled past days ago, while the decision is being made now.
 
 ### Live-verification gate (data-migration / security-sensitive changes; opt-in)
 
@@ -593,10 +604,17 @@ The panel reviews the finished diff, each agent through a distinct lens, while r
 ```bash
 PANEL_ROLES="ba dev qa secops"
 CHANGED="$(git -C "$WORKTREE_PATH" diff --name-only origin/main...HEAD)"
-# CUSTOMIZE: your data-layer path glob (migrations, schema, ORM/query layer).
-echo "$CHANGED" | grep -qE '^(migrations/|db/)' && PANEL_ROLES="$PANEL_ROLES dba"
-# CUSTOMIZE: your infra/CI path glob (workflows, deploy scripts, infra config).
-echo "$CHANGED" | grep -qE '(^\.github/|^infra/|^deploy)' && PANEL_ROLES="$PANEL_ROLES devops"
+# The data-layer and infra surfaces are read from ${CLAUDE_PLUGIN_ROOT}/scripts/data-layer-surface.mjs,
+# the same module the mis-tier tripwire uses, so detection and dispatch never diverge.
+# (# CUSTOMIZE: `dataLayerGlobs` and `infraGlobs` in pipeline.config.json describe YOUR layout.)
+# The panel predicate is the BROAD one deliberately: a panel seat is cheap and reversible,
+# where the tripwire's narrow halt is not.
+if node -e 'import(process.env.CLAUDE_PLUGIN_ROOT + "/scripts/data-layer-surface.mjs").then(m=>process.exit(m.diffTouchesDataLayer(process.argv.slice(1))?0:1))' $CHANGED; then
+  PANEL_ROLES="$PANEL_ROLES dba"
+fi
+if node -e 'import(process.env.CLAUDE_PLUGIN_ROOT + "/scripts/data-layer-surface.mjs").then(m=>process.exit(m.diffTouchesInfra(process.argv.slice(1))?0:1))' $CHANGED; then
+  PANEL_ROLES="$PANEL_ROLES devops"
+fi
 ```
 
 **Art Director is contract-conditional, at every tier.** It is NOT a standing panel role and NOT a taste second-opinion on Design. It joins only when a binding visual contract exists for this issue, and it owns that contract.
@@ -718,10 +736,13 @@ FULL_PANEL="$(jq -r '.panel_roles | join(" ")' "$PIPELINE_BASE/<issue>/status.js
 DELTA="qa secops"
 for role in $OBJECTING_ROLES; do case " $DELTA " in *" $role "*) ;; *) DELTA="$DELTA $role";; esac; done
 FIX_CHANGED="$(git -C "$WORKTREE_PATH" diff --name-only <first-round-head>...HEAD)"
-# CUSTOMIZE: the same data-layer glob the standard-tier panel composition uses.
-echo "$FIX_CHANGED" | grep -qE '^(migrations/|db/)' && case " $DELTA " in *" dba "*) ;; *) DELTA="$DELTA dba";; esac
-# CUSTOMIZE: the same infra/CI glob the standard-tier panel composition uses.
-echo "$FIX_CHANGED" | grep -qE '(^\.github/|^infra/|^deploy)' && case " $DELTA " in *" devops "*) ;; *) DELTA="$DELTA devops";; esac
+# The SAME module the first-round panel composition uses, so a delta round cannot drift from it.
+if node -e 'import(process.env.CLAUDE_PLUGIN_ROOT + "/scripts/data-layer-surface.mjs").then(m=>process.exit(m.diffTouchesDataLayer(process.argv.slice(1))?0:1))' $FIX_CHANGED; then
+  case " $DELTA " in *" dba "*) ;; *) DELTA="$DELTA dba";; esac
+fi
+if node -e 'import(process.env.CLAUDE_PLUGIN_ROOT + "/scripts/data-layer-surface.mjs").then(m=>process.exit(m.diffTouchesInfra(process.argv.slice(1))?0:1))' $FIX_CHANGED; then
+  case " $DELTA " in *" devops "*) ;; *) DELTA="$DELTA devops";; esac
+fi
 if node -e 'import(process.env.CLAUDE_PLUGIN_ROOT + "/scripts/frontend-surface.mjs").then(m=>process.exit(m.diffTouchesFrontend(process.argv.slice(1))?0:1))' $FIX_CHANGED; then
   case " $DELTA " in *" design_review "*) ;; *) DELTA="$DELTA design_review";; esac
 fi
@@ -925,7 +946,7 @@ If you could not verify the change yourself, say that here and say what you did 
 You are the only role holding all three inputs, which is why voice mode lives here and not in the agents: a specialist sees one lens and cannot compute any of these. Derive them, do not guess them:
 
 - **Blast radius** reads off BA's blast-radius map (`map.json`): which contracts the change touches and who reads them. One consumer is *Contained*. Several unrelated features sharing a contract is *Spreading*. Auth, billing, data integrity, or anything customer-visible product-wide is *Foundation*.
-- **Reversibility** reads off the diff. A migration (per `migrationsGlob`), a deletion, an external account, a pricing change, or anything a customer already saw is a *One way door*, and `voice.md` requires you to say that phrase in the first three lines. A revertable commit is an *Undo button*. A revert plus a data fix or redeploy is *Some cleanup*.
+- **Reversibility** reads off the diff. A migration (per the narrow predicate in `${CLAUDE_PLUGIN_ROOT}/scripts/data-layer-surface.mjs`, whose glob set is the built-in presets unioned with `migrationGlobs` and `extraMigrationGlobs`), a deletion, an external account, a pricing change, or anything a customer already saw is a *One way door*, and `voice.md` requires you to say that phrase in the first three lines. A revertable commit is an *Undo button*. A revert plus a data fix or redeploy is *Some cleanup*.
 - **Confidence** reads off QA's binding verdict plus the verification evidence. A recorded local pass is *Solid*. Reasoning from the code with no run, or a green CI whose integration suite only skipped (see the live-verification gate), is *Reasoned*, and say which one it was. A *Guess* is labeled loudly, with what would turn it into a *Solid*. **Then check `spec.open_questions` for any resolution with `answered_by: "ba_default"` that a load-bearing acceptance criterion rests on, and name it in the report.** The tests can be green and the criterion still be answering a question the owner never saw: that is a *Reasoned* about the requirement wearing a *Solid* about the code, and the owner is the only one who can tell you the default was wrong.
 
 A scale you genuinely cannot fill is stated as unknown, never omitted and never softened into false confidence. Per `voice.md`: say you do not know in the same breath as the recommendation.

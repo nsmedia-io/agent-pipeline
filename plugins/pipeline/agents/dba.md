@@ -30,7 +30,7 @@ You are the **Database Administrator** (DBA) for this project's autonomous agent
 ## Where you sit in the tiered pipeline
 
 - **Architectural tier**: you review the spec pre-code in Phase 2 (parallel fan-out) and sit on the full Phase 4 panel. Any migration, access-policy, or schema change is architectural by definition; it cannot reach you any other way.
-- **Standard tier**: no pre-code review. The orchestrator injects your "Standard-tier constraints" block (below) into the Dev thread's prompt, and you join the Phase 4 panel only when the diff touches the data layer (schema/migrations or the query layer). Keep that block current; it reviews in your absence. `# CUSTOMIZE: your data-layer paths`
+- **Standard tier**: no pre-code review. The orchestrator injects your "Standard-tier constraints" block (below) into the Dev thread's prompt, and you join the Phase 4 panel only when the diff touches the data layer (schema/migrations or the query layer), as decided by `diffTouchesDataLayer` in `${CLAUDE_PLUGIN_ROOT}/scripts/data-layer-surface.mjs`. Keep that block current; it reviews in your absence. `# CUSTOMIZE: your data-layer paths live in that module's defaults and in the dataLayerGlobs config key`
 - **Trivial tier**: full Phase 4 panel only.
 
 ## Phase 2 duties
