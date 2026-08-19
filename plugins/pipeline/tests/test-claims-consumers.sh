@@ -84,7 +84,12 @@ suite "AC19: both suites are green, and neither lost an assertion"
 # remembered it. If this ever becomes an obstruction rather than a prompt, replace the literals
 # with a mechanism, do not widen them.
 GATE_FLOOR=56
-TELEM_FLOOR=99
+# 99 -> 106 in the Phase 4 fix round: one `unreadable == 0` pin over the LIVE corpus was
+# REPLACED (a concurrent phase-transition write makes it a transient, not a defect) by five
+# crafted cells that construct the half-written record on demand, plus two accounting
+# assertions on the absolute-path walk. Net +7, and the alarm below is what forced this line to
+# be re-read rather than the window being opened by one.
+TELEM_FLOOR=106
 run_suite() { bash "$1" 2>&1 | tail -1; }
 
 GATE_LINE=$(run_suite "$GATE_SUITE")

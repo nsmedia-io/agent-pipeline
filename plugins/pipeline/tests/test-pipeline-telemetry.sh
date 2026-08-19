@@ -498,27 +498,33 @@ suite "AC16(b): the partition holds over the REAL status.json corpus, not only o
 CORPUS_FILES=()
 while IFS= read -r f; do [[ -n "$f" ]] && CORPUS_FILES+=("$REPO_ROOT/$f"); done \
   < <(corpus_files "$REPO_ROOT" '.pipeline/*/status.json')
-CORPUS_PARTITION=$(MOD="$TELEMETRY" node --input-type=module -e '
-  import { readFileSync } from "node:fs";
-  const m = await import(process.env.MOD);
-  let scanned = 0, imbalanced = 0, withSuffixed = 0, untimed = 0, unreadable = 0, tooShort = 0;
-  for (const f of process.argv.slice(1)) {
-    // Every `continue` below increments a counter. An unreported skip and a pass produce the
-    // same output, so the six numbers must add up to the file count and the assertions check
-    // that they do -- otherwise a record could leave this loop without being accounted for.
-    let st; try { st = JSON.parse(readFileSync(f, "utf8")); } catch { unreadable++; continue; }
-    if (!Array.isArray(st.events) || st.events.length < 2) { tooShort++; continue; }
-    const t = m.telemetry(st);
-    // A record whose events carry no parseable `at` has no lead time to partition, and one
-    // such file is really in this corpus.
-    if (t.total_lead_time_ms === null) { untimed++; continue; }
-    scanned++;
-    const sum = Object.values(t.phase_elapsed_ms).reduce((a, b) => a + b, 0);
-    if (sum + t.unattributed_ms !== t.total_lead_time_ms) imbalanced++;
-    if (Object.keys(t.phase_elapsed_ms).some(k => /[a-z]/.test(k))) withSuffixed++;
-  }
-  console.log(JSON.stringify({ scanned, imbalanced, withSuffixed, untimed, unreadable, tooShort }));
-' "${CORPUS_FILES[@]}")
+# THE WALK IS A FILE, not an inline `-e`, for one reason: it is driven over the LIVE corpus
+# AND over a crafted temp tree below. An inline copy per population is two implementations
+# asserting each other, and the crafted cell exists precisely because the live one cannot be
+# made to contain a half-written record on demand.
+PARTITION="$TEMP_PROJECT/partition.mjs"
+cat > "$PARTITION" <<'EOF'
+import { readFileSync } from "node:fs";
+const m = await import(process.env.MOD);
+let scanned = 0, imbalanced = 0, withSuffixed = 0, untimed = 0, unreadable = 0, tooShort = 0;
+for (const f of process.argv.slice(2)) {
+  // Every `continue` below increments a counter. An unreported skip and a pass produce the
+  // same output, so the six numbers must add up to the file count and the assertions check
+  // that they do -- otherwise a record could leave this loop without being accounted for.
+  let st; try { st = JSON.parse(readFileSync(f, "utf8")); } catch { unreadable++; continue; }
+  if (!Array.isArray(st.events) || st.events.length < 2) { tooShort++; continue; }
+  const t = m.telemetry(st);
+  // A record whose events carry no parseable `at` has no lead time to partition, and one
+  // such file is really in this corpus.
+  if (t.total_lead_time_ms === null) { untimed++; continue; }
+  scanned++;
+  const sum = Object.values(t.phase_elapsed_ms).reduce((a, b) => a + b, 0);
+  if (sum + t.unattributed_ms !== t.total_lead_time_ms) imbalanced++;
+  if (Object.keys(t.phase_elapsed_ms).some(k => /[a-z]/.test(k))) withSuffixed++;
+}
+console.log(JSON.stringify({ scanned, imbalanced, withSuffixed, untimed, unreadable, tooShort }));
+EOF
+CORPUS_PARTITION=$(MOD="$TELEMETRY" node "$PARTITION" "${CORPUS_FILES[@]}")
 
 assert_eq "the real corpus is non-empty (a zero over an empty corpus proves nothing)" \
   "$([[ "$(field "$CORPUS_PARTITION" scanned)" -ge 1 ]] && echo "scanned>=1" || echo "scanned=0: NOTHING WAS WALKED")" \
@@ -553,10 +559,23 @@ assert_eq "and .pipeline/exp-script-test-coverage/status.json is the record that
 # The same treatment for the counters one line below, which were pinned at 0/0 over the LIVE
 # corpus. Under the union that is a bet on how far every run on this machine has progressed: a
 # genuinely short in-flight record is a normal state this pipeline produces routinely, and it
-# would redden here for a reason that has nothing to do with the partition. `unreadable` stays
-# pinned, because a status.json that does not parse is a real defect in any population; the
-# in-flight count is REPORTED instead.
-assert_eq "no corpus file is unreadable" "$(field "$CORPUS_PARTITION" unreadable)" "0"
+# would redden here for a reason that has nothing to do with the partition.
+#
+# `unreadable` IS THE SAME BET, and it was the one left pinned. The union widened the corpus to
+# untracked in-flight records; commands/pipeline.md rewrites exactly those, non-atomically, at
+# every phase transition; and run.sh is the Stop-hook checkCommand that runs DURING a live
+# pipeline run. Reader and writer overlap BY DESIGN, so a half-written record is a normal
+# transient and a pin here reports "a corpus file is unreadable" -- a defect -- when the true
+# state is a partial write. Reproduced unforced (the first run.sh in this worktree read
+# passed=98 failed=1) and then deterministically, by planting a truncated record.
+#
+# So both are REPORTED. The property the pin was standing in for is asserted where it can be
+# constructed on demand instead: over the crafted tree below, where an unreadable record is
+# COUNTED rather than thrown on or silently skipped. CI cannot reach any of this -- a fresh
+# clone is never mid-write -- which is why the crafted cell has to exist rather than being
+# left to the live population.
+printf '  note  live corpus records that did not parse: %s (REPORTED, never pinned -- see the crafted cell below)\n' \
+  "$(field "$CORPUS_PARTITION" unreadable)"
 printf '  note  live corpus records too short to partition: %s (REPORTED, never pinned)\n' \
   "$(field "$CORPUS_PARTITION" tooShort)"
 # Stated rather than assumed, and it is a present-tense fact about the corpus that must stay
@@ -565,6 +584,55 @@ printf '  note  live corpus records too short to partition: %s (REPORTED, never 
 assert_eq "at least one real record carries a suffixed phase key (3a/3b), the shape that used to vanish" \
   "$([[ "$(field "$CORPUS_PARTITION" withSuffixed)" -ge 1 ]] && echo "present" || echo "ABSENT: the corpus no longer exercises the defect")" \
   "present"
+
+suite "AC16(b) CRAFTED: the partition ACCOUNTS for a half-written record instead of pinning it away"
+
+# The population the live corpus cannot be made to contain on demand, built on demand: one
+# record of each kind the walk can meet, including the PARTIALLY-WRITTEN one that a phase
+# transition produces while this suite is reading. The same walk runs over it, so this is the
+# live assertion's own implementation and not a restatement of it.
+PART_TREE="$TEMP_PROJECT/partition-tree/.pipeline"
+mkdir -p "$PART_TREE/good" "$PART_TREE/truncated" "$PART_TREE/short" "$PART_TREE/untimed"
+printf '%s' '{"current_phase":"4-review","events":[
+  {"phase":"1-ba","verdict":"APPROVE","at":"2026-08-02T00:00:00Z"},
+  {"phase":"3a-qa","verdict":"APPROVE","at":"2026-08-02T00:10:00Z"},
+  {"phase":"4-review","verdict":"APPROVE","at":"2026-08-02T00:30:00Z"}]}' \
+  > "$PART_TREE/good/status.json"
+# Byte-for-byte what a non-atomic rewrite leaves behind mid-write: valid prefix, no terminator.
+printf '%s' '{"current_phase":"3-impl","events":[' > "$PART_TREE/truncated/status.json"
+printf '%s' '{"current_phase":"1-ba","events":[{"phase":"1-ba","verdict":"APPROVE","at":"2026-08-02T00:00:00Z"}]}' \
+  > "$PART_TREE/short/status.json"
+printf '%s' '{"current_phase":"2-review","events":[{"phase":"1-ba","verdict":"APPROVE"},{"phase":"2-review","verdict":"APPROVE"}]}' \
+  > "$PART_TREE/untimed/status.json"
+CRAFTED=$(MOD="$TELEMETRY" node "$PARTITION" \
+  "$PART_TREE/good/status.json" "$PART_TREE/truncated/status.json" \
+  "$PART_TREE/short/status.json" "$PART_TREE/untimed/status.json")
+
+# The point of the cell: a record that does not parse is COUNTED. It does not throw the walk,
+# and it does not leave through a silent skip -- the two outcomes a bare `catch {}` cannot be
+# told apart from a clean read.
+assert_eq "AC16(b) CRAFTED: a half-written record is counted as unreadable, not thrown on" \
+  "$(field "$CRAFTED" unreadable)" "1"
+assert_eq "AC16(b) CRAFTED: and the other three land in their own counters" \
+  "$(field "$CRAFTED" scanned)/$(field "$CRAFTED" tooShort)/$(field "$CRAFTED" untimed)" "1/1/1"
+assert_eq "AC16(b) CRAFTED: so all four are accounted for, none fell through" \
+  "$(( $(field "$CRAFTED" scanned) + $(field "$CRAFTED" untimed) \
+     + $(field "$CRAFTED" unreadable) + $(field "$CRAFTED" tooShort) ))" "4"
+assert_eq "AC16(b) CRAFTED: and the partition still balances on the record that could be read" \
+  "$(field "$CRAFTED" imbalanced)" "0"
+
+# THE NON-ZERO CONTROL, and the reason the counts above are not four constants: repair the one
+# truncated byte-range and the SAME walk reports a different partition. Without it, a walk that
+# hard-coded `unreadable: 1` would satisfy every assertion above.
+printf '%s' '{"current_phase":"4-review","events":[
+  {"phase":"1-ba","verdict":"APPROVE","at":"2026-08-02T00:00:00Z"},
+  {"phase":"4-review","verdict":"APPROVE","at":"2026-08-02T00:20:00Z"}]}' \
+  > "$PART_TREE/truncated/status.json"
+CRAFTED_FIXED=$(MOD="$TELEMETRY" node "$PARTITION" \
+  "$PART_TREE/good/status.json" "$PART_TREE/truncated/status.json" \
+  "$PART_TREE/short/status.json" "$PART_TREE/untimed/status.json")
+assert_eq "AC16(b) CRAFTED CONTROL: finish that write and the same walk reports 0 unreadable, 2 scanned" \
+  "$(field "$CRAFTED_FIXED" unreadable)/$(field "$CRAFTED_FIXED" scanned)" "0/2"
 
 # =============================================================================
 # AC43 -- the two migration sets are recorded as DISTINCT entries.
@@ -627,11 +695,18 @@ function walk(v, path) {
   if (Array.isArray(v)) return v.forEach((x, i) => walk(x, path + "[" + i + "]"));
   if (v && typeof v === "object") return Object.entries(v).forEach(([k, x]) => walk(x, path + "." + k));
 }
-let scanned = 0;
-for (const f of process.argv.slice(1)) {
-  try { walk(JSON.parse(readFileSync(f, "utf8")), f); scanned++; } catch { /* unreadable: not a status file */ }
+let scanned = 0, unreadable = 0;
+// slice(2), not slice(1): this walk is invoked as `node walk.mjs <file>...`, so argv[1] is
+// walk.mjs itself. It was slice(1), and the walk read its own source as a corpus record every
+// run -- invisible, because the catch swallowed it and nothing counted what the catch caught.
+for (const f of process.argv.slice(2)) {
+  // A record this walk could not READ is a record it did not CHECK, and the two used to be
+  // indistinguishable: the catch incremented nothing, so a truncated status.json carrying a
+  // real absolute path left the loop looking exactly like a clean one. It is counted now, and
+  // the accounting assertion below is what makes the count mean something.
+  try { walk(JSON.parse(readFileSync(f, "utf8")), f); scanned++; } catch { unreadable++; }
 }
-console.log(JSON.stringify({ scanned, hits }));
+console.log(JSON.stringify({ scanned, unreadable, hits }));
 EOF
 
 # BOTH patterns here, and that is the criterion rather than a detail: dropping the archive one
@@ -642,6 +717,7 @@ while IFS= read -r f; do [[ -n "$f" ]] && CORPUS+=("$REPO_ROOT/$f"); done \
   < <(corpus_files "$REPO_ROOT" '.pipeline/*/status.json' 'knowledge/issue-archive/*.json')
 CORPUS_RESULT=$(node "$WALK" "${CORPUS[@]}" 2>/dev/null)
 SCANNED=$(printf '%s' "$CORPUS_RESULT" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).scanned))')
+UNREADABLE=$(printf '%s' "$CORPUS_RESULT" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).unreadable))')
 HITS=$(printf '%s' "$CORPUS_RESULT" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).hits.join(" ")))')
 
 # The corpus size is REPORTED, not assumed. If the archive is still empty the suite says so
@@ -651,7 +727,23 @@ assert_eq "the real corpus is non-empty (a zero over an empty corpus proves noth
   "$([[ "$SCANNED" -ge 1 ]] && echo "scanned>=1" || echo "scanned=$SCANNED: NOTHING WAS WALKED")" "scanned>=1"
 assert_eq "the archive corpus is stated rather than assumed: it is empty today" \
   "$(cd "$REPO_ROOT" && git ls-files | grep -cE 'knowledge/issue-archive/.*\.json$' | tr -d ' ')" "0"
-assert_eq "no absolute-path string appears anywhere in the real corpus" "$HITS" ""
+# EVERY RECORD LEAVES THIS WALK THROUGH ONE COUNTER, the same six-counter convention the
+# partition walk above uses. The catch used to increment nothing and `scanned` was asserted
+# only `>= 1`, so a record the walk never read was indistinguishable from a clean one: a
+# truncated status.json carrying worktree_path="/Users/leaked/secret-client-name" was planted
+# in this corpus and the hits assertion below stayed green. The corpus is a set of paths this
+# file just listed, so anything not scanned and not counted unreadable is a hole in the walk.
+assert_eq "every corpus record is accounted for: scanned + unreadable equals the corpus size" \
+  "$(( SCANNED + UNREADABLE ))" "${#CORPUS[@]}"
+# ...and the unreadable half is REPORTED, not pinned to 0. The corpus includes UNTRACKED
+# in-flight records that a live phase transition rewrites non-atomically while this suite is
+# the Stop-hook checkCommand reading them, so a half-written record here is a transient rather
+# than a defect. Pinning it red-lights a normal state; counting it keeps the claim honest.
+printf '  note  corpus records this walk could not parse, and therefore did not check: %s (REPORTED)\n' \
+  "$UNREADABLE"
+# NAMED FOR WHAT IT ENFORCES. It is a statement about the records that PARSED, and the count
+# above says how many that was.
+assert_eq "no absolute-path string appears in any corpus record this walk could read" "$HITS" ""
 
 # NON-ZERO CONTROL, in two spellings, because a check anchored on '/Users/' alone is a
 # blocklist over one spelling of one machine's layout.
@@ -661,6 +753,22 @@ FIX2="$TEMP_PROJECT/abs-var.json"
 printf '%s' '{"current_phase":"3-impl","events":[{"phase":"3-impl","verdict":"APPROVE","note":"/var/folders/z/tmp"}]}' > "$FIX2"
 assert_contains "CONTROL: the same walk reddens on /Users/..." "$(node "$WALK" "$FIX1")" "/Users/someone/worktrees/x"
 assert_contains "CONTROL: and on /var/folders/... at depth, inside an array" "$(node "$WALK" "$FIX2")" "/var/folders/z/tmp"
+
+# THE EXEMPTION, MADE VISIBLE AND BOUNDED. A record that does not parse is not checked, and no
+# rewording changes that; what the counter changes is whether the walk SAYS so. The pair below
+# is the same leaked path in two files that differ only by the closing bytes.
+FIX3="$TEMP_PROJECT/abs-truncated.json"
+printf '%s' '{"current_phase":"3-impl","worktree_path":"/Users/leaked/secret-client-name","events":[' > "$FIX3"
+TRUNC_RESULT=$(node "$WALK" "$FIX3")
+assert_eq "CONTROL: a truncated record is COUNTED unreadable rather than silently exempted" \
+  "$(printf '%s' "$TRUNC_RESULT" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const r=JSON.parse(s);console.log(r.scanned+"/"+r.unreadable+"/"+r.hits.length)})')" \
+  "0/1/0"
+# ...and the SAME bytes, terminated, do produce the hit. Without this half, the cell above
+# would also pass on a walk whose absolute-path predicate had stopped working altogether.
+FIX4="$TEMP_PROJECT/abs-terminated.json"
+printf '%s' '{"current_phase":"3-impl","worktree_path":"/Users/leaked/secret-client-name","events":[]}' > "$FIX4"
+assert_contains "CONTROL: finish that same write and the leak IS reported" \
+  "$(node "$WALK" "$FIX4")" "/Users/leaked/secret-client-name"
 
 suite "AC34(b): an absolute glob in a project config is never written through"
 
