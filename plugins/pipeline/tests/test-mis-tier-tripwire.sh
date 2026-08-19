@@ -438,4 +438,61 @@ assert_eq "surface module PRESENT + resolver PRESENT: the resolver EMITS a token
 assert_eq "surface module PRESENT + resolver PRESENT: and the tripwire is silent on a clean diff" \
   "$(classify "$OUT_CLEAN")" "silent"
 
+suite "DBA nit: tripwireReport never returns a HIT and 'it cannot fire here' at the same time"
+
+# tripwireReport() had zero direct coverage. It returned `hits` and the zero-match note
+# together, computed over two different populations (the changed paths, and the tracked tree),
+# so a repository whose tracked files match nothing but whose DIFF adds a migration got both.
+# pipeline.md:572 tells the orchestrator to file that note in status.json (`flags`), so the run
+# that halted ON a hit would have recorded a flag saying the tripwire cannot fire here.
+report() { # <repo-dir> <changed-path>... -> "hits=<n> note=<yes|no>"
+  [[ -n "$DL_MODULE" ]] || { printf 'ERR:no-module'; return 0; }
+  MOD="$DL_MODULE" DIR="$1" node --input-type=module -e '
+    const m = await import(process.env.MOD);
+    const r = m.tripwireReport(process.argv.slice(1), process.env.DIR);
+    console.log("hits=" + r.hits.length + " note=" + (r.note ? "yes" : "no"));
+  ' "${@:2}"
+}
+
+# A repo whose TRACKED files match nothing the narrow set matches. Both fixtures below are the
+# same repository: the only thing that varies is the changed-path list handed in, so the two
+# outcomes are attributable to the hits and to nothing else.
+BARE_REPO="$TEMP_PROJECT/tripwire-report-repo"
+mkdir -p "$BARE_REPO/src"
+git -C "$BARE_REPO" init -q
+printf 'x\n' > "$BARE_REPO/src/app.ts"
+git -C "$BARE_REPO" add src/app.ts
+git -C "$BARE_REPO" -c user.email=t@t -c user.name=t commit -q -m init
+
+# A second repository whose TRACKED tree does contain a migration, so the note's own condition
+# can be observed going both ways rather than only one.
+MIGRATED_REPO="$TEMP_PROJECT/tripwire-report-repo-migrated"
+mkdir -p "$MIGRATED_REPO/migrations"
+git -C "$MIGRATED_REPO" init -q
+printf 'select 1;\n' > "$MIGRATED_REPO/migrations/0001.sql"
+git -C "$MIGRATED_REPO" add migrations/0001.sql
+git -C "$MIGRATED_REPO" -c user.email=t@t -c user.name=t commit -q -m init
+
+# NON-ZERO CONTROLS FIRST, and they are what make the suppression below meaningful: on a clean
+# diff this same repository DOES produce the note, and a repo whose tree matches does NOT.
+# Without both, "note=no" on a hit is satisfied by a note that never fires at all.
+assert_eq "CONTROL: a clean diff in a repo whose tree matches nothing DOES carry the note" \
+  "$(report "$BARE_REPO" 'src/app.ts')" "hits=0 note=yes"
+assert_eq "CONTROL: with no changed paths at all, the same repo reports it too" \
+  "$(report "$BARE_REPO")" "hits=0 note=yes"
+assert_eq "CONTROL: a repo whose TRACKED tree does contain a migration never carries the note" \
+  "$(report "$MIGRATED_REPO" 'src/app.ts')" "hits=0 note=no"
+# THE CONTRADICTION, on the one input that can construct it: tracked tree matches nothing,
+# changed paths add a migration. Before the fix this returned `hits=1 note=yes`.
+assert_eq "a HIT suppresses the 'cannot fire here' note: the two are never both returned" \
+  "$(report "$BARE_REPO" 'migrations/0001.sql')" "hits=1 note=no"
+assert_eq "and the hit is still reported where the tracked tree matches (the ordinary case)" \
+  "$(report "$MIGRATED_REPO" 'migrations/0002.sql')" "hits=1 note=no"
+# The .md exclusion reaches tripwireReport too, so its hits are the NARROW predicate's and not
+# a second, looser copy of the rule.
+assert_eq "a .md path under migrations/ is not a hit here either" \
+  "$(report "$BARE_REPO" 'docs/migrations/guide.md')" "hits=0 note=yes"
+assert_eq "but its .txt sibling is" \
+  "$(report "$BARE_REPO" 'docs/migrations/notes.txt')" "hits=1 note=no"
+
 finish
