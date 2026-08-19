@@ -130,8 +130,19 @@ function phaseKey(phase) {
  * a non-zero `unattributed_ms` rather than evaporating. `unattributed_ms` is negative only
  * when events[] is out of order, which is itself the signal.
  *
+ * AND THE PARTITION'S OWN BLIND SPOT, WHICH IS WHY `untimed_events` EXISTS. Every number above
+ * is computed over `timed`, INCLUDING the denominator: an event whose `at` is unparseable (or
+ * whose `phase` is not a string) is dropped from the numerator and from `total_lead_time_ms`
+ * alike, so the partition still balances and reports `unattributed_ms: 0`. It is a true
+ * statement about a population that quietly lost a member. `[1-ba@00:00, 3a@"not-a-date",
+ * 5-archive@02:00]` balanced perfectly while an event vanished. The drop CANNOT be folded into
+ * `unattributed_ms` -- an event with no timestamp contributes no duration to attribute, so
+ * there is no millisecond figure to carry -- so it is reported as its own COUNT instead. A
+ * reader who sees `untimed_events > 0` knows the balance below it covers fewer events than the
+ * record contains, which is exactly what the old shape could not say.
+ *
  * @returns {{phase_elapsed_ms: Record<string, number>, total_lead_time_ms: number|null,
- *            unattributed_ms: number, unattributed_events: number,
+ *            unattributed_ms: number, unattributed_events: number, untimed_events: number,
  *            review_rounds: number, events_counted: number}}
  */
 export function telemetry(status) {
@@ -140,6 +151,7 @@ export function telemetry(status) {
   const timed = events
     .map((e) => ({ phase: e && e.phase, at: parseTime(e && e.at) }))
     .filter((e) => typeof e.phase === "string" && e.at !== null);
+  const untimed_events = events.length - timed.length;
 
   const phase_elapsed_ms = {};
   let unattributed_ms = 0;
@@ -168,6 +180,7 @@ export function telemetry(status) {
     total_lead_time_ms,
     unattributed_ms,
     unattributed_events,
+    untimed_events,
     review_rounds,
     events_counted: timed.length,
   };
