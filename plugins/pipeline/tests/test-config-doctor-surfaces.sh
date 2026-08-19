@@ -173,18 +173,71 @@ key_value() { # <key> <field> -> the registered string, or "" when absent
     })'
 }
 cell_literals() { printf '%s' "$1" | grep -oE '`[^`]+`' | sed 's/^`//;s/`$//'; }
-cell_drift() { # <key> <default-cell> -> "" when every literal in the cell is a value the code produces
+
+# CONTAINMENT ANYWHERE IN `reader|fallback` was the first spelling of this comparison, and it
+# could not refuse two whole classes of false claim. SecOps rewrote the README's
+# `migrationDownMarker` default from `-- DOWN` to `-- D` and the suite stayed 75/0, because a
+# truncation is a substring of the thing it truncates. QA separately measured that four of the
+# nine literals -- migrationGlobs, dataLayerGlobs, infraGlobs and dispatchModels -- matched only
+# through `reader`, which HOLDS A FILE PATH, so any path-shaped claim satisfied them: setting the
+# checkCommand cell to `hooks/stop.sh` passed at 75/0 too.
+#
+# Both holes are the same mistake, which is comparing a value claim against a field that is not a
+# value. The comparison is now DELIMITED and the two kinds of literal are told apart.
+delimited_in() {  # <haystack> <needle> -> 0 when the needle occurs on non-alphanumeric boundaries
+  local hay="$1"
+  local needle="$2"
+  local rest="$hay"
+  local pre
+  local post
+  local before
+  local after
+  [[ -n "$needle" ]] || return 1
+  while [[ "$rest" == *"$needle"* ]]; do
+    pre="${rest%%"$needle"*}"
+    post="${rest#*"$needle"}"
+    before="${pre: -1}"
+    after="${post:0:1}"
+    if [[ ! "$before" =~ [A-Za-z0-9] ]] && [[ ! "$after" =~ [A-Za-z0-9] ]]; then return 0; fi
+    rest="$post"
+  done
+  return 1
+}
+is_module_path() {  # <literal> -> 0 when it is a path into the plugin rather than a value
+  case "$1" in */*.mjs|*/*.sh|*/*.json) return 0 ;; *) return 1 ;; esac
+}
+cell_drift() { # <key> <default-cell> -> "" when every literal in the cell is a claim the code supports
   local key="$1"
   local cell="$2"
-  local registered lit out=""
-  registered="$(key_value "$key" reader)|$(key_value "$key" fallback)"
-  if [[ "$registered" == "|" ]]; then printf '%s' "$key(unregistered)"; return 0; fi
+  local fallback
+  local reader
+  local lit
+  local out=""
+  fallback="$(key_value "$key" fallback)"
+  reader="$(key_value "$key" reader)"
+  if [[ -z "$fallback" && -z "$reader" ]]; then printf '%s' "$key(unregistered)"; return 0; fi
   while IFS= read -r lit; do
     [[ -n "$lit" ]] || continue
-    case "$registered" in
-      *"$lit"*) ;;
-      *) out="$out|$key: README states [$lit], code says [$(key_value "$key" fallback)]" ;;
-    esac
+    if is_module_path "$lit"; then
+      # A POINTER ("the default is defined over there"), never a value, and never matched against
+      # `reader` as a substring. A pointer earns its place only when the cell SAYS it is one, the
+      # code really calls that key's default a built-in, the file is really there, and the key is
+      # really read from it. `hooks/stop.sh` in the checkCommand cell fails the second of those,
+      # in both the bare and the "the default in ..." spelling.
+      if ! delimited_in "$cell" "in \`$lit\`"; then
+        out="$out|$key: README states [$lit] as its default value, but that is a module path"
+      elif ! delimited_in "$fallback" "built-in"; then
+        out="$out|$key: README points at [$lit] for its default, but the code says [$fallback], which is not a built-in"
+      elif [[ ! -f "$PLUGIN_DIR/$lit" ]]; then
+        out="$out|$key: README points at [$lit], which is not a file in the plugin"
+      elif ! delimited_in "$reader" "$lit"; then
+        out="$out|$key: README points at [$lit], but the key is read by [$reader]"
+      fi
+    elif ! delimited_in "$fallback" "$lit"; then
+      # A VALUE claim, compared against `fallback` ALONE. `reader` is prose naming files and
+      # consumers; comparing a value against it is what let a path stand in for a command.
+      out="$out|$key: README states [$lit], code says [$fallback]"
+    fi
   done < <(cell_literals "$cell")
   printf '%s' "$out"
 }
@@ -222,6 +275,46 @@ assert_eq "CONTROL: and it reports nothing for a cell that matches the registry"
   "$(cell_drift knowledgeDir '`knowledge`')" ""
 assert_contains "CONTROL: an unregistered key is named rather than silently skipped" \
   "$(cell_drift notARealKey '`whatever`')" "notARealKey(unregistered)"
+
+# THE TWO MUTATIONS THAT WALKED PAST THE CONTAINMENT VERSION, run through the live registry.
+# Both were measured green at 75/0 before this change; both are named failures now.
+assert_eq "the real migrationDownMarker cell still passes, so the tightening did not just refuse everything" \
+  "$(cell_drift migrationDownMarker '`-- DOWN`')" ""
+assert_contains "CONTROL: a TRUNCATED default (\`-- D\` for \`-- DOWN\`) is refused" \
+  "$(cell_drift migrationDownMarker '`-- D`')" "README states [-- D]"
+assert_contains "CONTROL: and a truncation of a one-word default is refused too" \
+  "$(cell_drift integrationBranch '`mai`')" "README states [mai]"
+assert_contains "CONTROL: a FILE PATH standing in for a command default is refused" \
+  "$(cell_drift checkCommand '`hooks/stop.sh`')" "that is a module path"
+# The same claim in the spelling a pointer cell legitimately uses. Without this case the fix is
+# one rewording away from being defeated: `reader` for checkCommand really is hooks/stop.sh, so
+# only the "is this key's default actually a built-in" question can refuse it.
+assert_contains "CONTROL: dressed as a pointer, it is still refused, because that default is no built-in" \
+  "$(cell_drift checkCommand 'the default in `hooks/stop.sh`')" "which is not a built-in"
+
+# The four cells QA measured as UNFALSIFIABLE, each now put through a check that can refuse. A
+# pointer that names no real file, and a pointer to a module that does not read the key, are the
+# two ways a path-shaped claim goes wrong; both were invisible while `reader` was searched as a
+# substring for the value.
+POINTER_MISS=""
+POINTER_WRONG=""
+for k in migrationGlobs dataLayerGlobs infraGlobs dispatchModels; do
+  [[ -n "$(cell_drift "$k" "the default in \`scripts/no-such-module.mjs\`")" ]] \
+    || POINTER_MISS="$POINTER_MISS $k"
+  [[ -n "$(cell_drift "$k" "the default in \`hooks/stop.sh\`")" ]] \
+    || POINTER_WRONG="$POINTER_WRONG $k"
+done
+assert_eq "CONTROL: every pointer cell refuses a module path that does not exist" "$POINTER_MISS" ""
+assert_eq "CONTROL: and refuses a real file that does not read that key" "$POINTER_WRONG" ""
+
+# The boundary rule itself, since four assertions above depend on it discriminating rather than
+# always saying yes or always saying no.
+assert_eq "delimited_in finds a needle bounded by quotes" \
+  "$(delimited_in 'the built-in "-- DOWN" line-comment marker' '-- DOWN' && echo found || echo no)" "found"
+assert_eq "and refuses the same needle truncated mid-word" \
+  "$(delimited_in 'the built-in "-- DOWN" line-comment marker' '-- D' && echo found || echo no)" "no"
+assert_eq "and finds one that runs to the end of the string" \
+  "$(delimited_in 'otherwise NOTHING' 'NOTHING' && echo found || echo no)" "found"
 
 # The same false claim also lived OUTSIDE the table, in agents/dev.md, where the row parser
 # cannot reach it. A check that only covers the shape the drift was found in leaves its twin
