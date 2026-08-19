@@ -569,6 +569,7 @@ ROUND1_SUBJECTS=(
 CLOSED_ROUND_TIPS=(
   'test: decouple the HEAD-anchored revert probe'              # round 1 tip
   'fix: the telemetry partition counts the events it dropped'  # round 2 tip
+  'docs: the README checkCommand default was a promise'        # round 3 tip
 )
 round_commits() {  # <from-ish> <to-ish> -> one sha per line, oldest first
   git -C "$REPO_ROOT" log --reverse --no-merges --format='%H' "$1".."$2" 2>/dev/null
@@ -629,6 +630,9 @@ CLOSED_CONFLICTS=""
 CLOSED_CHECKED=0
 CLOSED_N=0
 SUPERSEDED_SEEN=0
+# Which TIP each exempted commit was skipped at, so the necessity check below can re-run the
+# exact comparison the exemption suppressed rather than a nearby one.
+SUPERSEDED_AT=""
 for subj in "${CLOSED_ROUND_TIPS[@]}"; do
   CLOSED_N=$((CLOSED_N + 1))
   TIP="$(sha_of "$subj")"
@@ -636,7 +640,11 @@ for subj in "${CLOSED_ROUND_TIPS[@]}"; do
   while IFS= read -r h; do
     [[ -n "$h" ]] || continue
     CLOSED_CHECKED=$((CLOSED_CHECKED + 1))
-    if is_superseded "$h"; then SUPERSEDED_SEEN=$((SUPERSEDED_SEEN + 1)); continue; fi
+    if is_superseded "$h"; then
+      SUPERSEDED_SEEN=$((SUPERSEDED_SEEN + 1))
+      SUPERSEDED_AT="$SUPERSEDED_AT $h:$TIP"
+      continue
+    fi
     [[ "$(revert_touches_at "$TIP" "$h")" == clean:* ]] \
       || CLOSED_CONFLICTS="$CLOSED_CONFLICTS|round $CLOSED_N: $(git -C "$REPO_ROOT" log -1 --format=%s "$h") [$(revert_touches_at "$TIP" "$h")]"
   done < <(round_commits "$CLOSED_BASE" "$TIP")
@@ -671,9 +679,35 @@ for pair in "${SUPERSEDED_PAIRS[@]}"; do
   # 3. It was separable right up to the repair: it reverts cleanly at the repairer's PARENT.
   [[ "$(revert_touches_at "$REP_SHA^" "$SUP_SHA")" == clean:* ]] \
     || PAIR_FAILURES="$PAIR_FAILURES|not separable before its repair: ${pair%%||*}"
+  # 4. THE EXEMPTION IS NECESSARY, which is the only one of the four an ADJACENT pair cannot
+  #    satisfy for free. For the single entry listed today `git rev-parse REP^` IS `SUP`, so
+  #    check 3 reverts a commit at its own tip -- measured clean for every commit that has ever
+  #    existed -- and check 1's `--is-ancestor` is automatic for an adjacent pair. Only check 2
+  #    could refuse anything. So the comparison the exemption SUPPRESSED is re-run here: the
+  #    superseded commit must really CONFLICT at its round's tip. An exemption nobody has watched
+  #    be needed is not an exemption, it is a way to stop checking a commit.
+  SUP_TIP=""
+  for at in $SUPERSEDED_AT; do
+    [[ "${at%%:*}" == "$SUP_SHA" ]] && SUP_TIP="${at##*:}"
+  done
+  if [[ -z "$SUP_TIP" ]]; then
+    PAIR_FAILURES="$PAIR_FAILURES|no round tip recorded, so necessity was never tested: ${pair%%||*}"
+  elif [[ "$(revert_touches_at "$SUP_TIP" "$SUP_SHA")" == clean:* ]]; then
+    PAIR_FAILURES="$PAIR_FAILURES|UNNECESSARY exemption (reverts cleanly at its round tip): ${pair%%||*}"
+  fi
 done
-assert_eq "and each one is an earned exemption: later, overlapping, and separable until the repair" \
+assert_eq "and each one is an earned exemption: later, overlapping, separable until the repair, and NEEDED" \
   "$PAIR_FAILURES" ""
+# The necessity check, stated on its own so a green transcript records WHICH way it came out
+# rather than only that four checks collectively passed.
+assert_eq "the listed exemption really is needed: the superseded commit conflicts at its round tip" \
+  "$(revert_touches_at "$ROUND1_TIP_SHA" "$(sha_of "${SUPERSEDED_PAIRS[0]%%||*}")")" "CONFLICT"
+# CONTROL for check 4, in the other direction: the same necessity test over a commit of the SAME
+# round that needs no exemption returns clean:, so the CONFLICT above discriminates rather than
+# being what this probe says about everything.
+assert_eq "CONTROL: the same necessity test reports clean: for a commit that needs no exemption" \
+  "$([[ "$(revert_touches_at "$ROUND1_TIP_SHA" "$(sha_of 'fix: panel composition seats the specialist')")" == clean:* ]] \
+     && echo clean || echo NOT-CLEAN)" "clean"
 # CONTROL: the earning checks must be able to REFUSE, or the empty string above is a statement
 # about three checks that always pass. Two unrelated commits share no file and are not a repair.
 assert_eq "CONTROL: two unrelated commits do NOT satisfy the shared-file test" \
