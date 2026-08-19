@@ -27,9 +27,19 @@ make_temp_project || exit 90
 PIPELINE_MD="$PLUGIN_ROOT/commands/pipeline.md"
 
 # ---- extraction -------------------------------------------------------------
-PANEL_BLOCK="$TEMP_PROJECT/panel-block.sh"
+PANEL_COMPOSE="$TEMP_PROJECT/panel-compose.sh"
 awk '/^PANEL_ROLES="ba dev qa secops"$/{f=1} f{print} f&&/^```$/{exit}' "$PIPELINE_MD" \
-  | grep -v '^```' > "$PANEL_BLOCK"
+  | grep -v '^```' > "$PANEL_COMPOSE"
+# The Design block is a SEPARATE fence that runs in the same shell immediately after the one
+# above: it uses that block's $CHANGED_PATHS and its surface_probe. Concatenating them is what
+# the orchestrator does, and it is the only way the panel-path FRONTEND probe is reachable at
+# all -- extracting the first fence alone is why #20 sat untested in a suite named for this
+# exact failure direction while the delta block's copy of it was covered.
+DESIGN_BLOCK="$TEMP_PROJECT/design-block.sh"
+awk '/^# \$CHANGED_PATHS is the NUL-delimited diff path list, and `surface_probe` is the function$/{f=1} f{print} f&&/^```$/{exit}' "$PIPELINE_MD" \
+  | grep -v '^```' > "$DESIGN_BLOCK"
+PANEL_BLOCK="$TEMP_PROJECT/panel-block.sh"
+cat "$PANEL_COMPOSE" "$DESIGN_BLOCK" > "$PANEL_BLOCK"
 DELTA_BLOCK="$TEMP_PROJECT/delta-block.sh"
 awk '/^# The FULL panel is whatever was recorded in status.json panel_roles on the first$/{f=1} f{print} f&&/^```$/{exit}' "$PIPELINE_MD" \
   | grep -v '^```' > "$DELTA_BLOCK"
@@ -37,13 +47,23 @@ awk '/^# The FULL panel is whatever was recorded in status.json panel_roles on t
 suite "the blocks under test were actually extracted (without this, every case below measures an empty file)"
 
 assert_eq "the standard-tier panel-composition block is non-empty" \
-  "$([[ -s "$PANEL_BLOCK" ]] && echo yes || echo no)" "yes"
+  "$([[ -s "$PANEL_COMPOSE" ]] && echo yes || echo no)" "yes"
+assert_eq "the Design block is non-empty (its anchor comment is how it is found)" \
+  "$([[ -s "$DESIGN_BLOCK" ]] && echo yes || echo no)" "yes"
 assert_eq "the delta re-review block is non-empty" \
   "$([[ -s "$DELTA_BLOCK" ]] && echo yes || echo no)" "yes"
-assert_eq "the panel block carries both surface probes" \
-  "$(grep -c '^surface_probe diffTouches' "$PANEL_BLOCK" | tr -d ' ')" "2"
+assert_eq "the panel path carries all THREE surface probes once the two fences are joined" \
+  "$(grep -c '^surface_probe [a-z-]*\.mjs diffTouches' "$PANEL_BLOCK" | tr -d ' ')" "3"
 assert_eq "and so does the delta block" \
-  "$(grep -c '^surface_probe diffTouches' "$DELTA_BLOCK" | tr -d ' ')" "2"
+  "$(grep -c '^surface_probe [a-z-]*\.mjs diffTouches' "$DELTA_BLOCK" | tr -d ' ')" "3"
+# Each surface is named EXPLICITLY. Counting to three passes on three copies of one probe,
+# which is the shape a careless de-duplication produces.
+for pred in diffTouchesDataLayer diffTouchesInfra diffTouchesFrontend; do
+  assert_eq "the panel path probes $pred exactly once" \
+    "$(grep -c "^surface_probe [a-z-]*\.mjs $pred " "$PANEL_BLOCK" | tr -d ' ')" "1"
+  assert_eq "and the delta block probes $pred exactly once" \
+    "$(grep -c "^surface_probe [a-z-]*\.mjs $pred " "$DELTA_BLOCK" | tr -d ' ')" "1"
+done
 
 suite "the two probe definitions are byte-identical, so a delta round cannot drift from round 1"
 
@@ -70,6 +90,24 @@ assert_eq "the old two-outcome shape is gone from the whole file" \
   "$(grep -c 'diffTouchesDataLayer(process.argv.slice(1))?0:1' "$PIPELINE_MD" | tr -d ' ')" "0"
 assert_eq "and so is its infra twin" \
   "$(grep -c 'diffTouchesInfra(process.argv.slice(1))?0:1' "$PIPELINE_MD" | tr -d ' ')" "0"
+# The FRONTEND twin outlived both by a whole round, in the same file, four hundred lines under
+# the paragraph that states the rule. The property is spelled over the outcome rather than over
+# one remembered spelling: no `?0:1` survives anywhere in the file, whatever it wraps.
+assert_eq "and the frontend twin, which shipped a round later than the other two" \
+  "$(grep -c 'diffTouchesFrontend(fs.readFileSync(0,"utf8").split("\\0").filter(Boolean))?0:1' "$PIPELINE_MD" | tr -d ' ')" "0"
+# Over the EXTRACTED BLOCKS, not the whole file. The prose around them describes the defective
+# shape in order to explain why it is gone -- twice, now -- and a whole-file grep counts those
+# sentences, so it could never reach zero and would be un-passable for a reason that has nothing
+# to do with what the orchestrator runs. The executable text is the population that matters.
+assert_eq "no two-outcome predicate exit survives in any block the orchestrator runs" \
+  "$(cat "$PANEL_BLOCK" "$DELTA_BLOCK" | grep -c 'process.exit(.*?0:1)' | tr -d ' ')" "0"
+TWO_OUTCOME_PROBE="$TEMP_PROJECT/two-outcome-probe.sh"
+printf '%s\n' 'if node -e "...then(m=>process.exit(m.diffTouchesFrontend(x)?0:1))" < "$P"; then' > "$TWO_OUTCOME_PROBE"
+assert_eq "CONTROL: that same grep DOES find the shape when it is present" \
+  "$(grep -c 'process.exit(.*?0:1)' "$TWO_OUTCOME_PROBE" | tr -d ' ')" "1"
+# ...and the blocks are non-empty, or the zero above is a statement about two empty files.
+assert_eq "and those blocks carry executable probe lines for that zero to be about" \
+  "$(cat "$PANEL_BLOCK" "$DELTA_BLOCK" | grep -c '^surface_probe ' | tr -d ' ')" "6"
 
 # ---- fixtures ---------------------------------------------------------------
 #
@@ -131,9 +169,11 @@ run_delta() {  # $1 = WORKTREE_PATH, $2 = CLAUDE_PLUGIN_ROOT, $3 = runner (defau
 
 DL_REPO="$TEMP_PROJECT/repo-datalayer"; make_diff_repo "$DL_REPO" "db/queries/orders.ts"
 INFRA_REPO="$TEMP_PROJECT/repo-infra"; make_diff_repo "$INFRA_REPO" ".github/workflows/ci.yml"
-# The clean repo's path must miss ALL THREE surfaces, not just the two under test: the delta
-# block also carries the (pre-existing, out-of-scope) frontend probe, and a `src/ui/*.tsx`
-# fixture seats design_review there, which would read as a failure of this suite's control.
+FE_REPO="$TEMP_PROJECT/repo-frontend"; make_diff_repo "$FE_REPO" "src/ui/Button.tsx"
+# The clean repo's path misses ALL THREE surfaces, and that is the definition of clean here
+# rather than a way to keep the frontend probe quiet: every "seats nobody" assertion below is
+# a negative control for all three, so a path that hits any one of them would make the control
+# report a failure of the block instead of a property of the fixture.
 CLEAN_REPO="$TEMP_PROJECT/repo-clean"; make_diff_repo "$CLEAN_REPO" "docs/notes.txt"
 
 # The real plugin root, and a BROKEN one: a directory that exists but has no scripts/, which
@@ -150,7 +190,12 @@ assert_contains "a data-layer path SEATS dba" "$(run_panel "$DL_REPO" "$GOOD_ROO
 assert_not_contains "and that same clean-module run does NOT seat devops" "$(run_panel "$DL_REPO" "$GOOD_ROOT")" "devops"
 assert_contains "an infra path SEATS devops" "$(run_panel "$INFRA_REPO" "$GOOD_ROOT")" "devops"
 assert_not_contains "and that same run does NOT seat dba" "$(run_panel "$INFRA_REPO" "$GOOD_ROOT")" "dba"
-assert_eq "a diff that touches neither surface seats neither" \
+assert_contains "a frontend path SEATS design_review" "$(run_panel "$FE_REPO" "$GOOD_ROOT")" "design_review"
+assert_not_contains "and that same run does NOT seat dba" "$(run_panel "$FE_REPO" "$GOOD_ROOT")" "dba"
+assert_not_contains "nor devops" "$(run_panel "$FE_REPO" "$GOOD_ROOT")" "devops"
+assert_not_contains "and a data-layer path does NOT seat design_review" \
+  "$(run_panel "$DL_REPO" "$GOOD_ROOT")" "design_review"
+assert_eq "a diff that touches no surface seats nobody" \
   "$(run_panel "$CLEAN_REPO" "$GOOD_ROOT")" "ROLES=ba dev qa secops"
 assert_eq "no PANEL-NOTE is emitted when the probe actually ran" \
   "$(run_panel "$CLEAN_REPO" "$GOOD_ROOT" | grep -c 'PANEL-NOTE' | tr -d ' ')" "0"
@@ -160,6 +205,46 @@ suite "THE BLOCKER: an UNEVALUABLE probe seats the specialist instead of silentl
 BROKEN_OUT="$(run_panel "$CLEAN_REPO" "$BROKEN_ROOT")"
 assert_contains "with no scripts/ under CLAUDE_PLUGIN_ROOT, dba is SEATED" "$BROKEN_OUT" "dba"
 assert_contains "and devops is SEATED" "$BROKEN_OUT" "devops"
+# THE #20 CELL. The same stale-cache root that dropped DBA and DevOps went on dropping DESIGN
+# for a further round, because only two of the three probes were converted. The frontend module
+# is a different file, so this is not a repeat of the assertion above: a fix that converted the
+# probe but pointed it at data-layer-surface.mjs would pass every other case in this suite.
+assert_contains "and design_review is SEATED, on the probe that stayed two-outcome a round longer" \
+  "$BROKEN_OUT" "design_review"
+assert_contains "with a note naming it as seated on indeterminacy" "$BROKEN_OUT" \
+  "PANEL-NOTE: design_review SEATED on an INDETERMINATE frontend probe"
+assert_contains "and the frontend module is named on stderr, not the data-layer one" \
+  "$(run_panel_stderr "$CLEAN_REPO" "$BROKEN_ROOT")" "SURFACE-INDETERMINATE: diffTouchesFrontend"
+
+# NON-ZERO CONTROL for that cell: the PRE-FIX frontend shape, verbatim as it shipped, observed
+# doing the thing. Without it "design_review is seated" is equally satisfied by a block that was
+# never broken, and the assertion would be a statement about nothing.
+OLD_FE="$TEMP_PROJECT/old-frontend-shape.sh"
+cat > "$OLD_FE" <<'EOF'
+PANEL_ROLES="ba dev qa secops"
+CHANGED_PATHS="$(mktemp)"
+git -C "$WORKTREE_PATH" diff --name-only -z origin/main...HEAD > "$CHANGED_PATHS"
+if node -e 'const fs=require("node:fs");import(process.env.CLAUDE_PLUGIN_ROOT + "/scripts/frontend-surface.mjs").then(m=>process.exit(m.diffTouchesFrontend(fs.readFileSync(0,"utf8").split("\0").filter(Boolean))?0:1))' < "$CHANGED_PATHS"; then
+  PANEL_ROLES="$PANEL_ROLES design_review"
+fi
+rm -f "$CHANGED_PATHS"
+EOF
+run_old_fe() {  # $1 = WORKTREE_PATH, $2 = CLAUDE_PLUGIN_ROOT
+  WORKTREE_PATH="$1" CLAUDE_PLUGIN_ROOT="$2" bash -c \
+    ". \"$OLD_FE\"; printf 'ROLES=%s\n' \"\$PANEL_ROLES\"" 2>/dev/null
+}
+assert_contains "the pre-fix frontend shape is RIGHT on a frontend diff with a working module" \
+  "$(run_old_fe "$FE_REPO" "$GOOD_ROOT")" "design_review"
+assert_eq "and right on a clean diff, which is why it shipped" \
+  "$(run_old_fe "$CLEAN_REPO" "$GOOD_ROOT")" "ROLES=ba dev qa secops"
+assert_eq "THE #20 DEFECT: on a FRONTEND diff with a stale plugin root it drops design_review" \
+  "$(run_old_fe "$FE_REPO" "$BROKEN_ROOT")" "ROLES=ba dev qa secops"
+assert_eq "and its output is byte-identical to the honest no-match, which is why nobody saw it" \
+  "$([[ "$(run_old_fe "$FE_REPO" "$BROKEN_ROOT")" == "$(run_old_fe "$CLEAN_REPO" "$GOOD_ROOT")" ]] && echo identical || echo different)" \
+  "identical"
+assert_eq "the SHIPPED block, same input, is materially different" \
+  "$([[ "$(run_panel "$FE_REPO" "$BROKEN_ROOT" | grep '^ROLES=')" == "$(run_panel "$CLEAN_REPO" "$GOOD_ROOT" | grep '^ROLES=')" ]] && echo IDENTICAL || echo different)" \
+  "different"
 # The seat alone is not enough: an over-seated panel that says nothing is a panel whose
 # recorded panel_roles lies about WHY the role is there.
 assert_contains "a PANEL-NOTE names dba as seated on indeterminacy, not on a match" "$BROKEN_OUT" \
@@ -198,8 +283,22 @@ FALSE_ROOT="$TEMP_PROJECT/honest-false-plugin"
 mkdir -p "$FALSE_ROOT/scripts"
 printf 'export function diffTouchesDataLayer(){return false}\nexport function diffTouchesInfra(){return false}\n' \
   > "$FALSE_ROOT/scripts/data-layer-surface.mjs"
-assert_eq "CONTROL: a module that loads and honestly answers false seats NOBODY" \
+# Both modules, or this control is not the control it claims: with only the data-layer module
+# stubbed, the frontend probe would be indeterminate and design_review would be seated, and
+# "seats NOBODY" would be measuring a missing file rather than an honest false.
+printf 'export function diffTouchesFrontend(){return false}\n' \
+  > "$FALSE_ROOT/scripts/frontend-surface.mjs"
+assert_eq "CONTROL: modules that load and honestly answer false seat NOBODY" \
   "$(run_panel "$CLEAN_REPO" "$FALSE_ROOT")" "ROLES=ba dev qa secops"
+# And the half that control cannot see: with the data-layer module honest and the FRONTEND one
+# absent, exactly one seat is taken and it is the right one.
+HALF_ROOT="$TEMP_PROJECT/half-stubbed-plugin"
+mkdir -p "$HALF_ROOT/scripts"
+cp "$FALSE_ROOT/scripts/data-layer-surface.mjs" "$HALF_ROOT/scripts/data-layer-surface.mjs"
+HALF_OUT="$(run_panel "$CLEAN_REPO" "$HALF_ROOT")"
+assert_contains "a MISSING frontend module alone seats design_review" "$HALF_OUT" "design_review"
+assert_not_contains "and does not seat dba, whose own module answered" "$HALF_OUT" "dba"
+assert_not_contains "nor devops" "$HALF_OUT" "devops"
 
 suite "the DELTA re-review round fails the same direction (the other two of the four sites)"
 
@@ -209,7 +308,10 @@ assert_eq "CONTROL: a fix commit touching neither surface leaves the delta seed 
 BROKEN_DELTA="$(run_delta "$CLEAN_REPO" "$BROKEN_ROOT")"
 assert_contains "an unevaluable delta probe adds dba" "$BROKEN_DELTA" "dba"
 assert_contains "and devops" "$BROKEN_DELTA" "devops"
+assert_contains "and design_review, the third surface" "$BROKEN_DELTA" "design_review"
 assert_contains "and emits the note" "$BROKEN_DELTA" "PANEL-NOTE: dba SEATED on an INDETERMINATE"
+assert_contains "and one for the frontend probe too" "$BROKEN_DELTA" \
+  "PANEL-NOTE: design_review SEATED on an INDETERMINATE frontend probe"
 
 # =============================================================================
 # THE SECOND ESCAPE: SHELL crossed with PATH COUNT.
@@ -242,6 +344,8 @@ DL_MULTI="$TEMP_PROJECT/repo-datalayer-multi"
 make_diff_repo "$DL_MULTI" "db/migrate/001_add_users.rb" "src/app.ts"
 INFRA_MULTI="$TEMP_PROJECT/repo-infra-multi"
 make_diff_repo "$INFRA_MULTI" ".github/workflows/ci.yml" "src/app.ts"
+FE_MULTI="$TEMP_PROJECT/repo-frontend-multi"
+make_diff_repo "$FE_MULTI" "src/ui/Button.tsx" "src/lib/util.ts"
 CLEAN_MULTI="$TEMP_PROJECT/repo-clean-multi"
 make_diff_repo "$CLEAN_MULTI" "docs/notes.txt" "docs/more.txt"
 
@@ -328,6 +432,10 @@ for runner in "${RUNNERS[@]}"; do
     "$(run_panel_in "$runner" "$INFRA_REPO" "$GOOD_ROOT")" "devops"
   assert_contains "[$runner] MULTI-path infra diff seats devops" \
     "$(run_panel_in "$runner" "$INFRA_MULTI" "$GOOD_ROOT")" "devops"
+  assert_contains "[$runner] one-path frontend diff seats design_review" \
+    "$(run_panel_in "$runner" "$FE_REPO" "$GOOD_ROOT")" "design_review"
+  assert_contains "[$runner] MULTI-path frontend diff seats design_review" \
+    "$(run_panel_in "$runner" "$FE_MULTI" "$GOOD_ROOT")" "design_review"
   # OVER-REFUSAL CONTROL in the same column: a block that seated everyone would pass all four
   # cells above, so each column carries its own negative.
   assert_eq "[$runner] one-path clean diff seats neither" \
@@ -340,26 +448,25 @@ for runner in "${RUNNERS[@]}"; do
     "$(run_panel_in "$runner" "$DL_MULTI" "$GOOD_ROOT")" "devops"
   assert_not_contains "[$runner] MULTI-path infra diff does NOT seat dba" \
     "$(run_panel_in "$runner" "$INFRA_MULTI" "$GOOD_ROOT")" "dba"
+  # The frontend column's own negative, for the same reason.
+  assert_not_contains "[$runner] MULTI-path data-layer diff does NOT seat design_review" \
+    "$(run_panel_in "$runner" "$DL_MULTI" "$GOOD_ROOT")" "design_review"
+  assert_not_contains "[$runner] MULTI-path frontend diff does NOT seat dba" \
+    "$(run_panel_in "$runner" "$FE_MULTI" "$GOOD_ROOT")" "dba"
 done
 
 suite "THE FIX: the delta round holds across the same matrix (the other two call sites)"
 
-# The delta block is also the only extractable block carrying the FRONTEND probe. Its
-# two-outcome shape is out of scope here (#20), but its path plumbing moved onto the same
-# NUL-delimited list, so it gets the same matrix: a frontend probe that word-splits drops the
-# Design lens on exactly the multi-path diffs a real frontend change produces.
-FE_MULTI="$TEMP_PROJECT/repo-frontend-multi"
-make_diff_repo "$FE_MULTI" "src/ui/Button.tsx" "src/lib/util.ts"
-FE_ONE="$TEMP_PROJECT/repo-frontend-one"
-make_diff_repo "$FE_ONE" "src/ui/Button.tsx"
-
+# The frontend fixtures are the SAME ones the panel matrix above uses, deliberately: the two
+# copies of the probe are supposed to behave identically, and giving each its own fixture is
+# how a difference between them hides.
 for runner in "${RUNNERS[@]}"; do
   assert_contains "[$runner] a MULTI-path data-layer fix commit adds dba to the delta set" \
     "$(run_delta "$DL_MULTI" "$GOOD_ROOT" "$runner")" "dba"
   assert_contains "[$runner] a MULTI-path infra fix commit adds devops" \
     "$(run_delta "$INFRA_MULTI" "$GOOD_ROOT" "$runner")" "devops"
   assert_contains "[$runner] a one-path frontend fix commit adds design_review" \
-    "$(run_delta "$FE_ONE" "$GOOD_ROOT" "$runner")" "design_review"
+    "$(run_delta "$FE_REPO" "$GOOD_ROOT" "$runner")" "design_review"
   assert_contains "[$runner] a MULTI-path frontend fix commit adds design_review" \
     "$(run_delta "$FE_MULTI" "$GOOD_ROOT" "$runner")" "design_review"
   assert_eq "[$runner] CONTROL: a MULTI-path fix commit touching neither surface leaves the seed alone" \
@@ -412,7 +519,13 @@ assert_eq "and 20 is what the probe returns on a real no-match" \
   "$(WORKTREE_PATH="$CLEAN_REPO" CLAUDE_PLUGIN_ROOT="$GOOD_ROOT" bash -c \
       "CHANGED_PATHS=\"\$(mktemp)\"; git -C \"\$WORKTREE_PATH\" diff --name-only -z origin/main...HEAD > \"\$CHANGED_PATHS\"
        $(probe_def "$PANEL_BLOCK")
-       surface_probe diffTouchesDataLayer < \"\$CHANGED_PATHS\"; echo \$?; rm -f \"\$CHANGED_PATHS\"" 2>/dev/null)" \
+       surface_probe data-layer-surface.mjs diffTouchesDataLayer < \"\$CHANGED_PATHS\"; echo \$?; rm -f \"\$CHANGED_PATHS\"" 2>/dev/null)" \
+  "20"
+assert_eq "and the frontend probe returns the same 20 on its own real no-match" \
+  "$(WORKTREE_PATH="$CLEAN_REPO" CLAUDE_PLUGIN_ROOT="$GOOD_ROOT" bash -c \
+      "CHANGED_PATHS=\"\$(mktemp)\"; git -C \"\$WORKTREE_PATH\" diff --name-only -z origin/main...HEAD > \"\$CHANGED_PATHS\"
+       $(probe_def "$PANEL_BLOCK")
+       surface_probe frontend-surface.mjs diffTouchesFrontend < \"\$CHANGED_PATHS\"; echo \$?; rm -f \"\$CHANGED_PATHS\"" 2>/dev/null)" \
   "20"
 # CONTROL for that number: node reaches into the same band unprompted, which is the whole
 # reason the sentinel moved. 13 is "Unsettled Top-Level Await", emitted with no process.exit.

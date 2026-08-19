@@ -630,17 +630,21 @@ fi
 # (# CUSTOMIZE: `dataLayerGlobs` and `infraGlobs` in pipeline.config.json describe YOUR layout.)
 # The panel predicate is the BROAD one deliberately: a panel seat is cheap and reversible,
 # where the tripwire's narrow halt is not.
-surface_probe() {  # $1 = predicate export name; the NUL-delimited path list arrives on STDIN
-  node -e 'const fs=require("node:fs");new Promise(r=>r(fs.readFileSync(0,"utf8").split("\0").filter(Boolean))).then(paths=>import(process.env.CLAUDE_PLUGIN_ROOT + "/scripts/data-layer-surface.mjs").then(m=>{const f=m[process.argv[1]];if(typeof f!=="function")throw new Error("missing export "+process.argv[1]);if(paths.length===0)throw new Error("empty path list: an unread diff is not a clean diff");process.exit(f(paths)?0:20)})).catch(e=>{console.error("SURFACE-INDETERMINATE: "+process.argv[1]+": "+(e&&e.message));process.exit(1)})' "$1"
+#
+# The MODULE is an argument, not a constant, so the frontend probe further down this phase runs
+# the same three-outcome shape instead of a second spelling of it. One function, one fail
+# direction, one place to get it wrong.
+surface_probe() {  # $1 = module basename under scripts/, $2 = predicate export; NUL path list on STDIN
+  node -e 'const fs=require("node:fs");new Promise(r=>r(fs.readFileSync(0,"utf8").split("\0").filter(Boolean))).then(paths=>import(process.env.CLAUDE_PLUGIN_ROOT + "/scripts/" + process.argv[1]).then(m=>{const f=m[process.argv[2]];if(typeof f!=="function")throw new Error("missing export "+process.argv[2]+" in "+process.argv[1]);if(paths.length===0)throw new Error("empty path list: an unread diff is not a clean diff");process.exit(f(paths)?0:20)})).catch(e=>{console.error("SURFACE-INDETERMINATE: "+process.argv[2]+": "+(e&&e.message));process.exit(1)})' "$1" "$2"
 }
-surface_probe diffTouchesDataLayer < "$CHANGED_PATHS"; RC=$?
+surface_probe data-layer-surface.mjs diffTouchesDataLayer < "$CHANGED_PATHS"; RC=$?
 if [ "$RC" -ne 20 ]; then
   PANEL_ROLES="$PANEL_ROLES dba"
   if [ "$RC" -ne 0 ]; then
     echo "PANEL-NOTE: dba SEATED on an INDETERMINATE data-layer probe (exit $RC; see SURFACE-INDETERMINATE on stderr), not on a match."
   fi
 fi
-surface_probe diffTouchesInfra < "$CHANGED_PATHS"; RC=$?
+surface_probe data-layer-surface.mjs diffTouchesInfra < "$CHANGED_PATHS"; RC=$?
 if [ "$RC" -ne 20 ]; then
   PANEL_ROLES="$PANEL_ROLES devops"
   if [ "$RC" -ne 0 ]; then
@@ -657,7 +661,7 @@ fi
 
 The direction is the same rule the mis-tier tripwire states, applied to a third consumer: *an unevaluable check cannot know the answer is negative.* The tripwire halts because it cannot know the diff was clean; panel composition seats because it cannot know the diff misses the surface. Over-seating costs one reviewer's context and refuses no correct work; under-seating removes the exact lens the diff needed while `status.json` records a panel and the PR summary claims it reviewed the diff.
 
-If either block prints a `PANEL-NOTE:` line, record that sentence in `status.json` (`flags`) alongside `panel_roles`, and say it in the PR summary: the recorded panel then contains a role seated by indeterminacy rather than by a match, and an auditor reading `panel_roles` later cannot tell those apart from the array alone. Fixing the stale `${CLAUDE_PLUGIN_ROOT}` is the real remedy; the seat is the safe default while it is broken.
+If any probe prints a `PANEL-NOTE:` line (data-layer, infra, or the frontend one in the Design block below), record that sentence in `status.json` (`flags`) alongside `panel_roles`, and say it in the PR summary: the recorded panel then contains a role seated by indeterminacy rather than by a match, and an auditor reading `panel_roles` later cannot tell those apart from the array alone. Fixing the stale `${CLAUDE_PLUGIN_ROOT}` is the real remedy; the seat is the safe default while it is broken.
 
 **Art Director is contract-conditional, at every tier.** It is NOT a standing panel role and NOT a taste second-opinion on Design. It joins only when a binding visual contract exists for this issue, and it owns that contract.
 
@@ -679,12 +683,17 @@ It renders the result itself, rules clause by clause, and writes a bare `peer-re
 **Design is surface-conditional at EVERY tier.** Add `design_review` to `PANEL_ROLES` (on top of the architectural/trivial six or the standard four-plus) when, and only when, the diff touches a frontend surface. Use the SAME allowlist the gate uses, so detection and dispatch never diverge:
 
 ```bash
-# $CHANGED_PATHS is the NUL-delimited diff path list (written above for standard; produce it
-# the same way for architectural/trivial). diffTouchesFrontend in
-# ${CLAUDE_PLUGIN_ROOT}/scripts/frontend-surface.mjs is the single source of truth; this
-# one-liner reuses it so the panel and the gate agree.
-if node -e 'const fs=require("node:fs");import(process.env.CLAUDE_PLUGIN_ROOT + "/scripts/frontend-surface.mjs").then(m=>process.exit(m.diffTouchesFrontend(fs.readFileSync(0,"utf8").split("\0").filter(Boolean))?0:1))' < "$CHANGED_PATHS"; then
+# $CHANGED_PATHS is the NUL-delimited diff path list, and `surface_probe` is the function
+# defined in the panel-composition block above: this block runs in the SAME shell, immediately
+# after it (produce both the same way for architectural/trivial). diffTouchesFrontend in
+# ${CLAUDE_PLUGIN_ROOT}/scripts/frontend-surface.mjs is the single source of truth; the probe
+# reuses it so the panel and the gate agree.
+surface_probe frontend-surface.mjs diffTouchesFrontend < "$CHANGED_PATHS"; RC=$?
+if [ "$RC" -ne 20 ]; then
   PANEL_ROLES="$PANEL_ROLES design_review"
+  if [ "$RC" -ne 0 ]; then
+    echo "PANEL-NOTE: design_review SEATED on an INDETERMINATE frontend probe (exit $RC; see SURFACE-INDETERMINATE on stderr), not on a match."
+  fi
 fi
 
 # Art Director sits only when it authored a contract for this issue (Duty A above).
@@ -692,7 +701,7 @@ fi
 rm -f "$CHANGED_PATHS"
 ```
 
-The frontend probe above is still on the TWO-outcome shape, which the data-layer and infra probes are not: an unevaluable `frontend-surface.mjs` reads as "no frontend file changed" and silently drops the Design lens. That is issue #20 and is deliberately not fixed here; only its path plumbing moved onto the NUL-delimited list, because the variable it used to read no longer exists.
+The frontend probe is on the same three-outcome shape as the data-layer and infra ones, and it got there late: it shipped as `process.exit(m.diffTouchesFrontend(...)?0:1)` with no `.catch()` and no exit-status branch, four hundred lines below a paragraph in this file titled "Three outcomes, never two". A stale `${CLAUDE_PLUGIN_ROOT}` made it exit 1 with zero bytes on both streams, byte-identical to "no frontend file changed", and Design was dropped from a panel reviewing a frontend diff while `status.json` recorded a panel. That was issue #20; the seat now goes to the specialist on any exit that is not the reserved 20.
 
 Record the resolved `PANEL_ROLES` in `status.json` so the merge, the rubric, and a `--resume` all agree on who was on the panel. At the same checkpoint, increment `review_rounds` (1 on the first full panel, +1 per delta round; events[] carries no round field, so this cannot be inferred later) and refresh the derived telemetry and the effective-config audit record:
 
@@ -815,25 +824,29 @@ fi
 # This definition is byte-identical to the one above on purpose; keep them that way. The path
 # list is passed by REDIRECTION at the call site rather than named inside the function, which
 # is what lets the two definitions stay byte-identical across two differently-named lists.
-surface_probe() {  # $1 = predicate export name; the NUL-delimited path list arrives on STDIN
-  node -e 'const fs=require("node:fs");new Promise(r=>r(fs.readFileSync(0,"utf8").split("\0").filter(Boolean))).then(paths=>import(process.env.CLAUDE_PLUGIN_ROOT + "/scripts/data-layer-surface.mjs").then(m=>{const f=m[process.argv[1]];if(typeof f!=="function")throw new Error("missing export "+process.argv[1]);if(paths.length===0)throw new Error("empty path list: an unread diff is not a clean diff");process.exit(f(paths)?0:20)})).catch(e=>{console.error("SURFACE-INDETERMINATE: "+process.argv[1]+": "+(e&&e.message));process.exit(1)})' "$1"
+surface_probe() {  # $1 = module basename under scripts/, $2 = predicate export; NUL path list on STDIN
+  node -e 'const fs=require("node:fs");new Promise(r=>r(fs.readFileSync(0,"utf8").split("\0").filter(Boolean))).then(paths=>import(process.env.CLAUDE_PLUGIN_ROOT + "/scripts/" + process.argv[1]).then(m=>{const f=m[process.argv[2]];if(typeof f!=="function")throw new Error("missing export "+process.argv[2]+" in "+process.argv[1]);if(paths.length===0)throw new Error("empty path list: an unread diff is not a clean diff");process.exit(f(paths)?0:20)})).catch(e=>{console.error("SURFACE-INDETERMINATE: "+process.argv[2]+": "+(e&&e.message));process.exit(1)})' "$1" "$2"
 }
-surface_probe diffTouchesDataLayer < "$FIX_CHANGED_PATHS"; RC=$?
+surface_probe data-layer-surface.mjs diffTouchesDataLayer < "$FIX_CHANGED_PATHS"; RC=$?
 if [ "$RC" -ne 20 ]; then
   case " $DELTA " in *" dba "*) ;; *) DELTA="$DELTA dba";; esac
   if [ "$RC" -ne 0 ]; then
     echo "PANEL-NOTE: dba SEATED on an INDETERMINATE data-layer probe (exit $RC; see SURFACE-INDETERMINATE on stderr), not on a match."
   fi
 fi
-surface_probe diffTouchesInfra < "$FIX_CHANGED_PATHS"; RC=$?
+surface_probe data-layer-surface.mjs diffTouchesInfra < "$FIX_CHANGED_PATHS"; RC=$?
 if [ "$RC" -ne 20 ]; then
   case " $DELTA " in *" devops "*) ;; *) DELTA="$DELTA devops";; esac
   if [ "$RC" -ne 0 ]; then
     echo "PANEL-NOTE: devops SEATED on an INDETERMINATE infra probe (exit $RC; see SURFACE-INDETERMINATE on stderr), not on a match."
   fi
 fi
-if node -e 'const fs=require("node:fs");import(process.env.CLAUDE_PLUGIN_ROOT + "/scripts/frontend-surface.mjs").then(m=>process.exit(m.diffTouchesFrontend(fs.readFileSync(0,"utf8").split("\0").filter(Boolean))?0:1))' < "$FIX_CHANGED_PATHS"; then
+surface_probe frontend-surface.mjs diffTouchesFrontend < "$FIX_CHANGED_PATHS"; RC=$?
+if [ "$RC" -ne 20 ]; then
   case " $DELTA " in *" design_review "*) ;; *) DELTA="$DELTA design_review";; esac
+  if [ "$RC" -ne 0 ]; then
+    echo "PANEL-NOTE: design_review SEATED on an INDETERMINATE frontend probe (exit $RC; see SURFACE-INDETERMINATE on stderr), not on a match."
+  fi
 fi
 rm -f "$FIX_CHANGED_PATHS"
 ROLES_TO_MERGE="$DELTA"
