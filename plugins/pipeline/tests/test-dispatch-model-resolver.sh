@@ -373,6 +373,54 @@ assert_eq "no (role, tier, phase) cell resolves to haiku under the shipped defau
 assert_eq "control: the same probe DOES report haiku when a config sets it" \
   "$(r_stdout "$R_LOWER" ba standard 4)" "haiku"
 
+suite "QA-3/N1: a role-level override cannot flatten a phase that carries two sites"
+
+# THE DEFECT. The override was applied AFTER row selection and ignored `site` entirely, so
+# {"dispatchModels":{"dev":"haiku"}} resolved BOTH `--site design-sketch` and
+# `--site bakeoff-judge` to haiku -- collapsing the one dimension this table exists to hold,
+# on the opus-pinned synthesis step, from a config edit that reads as tuning.
+#
+# A `dispatchModels` key names a ROLE, so it carries ONE value and cannot address one of two
+# sites. Refused there and reported, rather than silently applied to both.
+R_DEVHAIKU=$(new_root cfg-dev-haiku '{"dispatchModels":{"dev":"haiku"}}')
+
+assert_eq "the bake-off judge keeps its opus, not the role-level haiku" \
+  "$(emission "$R_DEVHAIKU" dev architectural 2.5 --site bakeoff-judge)" "emit:opus"
+assert_eq "and the design sketch keeps its sonnet" \
+  "$(emission "$R_DEVHAIKU" dev architectural 2.5 --site design-sketch)" "emit:sonnet"
+# The two sites must still resolve DIFFERENTLY under the override. Equal values here is the
+# exact defect: a config edit that erased the distinction.
+assert_eq "the two sites still differ under the override, which is what 'not flattened' means" \
+  "$([[ "$(emission "$R_DEVHAIKU" dev architectural 2.5 --site bakeoff-judge)" == "$(emission "$R_DEVHAIKU" dev architectural 2.5 --site design-sketch)" ]] && echo FLATTENED || echo distinct)" \
+  "distinct"
+assert_eq "with no --site at all the multi-site phase is still not flattened to haiku" \
+  "$(emission "$R_DEVHAIKU" dev architectural 2.5)" "emit:sonnet"
+
+# A refusal that says nothing is how a config typo becomes permanent: the operator set a key
+# and got the table, and nothing told them why.
+assert_contains "the refusal is REPORTED, naming both sites and their models" \
+  "$(r_stderr "$R_DEVHAIKU" dev architectural 2.5 --site bakeoff-judge)" \
+  "carries 2 dispatch sites with DIFFERENT models"
+assert_contains "and it names the sites, so the operator can act on it" \
+  "$(r_stderr "$R_DEVHAIKU" dev architectural 2.5 --site bakeoff-judge)" \
+  "design-sketch=sonnet, bakeoff-judge=opus"
+
+# NON-ZERO CONTROLS. Without these, "dev/2.5 is not haiku" would be satisfied by an
+# implementation that ignored `dispatchModels` entirely.
+assert_eq "CONTROL: the SAME override DOES apply at dev/4, where the phase carries one site" \
+  "$(emission "$R_DEVHAIKU" dev standard 4)" "emit:haiku"
+assert_eq "CONTROL: and at dev/3, which carries no table row at all, it still applies" \
+  "$(emission "$R_DEVHAIKU" dev standard 3)" "emit:haiku"
+assert_eq "CONTROL: no override at all leaves the bake-off judge on opus (the value being protected)" \
+  "$(emission "$(new_root cfg-dev-none '{}')" dev architectural 2.5 --site bakeoff-judge)" "emit:opus"
+assert_eq "CONTROL: no refusal is reported where the phase is unambiguous" \
+  "$(r_stderr "$R_DEVHAIKU" dev standard 4 | grep -c 'DIFFERENT models' | tr -d ' ')" "0"
+
+# The refusal is keyed on the models DIFFERING, not merely on there being two rows: an
+# override that cannot change any outcome has nothing to flatten and is not worth refusing.
+assert_eq "the rule is stated over differing models, not over a row count" \
+  "$(grep -c 'distinctModels.size > 1' "$SCRIPTS_DIR/dispatch-model.mjs" | tr -d ' ')" "1"
+
 suite "AC19: no inline model literal survives in a dispatch block"
 
 # NON-ZERO CONTROL, observed at origin/main before the fix: this grep returns 4 at HEAD

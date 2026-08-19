@@ -23,6 +23,11 @@
  * only helps when the key is ABSENT). Emitting nothing collapses the class and leaves exactly
  * one way to lower them: editing agents/secops.md or agents/qa.md.
  *
+ * A `dispatchModels` key names a ROLE and therefore carries ONE value, so it cannot address a
+ * (role, phase) that carries two sites with different models. It is REFUSED there and
+ * reported, never applied to both: flattening (dev, 2.5) would lower the opus-pinned bake-off
+ * judge from a config edit that reads as tuning. Move a specific site by editing the table.
+ *
  * # CUSTOMIZE: set `dispatchModels` in pipeline.config.json to override a NON-pinned role,
  * e.g. { "dispatchModels": { "design_review": "opus" } }. Values are allowlisted to the
  * floating aliases below; a full model ID is rejected and reported.
@@ -197,7 +202,23 @@ export function resolve({ role: rawRole, tier, phase, site, cfg }) {
     row = rows.find((r) => r.siteDefault) || rows[0] || null;
   }
 
-  if (overrides[role]) return { model: overrides[role], reports, error: null };
+  // A `dispatchModels` key names a ROLE, so it carries one value, but a (role, phase) can be
+  // TWO dispatches whose models differ on purpose: (dev, 2.5) is the two design sketches
+  // (sonnet) and the bake-off judge (opus). Applied after row selection, a role-level override
+  // returns the same token for both and silently flattens the distinction this table's `site`
+  // dimension exists to hold -- on the opus-pinned synthesis step, quietly, from a config edit
+  // that reads as tuning. It is REFUSED there and reported, rather than honoured for a site it
+  // cannot name. Everywhere the (role, phase) is unambiguous the override applies as before.
+  if (overrides[role]) {
+    const distinctModels = new Set(rows.map((r) => r.model));
+    if (rows.length > 1 && distinctModels.size > 1) {
+      reports.push(
+        `dispatchModels.${role}: ${role}/${phase} carries ${rows.length} dispatch sites with DIFFERENT models (${rows.map((r) => `${r.site}=${r.model}`).join(", ")}); a role-level key cannot name one of them, so the override is IGNORED for this phase and the table applies. Change the table in this file to move a specific site.`,
+      );
+    } else {
+      return { model: overrides[role], reports, error: null };
+    }
+  }
   return { model: row ? row.model : null, reports, error: null };
 }
 
