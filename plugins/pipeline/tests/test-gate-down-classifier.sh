@@ -380,6 +380,69 @@ run_cell ac21-default "migrations/051_default.sql" "-- drop table foo;
 "
 assert_eq "AC21 CONTRAST: the default \`-- DOWN\` marker passes under either reading" "$RC" "0"
 
+suite "gate down-region classifier: AC7(b) -- the \`--\` no-whitespace boundary, fixtured in both directions"
+
+# AN ACCEPTED BOUNDARY, WITH FIXTURES, because "documented as accepted" and "nobody ever
+# checked" produce the same green. MySQL and MariaDB require whitespace after `--` before it
+# is a comment; PostgreSQL, SQLite, Oracle and T-SQL do not. The scan sides with the majority
+# and strips `--x`, so a MySQL-family target sees SQL where the gate saw commentary.
+#
+# The cells below assert the ACCEPT, which is the uncomfortable direction and exactly why they
+# have to exist: the boundary shipped with a docstring sentence promising the cost was "never
+# destruction" and with NO fixture using a `--` without following whitespace in EITHER
+# direction. The sentence has been narrowed to what these cells actually show; if a later
+# change closes the boundary, these cells go red and their comments say what to weigh.
+run_cell ac7b-nows "migrations/07b1.sql" "--x; drop table users;
+"
+assert_eq "AC7(b): \`--x; drop table users;\` is ACCEPTED, RC=0 -- the documented boundary" "$RC" "0"
+assert_contains "AC7(b): and the gate says so rather than passing silently" "$OUT" "OK: pre-Phase-4 gate passed."
+# THE COST THIS CELL RECORDS, so nobody reads the RC=0 as a safety claim: on MySQL/MariaDB
+# `--x` is not a comment, so a `;`-splitting runner sees a failing first statement and then a
+# live `drop table users`. It needs a MySQL-family target AND a runner that continues past an
+# error. The docstring carries this; the assertion below pins that it keeps carrying it.
+
+# CONTROL 1: the SPACED twin. Without it the cell above could be read as "a semicolon inside a
+# comment is fine", which is a different and much broader claim.
+run_cell ac7b-ws "migrations/07b2.sql" "-- x; drop table users;
+"
+assert_eq "AC7(b) CONTROL: the spaced \`-- x; ...\` twin is accepted too, so the axis is the whitespace" "$RC" "0"
+
+# CONTROL 2 and 3: WHAT REQUIRING WHITESPACE WOULD REFUSE. These are the population that makes
+# the boundary worth keeping rather than closing, and they are ordinary, not contrived.
+run_cell ac7b-divider "migrations/07b3.sql" "-----------------------------
+-- rollback: restore via PITR
+-----------------------------
+"
+assert_eq "AC7(b) CONTROL: a \`-----\` section divider stays clean, RC=0" "$RC" "0"
+run_cell ac7b-nospace-prose "migrations/07b4.sql" "--drop the index, then restore from the nightly dump
+"
+assert_eq "AC7(b) CONTROL: and so does \`--drop the index\`, ordinary prose with no space" "$RC" "0"
+
+# CONTROL 4: THE BOUNDARY IS CONFINED TO ONE LINE. The same DROP on the NEXT line is refused,
+# which is what makes the accepted cell a narrow shape rather than "`--` disables the gate".
+run_cell ac7b-nextline "migrations/07b5.sql" "--x
+drop table users;
+"
+assert_eq "AC7(b) CONTROL: the same DROP on the NEXT line still halts, RC=1" "$RC" "1"
+assert_not_schema "AC7(b) CONTROL"
+assert_contains "AC7(b) CONTROL: naming it as executable" "$ERR" "executable"
+
+# THE PROSE HALF. Asserted over the WHOLE MODULE, not over the docstring window the AC22 suite
+# derives below: this is a banned SENTENCE rather than a required one, and a banned sentence
+# must not reappear in any comment in the file -- including the classifier's own docblock,
+# which is where a future editor is most likely to restate the rule.
+GATE_TEXT="$(cat "$GATE_SRC")"
+assert_not_contains "AC7(b): the module no longer promises the boundary is \"never as destruction\"" \
+  "$GATE_TEXT" "never as destruction"
+assert_contains "AC7(b): it names the second-statement shape that makes the promise false" \
+  "$GATE_TEXT" "SECOND STATEMENT"
+assert_contains "AC7(b): and names the runner condition the destruction needs" \
+  "$GATE_TEXT" "continues past"
+# ...and records WHY the obvious fix is not taken, or the next reader closes the boundary and
+# false-halts every `-----` divider in the corpus.
+assert_contains "AC7(b): and warns against \"fixing\" it by requiring whitespace after \`--\`" \
+  "$GATE_TEXT" "DO NOT close this by requiring whitespace"
+
 suite "gate down-region classifier: AC22 -- the docstring states the rule it now enforces"
 
 # A prose reader that sides with the OLD predicate is the sentence that reintroduces the bug
