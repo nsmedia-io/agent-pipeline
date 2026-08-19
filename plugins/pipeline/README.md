@@ -58,7 +58,7 @@ Copy `pipeline.config.example.json` to `pipeline.config.json` at your project ro
 | Key | What it does | Default |
 |---|---|---|
 | `integrationBranch` | Base branch for worktrees and diffs | `main` |
-| `checkCommand` | The command Dev and the Stop hook run to prove green | `npm run typecheck && npm test && npm run lint` |
+| `checkCommand` | The command Dev and the Stop hook run to prove green. Set it: the fallback is much weaker than it looks | `npm run typecheck`, and only if your package.json declares that script; otherwise the Stop hook verifies nothing at all |
 | `knowledgeDir` | Where the knowledge store lives | `knowledge` |
 | `frontendSurface` | Globs that mark a diff as frontend-touching (drives the Design lens + visual gate) | a generic component/style set |
 | `migrationGlobs` | Globs the pre-Phase-4 gate uses to DISCOVER migrations in the impl-report. REPLACES the built-in preset union, so setting it NARROWS gate discovery. It does NOT narrow the mis-tier tripwire, which unions the same key with the presets; widen both with `extraMigrationGlobs` instead | the fifteen-row framework-preset union in `scripts/data-layer-surface.mjs` |

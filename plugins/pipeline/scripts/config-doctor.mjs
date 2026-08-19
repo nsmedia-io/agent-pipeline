@@ -103,7 +103,7 @@ const CODE_KEYS = {
   migrationDownMarker: {
     type: "string",
     reader: "scripts/gate-pre-phase4.mjs",
-    fallback: "the built-in rollback marker",
+    fallback: 'the built-in "-- DOWN" line-comment marker',
   },
 };
 

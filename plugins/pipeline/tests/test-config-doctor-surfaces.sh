@@ -152,6 +152,94 @@ assert_eq "and the README states that number in words" \
 assert_eq "CONTROL: the same grep reports absent for a number the README does not claim" \
   "$([[ "$(grep -c 'twenty-row framework-preset union' "$PLUGIN_DIR/README.md" | tr -d ' ')" -ge 1 ]] && echo stated || echo absent)" "absent"
 
+suite "AC12(b): every VALUE the README's Default column states is a value the code produces"
+
+# The second clause of AC12, which shipped as prose and never as a check. It found live drift
+# the moment it was written: the README promised `checkCommand` defaults to
+# "npm run typecheck && npm test && npm run lint", while the Stop hook falls back to
+# `npm run typecheck` ONLY when package.json declares it and is otherwise a no-op. An owner
+# reading that table believed their tests and lint ran on every turn end. Nothing did.
+#
+# The rule is exact and needs no exception list: every BACKTICKED LITERAL in a Default cell is
+# a value claim, and it must appear verbatim in that key's registered `fallback` or `reader`.
+# Unbackticked prose in the same cell ("a generic component/style set") is a description, not a
+# claim about a value, and is not compared -- which is why the literal COUNT is asserted too:
+# rewriting a claim into prose to dodge the check reddens the floor.
+key_value() { # <key> <field> -> the registered string, or "" when absent
+  DOC="$DOCTOR" KEY="$1" FIELD="$2" node -e '
+    import(process.env.DOC).then(m=>{
+      const k = m.ALL_KEYS[process.env.KEY];
+      console.log(k && k[process.env.FIELD] ? String(k[process.env.FIELD]) : "");
+    })'
+}
+cell_literals() { printf '%s' "$1" | grep -oE '`[^`]+`' | sed 's/^`//;s/`$//'; }
+cell_drift() { # <key> <default-cell> -> "" when every literal in the cell is a value the code produces
+  local key="$1"
+  local cell="$2"
+  local registered lit out=""
+  registered="$(key_value "$key" reader)|$(key_value "$key" fallback)"
+  if [[ "$registered" == "|" ]]; then printf '%s' "$key(unregistered)"; return 0; fi
+  while IFS= read -r lit; do
+    [[ -n "$lit" ]] || continue
+    case "$registered" in
+      *"$lit"*) ;;
+      *) out="$out|$key: README states [$lit], code says [$(key_value "$key" fallback)]" ;;
+    esac
+  done < <(cell_literals "$cell")
+  printf '%s' "$out"
+}
+
+README_ROWS=0
+README_LITERALS=0
+DOC_DRIFT=""
+while IFS= read -r row; do
+  README_ROWS=$((README_ROWS + 1))
+  ROW_KEY="$(printf '%s' "$row" | awk -F'|' '{print $2}' | tr -d ' `')"
+  ROW_CELL="$(printf '%s' "$row" | awk -F'|' '{print $4}')"
+  README_LITERALS=$((README_LITERALS + $(cell_literals "$ROW_CELL" | grep -c . | tr -d ' ')))
+  DOC_DRIFT="$DOC_DRIFT$(cell_drift "$ROW_KEY" "$ROW_CELL")"
+done < <(grep '^| `[a-z]' "$PLUGIN_DIR/README.md")
+
+# The population is asserted BEFORE the verdict. A parse that matched nothing reports no drift,
+# which is the shape where "checked and fine" and "never looked" print the same thing.
+assert_eq "the README config table parsed into rows (a zero-row parse reports no drift forever)" \
+  "$([[ "$README_ROWS" -ge 10 ]] && echo ">=10" || echo "PARSED $README_ROWS ROWS")" ">=10"
+assert_eq "and those rows carry value claims to compare (prose-only cells compare nothing)" \
+  "$([[ "$README_LITERALS" -ge 9 ]] && echo ">=9" || echo "ONLY $README_LITERALS LITERALS")" ">=9"
+assert_eq "the checkCommand row in particular states a value, so it is inside the population" \
+  "$([[ -n "$(cell_literals "$(grep '^| `checkCommand`' "$PLUGIN_DIR/README.md" | awk -F'|' '{print $4}')")" ]] && echo stated || echo prose)" \
+  "stated"
+assert_eq "no README default contradicts the code" "$DOC_DRIFT" ""
+
+# NON-ZERO CONTROL, run through the SAME comparison against the SAME live registry: a cell
+# claiming a default the code does not produce is reported, and names both sides.
+FAKE_CELL='`npm run typecheck && npm test && npm run lint`'
+assert_contains "CONTROL: the comparison reports a README default the code does not produce" \
+  "$(cell_drift checkCommand "$FAKE_CELL")" "README states [npm run typecheck && npm test && npm run lint]"
+assert_contains "and it names what the code actually falls back to, not just that they differ" \
+  "$(cell_drift checkCommand "$FAKE_CELL")" "npm run typecheck if package.json declares it"
+assert_eq "CONTROL: and it reports nothing for a cell that matches the registry" \
+  "$(cell_drift knowledgeDir '`knowledge`')" ""
+assert_contains "CONTROL: an unregistered key is named rather than silently skipped" \
+  "$(cell_drift notARealKey '`whatever`')" "notARealKey(unregistered)"
+
+# The same false claim also lived OUTSIDE the table, in agents/dev.md, where the row parser
+# cannot reach it. A check that only covers the shape the drift was found in leaves its twin
+# in place: the claim is refused wherever a doc calls that command the DEFAULT.
+FALSE_DEFAULT_FILES="$( { grep -rl 'default `npm run typecheck && npm test && npm run lint`' \
+  "$PLUGIN_DIR/README.md" "$PLUGIN_DIR/agents" "$PLUGIN_DIR/commands" 2>/dev/null || true; } | wc -l | tr -d ' ')"
+assert_eq "no doc calls the full three-part command the checkCommand DEFAULT" "$FALSE_DEFAULT_FILES" "0"
+FALSE_DEFAULT_PROBE="$TEMP_PROJECT/false-default-probe.md"
+printf '%s\n' 'run your check command (default `npm run typecheck && npm test && npm run lint`).' \
+  > "$FALSE_DEFAULT_PROBE"
+assert_eq "CONTROL: the same grep DOES find the claim when it is present" \
+  "$(grep -c 'default `npm run typecheck && npm test && npm run lint`' "$FALSE_DEFAULT_PROBE" | tr -d ' ')" "1"
+# ...and the example config may still USE that command, which is a suggestion and not a claim
+# about what happens when the key is absent. Asserted so a later cleanup does not delete it as
+# though it were the same defect.
+assert_eq "the example config still SETS it, which is the right place for that command" \
+  "$(grep -c '"checkCommand": "npm run typecheck && npm test && npm run lint"' "$EXAMPLE" | tr -d ' ')" "1"
+
 # =============================================================================
 # AC28 -- LOUD MATCH-NOTHING, at PATTERN granularity, per CONSUMER.
 # =============================================================================
