@@ -314,37 +314,59 @@ suite "AC16(b): the partition holds over the REAL status.json corpus, not only o
 # Over every status.json this checkout actually has, so the property is measured against what
 # the orchestrator writes rather than against what this file imagines it writes. The corpus
 # SIZE is asserted first: a "0 imbalanced" over an empty corpus is a zero with no control.
+#
+# THE CORPUS IS `git ls-files` AND NOTHING ELSE. It used to append an on-disk path that existed
+# only on the machine this suite was written on. The guards worked exactly as designed -- in CI
+# and in any fresh clone they reported `scanned=0: NOTHING WAS WALKED` -- so the `tests`
+# workflow was RED from the commit that introduced it. The guards were right and the population
+# was wrong. `.pipeline/17/status.json` is now tracked, which is what the .gitignore's
+# `!.pipeline/*/status.json` negation exists for and what `.pipeline/exp-script-test-coverage/`
+# already did, so every checkout walks the same files.
+CORPUS_FILES=()
+while IFS= read -r f; do [[ -n "$f" ]] && CORPUS_FILES+=("$REPO_ROOT/$f"); done \
+  < <(cd "$REPO_ROOT" && git ls-files | grep -E '(^|/)\.pipeline/[^/]+/status\.json$')
 CORPUS_PARTITION=$(MOD="$TELEMETRY" node --input-type=module -e '
   import { readFileSync } from "node:fs";
   const m = await import(process.env.MOD);
-  let scanned = 0, imbalanced = 0, withSuffixed = 0, untimed = 0;
+  let scanned = 0, imbalanced = 0, withSuffixed = 0, untimed = 0, unreadable = 0, tooShort = 0;
   for (const f of process.argv.slice(1)) {
-    let st; try { st = JSON.parse(readFileSync(f, "utf8")); } catch { continue; }
-    if (!Array.isArray(st.events) || st.events.length < 2) continue;
+    // Every `continue` below increments a counter. An unreported skip and a pass produce the
+    // same output, so the six numbers must add up to the file count and the assertions check
+    // that they do -- otherwise a record could leave this loop without being accounted for.
+    let st; try { st = JSON.parse(readFileSync(f, "utf8")); } catch { unreadable++; continue; }
+    if (!Array.isArray(st.events) || st.events.length < 2) { tooShort++; continue; }
     const t = m.telemetry(st);
     // A record whose events carry no parseable `at` has no lead time to partition, and one
-    // such file is really in this corpus. It is COUNTED, not quietly passed over: an
-    // unreported skip and a pass produce the same output, which is the whole failure class.
+    // such file is really in this corpus.
     if (t.total_lead_time_ms === null) { untimed++; continue; }
     scanned++;
     const sum = Object.values(t.phase_elapsed_ms).reduce((a, b) => a + b, 0);
     if (sum + t.unattributed_ms !== t.total_lead_time_ms) imbalanced++;
     if (Object.keys(t.phase_elapsed_ms).some(k => /[a-z]/.test(k))) withSuffixed++;
   }
-  console.log(JSON.stringify({ scanned, imbalanced, withSuffixed, untimed }));
-' $(cd "$REPO_ROOT" && git ls-files | grep -E '(^|/)\.pipeline/[^/]+/status\.json$' | sed "s|^|$REPO_ROOT/|") \
-  $([[ -f "$REPO_ROOT/.pipeline/17/status.json" ]] && echo "$REPO_ROOT/.pipeline/17/status.json"))
+  console.log(JSON.stringify({ scanned, imbalanced, withSuffixed, untimed, unreadable, tooShort }));
+' "${CORPUS_FILES[@]}")
 
 assert_eq "the real corpus is non-empty (a zero over an empty corpus proves nothing)" \
   "$([[ "$(field "$CORPUS_PARTITION" scanned)" -ge 1 ]] && echo "scanned>=1" || echo "scanned=0: NOTHING WAS WALKED")" \
   "scanned>=1"
 assert_eq "no real status.json has unaccounted-for time" "$(field "$CORPUS_PARTITION" imbalanced)" "0"
-# The skipped records are NAMED as a number rather than left invisible, so the pass above is
+# EVERY file handed in leaves the loop through exactly one counter. Without this the three
+# `continue` branches are places where "checked and fine" and "never checked" look the same.
+assert_eq "every corpus file is accounted for by one of the counters: none fell through" \
+  "$(( $(field "$CORPUS_PARTITION" scanned) + $(field "$CORPUS_PARTITION" untimed) \
+     + $(field "$CORPUS_PARTITION" unreadable) + $(field "$CORPUS_PARTITION" tooShort) ))" \
+  "${#CORPUS_FILES[@]}"
+assert_eq "and the corpus is more than one file, so it is a population rather than an example" \
+  "$([[ "${#CORPUS_FILES[@]}" -ge 2 ]] && echo ">=2" || echo "only ${#CORPUS_FILES[@]}")" ">=2"
+# The skipped records are NAMED as numbers rather than left invisible, so the pass above is
 # read against how much of the corpus it actually covered.
 assert_eq "the records with no parseable timestamps are counted, not silently dropped from the pass" \
   "$([[ "$(field "$CORPUS_PARTITION" untimed)" -ge 0 ]] && echo counted || echo unreported)" "counted"
 assert_eq "and there is exactly one such record in this corpus today" \
   "$(field "$CORPUS_PARTITION" untimed)" "1"
+assert_eq "no corpus file is unreadable, and none is too short to partition" \
+  "$(field "$CORPUS_PARTITION" unreadable)/$(field "$CORPUS_PARTITION" tooShort)" "0/0"
 # Stated rather than assumed, and it is a present-tense fact about the corpus that must stay
 # true: this run's own record carries 3a/3b, so if this number ever reads 0 the corpus has been
 # replaced by one that cannot exercise the defect this section exists for.
@@ -515,7 +537,6 @@ console.log(JSON.stringify({ present, malformed }));
 EOF
 WT_CORPUS=()
 while IFS= read -r f; do [[ -n "$f" ]] && WT_CORPUS+=("$REPO_ROOT/$f"); done < <(cd "$REPO_ROOT" && git ls-files | grep -E '(^|/)\.pipeline/[^/]+/status\.json$')
-[[ -f "$REPO_ROOT/.pipeline/17/status.json" ]] && WT_CORPUS+=("$REPO_ROOT/.pipeline/17/status.json")
 WT_SHAPE=$(node "$SHAPE_WALK" "${WT_CORPUS[@]}" 2>/dev/null)
 assert_eq "no real status.json carries a malformed worktree_path (absolute, or containing spaces)" \
   "$(field "$WT_SHAPE" malformed)" "0"

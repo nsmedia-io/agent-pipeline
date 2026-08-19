@@ -17,6 +17,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # FULL history, not the action's default fetch-depth: 1. Several suites are ABOUT the
+          # commit series -- that each commit reverts cleanly on its own, that the CI commit
+          # lands before the surface module -- and they find their commits by subject through
+          # `git log`. With one commit fetched, every lookup returned empty, `revert_touches`
+          # ran with `sha: unbound variable` under `set -u`, and `git diff origin/main...HEAD`
+          # died with `fatal: bad revision`. The suites were right; the checkout was too thin.
+          # This job is the only place the depth matters, and a repo of markdown and JSON is
+          # small enough that a full fetch costs nothing worth measuring.
+          fetch-depth: 0
       # No package.json, no dependencies, no install step, matching manifests.yml's own
       # deliberate constraint: a gate that can break on someone else's package is a gate that
       # gets disabled the first time it does. run.sh is bash plus the runner's bundled Node.
