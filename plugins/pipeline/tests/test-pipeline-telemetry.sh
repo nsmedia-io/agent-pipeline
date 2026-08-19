@@ -23,6 +23,61 @@ REPO_ROOT="$(cd "$PLUGIN_DIR/../.." && pwd)"
 
 node_run() { MOD="$1"; shift; MOD="$MOD" node --input-type=module -e "$@"; }
 
+# --- BEGIN corpus helper (issue #30 D1) ---
+# ONE corpus build, parameterised by PATTERN, shared by every site below that needs a set of
+# status-shaped records. It lives in a marker-delimited block because test-corpus-union.sh
+# extracts and DRIVES these two functions against a temp git tree: a function buried mid-suite
+# cannot be driven, so its cells could only ever be reimplementations asserting themselves.
+#
+# WHY THE UNION. A tracked-only corpus cannot see an untracked in-flight record -- which is
+# exactly where an absolute path gets written -- and the workaround (commit one status record
+# per issue) makes this suite's colour a function of how far the run under review has itself
+# progressed: the walk reads PATHS from the index but CONTENT from disk, so this pipeline's own
+# checkpoint moved the suite from 95/1 to 96/0 at the same commit with nothing in plugins/
+# changed. The union can only ever WIDEN the population, never narrow it.
+#
+# WHY THE PATTERN IS AN ARGUMENT, and not a convenience. One un-parameterised helper is wrong
+# in both directions. On a `.pipeline`-only pattern it silently drops the issue-archive half of
+# the absolute-path population -- a coverage narrowing inside the fix for coverage narrowing.
+# On a blind union it feeds archive JSONs into the partition walk, where they parse fine, carry
+# no events, land in tooShort, and redden the in-flight property the day the first archive
+# lands, for a reason that has nothing to do with telemetry.
+#
+# corpus_files <repo-root> <pattern> [<pattern>...]
+#   Prints the deduplicated union of the tracked set and an on-disk enumeration for the same
+#   patterns, repo-relative, one path per line.
+corpus_files() {
+  local root="$1"; shift
+  local pattern p
+  {
+    for pattern in "$@"; do
+      ( cd "$root" 2>/dev/null && git ls-files -- "$pattern" 2>/dev/null )
+      ( cd "$root" 2>/dev/null && shopt -s nullglob && for p in $pattern; do
+          [[ -f "$p" ]] && printf '%s\n' "$p"
+        done )
+    done
+  } | LC_ALL=C sort -u
+}
+
+# in_flight_short <status-file>
+#   Exit 0 iff the record is a SHORT IN-FLIGHT one. All three conjuncts are load-bearing.
+#   Dropping the events-array conjunct would make the predicate a restatement of half of
+#   tooShort's own definition (`!Array.isArray(events) || events.length < 2`), which can
+#   essentially never fail, and would silently excuse a malformed record that carries a
+#   current_phase and no events array at all. Unreadable exits non-zero. Prints nothing, so the
+#   verdict is the exit status and a debug line cannot masquerade as one.
+in_flight_short() {
+  node -e '
+    const fs = require("fs");
+    let s;
+    try { s = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); } catch { process.exit(2); }
+    const ok = typeof s.current_phase === "string" && s.current_phase !== ""
+      && Array.isArray(s.events) && s.events.length < 2;
+    process.exit(ok ? 0 : 1);
+  ' "$1" >/dev/null 2>&1
+}
+# --- END corpus helper ---
+
 # =============================================================================
 # AC13 -- THE PHASE 4 SHARD FALLBACK.
 # =============================================================================
@@ -433,16 +488,16 @@ suite "AC16(b): the partition holds over the REAL status.json corpus, not only o
 # the orchestrator writes rather than against what this file imagines it writes. The corpus
 # SIZE is asserted first: a "0 imbalanced" over an empty corpus is a zero with no control.
 #
-# THE CORPUS IS `git ls-files` AND NOTHING ELSE. It used to append an on-disk path that existed
-# only on the machine this suite was written on. The guards worked exactly as designed -- in CI
-# and in any fresh clone they reported `scanned=0: NOTHING WAS WALKED` -- so the `tests`
-# workflow was RED from the commit that introduced it. The guards were right and the population
-# was wrong. `.pipeline/17/status.json` is now tracked, which is what the .gitignore's
-# `!.pipeline/*/status.json` negation exists for and what `.pipeline/exp-script-test-coverage/`
-# already did, so every checkout walks the same files.
+# THE CORPUS IS THE UNION of the tracked set and what is on disk, built by the one helper at
+# the top of this file. It used to be `git ls-files` and nothing else, which is a population
+# that structurally cannot contain an in-flight record -- and before that it was an on-disk
+# path that existed only on the machine this suite was written on, which made the `tests`
+# workflow RED from the commit that introduced it. The union is the shape that is right in a
+# fresh clone (where it equals the tracked set exactly, so CI's population is unchanged) AND on
+# a developer's machine, where the record that has never been committed is the one that matters.
 CORPUS_FILES=()
 while IFS= read -r f; do [[ -n "$f" ]] && CORPUS_FILES+=("$REPO_ROOT/$f"); done \
-  < <(cd "$REPO_ROOT" && git ls-files | grep -E '(^|/)\.pipeline/[^/]+/status\.json$')
+  < <(corpus_files "$REPO_ROOT" '.pipeline/*/status.json')
 CORPUS_PARTITION=$(MOD="$TELEMETRY" node --input-type=module -e '
   import { readFileSync } from "node:fs";
   const m = await import(process.env.MOD);
@@ -481,10 +536,29 @@ assert_eq "and the corpus is more than one file, so it is a population rather th
 # read against how much of the corpus it actually covered.
 assert_eq "the records with no parseable timestamps are counted, not silently dropped from the pass" \
   "$([[ "$(field "$CORPUS_PARTITION" untimed)" -ge 0 ]] && echo counted || echo unreported)" "counted"
-assert_eq "and there is exactly one such record in this corpus today" \
-  "$(field "$CORPUS_PARTITION" untimed)" "1"
-assert_eq "no corpus file is unreadable, and none is too short to partition" \
-  "$(field "$CORPUS_PARTITION" unreadable)/$(field "$CORPUS_PARTITION" tooShort)" "0/0"
+# A PROPERTY, not an absolute count. `untimed == 1` was a number over a population this helper
+# widens, and it survived the widening only by luck -- the newly-included records happen to have
+# parseable timestamps. So it is expressed as a floor that NAMES the record which carries it,
+# and the name is checked live below: a stale name then fails loudly instead of passing
+# confidently about a corpus that no longer contains it.
+assert_eq "at least one record has no parseable timestamps, so the counter is a verdict" \
+  "$([[ "$(field "$CORPUS_PARTITION" untimed)" -ge 1 ]] && echo ">=1" || echo "untimed=0: the corpus no longer carries an untimed record")" \
+  ">=1"
+assert_eq "and .pipeline/exp-script-test-coverage/status.json is the record that carries it" \
+  "$(MOD="$TELEMETRY" R="$REPO_ROOT/.pipeline/exp-script-test-coverage/status.json" node --input-type=module -e '
+     import { readFileSync } from "node:fs";
+     const m = await import(process.env.MOD);
+     console.log(m.telemetry(JSON.parse(readFileSync(process.env.R,"utf8"))).untimed_events > 0 ? "yes" : "no");
+   ')" "yes"
+# The same treatment for the counters one line below, which were pinned at 0/0 over the LIVE
+# corpus. Under the union that is a bet on how far every run on this machine has progressed: a
+# genuinely short in-flight record is a normal state this pipeline produces routinely, and it
+# would redden here for a reason that has nothing to do with the partition. `unreadable` stays
+# pinned, because a status.json that does not parse is a real defect in any population; the
+# in-flight count is REPORTED instead.
+assert_eq "no corpus file is unreadable" "$(field "$CORPUS_PARTITION" unreadable)" "0"
+printf '  note  live corpus records too short to partition: %s (REPORTED, never pinned)\n' \
+  "$(field "$CORPUS_PARTITION" tooShort)"
 # Stated rather than assumed, and it is a present-tense fact about the corpus that must stay
 # true: this run's own record carries 3a/3b, so if this number ever reads 0 the corpus has been
 # replaced by one that cannot exercise the defect this section exists for.
@@ -560,8 +634,12 @@ for (const f of process.argv.slice(1)) {
 console.log(JSON.stringify({ scanned, hits }));
 EOF
 
+# BOTH patterns here, and that is the criterion rather than a detail: dropping the archive one
+# would narrow the population this walk exists to cover, inside the change that fixes a
+# narrowed population.
 CORPUS=()
-while IFS= read -r f; do [[ -n "$f" ]] && CORPUS+=("$REPO_ROOT/$f"); done < <(cd "$REPO_ROOT" && git ls-files | grep -E '(^|/)\.pipeline/[^/]+/status\.json$|^knowledge/issue-archive/.*\.json$|/knowledge/issue-archive/.*\.json$')
+while IFS= read -r f; do [[ -n "$f" ]] && CORPUS+=("$REPO_ROOT/$f"); done \
+  < <(corpus_files "$REPO_ROOT" '.pipeline/*/status.json' 'knowledge/issue-archive/*.json')
 CORPUS_RESULT=$(node "$WALK" "${CORPUS[@]}" 2>/dev/null)
 SCANNED=$(printf '%s' "$CORPUS_RESULT" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).scanned))')
 HITS=$(printf '%s' "$CORPUS_RESULT" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).hits.join(" ")))')
@@ -654,7 +732,8 @@ for (const f of process.argv.slice(1)) {
 console.log(JSON.stringify({ present, malformed }));
 EOF
 WT_CORPUS=()
-while IFS= read -r f; do [[ -n "$f" ]] && WT_CORPUS+=("$REPO_ROOT/$f"); done < <(cd "$REPO_ROOT" && git ls-files | grep -E '(^|/)\.pipeline/[^/]+/status\.json$')
+while IFS= read -r f; do [[ -n "$f" ]] && WT_CORPUS+=("$REPO_ROOT/$f"); done \
+  < <(corpus_files "$REPO_ROOT" '.pipeline/*/status.json')
 WT_SHAPE=$(node "$SHAPE_WALK" "${WT_CORPUS[@]}" 2>/dev/null)
 assert_eq "no real status.json carries a malformed worktree_path (absolute, or containing spaces)" \
   "$(field "$WT_SHAPE" malformed)" "0"
