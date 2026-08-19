@@ -144,6 +144,52 @@ run_cell ac2-commented "migrations/031_ok.sql" "-- drop table foo;
 assert_eq "AC2 CONTROL: a fully \`--\` commented down region still passes" "$RC" "0"
 assert_contains "AC2 CONTROL: and the gate says so" "$OUT" "OK: pre-Phase-4 gate passed."
 
+suite "gate down-region classifier: AC5 -- the halt names a construct the file actually contains"
+
+# The remedy is the actionable half of the message contract, and it was appended
+# UNCONDITIONALLY: a plain-residue halt with no block comment anywhere in the file still said
+# "remove the inner \`/* */\` delimiters", sending the reader to look for a construct that is
+# not there. Both directions are asserted here rather than one, because "names the delimiters"
+# and "does not name the delimiters" are the two halves of one partition and a single cell
+# cannot tell a correct message from a constant one.
+run_cell ac5-plain "migrations/05a.sql" "-- rollback note
+drop table foo;
+"
+assert_eq "AC5: plain residue halts" "$RC" "1"
+assert_not_schema "AC5"
+assert_not_contains "AC5: and its remedy does NOT name inner \`/* */\` delimiters the file has none of" \
+  "$ERR" "remove the inner"
+assert_contains "AC5: it says what to do with the line that IS there" "$ERR" "comment the line out"
+assert_contains "AC5: and still offers the reflow" "$ERR" "reflow"
+
+# CONTROL: the same halt WITH a closed block comment before the residue. This is the case the
+# clause was written for, and it must keep it.
+run_cell ac5-block "migrations/05b.sql" "/* note */ drop table foo;
+"
+assert_eq "AC5 CONTROL: residue after a CLOSED block halts too" "$RC" "1"
+assert_contains "AC5 CONTROL: and THAT remedy does name the inner delimiters" "$ERR" "remove the inner"
+assert_not_contains "AC5 CONTROL: and not the plain-residue wording" "$ERR" "comment the line out"
+
+# THE WHITESPACE DISAGREEMENT, named in the message instead of left invisible. downRegionIsEmpty
+# trims with String.trim(), which is Unicode-aware; the scan skips space, tab, CR and LF only.
+# So a comment line led by U+00A0 -- an ordinary copy-paste artifact -- classifies as residue
+# and the halt reads "contains executable SQL" while pointing at a line that is plainly a `--`
+# comment. It is FAIL-CLOSED, so the cost is a confusing halt rather than a pass, and the
+# classification is deliberately unchanged: the message is what needed fixing.
+NBSP=$(printf '\302\240')
+run_cell ac5-nbsp "migrations/05c.sql" "$NBSP-- rollback: drop table foo;
+"
+assert_eq "AC5: a U+00A0-led comment line still halts (fail-closed, unchanged)" "$RC" "1"
+assert_not_schema "AC5 (nbsp)"
+assert_contains "AC5: and the halt NAMES the character, which is otherwise invisible" "$ERR" "U+00A0"
+assert_contains "AC5: and says why the two disagree" "$ERR" "String.trim()"
+
+# CONTROL: the identical line with a PLAIN SPACE passes. Without it, the cell above could be
+# reddening on the words after the space rather than on the space itself.
+run_cell ac5-nbsp-ctl "migrations/05d.sql" " -- rollback: drop table foo;
+"
+assert_eq "AC5 CONTROL: the same line led by an ASCII space classifies clean, RC=0" "$RC" "0"
+
 suite "gate down-region classifier: AC3 -- the eleven-cell fixture matrix"
 
 # The matrix is the CROSS PRODUCT, not a representative fixture. Cells (g), (h) and (i) are

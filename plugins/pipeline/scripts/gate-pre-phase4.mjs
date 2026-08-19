@@ -343,7 +343,25 @@ function classificationFailure(rel, result) {
       `comments do not nest in MySQL/MariaDB, SQLite or Oracle, so the first */ closes and ` +
       `everything after it is live SQL`;
   }
-  msg += `\n    remedy: remove the inner \`/* */\` delimiters, or ${REFLOW_REMEDY}.`;
+  // downRegionIsEmpty trims with String.trim(), which is Unicode-aware; this scanner skips
+  // space, tab, CR and LF only. A comment line led by U+00A0 therefore lands here, and the
+  // halt reads "contains executable SQL" while pointing at what is plainly a `--` comment. The
+  // classification is fail-closed and stays; without naming the character there is nothing for
+  // the reader to look for, because the difference is invisible.
+  const exotic = /[^\S \t\r\n]/u.exec(result.lineText);
+  if (exotic) {
+    const cp = exotic[0].codePointAt(0).toString(16).toUpperCase().padStart(4, "0");
+    msg +=
+      `\n    note: this line contains U+${cp}, which String.trim() counts as whitespace and ` +
+      `this scan does not (it skips space, tab, CR and LF only), so a comment line led by it ` +
+      `reads as executable. Replacing it with a plain space is usually the whole fix`;
+  }
+  // The inner-delimiters clause is about a CLOSED block whose first `*/` ended it early. On
+  // plain residue there is no block comment in the file at all, and naming one sends the
+  // reader looking for a construct that is not there.
+  msg += result.closedBlock
+    ? `\n    remedy: remove the inner \`/* */\` delimiters, or ${REFLOW_REMEDY}.`
+    : `\n    remedy: comment the line out with a leading \`--\`, or ${REFLOW_REMEDY}.`;
   return msg;
 }
 
