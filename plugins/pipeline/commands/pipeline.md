@@ -64,6 +64,8 @@ Non-negotiables (carry through to every subagent prompt you construct):
 
 Append an entry to `events` after each phase transition: `{"phase": "1-ba", "verdict": "<agent verdict>", "at": "<iso>"}`.
 
+**`events[]` entries are EXIT markers and `current_phase` is an ENTRY marker.** An event is appended AFTER a phase finishes and carries that phase's `verdict`, so it records a phase CLOSING; `current_phase` is set BEFORE a phase begins and names the phase being ENTERED. Two fields with opposite conventions five lines apart is the trap that made the telemetry credit every interval to the wrong phase, so the two are named here rather than left to be inferred.
+
 ### Durable checkpoint convention (resume reliability)
 
 `status.json` is the `/pipeline --resume <issue>` checkpoint, so it must be durable, not a post-hoc log. **Write AND commit `status.json` BEFORE each phase transition begins, recording the phase being ENTERED**, not the phase just finished. Set `current_phase` to the phase about to run, then commit, then dispatch that phase. If the run is interrupted mid-phase, `--resume` reads the committed `current_phase` and re-enters that same phase from the top, never a stale prior one.

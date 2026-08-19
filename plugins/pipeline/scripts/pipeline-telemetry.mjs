@@ -112,7 +112,28 @@ function phaseKey(phase) {
 }
 
 /**
+ * Which convention the numbers below were computed under. telemetry() shipped in 0.21.0, so
+ * adopter records already carry figures computed the other way, and an entry-semantics block is
+ * otherwise forever indistinguishable from an exit-semantics one. It is a closed enum, not free
+ * text: status.json is committed and archived verbatim.
+ */
+const ATTRIBUTION = "exit";
+
+/**
  * Per-phase elapsed time from the events[] the orchestrator already writes.
+ *
+ * EVENTS[] ARE EXIT MARKERS, so each interval is credited to the phase CLOSED by the LATER
+ * event, never to the earlier one. The tell is `verdict`: every event carries one, and a
+ * verdict is not knowable until a phase has RUN. `current_phase` is the opposite convention (an
+ * ENTRY marker, the phase being entered), and two fields with opposite conventions is what
+ * produced the defect this reading fixes. Under the entry reading the loop's `timed.length - 1`
+ * bound means the LAST event's phase never receives a key at all, so it was not a one-slot
+ * shift but a structural inability to ever report a run's final phase.
+ *
+ * The mirror property is real and is deliberately NOT patched: under exit semantics the FIRST
+ * phase's start is unrecorded. Do not invent a leading boundary from `started_at`. On the real
+ * #17 record started_at precedes the first event by 25 hours of untracked wall clock, so a
+ * leading credit would report that phase as 91,271,177 ms instead of 6,545.
  *
  * `review_rounds` is an EXPLICIT counter rather than an inference, and that is not a
  * preference: events[] items carry only `phase` and `at`, with no round field, so a round
@@ -157,7 +178,7 @@ export function telemetry(status) {
   let unattributed_ms = 0;
   let unattributed_events = 0;
   for (let i = 0; i < timed.length - 1; i++) {
-    const key = phaseKey(timed[i].phase);
+    const key = phaseKey(timed[i + 1].phase);
     const delta = timed[i + 1].at - timed[i].at;
     // A negative delta is not a duration, so it is never credited to a phase; it is carried
     // in the unattributed bucket so the partition still balances and stays inspectable.
@@ -183,5 +204,6 @@ export function telemetry(status) {
     untimed_events,
     review_rounds,
     events_counted: timed.length,
+    attribution: ATTRIBUTION,
   };
 }
