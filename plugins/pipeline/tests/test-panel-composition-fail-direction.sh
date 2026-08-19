@@ -257,15 +257,43 @@ run_panel_stderr() {
 # The WHOLE delta block, not a reassembly of the two pieces this suite cares about. The
 # previous version set FIX_CHANGED itself and spliced in only the probe definition and the
 # probe calls, so the lines that PRODUCE the path list -- the ones the zsh word-splitting
-# escape lived in -- were supplied by this file rather than observed from the artifact. Two
-# placeholders are substituted because they are placeholders in the shipped text: the
-# `<first-round-head>` anchor, and the jq line that reads a status.json no fixture has.
+# escape lived in -- were supplied by this file rather than observed from the artifact. One line
+# is deleted because it reads a status.json no fixture has; the round-1 anchor is supplied the
+# way the shipped block now asks for it, through the environment.
 DELTA_RUNNABLE="$TEMP_PROJECT/delta-runnable.sh"
-sed -e '/^FULL_PANEL=/d' -e 's/<first-round-head>/origin\/main/' "$DELTA_BLOCK" > "$DELTA_RUNNABLE"
+sed -e '/^FULL_PANEL=/d' "$DELTA_BLOCK" > "$DELTA_RUNNABLE"
 run_delta() {  # $1 = WORKTREE_PATH, $2 = CLAUDE_PLUGIN_ROOT, $3 = runner (default bash)
-  WORKTREE_PATH="$1" CLAUDE_PLUGIN_ROOT="$2" OBJECTING_ROLES="" \
+  WORKTREE_PATH="$1" CLAUDE_PLUGIN_ROOT="$2" OBJECTING_ROLES="" FIRST_ROUND_HEAD="origin/main" \
     in_shell "${3:-bash}" ". \"$DELTA_RUNNABLE\"; printf 'DELTA=%s\n' \"\$ROLES_TO_MERGE\""
 }
+
+suite "the delta block's round-1 anchor is unmistakably a placeholder"
+
+# `git diff --name-only -z <first-round-head>...HEAD` parses as a shell REDIRECTION, not a ref,
+# when an orchestrator copies the line verbatim. It failed SAFE -- every probe went indeterminate
+# and the panel over-seated -- but by accident rather than by design, and a reader of a
+# transcript cannot tell an accident from a control. The anchor is a `${...:?}` expansion now, so
+# an unsubstituted copy stops with a message instead of quietly diffing against a file named
+# after the placeholder.
+assert_eq "no angle-bracket placeholder survives on a command line in the delta block" \
+  "$(grep -c -- '-z <' "$DELTA_BLOCK" | tr -d ' ')" "0"
+assert_contains "the anchor is a parameter expansion that refuses to run unsubstituted" \
+  "$(cat "$DELTA_BLOCK")" 'FIRST_ROUND_HEAD:?'
+assert_contains "and the git line reads that variable, quoted" \
+  "$(cat "$DELTA_BLOCK")" 'diff --name-only -z "$FIRST_ROUND_HEAD"...HEAD'
+# RUN, not read. The extracted block with no FIRST_ROUND_HEAD set must stop and say so.
+UNSUB_OUT="$(env -u FIRST_ROUND_HEAD WORKTREE_PATH="$TEMP_PROJECT" CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" \
+  OBJECTING_ROLES="" bash -c ". \"$DELTA_RUNNABLE\"" 2>&1)"
+UNSUB_RC="$?"
+assert_eq "an unsubstituted copy exits NON-ZERO instead of running" \
+  "$([[ "$UNSUB_RC" -ne 0 ]] && echo non-zero || echo "ZERO (rc=$UNSUB_RC)")" "non-zero"
+assert_contains "and names what was not substituted" "$UNSUB_OUT" "substitute the first-round HEAD sha"
+assert_eq "and no stray file named after the placeholder is created" \
+  "$([[ -e "$TEMP_PROJECT/first-round-head" ]] && echo CREATED || echo none)" "none"
+# CONTROL: the SUBSTITUTED form still runs, or the refusal above is a block that never works.
+ANCHOR_REPO="$TEMP_PROJECT/repo-anchor"; make_diff_repo "$ANCHOR_REPO" "docs/notes.txt"
+assert_contains "CONTROL: with the anchor supplied, the same block runs and resolves a delta set" \
+  "$(run_delta "$ANCHOR_REPO" "$PLUGIN_ROOT")" "DELTA=qa secops"
 
 DL_REPO="$TEMP_PROJECT/repo-datalayer"; make_diff_repo "$DL_REPO" "db/queries/orders.ts"
 INFRA_REPO="$TEMP_PROJECT/repo-infra"; make_diff_repo "$INFRA_REPO" ".github/workflows/ci.yml"

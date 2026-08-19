@@ -813,7 +813,13 @@ FULL_PANEL="$(jq -r '.panel_roles | join(" ")' "$PIPELINE_BASE/<issue>/status.js
 DELTA="qa secops"
 for role in $OBJECTING_ROLES; do case " $DELTA " in *" $role "*) ;; *) DELTA="$DELTA $role";; esac; done
 FIX_CHANGED_PATHS="$(mktemp)"
-git -C "$WORKTREE_PATH" diff --name-only -z <first-round-head>...HEAD > "$FIX_CHANGED_PATHS"
+# SUBSTITUTE THIS, or the block refuses to run. FIRST_ROUND_HEAD is the sha HEAD pointed at when
+# the FIRST round's panel ran. Spelled as an angle-bracket placeholder on the git line, it parsed
+# as a shell REDIRECTION rather than a ref if the line was copied verbatim: harmless in the end
+# (every probe went indeterminate and the panel over-seated) but harmless by accident. The `:?`
+# makes an unsubstituted copy fail loudly and immediately instead.
+FIRST_ROUND_HEAD="${FIRST_ROUND_HEAD:?substitute the first-round HEAD sha before running this block}"
+git -C "$WORKTREE_PATH" diff --name-only -z "$FIRST_ROUND_HEAD"...HEAD > "$FIX_CHANGED_PATHS"
 GIT_RC=$?
 if [ "$GIT_RC" -ne 0 ]; then
   : > "$FIX_CHANGED_PATHS"
