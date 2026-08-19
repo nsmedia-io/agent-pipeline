@@ -168,9 +168,9 @@ SERIES_TIP_SHA="$(sha_of 'test: repair two unsatisfiable assertions')"
 assert_eq "the implementation series tip is identifiable (without it the reverts below anchor nowhere)" \
   "$([[ -n "$SERIES_TIP_SHA" ]] && echo found || echo "missing")" "found"
 
-revert_touches() { # <sha> -> "clean:<files>" | "CONFLICT"
-  local sha="$1" wt="$TEMP_PROJECT/revert-${sha:0:7}"
-  git -C "$REPO_ROOT" worktree add -q --detach "$wt" "${SERIES_TIP_SHA:-HEAD}" >/dev/null 2>&1 || { printf 'CONFLICT'; return 0; }
+revert_touches() { # <sha> [anchor] -> "clean:<files>" | "CONFLICT"
+  local sha="$1" anchor="${2:-${SERIES_TIP_SHA:-HEAD}}" wt="$TEMP_PROJECT/revert-${sha:0:7}-${2:-tip}"
+  git -C "$REPO_ROOT" worktree add -q --detach "$wt" "$anchor" >/dev/null 2>&1 || { printf 'CONFLICT'; return 0; }
   if git -C "$wt" revert --no-commit --no-edit "$sha" >/dev/null 2>&1; then
     printf 'clean:%s' "$(git -C "$wt" diff --cached --name-only | tr '\n' ' ')"
   else
@@ -195,6 +195,37 @@ assert_not_contains "and it does not touch the CI workflow" "$SURFACE_REVERT" ".
 assert_eq "CONTROL: the same probe reports CONFLICT for a sha that cannot be reverted here" \
   "$(revert_touches "$(git -C "$REPO_ROOT" hash-object -t commit /dev/null 2>/dev/null || echo 0000000000000000000000000000000000000000)")" \
   "CONFLICT"
+
+suite "AC24: the Phase 4 fix round splits the same way, anchored at HEAD"
+
+# R17 applies to a fix round too, and here the anchor IS HEAD: these commits have nothing after
+# them, so "revertable at HEAD" is the property with no ambiguity to resolve. Each is looked up
+# by subject, so the loop reports which one is missing rather than measuring an empty sha.
+FIX_SUBJECTS=(
+  'fix: panel composition seats the specialist'
+  'fix: telemetry attributes suffixed phase labels'
+  'docs: scope the upgrade note to Markdown'
+  'fix: a role-level dispatchModels key cannot flatten'
+  'fix: tripwireReport no longer returns a hit'
+  'docs: worktree_path is omitted from status.json'
+)
+FIX_MISSING=""
+FIX_CONFLICTS=""
+for s in "${FIX_SUBJECTS[@]}"; do
+  sha="$(sha_of "$s")"
+  if [[ -z "$sha" ]]; then FIX_MISSING="$FIX_MISSING|$s"; continue; fi
+  [[ "$(revert_touches "$sha" HEAD)" == clean:* ]] || FIX_CONFLICTS="$FIX_CONFLICTS|$s"
+done
+assert_eq "every fix-round commit is on the branch (without this the zero below counts nothing)" \
+  "$([[ -z "$FIX_MISSING" ]] && echo all-present || echo "missing:$FIX_MISSING")" "all-present"
+assert_eq "and each one reverts cleanly on its own at HEAD" \
+  "$([[ -z "$FIX_CONFLICTS" ]] && echo all-clean || echo "conflicts:$FIX_CONFLICTS")" "all-clean"
+# The two blockers are separable from each other in particular: they were the two REQUEST_CHANGES
+# items, and backing one out must not drag the other.
+assert_not_contains "reverting the panel-composition fix does not touch the telemetry module" \
+  "$(revert_touches "$(sha_of 'fix: panel composition seats the specialist')" HEAD)" "pipeline-telemetry.mjs"
+assert_not_contains "and reverting the telemetry fix does not touch commands/pipeline.md" \
+  "$(revert_touches "$(sha_of 'fix: telemetry attributes suffixed phase labels')" HEAD)" "commands/pipeline.md"
 
 # =============================================================================
 # AC6 / AC23 -- the pinned gate suite, and the pointers inside it.
