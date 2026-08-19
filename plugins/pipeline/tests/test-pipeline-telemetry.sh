@@ -124,13 +124,233 @@ T2=$(MOD="$TELEMETRY" node --input-type=module -e '
 assert_eq "with no counter recorded, the phase-4 entries are counted instead" "$T2" "2"
 assert_eq "an empty status yields a null lead time, not a fabricated zero" \
   "$(MOD="$TELEMETRY" node --input-type=module -e 'const m=await import(process.env.MOD);console.log(String(m.telemetry({}).total_lead_time_ms))')" "null"
+# The numbers-only rule, checked against a CLOSED allowlist rather than a shape regex. The
+# regex this replaces was `[0-9.]+` for the phase keys, which would have rejected the "3a"/"3b"
+# keys the parser now emits, so the guard and the accounting are pinned to the same declared
+# set: the field names, plus KNOWN_PHASES. A phase key that is not a declared phase is exactly
+# the free-text leak this assertion exists to catch.
+FIX_SUFFIXED='{"review_rounds":1,"events":[
+  {"phase":"3a-qa-tests","at":"2026-08-01T00:00:00Z"},
+  {"phase":"3b-dev","at":"2026-08-01T01:00:00Z"},
+  {"phase":"4-review","at":"2026-08-01T02:00:00Z"}]}'
+LEAK_CHECK="$TEMP_PROJECT/leak-check.mjs"
+cat > "$LEAK_CHECK" <<'EOF'
+// Counts strings in a telemetry-shaped object that are neither a declared field name nor a
+// declared phase label. Run over telemetry() output, and over a crafted object as its control.
+const d = await import(process.env.DISPATCH);
+const allowed = new Set([
+  "phase_elapsed_ms", "total_lead_time_ms", "unattributed_ms", "unattributed_events",
+  "review_rounds", "events_counted", ...d.KNOWN_PHASES,
+]);
+let obj;
+if (process.env.OBJ) {
+  obj = JSON.parse(process.env.OBJ);
+} else {
+  const m = await import(process.env.MOD);
+  obj = m.telemetry(JSON.parse(process.env.FIX));
+}
+console.log(JSON.stringify(obj).match(/"[^"]*"/g).map((s) => s.slice(1, -1)).filter((s) => !allowed.has(s)).length);
+EOF
+notes_leaked() { MOD="$TELEMETRY" DISPATCH="$SCRIPTS_DIR/dispatch-model.mjs" FIX="$1" node "$LEAK_CHECK"; }
 assert_eq "and nothing it emits is a free-text note, a path, or a command string" \
-  "$(MOD="$TELEMETRY" FIX="$FIX" node --input-type=module -e '
+  "$(notes_leaked "$FIX")" "0"
+assert_eq "including on the suffixed 3a/3b shape, whose keys are declared phases and not free text" \
+  "$(notes_leaked "$FIX_SUFFIXED")" "0"
+assert_eq "CONTROL: the same check reports 4 on an object carrying a note and a path (two keys, two values)" \
+  "$(DISPATCH="$SCRIPTS_DIR/dispatch-model.mjs" OBJ='{"phase_elapsed_ms":{"3a":1},"note":"loop back to BA","worktree_path":"/Users/x/wt"}' node "$LEAK_CHECK")" \
+  "4"
+
+# =============================================================================
+# AC16(b) -- THE PARTITION PROPERTY, and the 39% of a real run the old parser dropped.
+# =============================================================================
+#
+# The escape: phaseNumber() was /^([0-5](?:\.5)?)-/, and this pipeline writes "3a-qa-tests"
+# and "3b-dev" for its two implementation steps (both declared in KNOWN_PHASES). Neither
+# matched, both hit the caller's `if (!key) continue`, and there was no "3" key at all in the
+# output. Measured on this change's OWN status.json: total_lead_time_ms 10,465,309 against a
+# phase sum of 6,376,821, leaving 4,088,488 ms unattributed -- 68 minutes, 39% of the run, and
+# the single longest phase in it. Every fixture in the suite above uses well-formed "N-"
+# labels, so all of it stayed green while the function under-reported.
+#
+# The assertion that makes the CLASS impossible to reintroduce is not "3a is now attributed"
+# (a later "3c-" would escape it again) but the PARTITION: every millisecond between the first
+# and last event is either credited to a phase or reported as unattributed. A parser that
+# cannot read a future label shape then fails LOUDLY -- as a non-zero number in a committed
+# file -- rather than silently dropping the time.
+
+suite "AC16(b): sum(phase_elapsed_ms) + unattributed_ms == total_lead_time_ms"
+
+# The property is checked by the harness, over any fixture, so a case below reads as the
+# INPUT it is about rather than as arithmetic.
+PARTITION="$TEMP_PROJECT/partition.mjs"
+cat > "$PARTITION" <<'EOF'
+const m = await import(process.env.MOD);
+const t = m.telemetry(JSON.parse(process.env.FIX));
+const sum = Object.values(t.phase_elapsed_ms).reduce((a, b) => a + b, 0);
+const balances = sum + t.unattributed_ms === t.total_lead_time_ms;
+console.log(JSON.stringify({
+  balances, sum, unattributed_ms: t.unattributed_ms,
+  unattributed_events: t.unattributed_events,
+  total: t.total_lead_time_ms, keys: Object.keys(t.phase_elapsed_ms).sort().join(","),
+  gap: t.total_lead_time_ms - sum,
+}));
+EOF
+part() { MOD="$TELEMETRY" FIX="$1" node "$PARTITION"; }
+field() { printf '%s' "$1" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>console.log(String(JSON.parse(s).$2)))"; }
+
+# (1) THE REAL SHAPE. A fixture carrying the 3a-/3b- events this pipeline actually writes,
+# with the real gap between them: 03:07:21.453 -> 04:15:29.941 is 4,088,488 ms.
+REAL='{"review_rounds":1,"events":[
+  {"phase":"2.5-design","at":"2026-08-19T02:41:49.314Z"},
+  {"phase":"3a-qa-tests","at":"2026-08-19T03:07:21.453Z"},
+  {"phase":"3b-dev","at":"2026-08-19T04:15:29.941Z"},
+  {"phase":"4-review","at":"2026-08-19T05:00:00.000Z"},
+  {"phase":"4-review-complete","at":"2026-08-19T05:30:00.000Z"}]}'
+REAL_OUT=$(part "$REAL")
+assert_eq "the partition balances on the real 3a/3b shape" "$(field "$REAL_OUT" balances)" "true"
+assert_eq "3a is a key in its own right, at the exact elapsed the timestamps imply" \
+  "$(MOD="$TELEMETRY" FIX="$REAL" node --input-type=module -e '
+     const m = await import(process.env.MOD);
+     console.log(String(m.telemetry(JSON.parse(process.env.FIX)).phase_elapsed_ms["3a"]));
+   ')" "4088488"
+assert_eq "3b is its own key too, not folded into 3a" \
+  "$(MOD="$TELEMETRY" FIX="$REAL" node --input-type=module -e '
+     const m = await import(process.env.MOD);
+     console.log(String(m.telemetry(JSON.parse(process.env.FIX)).phase_elapsed_ms["3b"]));
+   ')" "2670059"
+assert_eq "nothing is unattributed on a run whose every label is declared" \
+  "$(field "$REAL_OUT" unattributed_ms)" "0"
+assert_eq "the keys are exactly the labels the events carried" \
+  "$(field "$REAL_OUT" keys)" "2.5,3a,3b,4"
+# THE REGRESSION, named as the number it was. Before the fix this gap was 4088488.
+assert_eq "no time is missing between the phase sum and the lead time" "$(field "$REAL_OUT" gap)" "0"
+
+# (2) NON-ZERO CONTROL on the partition itself. An UNDECLARED label must not balance to zero
+# unattributed: without this case, `unattributed_ms == 0` above could be a field hard-wired to
+# 0 and the partition would still "hold".
+FUTURE='{"events":[
+  {"phase":"3a-qa-tests","at":"2026-08-19T00:00:00Z"},
+  {"phase":"9z-some-future-phase","at":"2026-08-19T01:00:00Z"},
+  {"phase":"4-review","at":"2026-08-19T03:00:00Z"}]}'
+FUTURE_OUT=$(part "$FUTURE")
+assert_eq "an UNDECLARED phase label still balances the partition" "$(field "$FUTURE_OUT" balances)" "true"
+assert_eq "and its time is REPORTED as unattributed rather than dropped" \
+  "$(field "$FUTURE_OUT" unattributed_ms)" "7200000"
+assert_eq "with the boundary count that says how many labels it could not read" \
+  "$(field "$FUTURE_OUT" unattributed_events)" "1"
+assert_eq "CONTROL: the declared label in the SAME fixture is still attributed normally" \
+  "$(MOD="$TELEMETRY" FIX="$FUTURE" node --input-type=module -e '
+     const m = await import(process.env.MOD);
+     console.log(String(m.telemetry(JSON.parse(process.env.FIX)).phase_elapsed_ms["3a"]));
+   ')" "3600000"
+
+# (3) The partition over the shapes the old parser DID read, so the fix did not buy the new
+# property by breaking the old one.
+PLAIN='{"events":[
+  {"phase":"0.5-map","at":"2026-08-01T00:00:00Z"},
+  {"phase":"1-ba","at":"2026-08-01T00:30:00Z"},
+  {"phase":"2-review","at":"2026-08-01T01:00:00Z"},
+  {"phase":"2.5-design","at":"2026-08-01T02:00:00Z"},
+  {"phase":"3-impl","at":"2026-08-01T02:30:00Z"},
+  {"phase":"5-archive","at":"2026-08-01T03:00:00Z"}]}'
+assert_eq "the partition balances on well-formed N- labels too" "$(field "$(part "$PLAIN")" balances)" "true"
+assert_eq "and nothing there is unattributed" "$(field "$(part "$PLAIN")" unattributed_ms)" "0"
+
+# (4) Out-of-order timestamps. A negative delta is still not a duration, so it is not credited
+# to a phase -- but it is not silently discarded either, which is what would break the
+# partition and reopen the same class through a different door.
+BACKWARDS='{"events":[
+  {"phase":"1-ba","at":"2026-08-01T02:00:00Z"},
+  {"phase":"2-review","at":"2026-08-01T01:00:00Z"},
+  {"phase":"3-impl","at":"2026-08-01T03:00:00Z"}]}'
+BACK_OUT=$(part "$BACKWARDS")
+assert_eq "the partition balances even when events[] runs backwards" "$(field "$BACK_OUT" balances)" "true"
+assert_eq "the backwards boundary is carried as a NEGATIVE unattributed value, which is the signal" \
+  "$(field "$BACK_OUT" unattributed_ms)" "-3600000"
+# (4b) The vacuous case, which a real record in this repo's corpus actually is: events with no
+# parseable `at`. There is no lead time to partition, so the honest answer is null and a zero
+# bucket -- never a fabricated 0 total that would make the partition "hold" by inventing one.
+assert_eq "events with no timestamps yield a null lead time" \
+  "$(MOD="$TELEMETRY" node --input-type=module -e '
+     const m = await import(process.env.MOD);
+     const t = m.telemetry({events:[{phase:"1-ba"},{phase:"3a-qa-tests"}]});
+     console.log(String(t.total_lead_time_ms) + "/" + t.unattributed_ms + "/" + t.events_counted);
+   ')" "null/0/0"
+assert_eq "no phase is credited a negative duration" \
+  "$(MOD="$TELEMETRY" FIX="$BACKWARDS" node --input-type=module -e '
      const m = await import(process.env.MOD);
      const t = m.telemetry(JSON.parse(process.env.FIX));
-     const strings = JSON.stringify(t).match(/"[^"]*"/g).filter(s=>!/^"(phase_elapsed_ms|total_lead_time_ms|review_rounds|events_counted|[0-9.]+)"$/.test(s));
-     console.log(strings.length);
-   ')" "0"
+     console.log(Object.values(t.phase_elapsed_ms).some(v => v < 0) ? "NEGATIVE" : "none");
+   ')" "none"
+
+# (5) The parser reads its labels from KNOWN_PHASES, so declaring a phase and accounting for
+# it cannot drift apart. Asserted over the REAL declaration, not a copy of it.
+suite "AC16(b): every phase KNOWN_PHASES declares is a label the telemetry can attribute"
+
+assert_eq "no declared phase label falls through to unattributed" \
+  "$(MOD="$TELEMETRY" DISPATCH="$SCRIPTS_DIR/dispatch-model.mjs" node --input-type=module -e '
+     const t = await import(process.env.MOD);
+     const d = await import(process.env.DISPATCH);
+     const bad = d.KNOWN_PHASES.filter(p => {
+       const r = t.telemetry({events:[{phase:p+"-x",at:"2026-08-01T00:00:00Z"},{phase:"5-archive",at:"2026-08-01T01:00:00Z"}]});
+       return r.phase_elapsed_ms[p] !== 3600000;
+     });
+     console.log(bad.length ? "unattributable:" + bad.join(",") : "all-attributable");
+   ')" "all-attributable"
+assert_eq "CONTROL: a label NOT in KNOWN_PHASES is not attributable, so the check above discriminates" \
+  "$(MOD="$TELEMETRY" node --input-type=module -e '
+     const t = await import(process.env.MOD);
+     const r = t.telemetry({events:[{phase:"7q-x",at:"2026-08-01T00:00:00Z"},{phase:"5-archive",at:"2026-08-01T01:00:00Z"}]});
+     console.log(Object.keys(r.phase_elapsed_ms).length === 0 ? "not-attributed" : "attributed");
+   ')" "not-attributed"
+assert_eq "3a and 3b are declared, which is what makes them attributable rather than a special case" \
+  "$(DISPATCH="$SCRIPTS_DIR/dispatch-model.mjs" node --input-type=module -e '
+     const d = await import(process.env.DISPATCH);
+     console.log(["3a","3b"].every(p => d.KNOWN_PHASES.includes(p)) ? "declared" : "MISSING");
+   ')" "declared"
+
+suite "AC16(b): the partition holds over the REAL status.json corpus, not only over fixtures"
+
+# Over every status.json this checkout actually has, so the property is measured against what
+# the orchestrator writes rather than against what this file imagines it writes. The corpus
+# SIZE is asserted first: a "0 imbalanced" over an empty corpus is a zero with no control.
+CORPUS_PARTITION=$(MOD="$TELEMETRY" node --input-type=module -e '
+  import { readFileSync } from "node:fs";
+  const m = await import(process.env.MOD);
+  let scanned = 0, imbalanced = 0, withSuffixed = 0, untimed = 0;
+  for (const f of process.argv.slice(1)) {
+    let st; try { st = JSON.parse(readFileSync(f, "utf8")); } catch { continue; }
+    if (!Array.isArray(st.events) || st.events.length < 2) continue;
+    const t = m.telemetry(st);
+    // A record whose events carry no parseable `at` has no lead time to partition, and one
+    // such file is really in this corpus. It is COUNTED, not quietly passed over: an
+    // unreported skip and a pass produce the same output, which is the whole failure class.
+    if (t.total_lead_time_ms === null) { untimed++; continue; }
+    scanned++;
+    const sum = Object.values(t.phase_elapsed_ms).reduce((a, b) => a + b, 0);
+    if (sum + t.unattributed_ms !== t.total_lead_time_ms) imbalanced++;
+    if (Object.keys(t.phase_elapsed_ms).some(k => /[a-z]/.test(k))) withSuffixed++;
+  }
+  console.log(JSON.stringify({ scanned, imbalanced, withSuffixed, untimed }));
+' $(cd "$REPO_ROOT" && git ls-files | grep -E '(^|/)\.pipeline/[^/]+/status\.json$' | sed "s|^|$REPO_ROOT/|") \
+  $([[ -f "$REPO_ROOT/.pipeline/17/status.json" ]] && echo "$REPO_ROOT/.pipeline/17/status.json"))
+
+assert_eq "the real corpus is non-empty (a zero over an empty corpus proves nothing)" \
+  "$([[ "$(field "$CORPUS_PARTITION" scanned)" -ge 1 ]] && echo "scanned>=1" || echo "scanned=0: NOTHING WAS WALKED")" \
+  "scanned>=1"
+assert_eq "no real status.json has unaccounted-for time" "$(field "$CORPUS_PARTITION" imbalanced)" "0"
+# The skipped records are NAMED as a number rather than left invisible, so the pass above is
+# read against how much of the corpus it actually covered.
+assert_eq "the records with no parseable timestamps are counted, not silently dropped from the pass" \
+  "$([[ "$(field "$CORPUS_PARTITION" untimed)" -ge 0 ]] && echo counted || echo unreported)" "counted"
+assert_eq "and there is exactly one such record in this corpus today" \
+  "$(field "$CORPUS_PARTITION" untimed)" "1"
+# Stated rather than assumed, and it is a present-tense fact about the corpus that must stay
+# true: this run's own record carries 3a/3b, so if this number ever reads 0 the corpus has been
+# replaced by one that cannot exercise the defect this section exists for.
+assert_eq "at least one real record carries a suffixed phase key (3a/3b), the shape that used to vanish" \
+  "$([[ "$(field "$CORPUS_PARTITION" withSuffixed)" -ge 1 ]] && echo "present" || echo "ABSENT: the corpus no longer exercises the defect")" \
+  "present"
 
 # =============================================================================
 # AC43 -- the two migration sets are recorded as DISTINCT entries.

@@ -25,7 +25,13 @@ import {
   migrationGlobsForGate,
   migrationGlobsForTripwire,
 } from "./data-layer-surface.mjs";
-import { ALLOWED_MODELS, KNOWN_ROLES, PINNED_ROLES, resolve as resolveModel } from "./dispatch-model.mjs";
+import {
+  ALLOWED_MODELS,
+  KNOWN_PHASES,
+  KNOWN_ROLES,
+  PINNED_ROLES,
+  resolve as resolveModel,
+} from "./dispatch-model.mjs";
 
 /**
  * An adopter's absolute glob is unusual but legal, and it compiles fine, so without this it
@@ -84,10 +90,25 @@ function parseTime(v) {
   return Number.isFinite(t) ? t : null;
 }
 
-/** The leading phase number of an event, e.g. "4-review-complete" -> "4". */
-function phaseNumber(phase) {
-  const m = /^([0-5](?:\.5)?)-/.exec(typeof phase === "string" ? phase : "");
-  return m ? m[1] : null;
+/**
+ * The leading phase LABEL of an event, e.g. "4-review-complete" -> "4", "3a-qa-tests" -> "3a".
+ *
+ * Resolved against KNOWN_PHASES rather than against a shape regex, and that is the whole
+ * repair: the previous `/^([0-5](?:\.5)?)-/` could not read a suffixed label, so the two
+ * implementation phases this pipeline actually writes ("3a-qa-tests", "3b-dev") matched
+ * nothing and were dropped by the caller's `continue`. On this change's own run that silently
+ * discarded 4,088,488 ms -- 39% of the total lead time, and the single longest phase in it.
+ *
+ * A label whose leading token is not in KNOWN_PHASES returns null, and the caller does NOT
+ * drop its time: it lands in `unattributed_ms`, which is a number a reader can see. Adding a
+ * phase to KNOWN_PHASES is what teaches this function to attribute it, so the declaration and
+ * the accounting cannot drift apart.
+ */
+function phaseKey(phase) {
+  if (typeof phase !== "string") return null;
+  const dash = phase.indexOf("-");
+  const token = dash === -1 ? phase : phase.slice(0, dash);
+  return KNOWN_PHASES.includes(token) ? token : null;
 }
 
 /**
@@ -98,7 +119,19 @@ function phaseNumber(phase) {
  * count cannot be derived from them. When the caller has not maintained the counter, the
  * number of times the run ENTERED phase 4 is the honest floor, and it is reported as such.
  *
+ * THE PARTITION PROPERTY, which is what makes an unreadable label loud instead of silent:
+ *
+ *     sum(phase_elapsed_ms) + unattributed_ms === total_lead_time_ms
+ *
+ * It holds by construction, not by coincidence. Every consecutive pair of timed events
+ * contributes its delta to exactly ONE of the two sides, and consecutive deltas telescope to
+ * last - first, which is the definition of total_lead_time_ms. So time that no phase key can
+ * absorb -- an unrecognized label, or a boundary whose timestamps run backwards -- shows up as
+ * a non-zero `unattributed_ms` rather than evaporating. `unattributed_ms` is negative only
+ * when events[] is out of order, which is itself the signal.
+ *
  * @returns {{phase_elapsed_ms: Record<string, number>, total_lead_time_ms: number|null,
+ *            unattributed_ms: number, unattributed_events: number,
  *            review_rounds: number, events_counted: number}}
  */
 export function telemetry(status) {
@@ -109,19 +142,33 @@ export function telemetry(status) {
     .filter((e) => typeof e.phase === "string" && e.at !== null);
 
   const phase_elapsed_ms = {};
+  let unattributed_ms = 0;
+  let unattributed_events = 0;
   for (let i = 0; i < timed.length - 1; i++) {
-    const key = phaseNumber(timed[i].phase);
-    if (!key) continue;
+    const key = phaseKey(timed[i].phase);
     const delta = timed[i + 1].at - timed[i].at;
-    if (delta < 0) continue; // out-of-order timestamps are not negative durations
-    phase_elapsed_ms[key] = (phase_elapsed_ms[key] || 0) + delta;
+    // A negative delta is not a duration, so it is never credited to a phase; it is carried
+    // in the unattributed bucket so the partition still balances and stays inspectable.
+    if (key !== null && delta >= 0) {
+      phase_elapsed_ms[key] = (phase_elapsed_ms[key] || 0) + delta;
+    } else {
+      unattributed_ms += delta;
+      unattributed_events++;
+    }
   }
 
   const total_lead_time_ms =
     timed.length >= 2 ? timed[timed.length - 1].at - timed[0].at : null;
 
-  const entries = timed.filter((e) => phaseNumber(e.phase) === "4" && /^4-review$/.test(e.phase)).length;
+  const entries = timed.filter((e) => /^4-review$/.test(e.phase)).length;
   const review_rounds = Number.isInteger(s.review_rounds) ? s.review_rounds : entries;
 
-  return { phase_elapsed_ms, total_lead_time_ms, review_rounds, events_counted: timed.length };
+  return {
+    phase_elapsed_ms,
+    total_lead_time_ms,
+    unattributed_ms,
+    unattributed_events,
+    review_rounds,
+    events_counted: timed.length,
+  };
 }

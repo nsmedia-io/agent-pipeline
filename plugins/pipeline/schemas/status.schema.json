@@ -71,10 +71,12 @@
       "properties": {
         "phase_elapsed_ms": {
           "type": "object",
-          "description": "Milliseconds spent per phase number, keyed by the leading phase number of the events that opened it.",
+          "description": "Milliseconds spent per phase, keyed by the leading phase LABEL of the events that opened it, as declared in KNOWN_PHASES in scripts/dispatch-model.mjs. The label is not always a number: the architectural tier writes 3a and 3b for its two implementation steps, and both are keys here.",
           "additionalProperties": {"type": "integer", "minimum": 0}
         },
         "total_lead_time_ms": {"type": ["integer", "null"], "minimum": 0},
+        "unattributed_ms": {"type": "integer", "description": "Milliseconds between events that no phase key could absorb. sum(phase_elapsed_ms) + unattributed_ms == total_lead_time_ms holds by construction, so a phase label this pipeline writes but KNOWN_PHASES does not declare shows up here as a visible number instead of being silently dropped. Negative only when events[] timestamps run backwards, which is itself the signal."},
+        "unattributed_events": {"type": "integer", "minimum": 0, "description": "How many event boundaries contributed to unattributed_ms."},
         "review_rounds": {"type": "integer", "minimum": 0},
         "events_counted": {"type": "integer", "minimum": 0}
       }
