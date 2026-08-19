@@ -101,9 +101,21 @@ assert_contains "run.sh prints the suite name it is about to run" \
 suite "AC41: a workflow runs run.sh on pull_request and on push to main"
 
 WF_DIR="$REPO_ROOT/.github/workflows"
+WF_MATCHES="$(grep -rl 'plugins/pipeline/tests/run.sh' "$WF_DIR" 2>/dev/null | grep -c . | tr -d ' ')"
 WF_WITH_SUITE="$(grep -rl 'plugins/pipeline/tests/run.sh' "$WF_DIR" 2>/dev/null | head -1)"
 assert_eq "at least one workflow invokes tests/run.sh (a rename cannot silently drop it)" \
   "$([[ -n "$WF_WITH_SUITE" ]] && echo yes || echo "no: nothing in .github/workflows runs the suite")" "yes"
+# `head -1` is only honest while there is nothing to choose between. Two workflows running the
+# suite would leave every assertion below describing whichever sorted first, and a second one
+# added with a broken trigger would be invisible here forever.
+assert_eq "and exactly one does, so the head -1 below is not silently picking a winner" \
+  "$WF_MATCHES" "1"
+WF_TWO="$TEMP_PROJECT/two-workflows"
+mkdir -p "$WF_TWO"
+printf 'run: bash plugins/pipeline/tests/run.sh\n' > "$WF_TWO/a.yml"
+printf 'run: bash plugins/pipeline/tests/run.sh\n' > "$WF_TWO/b.yml"
+assert_eq "CONTROL: the same count reports 2 when two files match, so the 1 above is a measurement" \
+  "$(grep -rl 'plugins/pipeline/tests/run.sh' "$WF_TWO" 2>/dev/null | grep -c . | tr -d ' ')" "2"
 assert_contains "the run step is the exact command" "$(cat "$WF_WITH_SUITE")" "bash plugins/pipeline/tests/run.sh"
 assert_contains "it triggers on pull_request" "$(cat "$WF_WITH_SUITE")" "pull_request"
 assert_contains "and on push to main" "$(cat "$WF_WITH_SUITE")" "branches: [main]"
@@ -619,6 +631,50 @@ is_superseded() {  # <sha> -> 0 when this commit is the superseded half of a lis
   done
   return 1
 }
+# FIRST-MATCH FRAGILITY, closed here rather than left to the corpus. sha_of and pos_of resolve a
+# commit by grepping the log for a SUBSTRING of its subject and taking the first hit, so two
+# commits whose subjects share that substring resolve silently to the older one and every
+# assertion downstream measures a commit nobody named. Every lookup in this file is 1:1 today
+# BECAUSE OF WHICH COMMITS HAPPEN TO EXIST, which is a fact about this branch and not a property
+# of the lookup; a later round that repeats a subject prefix would go green while checking the
+# wrong commit. The uniqueness is therefore asserted, so that day is a red rather than a silence.
+#
+# The subject list is DERIVED from this file, not hand-maintained: every literal sha_of/pos_of
+# argument, plus the three subject collections that reach those functions by variable. A lookup
+# added later is covered without anyone remembering to add it here.
+subject_hits() {  # <subject substring> -> how many commits on the branch it matches
+  printf '%s\n' "$LOG" | grep -c -F "$1" | tr -d ' '
+}
+AMBIGUOUS=""
+UNRESOLVED=""
+SUBJECTS_CHECKED=0
+while IFS= read -r subj; do
+  [[ -n "$subj" ]] || continue
+  SUBJECTS_CHECKED=$((SUBJECTS_CHECKED + 1))
+  HITS="$(subject_hits "$subj")"
+  case "$HITS" in
+    1) ;;
+    0) UNRESOLVED="$UNRESOLVED|$subj" ;;
+    *) AMBIGUOUS="$AMBIGUOUS|$HITS commits match [$subj]" ;;
+  esac
+done < <(
+  { grep -oE "(sha_of|pos_of) '[^']+'" "${BASH_SOURCE[0]}" | sed "s/^[a-z_]* '//" | sed "s/'\$//"
+    printf '%s\n' "${ROUND1_SUBJECTS[@]}" "${CLOSED_ROUND_TIPS[@]}"
+    for pair in "${SUPERSEDED_PAIRS[@]}"; do printf '%s\n%s\n' "${pair%%||*}" "${pair##*||}"; done
+  } | sort -u
+)
+assert_eq "the subject sweep has a population to be about (a zero-subject sweep reports no ambiguity forever)" \
+  "$([[ "$SUBJECTS_CHECKED" -ge 12 ]] && echo ">=12" || echo "ONLY $SUBJECTS_CHECKED SUBJECTS")" ">=12"
+assert_eq "every subject this suite looks up matches exactly one commit, so grep -m1 cannot pick the wrong one" \
+  "$AMBIGUOUS" ""
+assert_eq "and every one of them resolves at all" "$UNRESOLVED" ""
+# NON-ZERO CONTROLS in both directions, or the two empty strings above are statements about a
+# counter that always says 1.
+assert_eq "CONTROL: the same counter reports more than one for a substring the subjects share" \
+  "$([[ "$(subject_hits '(#17)')" -ge 2 ]] && echo ">=2" || echo "ONLY $(subject_hits '(#17)')")" ">=2"
+assert_eq "CONTROL: and zero for a subject no commit on this branch carries" \
+  "$(subject_hits 'chore: a subject no commit on this branch carries')" "0"
+
 # The open round: everything after the last CLOSED tip.
 LAST_CLOSED_SUBJECT="${CLOSED_ROUND_TIPS[${#CLOSED_ROUND_TIPS[@]}-1]}"
 LAST_CLOSED_SHA="$(sha_of "$LAST_CLOSED_SUBJECT")"
