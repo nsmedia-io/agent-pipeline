@@ -7,6 +7,8 @@
 
   "architecturalTriggers": {
     "_comment": "What forces the deep tier when the pipeline runs against its own source. The gates, the hooks, and the agent contracts are this repo's equivalent of a schema: a wrong edit there degrades every downstream project silently.",
+    "paths": ["pipeline.config.json"],
+    "_paths_comment": "A diff touching this file is architectural, always. It governs whether the mis-tier tripwire fires, who is seated on the Phase 4 panel, and which model renders a binding verdict. Write access here already implies arbitrary command execution through checkCommand, so this is not a new trust boundary; it is closed because a narrowed glob is quiet and permanent and reads as a tuning change, where an RCE is immediate and loud.",
     "domains": ["security", "compliance"],
     "keywords": [
       "hook",
