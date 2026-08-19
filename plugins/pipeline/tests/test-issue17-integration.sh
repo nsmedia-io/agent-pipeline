@@ -129,6 +129,136 @@ rm -f "$BITE/test-planted-failure.sh"
 ( bash "$BITE/run.sh" >/dev/null 2>&1 )
 assert_eq "and the SAME tree exits 0 once the plant is removed" "$?" "0"
 
+# Backticks are DELIBERATELY absent from this title. Written as "the SAME `local` statement"
+# inside a double-quoted argument, the shell ran `local` as a command substitution and printed
+# "local: can only be used in a function" to stderr, leaving the suite header with a hole in it.
+suite 'AC41(d): no suite reads a variable declared in the SAME local statement'
+
+# The construct that made this suite pass here and fail in CI, and it is worth a detector
+# because the two shells disagree SILENTLY in one direction:
+#
+#   local sha="$1" wt="pre-${sha:0:7}"
+#
+# bash 3.2 (macOS, where these suites are written) expands ${sha} to the EMPTY string -- no
+# error, a quietly wrong value. bash 5 (ubuntu-latest, where CI runs them) trips `set -u` with
+# "sha: unbound variable", the enclosing function returns NOTHING, and six assertions compared
+# against an empty string that was neither of the two answers the function can give. A local
+# green therefore said nothing about the runner.
+same_local_offenders() {  # <file>... -> count of offending statements
+  local n=0
+  local f line trimmed seg names rest v prior
+  for f in "$@"; do
+    while IFS= read -r line; do
+      trimmed="${line#"${line%%[![:space:]]*}"}"
+      # A line that is PROSE about the construct is not the construct. This file documents the
+      # defect in its own comments and builds it as a printf fixture, and a detector that
+      # counted those would be un-passable for the wrong reason -- the same self-counting trap
+      # the AC5 grep in test-mis-tier-tripwire.sh already had to sidestep.
+      case "$trimmed" in '#'*) continue ;; esac
+      case "$line" in *local\ *) ;; *) continue ;; esac
+      # One LINE can hold several statements. Split on `;` so `f() { local a=$1; local b=$a; }`
+      # is read as the two statements it is, then strip through a block-opening `{ ` so the
+      # one-line function body is reached. Brace-SPACE, never a bare brace: splitting on `{`
+      # alone tore `${sha:0:7}` in half and the detector reported zero on the exact line it
+      # exists to catch. A `local` inside a quoted string is NOT reliably invisible, which is
+      # the opposite of what this comment used to claim: a multi-line `printf 'f() {\n local'`
+      # fixture has no brace-SPACE and is skipped, but the one-line `printf 'f() { local'`
+      # spelling does, and it counted. The detector is deliberately left conservative -- it
+      # cannot tell code from a string literal and should not pretend to -- so the construct
+      # is kept out of the shipped suites entirely and lives in fixtures/ instead.
+      while IFS= read -r seg; do
+        seg="${seg##*\{ }"
+        seg="${seg#"${seg%%[![:space:]]*}"}"
+        case "$seg" in "local "*) ;; *) continue ;; esac
+        names=""
+        # Walk the assignments left to right; an expansion naming a variable assigned EARLIER
+        # in the SAME statement is the defect. Reading a GLOBAL is fine and common.
+        for v in ${seg#local }; do
+          case "$v" in
+            *=*)
+              rest="${v#*=}"
+              for prior in $names; do
+                case "$rest" in *"\$$prior"*|*"\${$prior"*) n=$((n + 1)); break ;; esac
+              done
+              names="$names ${v%%=*}"
+              ;;
+            *) names="$names $v" ;;
+          esac
+        done
+      done < <(printf '%s\n' "$line" | tr ';' '\n')
+    done < "$f"
+  done
+  printf '%s' "$n"
+}
+assert_eq "no shipped suite or hook carries the construct" \
+  "$(same_local_offenders "$TESTS_DIR"/*.sh "$PLUGIN_DIR"/hooks/*.sh)" "0"
+# NON-ZERO CONTROL for the detector, in the exact shape that broke, or the zero above is a
+# statement about a walk that cannot see anything.
+LOCAL_PROBE="$TEMP_PROJECT/same-local-probe.sh"
+printf 'f() {\n  local sha="$1" wt="$T/revert-${sha:0:7}"\n  echo "$wt"\n}\n' > "$LOCAL_PROBE"
+assert_eq "CONTROL: the same detector reports 1 for the exact line that broke CI" \
+  "$(same_local_offenders "$LOCAL_PROBE")" "1"
+# ...and it does NOT report the split form, or it would refuse every correct spelling too.
+LOCAL_OK="$TEMP_PROJECT/split-local-probe.sh"
+printf 'f() {\n  local sha="$1"\n  local wt="$T/revert-${sha:0:7}"\n  echo "$wt"\n}\n' > "$LOCAL_OK"
+assert_eq "CONTROL: and reports 0 for the split form, so it is not refusing all locals" \
+  "$(same_local_offenders "$LOCAL_OK")" "0"
+# ...nor the ordinary multi-assignment that only reads GLOBALS, which several suites use.
+LOCAL_GLOBAL="$TEMP_PROJECT/global-local-probe.sh"
+printf 'f() {\n  local outf="$TEMP_PROJECT/out.txt" errf="$TEMP_PROJECT/err.txt"\n  echo "$outf $errf"\n}\n' > "$LOCAL_GLOBAL"
+assert_eq "CONTROL: and reports 0 when both assignments read a global" \
+  "$(same_local_offenders "$LOCAL_GLOBAL")" "0"
+# ...and it reaches a ONE-LINE function body, which is where the `;`-split plus block-opening
+# `{ ` strip earns its keep. Without that reach the detector is blind to the commonest way to
+# write the defect compactly, and its zero above would cover less than it appears to.
+#
+# THE ONE-LINE PAIR IS ON DISK IN fixtures/, not built by printf here, and that placement is
+# the fix for a self-counting bug rather than a preference. The detector strips through a
+# block-opening `{ `, so a printf format string spelling `f() { local a="$1" b="${a:0:3}" }`
+# put a countable segment inside this file: the zero it must reach was unreachable while the
+# fixture lived here, and the comment above claiming a quoted fixture "never counts itself"
+# was true only of the multi-line `{\n` spellings. fixtures/ is outside the flat tests/*.sh
+# population the assertion walks and outside run.sh's discovery glob, so the construct exists
+# exactly once, in a file whose whole purpose is to carry it. The detector is untouched.
+FIXTURES_DIR="$TESTS_DIR/fixtures"
+assert_eq "the one-line fixture pair exists (both controls below measure nothing without it)" \
+  "$([[ -f "$FIXTURES_DIR/same-local-oneline.sh" && -f "$FIXTURES_DIR/split-local-oneline.sh" ]] \
+     && echo both || echo "MISSING under $FIXTURES_DIR")" "both"
+assert_eq "CONTROL: the detector reaches the defect written as a one-line function body" \
+  "$(same_local_offenders "$FIXTURES_DIR/same-local-oneline.sh")" "1"
+assert_eq "CONTROL: and reports 0 for the same body split in two, so it is not refusing the spelling" \
+  "$(same_local_offenders "$FIXTURES_DIR/split-local-oneline.sh")" "0"
+# And the fixtures are NOT in the population the assertion above walks, or that zero is a
+# statement about a detector pointed away from the only files that carry the construct.
+assert_eq "the fixtures sit outside the tests/*.sh population, so the ratchet still covers every suite" \
+  "$(for p in "$TESTS_DIR"/*.sh; do [[ "$p" == "$FIXTURES_DIR"/* ]] && echo IN; done | wc -l | tr -d ' ')" "0"
+assert_eq "and outside run.sh's discovery glob, so neither is ever run as a suite" \
+  "$( cd "$TESTS_DIR" && for t in test-*.sh; do [[ "$t" == fixtures/* ]] && echo IN; done | wc -l | tr -d ' ')" "0"
+
+# The behavioural half, EXECUTED rather than described, and executed by the same interpreter
+# this suite is running under (`$BASH`, not whatever `bash` PATH resolves to -- the two differ
+# on any machine with a newer bash installed alongside the system one, and the expectation
+# below is version-dependent).
+#
+# The property asserted is that the two spellings DIFFER, not what the defective one returns.
+# bash 3.2 declares both names before assigning, so ${a} is set-and-empty and the result is a
+# quietly wrong "pre-"; bash 5 leaves `a` unset until its own assignment, so `set -u` aborts
+# the script and stdout is empty. Pinning either value would encode a guess about the runner
+# that this shell cannot check, and the guess is what a green local run cannot falsify. What
+# both outcomes share -- and all this claim needs -- is that neither is the right answer.
+SPLIT_OUT="$("${BASH:-bash}" "$FIXTURES_DIR/split-local-oneline.sh" 2>/dev/null)"
+SAME_OUT="$("${BASH:-bash}" "$FIXTURES_DIR/same-local-oneline.sh" 2>/dev/null)"
+assert_eq "the split form produces the value it is supposed to, in this shell" "$SPLIT_OUT" "pre-abc"
+assert_eq "and the SAME-statement form does NOT, so the two spellings are observably different" \
+  "$([[ "$SAME_OUT" == "$SPLIT_OUT" ]] && echo "SAME: the construct is harmless on bash ${BASH_VERSINFO[0]}" || echo differs)" \
+  "differs"
+# Both readings are REPORTED, and they go in the assertion NAME rather than in its two operands:
+# the harness prints the name on a pass and the operands only on a FAILURE, so a value carried in
+# the operands of a self-equal assertion is visible exactly when the run went red. That is
+# backwards for a line whose only job is to tell a reader of a GREEN transcript what was measured.
+assert_eq "MEASURED under bash-${BASH_VERSINFO[0]}: the split form returned [$SPLIT_OUT], the same-statement form [$SAME_OUT]" \
+  "reported" "reported"
+
 suite "AC41(c): run.sh passes in a FRESH CHECKOUT, not only in the worktree it was written in"
 
 # "The suite passes" meant "in this worktree" for the whole life of this branch, and the two
@@ -176,8 +306,34 @@ else
   FRESH_SUITES="$(cd "$FRESH/plugins/pipeline/tests" && ls test-*.sh | wc -l | tr -d ' ')"
   assert_eq "every suite in the fresh tree reported a result (a silent run is not a passing run)" \
     "$(printf '%s' "$FRESH_OUT" | grep -c '^passed=' | tr -d ' ')" "$FRESH_SUITES"
+  # The inner failure is NAMED, and its assertions are echoed. Counting "23 of 24 reported
+  # failed=0" tells a reader that something inside a run they cannot see went red and nothing
+  # else -- which is precisely what happened on the CI run that produced this change: the case
+  # failed once, passed on a rerun of the identical tree, and left no way to tell WHICH suite
+  # flaked. A gate that goes red without saying why is a gate someone eventually switches off.
+  failed_suites_in() {  # run.sh transcript on STDIN -> names of the suites that reported a failure
+    sed -E 's/'"$(printf '\033')"'\[[0-9;]*m//g' \
+      | awk '/^== test-.*\.sh ==$/{name=$2} /^passed=/{ if ($0 !~ /failed=0$/) printf "%s ", name }'
+  }
+  FRESH_FAILED_SUITES="$(printf '%s\n' "$FRESH_OUT" | failed_suites_in)"
   assert_eq "and every one of them reported zero failures" \
+    "$([[ -z "$FRESH_FAILED_SUITES" ]] && echo all-green || echo "RED INSIDE THE CLONE: $FRESH_FAILED_SUITES")" \
+    "all-green"
+  if [[ -n "$FRESH_FAILED_SUITES" ]]; then
+    printf '        inner failures from the fresh checkout:\n%s\n' \
+      "$(printf '%s\n' "$FRESH_OUT" | grep -A3 '  FAIL' | head -40)"
+  fi
+  # The count is kept alongside the names: a transcript whose suite headers were mangled would
+  # yield an empty name list and an "all-green" that means nothing.
+  assert_eq "and the failed=0 count agrees with the suite count, independently of the names" \
     "$(printf '%s' "$FRESH_OUT" | grep -c 'failed=0' | tr -d ' ')" "$FRESH_SUITES"
+  # NON-ZERO CONTROL for the extractor, through the SAME function: it must be able to name a
+  # failure, and must not name a suite that passed.
+  assert_eq "CONTROL: the same extractor names the failing suite in a transcript that has one" \
+    "$(printf '== test-alpha.sh ==\npassed=3 failed=0\n== test-beta.sh ==\npassed=2 failed=1\n' | failed_suites_in)" \
+    "test-beta.sh "
+  assert_eq "CONTROL: and names nothing in an all-green transcript" \
+    "$(printf '== test-alpha.sh ==\npassed=3 failed=0\n' | failed_suites_in)" ""
   assert_eq "the fresh tree has the same number of suites as this one, so none went missing in the clone" \
     "$FRESH_SUITES" "$(cd "$TESTS_DIR" && ls test-*.sh | wc -l | tr -d ' ')"
   # The guard is OBSERVED, not assumed: the inner run must have taken the deferred branch, or
@@ -225,9 +381,16 @@ SERIES_TIP_SHA="$(sha_of 'test: repair two unsatisfiable assertions')"
 assert_eq "the implementation series tip is identifiable (without it the reverts below anchor nowhere)" \
   "$([[ -n "$SERIES_TIP_SHA" ]] && echo found || echo "missing")" "found"
 
-revert_touches() { # <sha> -> "clean:<files>" | "CONFLICT"
-  local sha="$1" wt="$TEMP_PROJECT/revert-${sha:0:7}"
-  git -C "$REPO_ROOT" worktree add -q --detach "$wt" "${SERIES_TIP_SHA:-HEAD}" >/dev/null 2>&1 || { printf 'CONFLICT'; return 0; }
+revert_touches() { # <sha> -> "clean:<files>" | "NOWORKTREE" | "CONFLICT"
+  # SPLIT `local` declarations, deliberately. `local sha="$1" wt="...${sha:0:7}"` does NOT see
+  # `sha` in the same statement: bash 3.2 (macOS, where this was written) expanded it to the
+  # empty string and every probe silently shared one worktree path, while bash 5 (the CI runner)
+  # tripped `set -u` with "sha: unbound variable" and the function returned NOTHING -- neither
+  # clean: nor CONFLICT -- so six assertions compared against an empty string. That is the whole
+  # reason this suite passed here and failed there.
+  local sha="$1"
+  local wt="$TEMP_PROJECT/revert-${sha:0:7}"
+  git -C "$REPO_ROOT" worktree add -q --detach "$wt" "${SERIES_TIP_SHA:-HEAD}" >/dev/null 2>&1 || { printf 'NOWORKTREE'; return 0; }
   if git -C "$wt" revert --no-commit --no-edit "$sha" >/dev/null 2>&1; then
     printf 'clean:%s' "$(git -C "$wt" diff --cached --name-only | tr '\n' ' ')"
   else
@@ -252,6 +415,12 @@ assert_not_contains "and it does not touch the CI workflow" "$SURFACE_REVERT" ".
 assert_eq "CONTROL: the same probe reports CONFLICT for a sha that cannot be reverted here" \
   "$(revert_touches "$(git -C "$REPO_ROOT" hash-object -t commit /dev/null 2>/dev/null || echo 0000000000000000000000000000000000000000)")" \
   "CONFLICT"
+# ...and it is a CONFLICT rather than a NOWORKTREE, i.e. the probe got as far as running
+# `git revert`. Without this the control above is satisfied by a probe that never built a
+# worktree at all, which is exactly the state CI was in.
+assert_not_contains "and it got far enough to actually attempt the revert" \
+  "$(revert_touches "$(git -C "$REPO_ROOT" hash-object -t commit /dev/null 2>/dev/null || echo 0000000000000000000000000000000000000000)")" \
+  "NOWORKTREE"
 
 suite "AC24: each Phase 4 fix ROUND splits the same way, anchored at its own round's tip"
 
@@ -264,9 +433,14 @@ suite "AC24: each Phase 4 fix ROUND splits the same way, anchored at its own rou
 # MUST conflict. Measured: four of the six round-1 commits conflicted the moment round 2
 # landed. The assertion was right and its anchor had gone stale. Anchoring each round at its
 # own tip keeps every round measuring the split it was written for, forever.
-revert_touches_at() { # <anchor-ish> <sha> -> "clean:<files>" | "CONFLICT"
-  local anchor="$1" sha="$2" wt="$TEMP_PROJECT/revert-at-${anchor:0:7}-${sha:0:7}"
-  git -C "$REPO_ROOT" worktree add -q --detach "$wt" "$anchor" >/dev/null 2>&1 || { printf 'CONFLICT'; return 0; }
+revert_touches_at() { # <anchor-ish> <sha> -> "clean:<files>" | "NOWORKTREE" | "CONFLICT"
+  # Split for the same reason as revert_touches above, and the two failure causes are now told
+  # apart: an unusable ANCHOR and an unrevertable COMMIT are different problems, and collapsing
+  # both to CONFLICT let a control pass for the wrong reason.
+  local anchor="$1"
+  local sha="$2"
+  local wt="$TEMP_PROJECT/revert-at-${anchor:0:7}-${sha:0:7}"
+  git -C "$REPO_ROOT" worktree add -q --detach "$wt" "$anchor" >/dev/null 2>&1 || { printf 'NOWORKTREE'; return 0; }
   if git -C "$wt" revert --no-commit --no-edit "$sha" >/dev/null 2>&1; then
     printf 'clean:%s' "$(git -C "$wt" diff --cached --name-only | tr '\n' ' ')"
   else
@@ -291,9 +465,9 @@ assert_eq "the round-1 tip is identifiable (without it the round-1 reverts below
 EMPTY_TREE_SHA="$(git -C "$REPO_ROOT" hash-object -t commit /dev/null 2>/dev/null || echo 0000000000000000000000000000000000000000)"
 assert_eq "CONTROL: the probe reports CONFLICT for a sha that cannot be reverted here" \
   "$(revert_touches_at HEAD "$EMPTY_TREE_SHA")" "CONFLICT"
-assert_eq "CONTROL: and it reports CONFLICT for an anchor that does not exist, rather than a bare clean:" \
+assert_eq "CONTROL: and it reports NOWORKTREE for an anchor that does not exist, rather than a bare clean:" \
   "$(revert_touches_at 'no-such-anchor-ref' "$(sha_of 'fix: panel composition seats the specialist')")" \
-  "CONFLICT"
+  "NOWORKTREE"
 
 # R17 applies to a fix round too. Each commit is looked up by subject, so the loop reports which
 # one is missing rather than measuring an empty sha.
@@ -305,14 +479,66 @@ ROUND1_SUBJECTS=(
   'fix: tripwireReport no longer returns a hit'
   'docs: worktree_path is omitted from status.json'
 )
-# ROUND 2 IS DERIVED FROM GIT, not listed. A hand-maintained list cannot contain the LAST
-# commit of its own round -- adding that entry needs a further commit, which then becomes the
-# new last commit, forever one behind. Round 2 is by definition everything after the round-1
-# tip, which git can answer exactly, so the newest commit is covered the moment it exists.
-# Round 1 stays a written list because it is closed history: it names what was reviewed.
-ROUND2_SHAS=()
-while IFS= read -r h; do [[ -n "$h" ]] && ROUND2_SHAS+=("$h"); done \
-  < <(git -C "$REPO_ROOT" log --reverse --format='%H' "$ROUND1_TIP_SHA"..HEAD 2>/dev/null)
+# A ROUND IS DELIMITED BY ITS TIP, and only the NEWEST round is derived open-endedly. This is
+# the THIRD correction to this section's anchor, and the first two both moved the anchor without
+# CLOSING the round, which is why the same red came back: "round 2 is everything after round 1"
+# silently absorbs round 3, so round 3's repairs to lines round 2 introduced are reported as
+# round 2 failing R17. They are the same lines. The conflict is arithmetic, not a defect, and it
+# arrives on schedule every time a new round lands.
+#
+# Closing a round costs one line in the list below, and a closed round then measures the split it
+# was written for forever. The NEWEST round still cannot be listed -- a hand-maintained list can
+# never contain its own last commit, since adding that entry needs a further commit that becomes
+# the new last one -- so it stays derived from git and is covered the moment it exists. Only the
+# open round has that problem, and only the closed ones need delimiting; the two facts fit
+# together exactly.
+#
+# --no-merges, and the ANCHOR is the last non-merge commit rather than HEAD. On a pull_request
+# build actions/checkout checks out a MERGE of the branch into the base, so HEAD is a commit
+# this branch never authored: it appeared in the derived set, could not be reverted without
+# -m, and was reported as a round commit that fails R17. The branch's own series is the
+# non-merge commits, and its tip is the last of them -- the same commit HEAD is when the suite
+# runs anywhere else.
+CLOSED_ROUND_TIPS=(
+  'test: decouple the HEAD-anchored revert probe'              # round 1 tip
+  'fix: the telemetry partition counts the events it dropped'  # round 2 tip
+)
+round_commits() {  # <from-ish> <to-ish> -> one sha per line, oldest first
+  git -C "$REPO_ROOT" log --reverse --no-merges --format='%H' "$1".."$2" 2>/dev/null
+}
+
+# SUPERSEDED PAIRS: `<superseded subject>||<repairing subject>`, both in the same round.
+#
+# Generalising the loop over WHOLE rounds turned up a pair the previous, narrower population
+# never looked at: round 1's written subject list named six fix commits and silently omitted the
+# two test commits at the end, one of which repairs the other. A commit whose lines a later
+# commit rewrites cannot be reverted at a tip that contains the rewrite -- the same arithmetic
+# that makes a round un-revertable at a later round's tip, one level down.
+#
+# The pair is EXEMPTED FROM THE TIP CHECK AND CHECKED HARDER SOMEWHERE ELSE, because an
+# exemption nobody can falsify is just a deleted assertion: the superseded commit must revert
+# cleanly at the PARENT of its repairer (it was separable right up to the repair), the repairer
+# must really touch a file the superseded commit touched (or the exemption is unearned), and the
+# two must sit in that order. Adding a line here is therefore not a way to quiet a red.
+SUPERSEDED_PAIRS=(
+  'test: assert the Phase 4 fix round is separately revertable per R17||test: decouple the HEAD-anchored revert probe'
+)
+is_superseded() {  # <sha> -> 0 when this commit is the superseded half of a listed pair
+  local sha="$1"
+  local pair
+  for pair in "${SUPERSEDED_PAIRS[@]}"; do
+    [[ "$(sha_of "${pair%%||*}")" == "$sha" ]] && return 0
+  done
+  return 1
+}
+# The open round: everything after the last CLOSED tip.
+LAST_CLOSED_SUBJECT="${CLOSED_ROUND_TIPS[${#CLOSED_ROUND_TIPS[@]}-1]}"
+LAST_CLOSED_SHA="$(sha_of "$LAST_CLOSED_SUBJECT")"
+OPEN_ROUND_SHAS=()
+while IFS= read -r h; do [[ -n "$h" ]] && OPEN_ROUND_SHAS+=("$h"); done \
+  < <(round_commits "$LAST_CLOSED_SHA" HEAD)
+OPEN_ROUND_TIP_SHA=""
+[[ "${#OPEN_ROUND_SHAS[@]}" -ge 1 ]] && OPEN_ROUND_TIP_SHA="${OPEN_ROUND_SHAS[${#OPEN_ROUND_SHAS[@]}-1]}"
 check_round() { # <anchor> <subject>... -> "all-clean" | "missing:..." | "conflicts:..."
   local anchor="$1"; shift
   local s sha missing="" conflicts=""
@@ -328,18 +554,90 @@ check_round() { # <anchor> <subject>... -> "all-clean" | "missing:..." | "confli
 
 assert_eq "every round-1 commit is on the branch and reverts cleanly at the round-1 tip" \
   "$(check_round "$ROUND1_TIP_SHA" "${ROUND1_SUBJECTS[@]}")" "all-clean"
-# The derived set is asserted NON-EMPTY first. `git log A..HEAD` returns nothing when A is
-# unresolvable, and a loop over nothing reports all-clean: the exact shape where "checked and
-# fine" and "never checked" produce the same output.
-assert_eq "round 2 is non-empty (a clean sweep over zero commits proves nothing)" \
-  "$([[ "${#ROUND2_SHAS[@]}" -ge 1 ]] && echo ">=1" || echo "EMPTY: nothing after the round-1 tip")" ">=1"
-ROUND2_CONFLICTS=""
-for h in "${ROUND2_SHAS[@]}"; do
-  [[ "$(revert_touches_at HEAD "$h")" == clean:* ]] \
-    || ROUND2_CONFLICTS="$ROUND2_CONFLICTS|$(git -C "$REPO_ROOT" log -1 --format=%s "$h")"
+# EVERY CLOSED ROUND, each at its OWN tip, derived from the delimiter list rather than named
+# commit by commit. Round 1 keeps its written subject list above because that list documents
+# what the panel reviewed; this loop is the property, and it covers rounds the list never named.
+CLOSED_BASE="$SERIES_TIP_SHA"
+CLOSED_CONFLICTS=""
+CLOSED_CHECKED=0
+CLOSED_N=0
+SUPERSEDED_SEEN=0
+for subj in "${CLOSED_ROUND_TIPS[@]}"; do
+  CLOSED_N=$((CLOSED_N + 1))
+  TIP="$(sha_of "$subj")"
+  if [[ -z "$TIP" ]]; then CLOSED_CONFLICTS="$CLOSED_CONFLICTS|round $CLOSED_N tip NOT ON BRANCH: $subj"; continue; fi
+  while IFS= read -r h; do
+    [[ -n "$h" ]] || continue
+    CLOSED_CHECKED=$((CLOSED_CHECKED + 1))
+    if is_superseded "$h"; then SUPERSEDED_SEEN=$((SUPERSEDED_SEEN + 1)); continue; fi
+    [[ "$(revert_touches_at "$TIP" "$h")" == clean:* ]] \
+      || CLOSED_CONFLICTS="$CLOSED_CONFLICTS|round $CLOSED_N: $(git -C "$REPO_ROOT" log -1 --format=%s "$h") [$(revert_touches_at "$TIP" "$h")]"
+  done < <(round_commits "$CLOSED_BASE" "$TIP")
+  CLOSED_BASE="$TIP"
 done
-assert_eq "and every round-2 commit reverts cleanly at HEAD, which is round 2's own tip" \
-  "$([[ -z "$ROUND2_CONFLICTS" ]] && echo all-clean || echo "conflicts:$ROUND2_CONFLICTS")" "all-clean"
+# The population first: a loop over zero commits reports all-clean, which is the shape where
+# "checked and fine" and "never looked" print the same thing.
+assert_eq "the closed rounds contain commits to check (a clean sweep over zero proves nothing)" \
+  "$([[ "$CLOSED_CHECKED" -ge "${#CLOSED_ROUND_TIPS[@]}" ]] && echo ">=1 each" || echo "ONLY $CLOSED_CHECKED COMMITS ACROSS $CLOSED_N ROUNDS")" \
+  ">=1 each"
+assert_eq "every commit of every CLOSED round reverts cleanly at its own round's tip" \
+  "$([[ -z "$CLOSED_CONFLICTS" ]] && echo all-clean || echo "conflicts:$CLOSED_CONFLICTS")" "all-clean"
+
+# THE EXEMPTION, EARNED RATHER THAN DECLARED. Each listed pair is put through three checks the
+# tip check cannot make, so a line in SUPERSEDED_PAIRS costs more than it saves if it is untrue.
+assert_eq "every listed superseded commit was actually reached by the loop (a stale entry exempts nothing)" \
+  "$SUPERSEDED_SEEN" "${#SUPERSEDED_PAIRS[@]}"
+PAIR_FAILURES=""
+for pair in "${SUPERSEDED_PAIRS[@]}"; do
+  SUP_SHA="$(sha_of "${pair%%||*}")"
+  REP_SHA="$(sha_of "${pair##*||}")"
+  if [[ -z "$SUP_SHA" || -z "$REP_SHA" ]]; then PAIR_FAILURES="$PAIR_FAILURES|unresolvable pair: $pair"; continue; fi
+  # 1. The repairer comes AFTER the superseded commit.
+  [[ "$(git -C "$REPO_ROOT" merge-base --is-ancestor "$SUP_SHA" "$REP_SHA" && echo yes || echo no)" == yes ]] \
+    || PAIR_FAILURES="$PAIR_FAILURES|not an ancestor: ${pair%%||*}"
+  # 2. They really share a file, so the conflict is a REPAIR and not an unrelated failure the
+  #    list is being used to hide.
+  SHARED="$(comm -12 \
+    <(git -C "$REPO_ROOT" show --name-only --format= "$SUP_SHA" | sort -u) \
+    <(git -C "$REPO_ROOT" show --name-only --format= "$REP_SHA" | sort -u) | grep -c .)"
+  [[ "$SHARED" -ge 1 ]] || PAIR_FAILURES="$PAIR_FAILURES|no shared file: $pair"
+  # 3. It was separable right up to the repair: it reverts cleanly at the repairer's PARENT.
+  [[ "$(revert_touches_at "$REP_SHA^" "$SUP_SHA")" == clean:* ]] \
+    || PAIR_FAILURES="$PAIR_FAILURES|not separable before its repair: ${pair%%||*}"
+done
+assert_eq "and each one is an earned exemption: later, overlapping, and separable until the repair" \
+  "$PAIR_FAILURES" ""
+# CONTROL: the earning checks must be able to REFUSE, or the empty string above is a statement
+# about three checks that always pass. Two unrelated commits share no file and are not a repair.
+assert_eq "CONTROL: two unrelated commits do NOT satisfy the shared-file test" \
+  "$(comm -12 \
+      <(git -C "$REPO_ROOT" show --name-only --format= "$(sha_of 'ci: run the plugin test suite')" | sort -u) \
+      <(git -C "$REPO_ROOT" show --name-only --format= "$(sha_of 'docs: worktree_path is omitted from status.json')" | sort -u) | grep -c .)" \
+  "0"
+
+# The OPEN round, at its own tip.
+assert_eq "the open round is non-empty (a clean sweep over zero commits proves nothing)" \
+  "$([[ "${#OPEN_ROUND_SHAS[@]}" -ge 1 ]] && echo ">=1" || echo "EMPTY: nothing after the last closed tip")" ">=1"
+OPEN_CONFLICTS=""
+for h in "${OPEN_ROUND_SHAS[@]}"; do
+  [[ "$(revert_touches_at "$OPEN_ROUND_TIP_SHA" "$h")" == clean:* ]] \
+    || OPEN_CONFLICTS="$OPEN_CONFLICTS|$(git -C "$REPO_ROOT" log -1 --format=%s "$h") [$(revert_touches_at "$OPEN_ROUND_TIP_SHA" "$h")]"
+done
+assert_eq "and every commit of the OPEN round reverts cleanly at the open round's own tip" \
+  "$([[ -z "$OPEN_CONFLICTS" ]] && echo all-clean || echo "conflicts:$OPEN_CONFLICTS")" "all-clean"
+# Nothing falls between the delimiters: every non-merge commit after the implementation series
+# tip belongs to exactly one round. Without this, closing a round is a way to stop checking one.
+assert_eq "the closed rounds plus the open round account for every commit after the series tip" \
+  "$((CLOSED_CHECKED + ${#OPEN_ROUND_SHAS[@]}))" \
+  "$(round_commits "$SERIES_TIP_SHA" HEAD | grep -c . | tr -d ' ')"
+# The anchor is the branch's own tip, which on every checkout except a pull_request build IS
+# HEAD. Stated as an assertion rather than a comment so the two cannot drift apart silently.
+assert_eq "the open round's tip is HEAD itself whenever HEAD is not a merge commit" \
+  "$([[ "$(git -C "$REPO_ROOT" rev-list --no-walk --count --merges HEAD 2>/dev/null)" == "1" ]] \
+     && echo "head-is-a-merge (pull_request build)" \
+     || echo "$([[ "$OPEN_ROUND_TIP_SHA" == "$(git -C "$REPO_ROOT" rev-parse HEAD)" ]] && echo same || echo DRIFTED)")" \
+  "$([[ "$(git -C "$REPO_ROOT" rev-list --no-walk --count --merges HEAD 2>/dev/null)" == "1" ]] \
+     && echo "head-is-a-merge (pull_request build)" || echo same)"
 # CONTROL for check_round: it must be able to report a MISSING subject, or "all-clean" is a
 # statement about a loop that never looked anything up.
 assert_contains "CONTROL: check_round reports a subject that is not on the branch" \
