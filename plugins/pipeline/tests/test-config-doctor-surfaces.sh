@@ -144,8 +144,13 @@ assert_eq "CONTROL: the registry sweep is non-empty (it found real keys to check
 # hand-copied fact this whole issue is about, so it is derived from the code, not trusted.
 assert_eq "the README's 'fifteen-row' claim equals the code's row count" \
   "$(node -e 'import(process.argv[1]).then(m=>console.log(m.DEFAULT_MIGRATION_GLOBS.length))' "$SURFACE")" "15"
-assert_eq "and the README says fifteen" \
-  "$(grep -c 'fifteen-row framework-preset union' "$PLUGIN_DIR/README.md" | tr -d ' ')" "1"
+# Presence, not an exact count: the phrase legitimately appears in both the config table and
+# the Upgrading section, and pinning the count would redden on a documentation addition that
+# says the same true thing twice.
+assert_eq "and the README states that number in words" \
+  "$([[ "$(grep -c 'fifteen-row framework-preset union' "$PLUGIN_DIR/README.md" | tr -d ' ')" -ge 1 ]] && echo stated || echo absent)" "stated"
+assert_eq "CONTROL: the same grep reports absent for a number the README does not claim" \
+  "$([[ "$(grep -c 'twenty-row framework-preset union' "$PLUGIN_DIR/README.md" | tr -d ' ')" -ge 1 ]] && echo stated || echo absent)" "absent"
 
 # =============================================================================
 # AC28 -- LOUD MATCH-NOTHING, at PATTERN granularity, per CONSUMER.
