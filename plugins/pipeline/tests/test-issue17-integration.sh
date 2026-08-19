@@ -20,6 +20,45 @@ PIPELINE_MD="$PLUGIN_DIR/commands/pipeline.md"
 
 NEW_SUITES="test-data-layer-surface.sh test-mis-tier-tripwire.sh test-dispatch-model-resolver.sh test-dispatch-model-sites.sh test-config-doctor-surfaces.sh test-pipeline-telemetry.sh test-issue17-integration.sh"
 
+# run.sh's discovery rule is READ OUT OF run.sh and EXPANDED, never re-derived inline. Three
+# assertions below used to spell the glob themselves, and every one of them was unfalsifiable in
+# both directions: widening run.sh to `for t in test-*.sh fixtures/*.sh; do` left the two
+# fixture-placement guards printing 0 and still satisfied an `assert_contains` for
+# "for t in test-*.sh", and a planted tests/test-zz-planted.sh produced 0 from both guards too.
+# An assertion that cannot print anything but its expected value is a deleted assertion wearing
+# a green tick, so the rule is extracted once here and every consumer uses this one reading.
+run_sh_patterns() {  # <run.sh> -> the literal glob patterns from its discovery line
+  sed -n 's/^[[:space:]]*for t in \(.*\); do[[:space:]]*$/\1/p' "$1" | head -1
+}
+discovered_by() {  # <tests dir> <patterns> -> the files run.sh would run, one per line
+  ( cd "$1" && eval "for t in $2; do [ -f \"\$t\" ] && printf '%s\n' \"\$t\"; done" )
+}
+discovered_outside_flat() {  # <tests dir> <patterns> -> discovered names that are not flat in it
+  local dir="$1"
+  local pats="$2"
+  local t
+  local out=""
+  while IFS= read -r t; do
+    [[ -n "$t" ]] || continue
+    case "$t" in */*) out="$out $t" ;; esac
+  done < <(discovered_by "$dir" "$pats")
+  printf '%s' "$out"
+}
+discovered_under() {  # <tests dir> <patterns> <abs subdir> -> discovered names resolving inside it
+  local dir="$1"
+  local pats="$2"
+  local sub="$3"
+  local t
+  local d
+  local out=""
+  while IFS= read -r t; do
+    [[ -n "$t" ]] || continue
+    d="$(cd "$dir/$(dirname "$t")" 2>/dev/null && pwd)" || continue
+    [[ "$d" == "$sub" ]] && out="$out $t"
+  done < <(discovered_by "$dir" "$pats")
+  printf '%s' "$out"
+}
+
 # =============================================================================
 # AC35 -- THE NEW SUITES ACTUALLY RUN.
 # =============================================================================
@@ -30,8 +69,13 @@ suite "AC35: run.sh's flat glob reaches every suite this change adds"
 # down is a file nobody runs. run.sh itself is not invoked, because run.sh invokes THIS file:
 # the recursion would never terminate, and a suite that skipped itself to avoid that would be
 # the self-skip this repo refuses. The glob is therefore reproduced from run.sh's source line.
-GLOB_LINE="$(grep -n 'for t in test-' "$TESTS_DIR/run.sh" | head -1)"
-assert_contains "run.sh still discovers by a flat test-*.sh glob" "$GLOB_LINE" "for t in test-*.sh"
+#
+# EQUALITY on the extracted patterns, not containment. `assert_contains ... "for t in test-*.sh"`
+# was satisfied by the widened line `for t in test-*.sh fixtures/*.sh; do`, which is exactly the
+# drift this assertion exists to refuse.
+RUN_PATTERNS="$(run_sh_patterns "$TESTS_DIR/run.sh")"
+assert_eq "run.sh's discovery line was READ, and it is exactly the flat test-*.sh glob" \
+  "$RUN_PATTERNS" "test-*.sh"
 assert_eq "and it has no recursive discovery that could reach a subdirectory instead" \
   "$(grep -c 'find\|\*\*/' "$TESTS_DIR/run.sh" | tr -d ' ')" "0"
 
@@ -230,10 +274,33 @@ assert_eq "CONTROL: and reports 0 for the same body split in two, so it is not r
   "$(same_local_offenders "$FIXTURES_DIR/split-local-oneline.sh")" "0"
 # And the fixtures are NOT in the population the assertion above walks, or that zero is a
 # statement about a detector pointed away from the only files that carry the construct.
-assert_eq "the fixtures sit outside the tests/*.sh population, so the ratchet still covers every suite" \
-  "$(for p in "$TESTS_DIR"/*.sh; do [[ "$p" == "$FIXTURES_DIR"/* ]] && echo IN; done | wc -l | tr -d ' ')" "0"
-assert_eq "and outside run.sh's discovery glob, so neither is ever run as a suite" \
-  "$( cd "$TESTS_DIR" && for t in test-*.sh; do [[ "$t" == fixtures/* ]] && echo IN; done | wc -l | tr -d ' ')" "0"
+#
+# BOTH HALVES READ run.sh's OWN discovery line (via run_sh_patterns, defined at the top of this
+# file) and EXPAND IT. The previous spelling re-derived the glob inline -- `for t in test-*.sh;
+# do [[ "$t" == fixtures/* ]]` -- so it could not print anything but 0 no matter what run.sh
+# said. Two reviewers found it independently and both proved it: widening run.sh to
+# `for t in test-*.sh fixtures/*.sh; do` left the integration suite at 93/0, and planting
+# tests/test-zz-planted.sh returned 0 from both guards. The property is real and is genuinely
+# covered by the run.sh-source read at the top of AC35; what was missing was any way for THESE
+# two lines to fail.
+assert_eq "run.sh's discovery line was read here too (an empty extraction reaches nothing, forever)" \
+  "$([[ -n "$RUN_PATTERNS" ]] && echo read || echo "EXTRACTION FAILED")" "read"
+assert_eq "every suite run.sh discovers is flat in tests/, i.e. inside the population the ratchet walks" \
+  "$(discovered_outside_flat "$TESTS_DIR" "$RUN_PATTERNS")" ""
+assert_eq "and no fixture is reached by run.sh's own rule, so neither is ever run as a suite" \
+  "$(discovered_under "$TESTS_DIR" "$RUN_PATTERNS" "$FIXTURES_DIR")" ""
+# NON-ZERO CONTROL, and it is the exact mutation that walked past the previous spelling. The
+# widened copy is built in the scratch project and its CHANGED LINE IS ASSERTED first: a
+# substitution that silently matched nothing would otherwise pass as a control while proving
+# that a rule identical to the real one reaches no fixture.
+WIDE_RUN="$TEMP_PROJECT/wide-run.sh"
+sed 's|^for t in test-\*\.sh; do$|for t in test-*.sh fixtures/*.sh; do|' "$TESTS_DIR/run.sh" > "$WIDE_RUN"
+assert_eq "the widened copy really carries the wider rule" \
+  "$(run_sh_patterns "$WIDE_RUN")" "test-*.sh fixtures/*.sh"
+assert_contains "CONTROL: that widened rule reaches a file outside the ratchet's flat population" \
+  "$(discovered_outside_flat "$TESTS_DIR" "$(run_sh_patterns "$WIDE_RUN")")" "fixtures/same-local-oneline.sh"
+assert_contains "CONTROL: and it reaches the fixtures, so the two empty results above are verdicts" \
+  "$(discovered_under "$TESTS_DIR" "$(run_sh_patterns "$WIDE_RUN")" "$FIXTURES_DIR")" "fixtures/same-local-oneline.sh"
 
 # The behavioural half, EXECUTED rather than described, and executed by the same interpreter
 # this suite is running under (`$BASH`, not whatever `bash` PATH resolves to -- the two differ
