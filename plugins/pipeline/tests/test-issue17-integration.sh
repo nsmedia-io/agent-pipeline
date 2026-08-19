@@ -446,10 +446,67 @@ fi
 # =============================================================================
 suite "AC24: the commit order, and each revert applying cleanly on its own"
 
-BASE="$(git -C "$REPO_ROOT" merge-base origin/main HEAD 2>/dev/null)"
-LOG="$(git -C "$REPO_ROOT" log --reverse --format='%H %s' "$BASE"..HEAD 2>/dev/null)"
+# THE WINDOW IS DELIMITED BY SUBJECT AT BOTH ENDS, and that is the whole reason this block
+# survives its own merge. It used to read `merge-base origin/main HEAD`..HEAD, which is the
+# BRANCH'S development range and therefore describes nothing once the branch lands: on main the
+# merge-base and HEAD are the same commit, the range is empty, every sha_of below returned "",
+# eighteen assertions went red and the suite then died on an unbound array before it could print
+# a passed= line. A range expressed against a ref that MOVES cannot outlive the merge that moves
+# it, and `gh pr merge --rebase` rewrites every sha on the way in, so pinning shas would not have
+# helped either. That is a defect in the assertion, not in the merge choice.
+#
+# What a rebase DOES preserve is each commit's SUBJECT and their ORDER. So the series is named by
+# the subject of its first commit and the subject of its last, resolved against FULL history, and
+# every lookup below reads that one fixed window. The same two subjects select the same two
+# commits before the merge, after a rebase merge, and on a pull_request build whose HEAD is a
+# merge commit this branch never authored -- which also retires the --no-merges HEAD-tip dance
+# that case used to need. Nothing here reads origin/main any more.
+SERIES_FIRST_SUBJECT='test: author failing behavioral contract for the data-layer surface'
+SERIES_LAST_SUBJECT="docs: the delta block's round-1 anchor cannot be run as a redirection"
+
+subject_shas_from() {  # <start-ish> <subject substring> -> matching shas reachable from it, newest first
+  git -C "$REPO_ROOT" log --format='%H %s' "$1" 2>/dev/null | grep -F "$2" | cut -d' ' -f1
+}
+SERIES_FIRST_SHA="$(subject_shas_from HEAD "$SERIES_FIRST_SUBJECT" | head -1)"
+SERIES_HEAD_SHA="$(subject_shas_from HEAD "$SERIES_LAST_SUBJECT" | head -1)"
+BASE="$(git -C "$REPO_ROOT" rev-parse --verify "${SERIES_FIRST_SHA:-no-such-rev}^" 2>/dev/null)"
+LOG="$(git -C "$REPO_ROOT" log --reverse --no-merges --format='%H %s' "$BASE".."${SERIES_HEAD_SHA:-no-such-rev}" 2>/dev/null)"
 sha_of() { printf '%s\n' "$LOG" | grep -m1 -F "$1" | cut -d' ' -f1; }
 pos_of() { printf '%s\n' "$LOG" | grep -n -F "$1" | head -1 | cut -d: -f1; }
+
+# The window is asserted BEFORE anything is looked up inside it. An unresolved delimiter yields an
+# empty LOG, and every assertion downstream then compares one empty string against another --
+# which is exactly the shape that let this suite die quietly rather than say what was wrong.
+assert_eq "the series' FIRST commit resolves by subject (the window starts nowhere without it)" \
+  "$([[ -n "$SERIES_FIRST_SHA" ]] && echo found || echo "UNRESOLVED: $SERIES_FIRST_SUBJECT")" "found"
+assert_eq "and its LAST commit does too" \
+  "$([[ -n "$SERIES_HEAD_SHA" ]] && echo found || echo "UNRESOLVED: $SERIES_LAST_SUBJECT")" "found"
+assert_eq "the first delimiter names exactly ONE commit, so the window cannot open at the wrong one" \
+  "$(subject_shas_from HEAD "$SERIES_FIRST_SUBJECT" | grep -c . | tr -d ' ')" "1"
+assert_eq "and the last names exactly one, so it cannot close at the wrong one" \
+  "$(subject_shas_from HEAD "$SERIES_LAST_SUBJECT" | grep -c . | tr -d ' ')" "1"
+assert_eq "the window holds the whole series (a truncated window would sweep cleanly over nothing)" \
+  "$(printf '%s\n' "$LOG" | grep -c . | tr -d ' ')" "31"
+
+# THE MERGE-SURVIVAL PROPERTY ITSELF, executed rather than described: the window must resolve to
+# the same commits no matter WHAT HEAD is, because that independence is the fix. Walking from the
+# series head instead of from HEAD is the same question a post-merge main, a pull_request merge
+# HEAD, and a future main carrying unrelated work all ask.
+window_size_from() {  # <start-ish> -> commit count of the subject-delimited window, or UNRESOLVED
+  local start="$1"
+  local first
+  local last
+  first="$(subject_shas_from "$start" "$SERIES_FIRST_SUBJECT" | head -1)"
+  last="$(subject_shas_from "$start" "$SERIES_LAST_SUBJECT" | head -1)"
+  [[ -n "$first" && -n "$last" ]] || { printf 'UNRESOLVED'; return 0; }
+  git -C "$REPO_ROOT" log --no-merges --format=%H "$first^..$last" 2>/dev/null | grep -c . | tr -d ' '
+}
+assert_eq "the window resolves identically when walked from the series head rather than from HEAD" \
+  "$(window_size_from "$SERIES_HEAD_SHA")" "$(window_size_from HEAD)"
+# NON-ZERO CONTROL: the same resolver must be able to report that it could NOT find the series, or
+# the agreement above is a statement about a function that says the same thing everywhere.
+assert_eq "CONTROL: the same resolver reports UNRESOLVED from a commit that predates the series" \
+  "$(window_size_from "$BASE")" "UNRESOLVED"
 
 CI_SHA="$(sha_of 'ci: run the plugin test suite')"
 SURFACE_SHA="$(sha_of 'feat: one data-layer surface module')"
@@ -563,7 +620,7 @@ assert_eq "the round-1 tip is identifiable (without it the round-1 reverts below
 # must be observed NON-EMPTY before anything is asserted absent from them.
 EMPTY_TREE_SHA="$(git -C "$REPO_ROOT" hash-object -t commit /dev/null 2>/dev/null || echo 0000000000000000000000000000000000000000)"
 assert_eq "CONTROL: the probe reports CONFLICT for a sha that cannot be reverted here" \
-  "$(revert_touches_at HEAD "$EMPTY_TREE_SHA")" "CONFLICT"
+  "$(revert_touches_at "$SERIES_HEAD_SHA" "$EMPTY_TREE_SHA")" "CONFLICT"
 assert_eq "CONTROL: and it reports NOWORKTREE for an anchor that does not exist, rather than a bare clean:" \
   "$(revert_touches_at 'no-such-anchor-ref' "$(sha_of 'fix: panel composition seats the specialist')")" \
   "NOWORKTREE"
@@ -578,30 +635,34 @@ ROUND1_SUBJECTS=(
   'fix: tripwireReport no longer returns a hit'
   'docs: worktree_path is omitted from status.json'
 )
-# A ROUND IS DELIMITED BY ITS TIP, and only the NEWEST round is derived open-endedly. This is
-# the THIRD correction to this section's anchor, and the first two both moved the anchor without
-# CLOSING the round, which is why the same red came back: "round 2 is everything after round 1"
-# silently absorbs round 3, so round 3's repairs to lines round 2 introduced are reported as
-# round 2 failing R17. They are the same lines. The conflict is arithmetic, not a defect, and it
-# arrives on schedule every time a new round lands.
+# A ROUND IS DELIMITED BY ITS TIP. This is the THIRD correction to this section's anchor, and the
+# first two both moved the anchor without CLOSING the round, which is why the same red came back:
+# "round 2 is everything after round 1" silently absorbs round 3, so round 3's repairs to lines
+# round 2 introduced are reported as round 2 failing R17. They are the same lines. The conflict is
+# arithmetic, not a defect, and it arrived on schedule every time a new round landed.
 #
-# Closing a round costs one line in the list below, and a closed round then measures the split it
-# was written for forever. The NEWEST round still cannot be listed -- a hand-maintained list can
-# never contain its own last commit, since adding that entry needs a further commit that becomes
-# the new last one -- so it stays derived from git and is covered the moment it exists. Only the
-# open round has that problem, and only the closed ones need delimiting; the two facts fit
-# together exactly.
+# EVERY ROUND IS CLOSED NOW, including the last, and that is what the merge changed. While the
+# branch was live the newest round could not be listed -- a hand-maintained list cannot contain
+# its own last commit, since adding that entry needs a further commit that becomes the new last
+# one -- so it was derived open-endedly as "everything after the last closed tip, up to HEAD".
+# That derivation is what broke on main: it is a range against a moving ref, it went empty the
+# moment the branch merged, and an empty round then failed its own non-emptiness guard and left
+# OPEN_ROUND_SHAS unset under `set -u`. The merge also DISSOLVED the reason for it. The series is
+# frozen between two fixed commits now, nothing can be inserted into it, so its last commit is
+# nameable and is named below. No round is derived open-endedly any more, and the accounting
+# assertion further down proves the four tips partition the window with nothing left over -- so
+# closing the last round is not a way to stop checking it.
 #
-# --no-merges, and the ANCHOR is the last non-merge commit rather than HEAD. On a pull_request
-# build actions/checkout checks out a MERGE of the branch into the base, so HEAD is a commit
-# this branch never authored: it appeared in the derived set, could not be reverted without
-# -m, and was reported as a round commit that fails R17. The branch's own series is the
-# non-merge commits, and its tip is the last of them -- the same commit HEAD is when the suite
-# runs anywhere else.
+# This also retires the pull_request special case. The old derivation ran to HEAD, and on a
+# pull_request build actions/checkout checks out a MERGE of the branch into the base, so HEAD was
+# a commit this branch never authored: it appeared in the derived set, could not be reverted
+# without -m, and was reported as a round commit failing R17. A window that ends at a named
+# subject never sees that merge commit at all.
 CLOSED_ROUND_TIPS=(
-  'test: decouple the HEAD-anchored revert probe'              # round 1 tip
-  'fix: the telemetry partition counts the events it dropped'  # round 2 tip
-  'docs: the README checkCommand default was a promise'        # round 3 tip
+  'test: decouple the HEAD-anchored revert probe'                       # round 1 tip
+  'fix: the telemetry partition counts the events it dropped'           # round 2 tip
+  'docs: the README checkCommand default was a promise'                 # round 3 tip
+  "$SERIES_LAST_SUBJECT"                                                # round 4 tip = series head
 )
 round_commits() {  # <from-ish> <to-ish> -> one sha per line, oldest first
   git -C "$REPO_ROOT" log --reverse --no-merges --format='%H' "$1".."$2" 2>/dev/null
@@ -675,14 +736,8 @@ assert_eq "CONTROL: the same counter reports more than one for a substring the s
 assert_eq "CONTROL: and zero for a subject no commit on this branch carries" \
   "$(subject_hits 'chore: a subject no commit on this branch carries')" "0"
 
-# The open round: everything after the last CLOSED tip.
 LAST_CLOSED_SUBJECT="${CLOSED_ROUND_TIPS[${#CLOSED_ROUND_TIPS[@]}-1]}"
 LAST_CLOSED_SHA="$(sha_of "$LAST_CLOSED_SUBJECT")"
-OPEN_ROUND_SHAS=()
-while IFS= read -r h; do [[ -n "$h" ]] && OPEN_ROUND_SHAS+=("$h"); done \
-  < <(round_commits "$LAST_CLOSED_SHA" HEAD)
-OPEN_ROUND_TIP_SHA=""
-[[ "${#OPEN_ROUND_SHAS[@]}" -ge 1 ]] && OPEN_ROUND_TIP_SHA="${OPEN_ROUND_SHAS[${#OPEN_ROUND_SHAS[@]}-1]}"
 check_round() { # <anchor> <subject>... -> "all-clean" | "missing:..." | "conflicts:..."
   local anchor="$1"; shift
   local s sha missing="" conflicts=""
@@ -792,33 +847,26 @@ assert_eq "CONTROL: two unrelated commits do NOT satisfy the shared-file test" \
       <(git -C "$REPO_ROOT" show --name-only --format= "$(sha_of 'docs: worktree_path is omitted from status.json')" | sort -u) | grep -c .)" \
   "0"
 
-# The OPEN round, at its own tip.
-assert_eq "the open round is non-empty (a clean sweep over zero commits proves nothing)" \
-  "$([[ "${#OPEN_ROUND_SHAS[@]}" -ge 1 ]] && echo ">=1" || echo "EMPTY: nothing after the last closed tip")" ">=1"
-OPEN_CONFLICTS=""
-for h in "${OPEN_ROUND_SHAS[@]}"; do
-  [[ "$(revert_touches_at "$OPEN_ROUND_TIP_SHA" "$h")" == clean:* ]] \
-    || OPEN_CONFLICTS="$OPEN_CONFLICTS|$(git -C "$REPO_ROOT" log -1 --format=%s "$h") [$(revert_touches_at "$OPEN_ROUND_TIP_SHA" "$h")]"
-done
-assert_eq "and every commit of the OPEN round reverts cleanly at the open round's own tip" \
-  "$([[ -z "$OPEN_CONFLICTS" ]] && echo all-clean || echo "conflicts:$OPEN_CONFLICTS")" "all-clean"
-# Nothing falls between the delimiters: every non-merge commit after the implementation series
-# tip belongs to exactly one round. Without this, closing a round is a way to stop checking one.
-assert_eq "the closed rounds plus the open round account for every commit after the series tip" \
-  "$((CLOSED_CHECKED + ${#OPEN_ROUND_SHAS[@]}))" \
-  "$(round_commits "$SERIES_TIP_SHA" HEAD | grep -c . | tr -d ' ')"
-# The anchor is the branch's own tip, which on every checkout except a pull_request build IS
-# HEAD. Stated as an assertion rather than a comment so the two cannot drift apart silently.
-assert_eq "the open round's tip is HEAD itself whenever HEAD is not a merge commit" \
-  "$([[ "$(git -C "$REPO_ROOT" rev-list --no-walk --count --merges HEAD 2>/dev/null)" == "1" ]] \
-     && echo "head-is-a-merge (pull_request build)" \
-     || echo "$([[ "$OPEN_ROUND_TIP_SHA" == "$(git -C "$REPO_ROOT" rev-parse HEAD)" ]] && echo same || echo DRIFTED)")" \
-  "$([[ "$(git -C "$REPO_ROOT" rev-list --no-walk --count --merges HEAD 2>/dev/null)" == "1" ]] \
-     && echo "head-is-a-merge (pull_request build)" || echo same)"
+# NOTHING FALLS BETWEEN THE DELIMITERS: every non-merge commit after the implementation series
+# tip belongs to exactly one round. This is what stops "close the last round" from being a way to
+# stop checking it -- the four tips have to partition the window exactly, so a fifth round landing
+# unlisted, or a tip moved to skip commits, is arithmetic that does not add up rather than a
+# silence. It replaces the open round's non-emptiness guard and carries the same weight: a sweep
+# over zero commits cannot satisfy an equality against 22.
+assert_eq "the closed rounds account for every commit after the series tip, with none left over" \
+  "$CLOSED_CHECKED" \
+  "$(round_commits "$SERIES_TIP_SHA" "$SERIES_HEAD_SHA" | grep -c . | tr -d ' ')"
+assert_eq "and that population is the whole post-implementation series, not a truncated slice" \
+  "$CLOSED_CHECKED" "22"
+# The last round's tip IS the series head, i.e. the delimiter list runs to the end of the window
+# rather than stopping short of it. Stated as an assertion rather than a comment so the two
+# cannot drift apart silently.
+assert_eq "the last closed round's tip is the series head itself, so no commit sits past the list" \
+  "$LAST_CLOSED_SHA" "$SERIES_HEAD_SHA"
 # CONTROL for check_round: it must be able to report a MISSING subject, or "all-clean" is a
 # statement about a loop that never looked anything up.
-assert_contains "CONTROL: check_round reports a subject that is not on the branch" \
-  "$(check_round HEAD 'chore: a subject no commit on this branch carries')" "missing:"
+assert_contains "CONTROL: check_round reports a subject that is not in the series window" \
+  "$(check_round "$SERIES_HEAD_SHA" 'chore: a subject no commit on this branch carries')" "missing:"
 
 # The two round-1 blockers are separable from each other in particular: they were the two
 # REQUEST_CHANGES items, and backing one out must not drag the other.
@@ -853,8 +901,41 @@ assert_contains "test-gate-pre-phase4.sh passes in full" "$GATE_OUT" "passed=56 
 # deletion-exemption coverage quietly.
 assert_eq "and it still carries all 56 assertions (a green with fewer is a deleted case)" \
   "$(printf '%s' "$GATE_OUT" | grep -c '^  ok' | tr -d ' ')" "56"
-assert_eq "no assertion line in it was modified by this change" \
-  "$(git -C "$REPO_ROOT" diff origin/main...HEAD -- plugins/pipeline/tests/test-gate-pre-phase4.sh | grep -c '^[+-][^+-].*assert_')" "0"
+# Measured across the SERIES WINDOW, for the same reason the round lookups are: `origin/main...HEAD`
+# is an empty diff on main, so after the merge this line was green because it compared a commit
+# with itself. A vacuous pass is the worse half of the same defect -- the round assertions at
+# least went red about it.
+#
+# THE PATTERN IS `^[+-][[:space:]]*assert_`, and the previous `^[+-][^+-].*assert_` was a second,
+# independent way for this line to be un-failable: the assertions in that suite start at column 0,
+# so `[^+-]` consumed their leading `a` and `.*assert_` then had only "ssert_" left to find. The
+# control below measures it -- the old pattern reports 0 over the commit that ADDS 56 of them.
+# `[[:space:]]*` still cannot match the `+++`/`---` file headers, which is what the old character
+# class was for.
+assert_eq "no assertion line in it was modified anywhere in the series" \
+  "$(git -C "$REPO_ROOT" diff "$BASE".."$SERIES_HEAD_SHA" -- plugins/pipeline/tests/test-gate-pre-phase4.sh | grep -cE '^[+-][[:space:]]*assert_')" "0"
+# The 0 above is only a verdict if the diff it counted was non-empty. The series DOES touch this
+# file (one commit corrects comments in it), so the grep really walked a diff and found no
+# assertion line in it, rather than finding nothing because there was nothing to find.
+assert_eq "the series really does touch that file, so the 0 above counted a diff that exists" \
+  "$([[ "$(git -C "$REPO_ROOT" log --format=%H "$BASE".."$SERIES_HEAD_SHA" -- plugins/pipeline/tests/test-gate-pre-phase4.sh | grep -c .)" -ge 1 ]] \
+     && echo touched || echo "UNTOUCHED: the assertion above counted an empty diff")" "touched"
+# NON-ZERO CONTROL: the same grep over the commit that AUTHORED the suite must report a large
+# count, or the 0 above is a statement about a pattern that never matches anything.
+GATE_AUTHORED_SHA="$(subject_shas_from HEAD 'test(scripts): author the failing behavioral contract for the 8 .mjs scripts' | head -1)"
+# It sits BEFORE the series window, so the in-window uniqueness sweep cannot cover it; its 1:1
+# resolution is asserted here instead, against full history, for the same reason every other
+# lookup's is -- head -1 over an ambiguous subject silently measures a commit nobody named.
+assert_eq "CONTROL: the commit that authored the gate suite resolves to exactly one commit" \
+  "$(subject_shas_from HEAD 'test(scripts): author the failing behavioral contract for the 8 .mjs scripts' | grep -c . | tr -d ' ')" "1"
+assert_eq "CONTROL: the same grep counts all 56 added assertion lines across that commit" \
+  "$(git -C "$REPO_ROOT" diff "$GATE_AUTHORED_SHA^".."$GATE_AUTHORED_SHA" -- plugins/pipeline/tests/test-gate-pre-phase4.sh | grep -cE '^[+-][[:space:]]*assert_')" \
+  "56"
+# ...and the pattern this line replaced reports 0 on that same commit, which is why it is not
+# still in use. Stated as an assertion so the two patterns cannot quietly swap back.
+assert_eq "CONTROL: the OLD pattern saw none of those 56, which is the bug it is retired for" \
+  "$(git -C "$REPO_ROOT" diff "$GATE_AUTHORED_SHA^".."$GATE_AUTHORED_SHA" -- plugins/pipeline/tests/test-gate-pre-phase4.sh | grep -c '^[+-][^+-].*assert_')" \
+  "0"
 
 suite "AC23: the false pointers in that suite are corrected, and its rationale survives verbatim"
 
