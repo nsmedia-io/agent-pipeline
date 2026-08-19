@@ -65,25 +65,45 @@ assert_contains "AC6: the #16 title resolution survives as a live check" "$R17_T
 
 suite "AC19: both suites are green, and neither lost an assertion"
 
-# The floors are the TRUE current values (gate 56, telemetry 96), not one below. A floor one
-# below the current value lets exactly one assertion be deleted through the guard that exists
-# to stop assertions being deleted -- which is precisely how requirement C could be "satisfied"
-# by removing the ten assertions that defend the wrong convention.
+# The floors are the TRUE current values, not one below. A floor one below the current value
+# lets exactly one assertion be deleted through the guard that exists to stop assertions being
+# deleted -- which is precisely how requirement C could be "satisfied" by removing the ten
+# assertions that defend the wrong convention.
+#
+# A BARE FLOOR DRIFTS, AND IT HAS DRIFTED TWICE. r1 set telemetry at 95 against a true 96; r3
+# raised it to 96, and commits C6/C7 then took the suite to 99 without deleting anything, so
+# three assertions could again be deleted in silence. Nothing about a legitimate addition makes
+# a `>=` literal move: the guard degrades every time the thing it guards grows, and it degrades
+# QUIETLY, which is the same claim-more-than-you-measured defect this issue is about.
+#
+# So each floor is pinned from BOTH sides. The `>=` half is the deletion guard and is what
+# AC19 asks for. The `<=` half carries no safety claim at all -- it exists so that the next
+# legitimate addition FAILS HERE, loudly, with the new number in the message, instead of
+# silently opening a deletion window. Its failure is a two-character edit and a re-read of what
+# was added; that is the price of a floor that tracks reality rather than the last person who
+# remembered it. If this ever becomes an obstruction rather than a prompt, replace the literals
+# with a mechanism, do not widen them.
+GATE_FLOOR=56
+TELEM_FLOOR=99
 run_suite() { bash "$1" 2>&1 | tail -1; }
 
 GATE_LINE=$(run_suite "$GATE_SUITE")
 GATE_PASSED=$(printf '%s' "$GATE_LINE" | sed -n 's/.*passed=\([0-9]*\).*/\1/p')
 GATE_FAILED=$(printf '%s' "$GATE_LINE" | sed -n 's/.*failed=\([0-9]*\).*/\1/p')
 assert_eq "AC19: the gate suite reports failed=0" "$GATE_FAILED" "0"
-assert_eq "AC19: and its assertion count has not decreased from 56" \
-  "$([[ "${GATE_PASSED:-0}" -ge 56 ]] && echo ok || echo "passed=$GATE_PASSED")" "ok"
+assert_eq "AC19: and its assertion count has not decreased from $GATE_FLOOR" \
+  "$([[ "${GATE_PASSED:-0}" -ge "$GATE_FLOOR" ]] && echo ok || echo "passed=$GATE_PASSED")" "ok"
+assert_eq "AC19 DRIFT ALARM: the gate suite still measures $GATE_FLOOR -- raise GATE_FLOOR here if it grew" \
+  "$([[ "${GATE_PASSED:-0}" -le "$GATE_FLOOR" ]] && echo ok || echo "grew to $GATE_PASSED, floor is $GATE_FLOOR")" "ok"
 
 TELEM_LINE=$(run_suite "$TELEM_SUITE")
 TELEM_PASSED=$(printf '%s' "$TELEM_LINE" | sed -n 's/.*passed=\([0-9]*\).*/\1/p')
 TELEM_FAILED=$(printf '%s' "$TELEM_LINE" | sed -n 's/.*failed=\([0-9]*\).*/\1/p')
 assert_eq "AC19: the telemetry suite reports failed=0" "$TELEM_FAILED" "0"
-assert_eq "AC19: and its assertion count has not decreased from 96" \
-  "$([[ "${TELEM_PASSED:-0}" -ge 96 ]] && echo ok || echo "passed=$TELEM_PASSED")" "ok"
+assert_eq "AC19: and its assertion count has not decreased from $TELEM_FLOOR" \
+  "$([[ "${TELEM_PASSED:-0}" -ge "$TELEM_FLOOR" ]] && echo ok || echo "passed=$TELEM_PASSED")" "ok"
+assert_eq "AC19 DRIFT ALARM: the telemetry suite still measures $TELEM_FLOOR -- raise TELEM_FLOOR here if it grew" \
+  "$([[ "${TELEM_PASSED:-0}" -le "$TELEM_FLOOR" ]] && echo ok || echo "grew to $TELEM_PASSED, floor is $TELEM_FLOOR")" "ok"
 
 suite "AC23: the halt-cause enumeration is complete after A and B"
 

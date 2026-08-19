@@ -163,6 +163,45 @@ FRESH=$(corpus_files "$TREE" "$PIPELINE_PATTERN" | sort)
 assert_eq "AC18: with nothing untracked on disk, the helper equals \`git ls-files\`" "$FRESH" "$TRACKED"
 assert_eq "AC18 CONTROL: and that comparison was not two empty sets" \
   "$([[ -n "$TRACKED" ]] && echo ok || echo empty)" "ok"
+
+# THE CELL THAT DISCRIMINATES A UNION FROM ITS TWO HALVES, and the reason it has to exist.
+# Everything above measures the fresh-clone condition, where "tracked" and "on disk" are the
+# SAME SET BY CONSTRUCTION -- so a genuine union, a `git ls-files`-only reader and an on-disk-
+# only reader are indistinguishable there, and the named mutation "drop the tracked half"
+# survived the whole suite. The population that separates them is the one where the two halves
+# DISAGREE, in both directions at once, and it needs its own tree: manufacturing the
+# disagreement in $TREE would change what every cell above and below measures.
+new_tmpdir || exit 90
+DTREE="$NEW_TMPDIR"
+git -C "$DTREE" init -q
+mkdir -p "$DTREE/.pipeline/tracked-gone" "$DTREE/.pipeline/on-disk-only" "$DTREE/.pipeline/both"
+REC='{"current_phase":"3-impl","events":[]}'
+printf '%s' "$REC" > "$DTREE/.pipeline/tracked-gone/status.json"
+printf '%s' "$REC" > "$DTREE/.pipeline/both/status.json"
+git -C "$DTREE" add -A -f >/dev/null 2>&1
+git -C "$DTREE" -c user.email=t@t -c user.name=t commit -q -m init
+# Direction 1: TRACKED, then removed from disk. Only the index knows it.
+rm -f "$DTREE/.pipeline/tracked-gone/status.json"
+# Direction 2: ON DISK, never added. Only the filesystem knows it.
+printf '%s' "$REC" > "$DTREE/.pipeline/on-disk-only/status.json"
+# Direction 3: in BOTH halves, which is what makes the union a union and not a concatenation.
+
+DISC=$(corpus_files "$DTREE" "$PIPELINE_PATTERN" | sort)
+assert_contains "AC18(union-a): a TRACKED record deleted from disk is still in the corpus -- an on-disk-only reader loses it" \
+  "$DISC" ".pipeline/tracked-gone/status.json"
+assert_contains "AC18(union-b): an UNTRACKED on-disk record is in the corpus -- a \`git ls-files\`-only reader loses it" \
+  "$DISC" ".pipeline/on-disk-only/status.json"
+assert_contains "AC18(union-c) CONTROL: the record in both halves is present" \
+  "$DISC" ".pipeline/both/status.json"
+# ...exactly once. `sort -u` is what makes that true today; a concatenation would still satisfy
+# all three assertions above, and would then double-count every record in the live corpus.
+assert_eq "AC18(union-c): and appears exactly ONCE, so the union is deduplicated not concatenated" \
+  "$(printf '%s\n' "$DISC" | grep -cF '.pipeline/both/status.json' | tr -d ' ')" "1"
+# THE NON-ZERO CONTROL FOR THIS TREE. Without it, a helper that printed every path it could
+# think of would satisfy all four assertions above; with it, the corpus is pinned to exactly
+# the three records that exist in either half.
+assert_eq "AC18 CONTROL: and the corpus for this tree is those three records and nothing else" \
+  "$(printf '%s\n' "$DISC" | grep -c 'status\.json' | tr -d ' ')" "3"
 # Restore the untracked record for the pattern cases below.
 mkdir -p "$TREE/.pipeline/99"
 printf '%s' '{"current_phase":"3-impl","worktree_path":"/Users/someone/x","events":[{"phase":"0.5-map","verdict":"OK","at":"2026-08-02T00:00:00Z"}]}' \
