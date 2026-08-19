@@ -260,6 +260,17 @@ export function classifyDownRegion(sql, marker = DEFAULT_DOWN_MARKER) {
   return { kind: "clean" };
 }
 
+// A down region with no non-blank content at all. In this project a down region is
+// DOCUMENTATION rather than executable SQL, so an empty one does not mean "nothing to roll
+// back" -- it means nobody wrote the sentence saying what the operator does at 3am. There is
+// deliberately NO sentinel token for this: free-text prose already satisfies it, and a sentinel
+// would be a new term every adopting project has to learn, parse and keep from drifting.
+export function downRegionIsEmpty(sql, marker = DEFAULT_DOWN_MARKER) {
+  const start = downRegionStart(sql, marker);
+  if (start === -1) return false;
+  return sql.slice(start).trim() === "";
+}
+
 const REFLOW_REMEDY = "reflow the region to `--` line comments";
 
 function classificationFailure(rel, result) {
@@ -403,6 +414,15 @@ export function runGate({ report, spec, schema, migrationSources, downMarker = D
     }
     if (!hasDownSection(sql, downMarker)) {
       failures.push(`migration "${mig.rel}" has no down section (expected a "${downMarker}" marker)`);
+      continue;
+    }
+    if (downRegionIsEmpty(sql, downMarker)) {
+      failures.push(
+        `migration "${mig.rel}" down region is empty: the marker is there, the rollback note ` +
+          `is not. The gate requires at least one comment line saying what the operator does. ` +
+          `A deliberately irreversible migration satisfies this by saying so in a comment, ` +
+          `e.g. "-- irreversible: forward-only backfill, restore via PITR".`,
+      );
       continue;
     }
     const classified = classifyDownRegion(sql, downMarker);
