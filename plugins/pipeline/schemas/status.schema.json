@@ -24,10 +24,10 @@
     },
     "panel_roles": {
       "type": "array",
-      "items": {"type": "string", "enum": ["ba", "dba", "devops", "secops", "dev", "qa"]},
-      "description": "The Phase 4 panel composition resolved by tier and diff surfaces. Recorded before dispatch so the merge, the rubric, and --resume agree on who was on the panel. The design_review lens is tracked via its own shard, added whenever the diff touches a frontend surface."
+      "items": {"type": "string", "enum": ["ba", "dba", "devops", "secops", "dev", "qa", "design_review", "art_director"]},
+      "description": "The Phase 4 panel composition resolved by tier and diff surfaces. Recorded before dispatch so the merge, the rubric, and --resume agree on who was on the panel. design_review is APPENDED TO THIS ARRAY whenever the diff touches a frontend surface, and art_director whenever a visual-contract.json exists for the issue; both also write their own shard, exactly like every other role."
     },
-    "worktree_path": {"type": "string", "description": "Absolute path of the Phase 3 implementation worktree, recorded for audit and for --resume. NOTE: archive-pipeline.mjs does NOT currently read this as an artifact fallback; the Phase 4 sync step is the mechanism that preserves worktree artifacts. Being an absolute local path, it should be redacted before this file is archived into a public tree."},
+    "worktree_path": {"type": "string", "description": "The Phase 3 implementation worktree, recorded for audit and for --resume, RELATIVE to the project root. WRITER PROHIBITION, and it is a prohibition rather than a promise because nothing redacts this file: status.json is committed AND archived verbatim into the knowledge store, so it must never carry an absolute filesystem path, a command string, or a credential. archive-pipeline.mjs does not read this field as an artifact fallback; the Phase 4 sync step is what preserves worktree artifacts."},
     "phase3_qa_test_commit": {"type": "string", "description": "Architectural tier only: SHA of QA's committed failing-test contract, recorded before Dev dispatches."},
     "pr_url": {"type": "string", "format": "uri"},
     "final_verdict": {
@@ -57,6 +57,42 @@
           "at": {"type": "string", "format": "date-time"},
           "note": {"type": "string"}
         }
+      }
+    },
+    "review_rounds": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "How many Phase 4 panel rounds this issue has run (the first full panel is 1; each delta re-review adds 1). An EXPLICIT counter because events[] items carry only phase and at, with no round field, so the count cannot be inferred from them."
+    },
+    "telemetry": {
+      "type": "object",
+      "description": "Derived, NUMBERS ONLY. Computed from events[] by scripts/pipeline-telemetry.mjs. No note, no path, no command string: this file is archived verbatim.",
+      "additionalProperties": false,
+      "properties": {
+        "phase_elapsed_ms": {
+          "type": "object",
+          "description": "Milliseconds spent per phase number, keyed by the leading phase number of the events that opened it.",
+          "additionalProperties": {"type": "integer", "minimum": 0}
+        },
+        "total_lead_time_ms": {"type": ["integer", "null"], "minimum": 0},
+        "review_rounds": {"type": "integer", "minimum": 0},
+        "events_counted": {"type": "integer", "minimum": 0}
+      }
+    },
+    "effective_config": {
+      "type": "object",
+      "description": "The surface globs and per-role models that were LIVE for this run, so a narrowing is auditable after the fact rather than reconstructable only from a config file that may have changed since. The two migration sets are SEPARATE named entries deliberately: the gate's set REPLACES the defaults and the tripwire's UNIONS with them, and an auditor who cannot tell which was live for which control has learned nothing. An absolute-path glob is recorded as the literal token <absolute-glob-rejected>.",
+      "additionalProperties": false,
+      "properties": {
+        "migration_globs_tripwire": {"type": "array", "items": {"type": "string"}},
+        "migration_globs_gate": {"type": "array", "items": {"type": "string"}},
+        "data_layer_globs": {"type": "array", "items": {"type": "string"}},
+        "infra_globs": {"type": "array", "items": {"type": "string"}},
+        "models": {
+          "type": "object",
+          "additionalProperties": {"type": "string", "enum": ["opus", "sonnet", "haiku"]}
+        },
+        "rejected_absolute_globs": {"type": "integer", "minimum": 0}
       }
     },
     "flags": {

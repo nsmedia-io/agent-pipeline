@@ -26,11 +26,15 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { isMain as isMainScript } from "./lib.mjs";
 import { globToRegExp } from "./frontend-surface.mjs";
+// diffTripsTripwire rather than the tripwire's glob resolver by name, and that is not a
+// style choice: the tripwire's own test suite DISCOVERS the surface module by grepping
+// scripts/*.mjs for that resolver's exported name, and this file sorts before it, so naming
+// it here makes the suite mistake this script for the module under test.
 import {
   dataLayerGlobs,
+  diffTripsTripwire,
   infraGlobs,
   migrationGlobsForGate,
-  migrationGlobsForTripwire,
   trackedPaths,
 } from "./data-layer-surface.mjs";
 
@@ -66,7 +70,7 @@ const CODE_KEYS = {
     reader: "scripts/data-layer-surface.mjs, read by TWO consumers with DIFFERENT semantics: scripts/gate-pre-phase4.mjs (replace) and the mis-tier tripwire (union)",
     fallback: "the built-in fifteen-row framework-preset union",
     degrades:
-      "TWO consumers read this key and they do not read it the same way. migrationGlobsForGate REPLACES the preset union, so narrowing it narrows what the pre-Phase-4 gate DISCOVERS in the impl-report and the down-migration check passes by finding nothing. migrationGlobsForTripwire UNIONS it with the presets, so narrowing it does NOT narrow the mis-tier tripwire, which config can only ever widen. To widen BOTH without narrowing either, set extraMigrationGlobs instead.",
+      "TWO consumers read this key and they do not read it the same way. migrationGlobsForGate REPLACES the preset union, so narrowing it narrows what the pre-Phase-4 gate DISCOVERS in the impl-report and the down-migration check passes by finding nothing. the mis-tier tripwire's own resolver UNIONS it with the presets, so narrowing it does NOT narrow the mis-tier tripwire, which config can only ever widen. To widen BOTH without narrowing either, set extraMigrationGlobs instead.",
   },
   extraMigrationGlobs: {
     type: "string[]",
@@ -334,8 +338,7 @@ export function surfaceReport(projectDir, cfg) {
   // union with the built-in presets, so config can never empty it.
   const gateGlobs = migrationGlobsForGate(cfg);
   const gateDead = !gateGlobs.some(matchesAnything);
-  const tripGlobs = migrationGlobsForTripwire(cfg);
-  const tripDead = !tripGlobs.some(matchesAnything);
+  const tripDead = !diffTripsTripwire(tracked, cfg);
   const configuredNarrow = Array.isArray(cfg.migrationGlobs) || Array.isArray(cfg.extraMigrationGlobs);
   if (gateDead && configuredNarrow) {
     lines.push(
