@@ -65,6 +65,14 @@
  *       opener: an optimizer hint cannot be a standalone destructive statement, and refusing
  *       it would false-halt legitimate documentation.
  *
+ *       THE `M!` TEST IS CASE-SENSITIVE ON PURPOSE, and that is a measurement rather than a
+ *       reading of the manual. Run against MariaDB 11.8.8 in ONE harness pass, both halves of
+ *       the pair: an uppercase `/*M!` comment wrapping `drop table users;` DROPPED the table,
+ *       and the byte-identical lowercase `/*m!` twin SURVIVED it. So a lowercase `m` does not
+ *       open a conditional-execution comment, and matching it case-insensitively would refuse
+ *       ordinary documentation whose text happens to begin `m!` while buying nothing. Do not
+ *       "fix" this into a case-insensitive compare.
+ *
  *       DIALECT BOUNDARIES, DOCUMENTED AND DELIBERATELY NOT FIXED, each with its own cost:
  *         - MySQL `#` line comments are NOT stripped (`#` is not a comment in PostgreSQL,
  *           SQLite, Oracle or T-SQL, so stripping it would violate the rule above). A

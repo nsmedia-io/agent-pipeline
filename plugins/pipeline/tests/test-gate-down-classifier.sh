@@ -294,6 +294,20 @@ run_cell ac3-k-ctl2 "migrations/03kc2.sql" "/* plain block comment */
 "
 assert_eq "AC3(k) CONTROL: a plain block comment still classifies clean, RC=0" "$RC" "0"
 
+# (k-ctl-3) THE CASE AXIS, measured rather than read. `M!` is matched case-SENSITIVELY, and the
+# obvious "hardening" is to lowercase both sides. MariaDB 11.8.8, one harness pass, both cells
+# against a real server: `/*M! drop table users; */` DROPPED the table and the lowercase
+# `/*m! ... */` twin SURVIVED. So lowercase does not open a conditional-execution comment, and
+# a case-insensitive compare would refuse ordinary documentation beginning `m!` for nothing.
+# Cell (k3) above is the uppercase half of the same pair; the two are only meaningful together.
+run_cell ac3-k-ctl3 "migrations/03kc3.sql" "/*m! drop table users; */
+"
+assert_eq "AC3(k) CONTROL: a lowercase \`/*m!\` opener classifies clean, RC=0 (MariaDB does not run it)" "$RC" "0"
+# The measurement is the only thing standing between this cell and a future "obviously it
+# should be case-insensitive" edit, so the module must keep carrying it.
+assert_contains "AC3(k) CONTROL: and the module records the execution that settled the case axis" \
+  "$(cat "$GATE_SRC")" "CASE-SENSITIVE ON PURPOSE"
+
 suite "gate down-region classifier: AC4 -- indeterminate is its own value, not executable"
 
 # The natural lazy-regex strip leaves an unterminated `/*` as residue, yields RC=1, and
