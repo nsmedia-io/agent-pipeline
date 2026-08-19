@@ -403,6 +403,8 @@ This gate is cheap and it pays. Its first run on one issue found **four** criter
 Before dispatching, the orchestrator resolves the active worktree path:
 1. If a Phase-3 worktree for this issue already exists, read its path from `$PIPELINE_BASE/<issue>/tasks.json` `worktree_path`, or from `git worktree list --porcelain` matching the issue branch.
 2. If none exists, pre-create one: `WORKTREE_PATH=".claude/worktrees/<issue>-phase3-$(date +%Y%m%d-%H%M%S)"; git worktree add "$WORKTREE_PATH" -b <branch-type>/<issue>-<slug> origin/main`. Expand to the absolute path before substituting into the prompts.
+
+**Do not write `worktree_path` into `status.json`. OMIT the field.** The worktree path lives in `tasks.json`, which is where Dev writes it and where every consumer (this step, QA's landing step, `validate-pipeline-artifact.mjs`) reads it; nothing reads it back out of `status.json`, and it is not in the schema's `required` list. `status.json` is committed AND archived verbatim, so the field is a standing leak surface with no reader. If you write it anyway, it must be a REPO-RELATIVE path (`.claude/worktrees/<issue>-phase3-<stamp>`) and nothing else: not an absolute path, and not an English sentence explaining where the path went, which is a free-text note in a field the schema types as a path.
 3. **Seed the worktree's artifact dir and set its `ARTIFACT_DIR`.** The fresh worktree is checked out from `origin/main`, where the gitignored per-issue artifacts do not exist, so QA's and Dev's inputs must be copied in. The worktree is the artifact home for Phase 3 and Phase 4 (the Phase 4 sync step copies the outputs back to `$PIPELINE_BASE/<issue>` before archival):
    ```bash
    ABS_WT="$(cd "$WORKTREE_PATH" && pwd)"

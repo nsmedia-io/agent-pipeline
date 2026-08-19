@@ -464,6 +464,80 @@ assert_contains "it carries a writer prohibition instead" "$(cat "$SCHEMA")" "mu
 assert_eq "and nothing shipped claims a redaction step exists in code" \
   "$(grep -rl 'redacted before this file is archived' "$PLUGIN_DIR/scripts" "$PLUGIN_DIR/schemas" "$PLUGIN_DIR/commands" "$PLUGIN_DIR/agents" 2>/dev/null | wc -l | tr -d ' ')" "0"
 
+suite "SecOps nit: worktree_path has a SHAPE, and the orchestrator is told what it is"
+
+# The field was typed as a repo-relative path, is not in `required`, and no code reads it out
+# of status.json -- every consumer reads it from tasks.json. The orchestrator had no
+# instruction either way and wrote an English sentence into it, which is a free-text note in a
+# field the schema types as a path.
+assert_eq "worktree_path is not required, so omitting it is legal" \
+  "$(SCHEMA="$SCHEMA" node --input-type=module -e '
+     import { readFileSync } from "node:fs";
+     const s = JSON.parse(readFileSync(process.env.SCHEMA, "utf8"));
+     console.log(s.required.includes("worktree_path") ? "required" : "optional");
+   ')" "optional"
+assert_eq "CONTROL: a field that IS required reads as required, so the check discriminates" \
+  "$(SCHEMA="$SCHEMA" node --input-type=module -e '
+     import { readFileSync } from "node:fs";
+     const s = JSON.parse(readFileSync(process.env.SCHEMA, "utf8"));
+     console.log(s.required.includes("current_phase") ? "required" : "optional");
+   ')" "required"
+assert_contains "the schema says the field is preferably omitted and names where the path really lives" \
+  "$(cat "$SCHEMA")" "preferably OMITTED: no code reads this field from status.json"
+assert_contains "the orchestrator is told to omit it" "$(cat "$PIPELINE_MD")" \
+  "Do not write \`worktree_path\` into \`status.json\`. OMIT the field."
+assert_contains "and told the only legal alternative is a repo-relative path" "$(cat "$PIPELINE_MD")" \
+  "it must be a REPO-RELATIVE path"
+# CODE CHECK for the "nothing reads it" claim, over the shipped tree. tasks.json is the reader,
+# and the one script that does touch a worktree_path reads the artifact it was handed, not
+# status.json.
+assert_eq "no shipped script reads worktree_path out of a status file" \
+  "$(grep -rn 'worktree_path' "$PLUGIN_DIR/scripts" 2>/dev/null | grep -c 'status' | tr -d ' ')" "0"
+assert_eq "CONTROL: the same grep DOES find the field being read somewhere, so the zero is not vacuous" \
+  "$([[ "$(grep -rc 'worktree_path' "$PLUGIN_DIR/scripts"/*.mjs 2>/dev/null | grep -v ':0$' | wc -l | tr -d ' ')" -ge 1 ]] && echo found || echo "nothing reads it anywhere")" \
+  "found"
+
+# Over the REAL corpus: where the field is present at all, it must look like a repo-relative
+# path -- not absolute, and not a sentence. Asserted as an OUTCOME property rather than as a
+# blocklist over the one sentence that was actually written, which would pass the next one.
+SHAPE_WALK="$TEMP_PROJECT/wt-shape.mjs"
+cat > "$SHAPE_WALK" <<'EOF'
+import { readFileSync } from "node:fs";
+let present = 0, malformed = 0;
+for (const f of process.argv.slice(1)) {
+  let s; try { s = JSON.parse(readFileSync(f, "utf8")); } catch { continue; }
+  if (typeof s.worktree_path !== "string") continue;
+  present++;
+  const v = s.worktree_path;
+  if (/^\//.test(v) || /^[A-Za-z]:\\/.test(v) || /\s/.test(v)) malformed++;
+}
+console.log(JSON.stringify({ present, malformed }));
+EOF
+WT_CORPUS=()
+while IFS= read -r f; do [[ -n "$f" ]] && WT_CORPUS+=("$REPO_ROOT/$f"); done < <(cd "$REPO_ROOT" && git ls-files | grep -E '(^|/)\.pipeline/[^/]+/status\.json$')
+[[ -f "$REPO_ROOT/.pipeline/17/status.json" ]] && WT_CORPUS+=("$REPO_ROOT/.pipeline/17/status.json")
+WT_SHAPE=$(node "$SHAPE_WALK" "${WT_CORPUS[@]}" 2>/dev/null)
+assert_eq "no real status.json carries a malformed worktree_path (absolute, or containing spaces)" \
+  "$(field "$WT_SHAPE" malformed)" "0"
+# NON-ZERO CONTROLS in both spellings the property forbids, because "0 malformed" over a corpus
+# where the field is absent everywhere is a zero with nothing behind it.
+WT_FIX1="$TEMP_PROJECT/wt-abs.json"
+printf '%s' '{"worktree_path":"/Users/x/.claude/worktrees/42"}' > "$WT_FIX1"
+WT_FIX2="$TEMP_PROJECT/wt-sentence.json"
+printf '%s' '{"worktree_path":"(recorded in tasks.json; omitted here)"}' > "$WT_FIX2"
+WT_FIX3="$TEMP_PROJECT/wt-ok.json"
+printf '%s' '{"worktree_path":".claude/worktrees/42-phase3-20260101-120000"}' > "$WT_FIX3"
+assert_eq "CONTROL: the same walk reddens on an absolute path" \
+  "$(field "$(node "$SHAPE_WALK" "$WT_FIX1")" malformed)" "1"
+assert_eq "CONTROL: and on the English sentence that was actually written into it" \
+  "$(field "$(node "$SHAPE_WALK" "$WT_FIX2")" malformed)" "1"
+assert_eq "CONTROL: and PASSES a well-formed repo-relative path, so it is not refusing everything" \
+  "$(field "$(node "$SHAPE_WALK" "$WT_FIX3")" malformed)" "0"
+# ...and that pass is over a field the walk actually SAW: `malformed=0` is also what an absent
+# field returns, so the two cases have to be told apart.
+assert_eq "and it saw the field there, so that 0 is a verdict rather than an absence" \
+  "$(field "$(node "$SHAPE_WALK" "$WT_FIX3")" present)" "1"
+
 # =============================================================================
 # AC17 / AC32 -- the archival path is untouched, and the config file is a tier trigger.
 # =============================================================================
