@@ -129,6 +129,63 @@ rm -f "$BITE/test-planted-failure.sh"
 ( bash "$BITE/run.sh" >/dev/null 2>&1 )
 assert_eq "and the SAME tree exits 0 once the plant is removed" "$?" "0"
 
+suite "AC41(c): run.sh passes in a FRESH CHECKOUT, not only in the worktree it was written in"
+
+# "The suite passes" meant "in this worktree" for the whole life of this branch, and the two
+# are not the same statement. A fresh clone has no untracked files and, before this change, no
+# corpus for the telemetry partition to walk; a shallow one has no commit series for the AC24
+# reverts to find. Both were true of CI, which was RED from the commit that added it while
+# every local run was green. This case makes the two statements the same one.
+#
+# ONE LEVEL OF NESTING, bounded by an environment variable rather than by a comment: the inner
+# run.sh runs this same file, and an unguarded clone-and-run recurses forever. The inner run
+# reports that it deferred, so the guard is visible in the transcript instead of being a silent
+# skip. Cost: this roughly doubles run.sh's wall time, which is the price of the statement.
+if [[ -n "${PIPELINE_TESTS_FRESH_CHECKOUT:-}" ]]; then
+  assert_eq "nested run: the fresh-checkout case defers to the OUTER run (one level, by design)" \
+    "deferred" "deferred"
+else
+  FRESH="$TEMP_PROJECT/fresh-checkout"
+  # `file://` forces a real clone rather than a local-directory copy, which is what a CI
+  # checkout is. --no-hardlinks so the clone cannot share objects with the source.
+  git clone -q --no-hardlinks "file://$REPO_ROOT" "$FRESH" >/dev/null 2>&1
+  # `git clone` copies refs/heads and refs/tags and NOTHING ELSE, so the source's
+  # refs/remotes/origin/main does not come with it: the clone of a checkout that HAS origin/main
+  # does not have one. Several suites resolve their base through that ref, so it is copied over
+  # explicitly. When the source has no origin/main either, this fails and the assertion below
+  # REPORTS that rather than the suite failing somewhere further downstream with a bad revision.
+  git -C "$FRESH" fetch -q --no-tags "file://$REPO_ROOT" \
+    '+refs/remotes/origin/main:refs/remotes/origin/main' >/dev/null 2>&1
+  assert_eq "the fresh checkout was created (without this, every assertion below measures nothing)" \
+    "$([[ -f "$FRESH/plugins/pipeline/tests/run.sh" ]] && echo cloned || echo "clone FAILED")" "cloned"
+  assert_eq "and it is a DIFFERENT tree from the one under test, with no untracked files carried over" \
+    "$(cd "$FRESH" && git status --porcelain | wc -l | tr -d ' ')" "0"
+  # It must also carry the commit series, because that is the other half of what CI lacked.
+  assert_eq "it carries more than one commit, so the AC24 series lookups can resolve" \
+    "$([[ "$(git -C "$FRESH" log --oneline | wc -l | tr -d ' ')" -ge 2 ]] && echo ">=2" || echo "SHALLOW")" ">=2"
+  assert_eq "and origin/main resolves in it, which is what the diff-based blocks need" \
+    "$(git -C "$FRESH" rev-parse --verify origin/main >/dev/null 2>&1 && echo resolves || echo MISSING)" "resolves"
+
+  FRESH_OUT="$(PIPELINE_TESTS_FRESH_CHECKOUT=1 bash "$FRESH/plugins/pipeline/tests/run.sh" </dev/null 2>&1)"
+  FRESH_RC="$?"
+  assert_eq "run.sh exits 0 in the fresh checkout" "$FRESH_RC" "0"
+  assert_contains "and says so" "$FRESH_OUT" "All test suites passed."
+  # NON-ZERO CONTROL for that exit code: a run that produced nothing also exits 0 on some
+  # shapes, so the transcript is checked against the population it should have covered. Every
+  # test-*.sh in the fresh tree must have reported a result line.
+  FRESH_SUITES="$(cd "$FRESH/plugins/pipeline/tests" && ls test-*.sh | wc -l | tr -d ' ')"
+  assert_eq "every suite in the fresh tree reported a result (a silent run is not a passing run)" \
+    "$(printf '%s' "$FRESH_OUT" | grep -c '^passed=' | tr -d ' ')" "$FRESH_SUITES"
+  assert_eq "and every one of them reported zero failures" \
+    "$(printf '%s' "$FRESH_OUT" | grep -c 'failed=0' | tr -d ' ')" "$FRESH_SUITES"
+  assert_eq "the fresh tree has the same number of suites as this one, so none went missing in the clone" \
+    "$FRESH_SUITES" "$(cd "$TESTS_DIR" && ls test-*.sh | wc -l | tr -d ' ')"
+  # The guard is OBSERVED, not assumed: the inner run must have taken the deferred branch, or
+  # this case is silently recursing.
+  assert_contains "the inner run took the nesting guard, so this is one level deep and not many" \
+    "$FRESH_OUT" "the fresh-checkout case defers to the OUTER run"
+fi
+
 # =============================================================================
 # AC24 -- THE COMMITS SPLIT THE WAY THE SPEC REQUIRES.
 # =============================================================================
@@ -196,15 +253,20 @@ assert_eq "CONTROL: the same probe reports CONFLICT for a sha that cannot be rev
   "$(revert_touches "$(git -C "$REPO_ROOT" hash-object -t commit /dev/null 2>/dev/null || echo 0000000000000000000000000000000000000000)")" \
   "CONFLICT"
 
-suite "AC24: the Phase 4 fix round splits the same way, anchored at HEAD"
+suite "AC24: each Phase 4 fix ROUND splits the same way, anchored at its own round's tip"
 
-# A SEPARATE function rather than an `anchor` parameter on revert_touches, deliberately: adding
-# the parameter meant editing the same two lines the fix round's own README commit had already
-# edited, and this section's first run then reported that commit as a CONFLICT. The assertion
-# was right and the code shape was wrong. Kept apart so the two commits touch disjoint hunks.
-revert_touches_at_head() { # <sha> -> "clean:<files>" | "CONFLICT"
-  local sha="$1" wt="$TEMP_PROJECT/revert-head-${sha:0:7}"
-  git -C "$REPO_ROOT" worktree add -q --detach "$wt" HEAD >/dev/null 2>&1 || { printf 'CONFLICT'; return 0; }
+# ANCHORED PER ROUND, not at HEAD, and this is the second time the same correction has been
+# needed. R17's property is that a series splits into independently revertable units -- each
+# commit separable from the OTHER COMMITS IN ITS OWN SERIES. Anchoring a round's commits at
+# HEAD silently widens that to "and from every later round too", which is not the property and
+# is not achievable: round 2 repaired lines round 1 had introduced (the surface probes in
+# commands/pipeline.md, the telemetry corpus), so reverting a round-1 commit at a round-2 HEAD
+# MUST conflict. Measured: four of the six round-1 commits conflicted the moment round 2
+# landed. The assertion was right and its anchor had gone stale. Anchoring each round at its
+# own tip keeps every round measuring the split it was written for, forever.
+revert_touches_at() { # <anchor-ish> <sha> -> "clean:<files>" | "CONFLICT"
+  local anchor="$1" sha="$2" wt="$TEMP_PROJECT/revert-at-${anchor:0:7}-${sha:0:7}"
+  git -C "$REPO_ROOT" worktree add -q --detach "$wt" "$anchor" >/dev/null 2>&1 || { printf 'CONFLICT'; return 0; }
   if git -C "$wt" revert --no-commit --no-edit "$sha" >/dev/null 2>&1; then
     printf 'clean:%s' "$(git -C "$wt" diff --cached --name-only | tr '\n' ' ')"
   else
@@ -214,10 +276,28 @@ revert_touches_at_head() { # <sha> -> "clean:<files>" | "CONFLICT"
   git -C "$REPO_ROOT" worktree remove --force "$wt" >/dev/null 2>&1
 }
 
-# R17 applies to a fix round too, and here the anchor IS HEAD: these commits have nothing after
-# them, so "revertable at HEAD" is the property with no ambiguity to resolve. Each is looked up
-# by subject, so the loop reports which one is missing rather than measuring an empty sha.
-FIX_SUBJECTS=(
+# Each round's tip, by subject. ROUND 2 has nothing after it, so its anchor is HEAD.
+ROUND1_TIP_SHA="$(sha_of 'test: decouple the HEAD-anchored revert probe')"
+assert_eq "the round-1 tip is identifiable (without it the round-1 reverts below anchor nowhere)" \
+  "$([[ -n "$ROUND1_TIP_SHA" ]] && echo found || echo missing)" "found"
+
+# NON-ZERO CONTROL FOR THE PROBE ITSELF, and it is the assertion this section shipped without.
+# QA replaced revert_touches_at with a version that never created a worktree and never ran
+# `git revert`, returning a bare `clean:` every time: 63 passed, 0 failed, nothing caught it.
+# The two assert_not_contains companions below passed VACUOUSLY on that empty file list, which
+# is the documented shape of a `not.toContain` over a population nothing ever fills. Both holes
+# are closed here: the probe must be OBSERVED reporting CONFLICT, and the file lists it returns
+# must be observed NON-EMPTY before anything is asserted absent from them.
+EMPTY_TREE_SHA="$(git -C "$REPO_ROOT" hash-object -t commit /dev/null 2>/dev/null || echo 0000000000000000000000000000000000000000)"
+assert_eq "CONTROL: the probe reports CONFLICT for a sha that cannot be reverted here" \
+  "$(revert_touches_at HEAD "$EMPTY_TREE_SHA")" "CONFLICT"
+assert_eq "CONTROL: and it reports CONFLICT for an anchor that does not exist, rather than a bare clean:" \
+  "$(revert_touches_at 'no-such-anchor-ref' "$(sha_of 'fix: panel composition seats the specialist')")" \
+  "CONFLICT"
+
+# R17 applies to a fix round too. Each commit is looked up by subject, so the loop reports which
+# one is missing rather than measuring an empty sha.
+ROUND1_SUBJECTS=(
   'fix: panel composition seats the specialist'
   'fix: telemetry attributes suffixed phase labels'
   'docs: scope the upgrade note to Markdown'
@@ -225,23 +305,66 @@ FIX_SUBJECTS=(
   'fix: tripwireReport no longer returns a hit'
   'docs: worktree_path is omitted from status.json'
 )
-FIX_MISSING=""
-FIX_CONFLICTS=""
-for s in "${FIX_SUBJECTS[@]}"; do
-  sha="$(sha_of "$s")"
-  if [[ -z "$sha" ]]; then FIX_MISSING="$FIX_MISSING|$s"; continue; fi
-  [[ "$(revert_touches_at_head "$sha")" == clean:* ]] || FIX_CONFLICTS="$FIX_CONFLICTS|$s"
+# ROUND 2 IS DERIVED FROM GIT, not listed. A hand-maintained list cannot contain the LAST
+# commit of its own round -- adding that entry needs a further commit, which then becomes the
+# new last commit, forever one behind. Round 2 is by definition everything after the round-1
+# tip, which git can answer exactly, so the newest commit is covered the moment it exists.
+# Round 1 stays a written list because it is closed history: it names what was reviewed.
+ROUND2_SHAS=()
+while IFS= read -r h; do [[ -n "$h" ]] && ROUND2_SHAS+=("$h"); done \
+  < <(git -C "$REPO_ROOT" log --reverse --format='%H' "$ROUND1_TIP_SHA"..HEAD 2>/dev/null)
+check_round() { # <anchor> <subject>... -> "all-clean" | "missing:..." | "conflicts:..."
+  local anchor="$1"; shift
+  local s sha missing="" conflicts=""
+  for s in "$@"; do
+    sha="$(sha_of "$s")"
+    if [[ -z "$sha" ]]; then missing="$missing|$s"; continue; fi
+    [[ "$(revert_touches_at "$anchor" "$sha")" == clean:* ]] || conflicts="$conflicts|$s"
+  done
+  if [[ -n "$missing" ]]; then printf 'missing:%s' "$missing"
+  elif [[ -n "$conflicts" ]]; then printf 'conflicts:%s' "$conflicts"
+  else printf 'all-clean'; fi
+}
+
+assert_eq "every round-1 commit is on the branch and reverts cleanly at the round-1 tip" \
+  "$(check_round "$ROUND1_TIP_SHA" "${ROUND1_SUBJECTS[@]}")" "all-clean"
+# The derived set is asserted NON-EMPTY first. `git log A..HEAD` returns nothing when A is
+# unresolvable, and a loop over nothing reports all-clean: the exact shape where "checked and
+# fine" and "never checked" produce the same output.
+assert_eq "round 2 is non-empty (a clean sweep over zero commits proves nothing)" \
+  "$([[ "${#ROUND2_SHAS[@]}" -ge 1 ]] && echo ">=1" || echo "EMPTY: nothing after the round-1 tip")" ">=1"
+ROUND2_CONFLICTS=""
+for h in "${ROUND2_SHAS[@]}"; do
+  [[ "$(revert_touches_at HEAD "$h")" == clean:* ]] \
+    || ROUND2_CONFLICTS="$ROUND2_CONFLICTS|$(git -C "$REPO_ROOT" log -1 --format=%s "$h")"
 done
-assert_eq "every fix-round commit is on the branch (without this the zero below counts nothing)" \
-  "$([[ -z "$FIX_MISSING" ]] && echo all-present || echo "missing:$FIX_MISSING")" "all-present"
-assert_eq "and each one reverts cleanly on its own at HEAD" \
-  "$([[ -z "$FIX_CONFLICTS" ]] && echo all-clean || echo "conflicts:$FIX_CONFLICTS")" "all-clean"
-# The two blockers are separable from each other in particular: they were the two REQUEST_CHANGES
-# items, and backing one out must not drag the other.
+assert_eq "and every round-2 commit reverts cleanly at HEAD, which is round 2's own tip" \
+  "$([[ -z "$ROUND2_CONFLICTS" ]] && echo all-clean || echo "conflicts:$ROUND2_CONFLICTS")" "all-clean"
+# CONTROL for check_round: it must be able to report a MISSING subject, or "all-clean" is a
+# statement about a loop that never looked anything up.
+assert_contains "CONTROL: check_round reports a subject that is not on the branch" \
+  "$(check_round HEAD 'chore: a subject no commit on this branch carries')" "missing:"
+
+# The two round-1 blockers are separable from each other in particular: they were the two
+# REQUEST_CHANGES items, and backing one out must not drag the other.
+PANEL_FIX_REVERT="$(revert_touches_at "$ROUND1_TIP_SHA" "$(sha_of 'fix: panel composition seats the specialist')")"
+TELEM_FIX_REVERT="$(revert_touches_at "$ROUND1_TIP_SHA" "$(sha_of 'fix: telemetry attributes suffixed phase labels')")"
+# ...and the file lists are OBSERVED NON-EMPTY first. Without these two lines the assertions
+# below are satisfied by a probe that returns `clean:` with nothing after the colon.
+assert_eq "the panel-fix revert names at least one file, so the absence asserted next is a verdict" \
+  "$([[ "$PANEL_FIX_REVERT" == clean:?* ]] && echo non-empty || echo "EMPTY: $PANEL_FIX_REVERT")" "non-empty"
+assert_eq "and so does the telemetry-fix revert" \
+  "$([[ "$TELEM_FIX_REVERT" == clean:?* ]] && echo non-empty || echo "EMPTY: $TELEM_FIX_REVERT")" "non-empty"
 assert_not_contains "reverting the panel-composition fix does not touch the telemetry module" \
-  "$(revert_touches_at_head "$(sha_of 'fix: panel composition seats the specialist')")" "pipeline-telemetry.mjs"
+  "$PANEL_FIX_REVERT" "pipeline-telemetry.mjs"
 assert_not_contains "and reverting the telemetry fix does not touch commands/pipeline.md" \
-  "$(revert_touches_at_head "$(sha_of 'fix: telemetry attributes suffixed phase labels')")" "commands/pipeline.md"
+  "$TELEM_FIX_REVERT" "commands/pipeline.md"
+# CONTROL for the pair above: the same two probes DO name the files each commit really touched,
+# so "does not contain X" is measured against a list that contains something.
+assert_contains "CONTROL: the panel-fix revert names the file it really touched" \
+  "$PANEL_FIX_REVERT" "commands/pipeline.md"
+assert_contains "CONTROL: and the telemetry-fix revert names its own" \
+  "$TELEM_FIX_REVERT" "pipeline-telemetry.mjs"
 
 # =============================================================================
 # AC6 / AC23 -- the pinned gate suite, and the pointers inside it.
