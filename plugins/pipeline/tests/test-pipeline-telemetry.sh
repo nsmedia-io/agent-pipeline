@@ -99,19 +99,28 @@ assert_eq "CONTROL: commands/pipeline.md really does append it (the fact the des
 suite "AC16: per-phase elapsed and lead time are the exact values the fixture implies"
 
 FIX='{"review_rounds":2,"events":[
-  {"phase":"1-ba","at":"2026-08-01T00:00:00Z"},
-  {"phase":"2-review","at":"2026-08-01T01:00:00Z"},
-  {"phase":"3-impl","at":"2026-08-01T03:30:00Z"},
-  {"phase":"4-review","at":"2026-08-01T04:00:00Z"},
-  {"phase":"4-review-complete","at":"2026-08-01T05:00:00Z"}]}'
+  {"phase":"1-ba","verdict":"APPROVE","at":"2026-08-01T00:00:00Z"},
+  {"phase":"2-review","verdict":"APPROVE","at":"2026-08-01T01:00:00Z"},
+  {"phase":"3-impl","verdict":"APPROVE","at":"2026-08-01T03:30:00Z"},
+  {"phase":"4-review","verdict":"APPROVE","at":"2026-08-01T04:00:00Z"},
+  {"phase":"4-review-complete","verdict":"APPROVE","at":"2026-08-01T05:00:00Z"}]}'
 T=$(MOD="$TELEMETRY" FIX="$FIX" node --input-type=module -e '
   const m = await import(process.env.MOD);
   const t = m.telemetry(JSON.parse(process.env.FIX));
   console.log(JSON.stringify(t));
 ')
-assert_eq "phase 1 elapsed is exactly one hour"     "$(printf '%s' "$T" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).phase_elapsed_ms["1"]))')" "3600000"
-assert_eq "phase 2 elapsed is exactly two and a half hours" "$(printf '%s' "$T" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).phase_elapsed_ms["2"]))')" "9000000"
-assert_eq "phase 3 elapsed is exactly half an hour" "$(printf '%s' "$T" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).phase_elapsed_ms["3"]))')" "1800000"
+# EXIT-MARKER VALUES. Each interval is credited to the phase the LATER event CLOSED, so the
+# 1-ba -> 2-review hour belongs to phase 2, and phase 4 absorbs BOTH of its boundaries (the
+# half hour into 4-review and the hour into 4-review-complete, whose leading token is also 4).
+assert_eq "phase 2 elapsed is exactly one hour"     "$(printf '%s' "$T" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).phase_elapsed_ms["2"]))')" "3600000"
+assert_eq "phase 3 elapsed is exactly two and a half hours" "$(printf '%s' "$T" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).phase_elapsed_ms["3"]))')" "9000000"
+assert_eq "phase 4 absorbs both its boundaries: half an hour plus an hour" "$(printf '%s' "$T" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).phase_elapsed_ms["4"]))')" "5400000"
+# THE MIRROR PROPERTY, asserted rather than left implicit: under exit markers the FIRST phase's
+# START is genuinely unrecorded, so phase 1 gets no key here. It is not a dropped interval --
+# there is no earlier event to measure from -- and inventing one from started_at is forbidden
+# (on the real #17 record that would report 91,271,177 ms instead of 6,545).
+assert_eq "the first phase gets no key, because nothing recorded when it started" \
+  "$(printf '%s' "$T" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(Object.prototype.hasOwnProperty.call(JSON.parse(s).phase_elapsed_ms,"1")))')" "false"
 assert_eq "total lead time is exactly five hours"   "$(printf '%s' "$T" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).total_lead_time_ms))')" "18000000"
 assert_eq "review_rounds is the recorded counter, not a guess" "$(printf '%s' "$T" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).review_rounds))')" "2"
 
@@ -119,7 +128,7 @@ assert_eq "review_rounds is the recorded counter, not a guess" "$(printf '%s' "$
 # 4-review ENTRIES is the honest floor, and that fallback is asserted rather than assumed.
 T2=$(MOD="$TELEMETRY" node --input-type=module -e '
   const m = await import(process.env.MOD);
-  console.log(m.telemetry({events:[{phase:"4-review",at:"2026-08-01T00:00:00Z"},{phase:"4-review-complete",at:"2026-08-01T01:00:00Z"},{phase:"4-review",at:"2026-08-02T00:00:00Z"},{phase:"4-review-complete",at:"2026-08-02T01:00:00Z"}]}).review_rounds);
+  console.log(m.telemetry({events:[{phase:"4-review",verdict:"REQUEST_CHANGES",at:"2026-08-01T00:00:00Z"},{phase:"4-review-complete",verdict:"APPROVE",at:"2026-08-01T01:00:00Z"},{phase:"4-review",verdict:"REQUEST_CHANGES",at:"2026-08-02T00:00:00Z"},{phase:"4-review-complete",verdict:"APPROVE",at:"2026-08-02T01:00:00Z"}]}).review_rounds);
 ')
 assert_eq "with no counter recorded, the phase-4 entries are counted instead" "$T2" "2"
 assert_eq "an empty status yields a null lead time, not a fabricated zero" \
@@ -130,9 +139,9 @@ assert_eq "an empty status yields a null lead time, not a fabricated zero" \
 # set: the field names, plus KNOWN_PHASES. A phase key that is not a declared phase is exactly
 # the free-text leak this assertion exists to catch.
 FIX_SUFFIXED='{"review_rounds":1,"events":[
-  {"phase":"3a-qa-tests","at":"2026-08-01T00:00:00Z"},
-  {"phase":"3b-dev","at":"2026-08-01T01:00:00Z"},
-  {"phase":"4-review","at":"2026-08-01T02:00:00Z"}]}'
+  {"phase":"3a-qa-tests","verdict":"APPROVE","at":"2026-08-01T00:00:00Z"},
+  {"phase":"3b-dev","verdict":"APPROVE","at":"2026-08-01T01:00:00Z"},
+  {"phase":"4-review","verdict":"APPROVE","at":"2026-08-01T02:00:00Z"}]}'
 LEAK_CHECK="$TEMP_PROJECT/leak-check.mjs"
 cat > "$LEAK_CHECK" <<'EOF'
 // Counts strings in a telemetry-shaped object that are neither a declared field name nor a
@@ -146,9 +155,14 @@ const d = await import(process.env.DISPATCH);
 // that telemetry() emits without declaring is still caught -- by the closed-object assertion
 // and the emitted-keys-are-declared assertion further down, which are its two other halves.
 const schema = JSON.parse(readFileSync(process.env.SCHEMA, "utf8"));
-const allowed = new Set([
-  ...Object.keys(schema.properties.telemetry.properties), ...d.KNOWN_PHASES,
-]);
+const props = schema.properties.telemetry.properties;
+// The enum VALUES are read from the schema for the same reason the names are. `attribution`
+// emits the literal "exit", which is a string value in a numbers-only record, so without this
+// the marker that says which convention produced the figures would itself read as a leak. It
+// is a CLOSED widening: only values the schema declares as an enum are admitted, so free text
+// in the same field still counts -- which is what the control below measures.
+const enumValues = Object.values(props).flatMap((p) => (Array.isArray(p.enum) ? p.enum : []));
+const allowed = new Set([...Object.keys(props), ...d.KNOWN_PHASES, ...enumValues]);
 let obj;
 if (process.env.OBJ) {
   obj = JSON.parse(process.env.OBJ);
@@ -166,6 +180,11 @@ assert_eq "including on the suffixed 3a/3b shape, whose keys are declared phases
 assert_eq "CONTROL: the same check reports 4 on an object carrying a note and a path (two keys, two values)" \
   "$(DISPATCH="$SCRIPTS_DIR/dispatch-model.mjs" SCHEMA="$SCHEMA" OBJ='{"phase_elapsed_ms":{"3a":1},"note":"loop back to BA","worktree_path":"/Users/x/wt"}' node "$LEAK_CHECK")" \
   "4"
+# CONTROL ON THE WIDENING ITSELF. Admitting declared enum values is not "admit all strings":
+# free text in the very field the widening was made for still leaks.
+assert_eq "CONTROL: free text in \`attribution\` still leaks, so the enum widening is closed" \
+  "$(DISPATCH="$SCRIPTS_DIR/dispatch-model.mjs" SCHEMA="$SCHEMA" OBJ='{"phase_elapsed_ms":{"3a":1},"attribution":"loop back to BA"}' node "$LEAK_CHECK")" \
+  "1"
 
 # =============================================================================
 # AC16(b) -- THE PARTITION PROPERTY, and the 39% of a real run the old parser dropped.
@@ -207,29 +226,33 @@ part() { MOD="$TELEMETRY" FIX="$1" node "$PARTITION"; }
 field() { printf '%s' "$1" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>console.log(String(JSON.parse(s).$2)))"; }
 
 # (1) THE REAL SHAPE. A fixture carrying the 3a-/3b- events this pipeline actually writes,
-# with the real gap between them: 03:07:21.453 -> 04:15:29.941 is 4,088,488 ms.
+# with the real gap between them: 03:07:21.453 -> 04:15:29.941 is 4,088,488 ms. Under EXIT
+# markers that gap is Dev's, credited to the 3b event that CLOSED it -- the whole point of the
+# convention, and the number this pipeline's own run used to credit to QA.
 REAL='{"review_rounds":1,"events":[
-  {"phase":"2.5-design","at":"2026-08-19T02:41:49.314Z"},
-  {"phase":"3a-qa-tests","at":"2026-08-19T03:07:21.453Z"},
-  {"phase":"3b-dev","at":"2026-08-19T04:15:29.941Z"},
-  {"phase":"4-review","at":"2026-08-19T05:00:00.000Z"},
-  {"phase":"4-review-complete","at":"2026-08-19T05:30:00.000Z"}]}'
+  {"phase":"2.5-design","verdict":"SKIPPED","at":"2026-08-19T02:41:49.314Z"},
+  {"phase":"3a-qa-tests","verdict":"APPROVE","at":"2026-08-19T03:07:21.453Z"},
+  {"phase":"3b-dev","verdict":"APPROVE","at":"2026-08-19T04:15:29.941Z"},
+  {"phase":"4-review","verdict":"APPROVE","at":"2026-08-19T05:00:00.000Z"},
+  {"phase":"4-review-complete","verdict":"APPROVE","at":"2026-08-19T05:30:00.000Z"}]}'
 REAL_OUT=$(part "$REAL")
 assert_eq "the partition balances on the real 3a/3b shape" "$(field "$REAL_OUT" balances)" "true"
-assert_eq "3a is a key in its own right, at the exact elapsed the timestamps imply" \
+assert_eq "3a is a key in its own right, at the elapsed its own event closed" \
   "$(MOD="$TELEMETRY" FIX="$REAL" node --input-type=module -e '
      const m = await import(process.env.MOD);
      console.log(String(m.telemetry(JSON.parse(process.env.FIX)).phase_elapsed_ms["3a"]));
-   ')" "4088488"
-assert_eq "3b is its own key too, not folded into 3a" \
+   ')" "1532139"
+assert_eq "3b is its own key too, carrying the 4,088,488 ms that used to land on 3a" \
   "$(MOD="$TELEMETRY" FIX="$REAL" node --input-type=module -e '
      const m = await import(process.env.MOD);
      console.log(String(m.telemetry(JSON.parse(process.env.FIX)).phase_elapsed_ms["3b"]));
-   ')" "2670059"
+   ')" "4088488"
 assert_eq "nothing is unattributed on a run whose every label is declared" \
   "$(field "$REAL_OUT" unattributed_ms)" "0"
-assert_eq "the keys are exactly the labels the events carried" \
-  "$(field "$REAL_OUT" keys)" "2.5,3a,3b,4"
+# 2.5 opens the record, so under exit markers it has no closing interval of its own and gets no
+# key. Its own elapsed time would need an event BEFORE it, and there is none.
+assert_eq "the keys are exactly the phases the events CLOSED" \
+  "$(field "$REAL_OUT" keys)" "3a,3b,4"
 # THE REGRESSION, named as the number it was. Before the fix this gap was 4088488.
 assert_eq "no time is missing between the phase sum and the lead time" "$(field "$REAL_OUT" gap)" "0"
 
@@ -237,30 +260,31 @@ assert_eq "no time is missing between the phase sum and the lead time" "$(field 
 # unattributed: without this case, `unattributed_ms == 0` above could be a field hard-wired to
 # 0 and the partition would still "hold".
 FUTURE='{"events":[
-  {"phase":"3a-qa-tests","at":"2026-08-19T00:00:00Z"},
-  {"phase":"9z-some-future-phase","at":"2026-08-19T01:00:00Z"},
-  {"phase":"4-review","at":"2026-08-19T03:00:00Z"}]}'
+  {"phase":"3a-qa-tests","verdict":"APPROVE","at":"2026-08-19T00:00:00Z"},
+  {"phase":"9z-some-future-phase","verdict":"APPROVE","at":"2026-08-19T01:00:00Z"},
+  {"phase":"4-review","verdict":"APPROVE","at":"2026-08-19T03:00:00Z"}]}'
 FUTURE_OUT=$(part "$FUTURE")
 assert_eq "an UNDECLARED phase label still balances the partition" "$(field "$FUTURE_OUT" balances)" "true"
+# The undeclared label CLOSES the first interval, so it is that hour which no key can absorb.
 assert_eq "and its time is REPORTED as unattributed rather than dropped" \
-  "$(field "$FUTURE_OUT" unattributed_ms)" "7200000"
+  "$(field "$FUTURE_OUT" unattributed_ms)" "3600000"
 assert_eq "with the boundary count that says how many labels it could not read" \
   "$(field "$FUTURE_OUT" unattributed_events)" "1"
 assert_eq "CONTROL: the declared label in the SAME fixture is still attributed normally" \
   "$(MOD="$TELEMETRY" FIX="$FUTURE" node --input-type=module -e '
      const m = await import(process.env.MOD);
-     console.log(String(m.telemetry(JSON.parse(process.env.FIX)).phase_elapsed_ms["3a"]));
-   ')" "3600000"
+     console.log(String(m.telemetry(JSON.parse(process.env.FIX)).phase_elapsed_ms["4"]));
+   ')" "7200000"
 
 # (3) The partition over the shapes the old parser DID read, so the fix did not buy the new
 # property by breaking the old one.
 PLAIN='{"events":[
-  {"phase":"0.5-map","at":"2026-08-01T00:00:00Z"},
-  {"phase":"1-ba","at":"2026-08-01T00:30:00Z"},
-  {"phase":"2-review","at":"2026-08-01T01:00:00Z"},
-  {"phase":"2.5-design","at":"2026-08-01T02:00:00Z"},
-  {"phase":"3-impl","at":"2026-08-01T02:30:00Z"},
-  {"phase":"5-archive","at":"2026-08-01T03:00:00Z"}]}'
+  {"phase":"0.5-map","verdict":"OK","at":"2026-08-01T00:00:00Z"},
+  {"phase":"1-ba","verdict":"APPROVE","at":"2026-08-01T00:30:00Z"},
+  {"phase":"2-review","verdict":"APPROVE","at":"2026-08-01T01:00:00Z"},
+  {"phase":"2.5-design","verdict":"SKIPPED","at":"2026-08-01T02:00:00Z"},
+  {"phase":"3-impl","verdict":"APPROVE","at":"2026-08-01T02:30:00Z"},
+  {"phase":"5-archive","verdict":"DONE","at":"2026-08-01T03:00:00Z"}]}'
 assert_eq "the partition balances on well-formed N- labels too" "$(field "$(part "$PLAIN")" balances)" "true"
 assert_eq "and nothing there is unattributed" "$(field "$(part "$PLAIN")" unattributed_ms)" "0"
 
@@ -268,9 +292,9 @@ assert_eq "and nothing there is unattributed" "$(field "$(part "$PLAIN")" unattr
 # to a phase -- but it is not silently discarded either, which is what would break the
 # partition and reopen the same class through a different door.
 BACKWARDS='{"events":[
-  {"phase":"1-ba","at":"2026-08-01T02:00:00Z"},
-  {"phase":"2-review","at":"2026-08-01T01:00:00Z"},
-  {"phase":"3-impl","at":"2026-08-01T03:00:00Z"}]}'
+  {"phase":"1-ba","verdict":"APPROVE","at":"2026-08-01T02:00:00Z"},
+  {"phase":"2-review","verdict":"APPROVE","at":"2026-08-01T01:00:00Z"},
+  {"phase":"3-impl","verdict":"APPROVE","at":"2026-08-01T03:00:00Z"}]}'
 BACK_OUT=$(part "$BACKWARDS")
 assert_eq "the partition balances even when events[] runs backwards" "$(field "$BACK_OUT" balances)" "true"
 assert_eq "the backwards boundary is carried as a NEGATIVE unattributed value, which is the signal" \
@@ -281,7 +305,7 @@ assert_eq "the backwards boundary is carried as a NEGATIVE unattributed value, w
 assert_eq "events with no timestamps yield a null lead time" \
   "$(MOD="$TELEMETRY" node --input-type=module -e '
      const m = await import(process.env.MOD);
-     const t = m.telemetry({events:[{phase:"1-ba"},{phase:"3a-qa-tests"}]});
+     const t = m.telemetry({events:[{phase:"1-ba",verdict:"APPROVE"},{phase:"3a-qa-tests",verdict:"APPROVE"}]});
      console.log(String(t.total_lead_time_ms) + "/" + t.unattributed_ms + "/" + t.events_counted);
    ')" "null/0/0"
 
@@ -295,9 +319,9 @@ assert_eq "events with no timestamps yield a null lead time" \
 # true statement about a population that quietly lost a member, and the balance is what makes
 # it convincing. QA's fixture, exactly: three events, the middle one with an unparseable `at`.
 MIXED='{"events":[
-  {"phase":"1-ba","at":"2026-08-01T00:00:00Z"},
-  {"phase":"3a-qa-tests","at":"not-a-date"},
-  {"phase":"5-archive","at":"2026-08-01T02:00:00Z"}]}'
+  {"phase":"1-ba","verdict":"APPROVE","at":"2026-08-01T00:00:00Z"},
+  {"phase":"3a-qa-tests","verdict":"APPROVE","at":"not-a-date"},
+  {"phase":"5-archive","verdict":"DONE","at":"2026-08-01T02:00:00Z"}]}'
 MIXED_OUT=$(part "$MIXED")
 assert_eq "the mixed record still balances -- which is exactly why the balance alone proves nothing" \
   "$(field "$MIXED_OUT" balances)" "true"
@@ -324,9 +348,9 @@ assert_eq "an event with a NON-STRING phase is counted as dropped too, not only 
   "$(MOD="$TELEMETRY" node --input-type=module -e '
      const m = await import(process.env.MOD);
      const t = m.telemetry({events:[
-       {phase:"1-ba",at:"2026-08-01T00:00:00Z"},
-       {phase:42,at:"2026-08-01T01:00:00Z"},
-       {phase:"5-archive",at:"2026-08-01T02:00:00Z"}]});
+       {phase:"1-ba",verdict:"APPROVE",at:"2026-08-01T00:00:00Z"},
+       {phase:42,verdict:"APPROVE",at:"2026-08-01T01:00:00Z"},
+       {phase:"5-archive",verdict:"DONE",at:"2026-08-01T02:00:00Z"}]});
      console.log(t.untimed_events + "/" + t.events_counted + "/" + t.total_lead_time_ms);
    ')" "1/2/7200000"
 # The all-untimed shape, which is the one the suite already had: it must ALSO report the count,
@@ -334,7 +358,7 @@ assert_eq "an event with a NON-STRING phase is counted as dropped too, not only 
 assert_eq "the all-untimed record reports its drops as well" \
   "$(MOD="$TELEMETRY" node --input-type=module -e '
      const m = await import(process.env.MOD);
-     const t = m.telemetry({events:[{phase:"1-ba"},{phase:"3a-qa-tests"}]});
+     const t = m.telemetry({events:[{phase:"1-ba",verdict:"APPROVE"},{phase:"3a-qa-tests",verdict:"APPROVE"}]});
      console.log(t.untimed_events + "/" + String(t.total_lead_time_ms));
    ')" "2/null"
 # And the schema admits the field, or the orchestrator's write of this record is refused.
@@ -362,7 +386,7 @@ assert_eq "every key telemetry() returns is declared in the schema" \
      const s = JSON.parse(readFileSync(process.env.SCHEMA, "utf8"));
      const declared = Object.keys(s.properties.telemetry.properties);
      const emitted = Object.keys(m.telemetry({events:[
-       {phase:"1-ba",at:"2026-08-01T00:00:00Z"},{phase:"5-archive",at:"2026-08-01T01:00:00Z"}]}));
+       {phase:"1-ba",verdict:"APPROVE",at:"2026-08-01T00:00:00Z"},{phase:"5-archive",verdict:"DONE",at:"2026-08-01T01:00:00Z"}]}));
      const undeclared = emitted.filter(k => !declared.includes(k));
      console.log(undeclared.length ? "undeclared:" + undeclared.join(",") : "all-declared");
    ')" "all-declared"
@@ -378,12 +402,15 @@ assert_eq "no phase is credited a negative duration" \
 # it cannot drift apart. Asserted over the REAL declaration, not a copy of it.
 suite "AC16(b): every phase KNOWN_PHASES declares is a label the telemetry can attribute"
 
+# The label under test sits on the LATER event, because that is the one that CLOSES the
+# interval and therefore owns it. A pair whose second event was a fixed 5-archive would test
+# only that "5" is attributable, once per iteration, and report all-attributable regardless.
 assert_eq "no declared phase label falls through to unattributed" \
   "$(MOD="$TELEMETRY" DISPATCH="$SCRIPTS_DIR/dispatch-model.mjs" node --input-type=module -e '
      const t = await import(process.env.MOD);
      const d = await import(process.env.DISPATCH);
      const bad = d.KNOWN_PHASES.filter(p => {
-       const r = t.telemetry({events:[{phase:p+"-x",at:"2026-08-01T00:00:00Z"},{phase:"5-archive",at:"2026-08-01T01:00:00Z"}]});
+       const r = t.telemetry({events:[{phase:"0-start",verdict:"OK",at:"2026-08-01T00:00:00Z"},{phase:p+"-x",verdict:"APPROVE",at:"2026-08-01T01:00:00Z"}]});
        return r.phase_elapsed_ms[p] !== 3600000;
      });
      console.log(bad.length ? "unattributable:" + bad.join(",") : "all-attributable");
@@ -391,7 +418,7 @@ assert_eq "no declared phase label falls through to unattributed" \
 assert_eq "CONTROL: a label NOT in KNOWN_PHASES is not attributable, so the check above discriminates" \
   "$(MOD="$TELEMETRY" node --input-type=module -e '
      const t = await import(process.env.MOD);
-     const r = t.telemetry({events:[{phase:"7q-x",at:"2026-08-01T00:00:00Z"},{phase:"5-archive",at:"2026-08-01T01:00:00Z"}]});
+     const r = t.telemetry({events:[{phase:"5-archive",verdict:"DONE",at:"2026-08-01T00:00:00Z"},{phase:"7q-x",verdict:"APPROVE",at:"2026-08-01T01:00:00Z"}]});
      console.log(Object.keys(r.phase_elapsed_ms).length === 0 ? "not-attributed" : "attributed");
    ')" "not-attributed"
 assert_eq "3a and 3b are declared, which is what makes them attributable rather than a special case" \
@@ -553,7 +580,7 @@ assert_eq "no absolute-path string appears anywhere in the real corpus" "$HITS" 
 FIX1="$TEMP_PROJECT/abs-users.json"
 printf '%s' '{"current_phase":"3-impl","worktree_path":"/Users/someone/worktrees/x"}' > "$FIX1"
 FIX2="$TEMP_PROJECT/abs-var.json"
-printf '%s' '{"current_phase":"3-impl","events":[{"phase":"3-impl","note":"/var/folders/z/tmp"}]}' > "$FIX2"
+printf '%s' '{"current_phase":"3-impl","events":[{"phase":"3-impl","verdict":"APPROVE","note":"/var/folders/z/tmp"}]}' > "$FIX2"
 assert_contains "CONTROL: the same walk reddens on /Users/..." "$(node "$WALK" "$FIX1")" "/Users/someone/worktrees/x"
 assert_contains "CONTROL: and on /var/folders/... at depth, inside an array" "$(node "$WALK" "$FIX2")" "/var/folders/z/tmp"
 
