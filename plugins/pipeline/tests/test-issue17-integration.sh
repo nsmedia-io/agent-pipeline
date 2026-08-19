@@ -307,16 +307,36 @@ assert_contains "CONTROL: and it reaches the fixtures, so the two empty results 
 # on any machine with a newer bash installed alongside the system one, and the expectation
 # below is version-dependent).
 #
-# The property asserted is that the two spellings DIFFER, not what the defective one returns.
-# bash 3.2 declares both names before assigning, so ${a} is set-and-empty and the result is a
-# quietly wrong "pre-"; bash 5 leaves `a` unset until its own assignment, so `set -u` aborts
-# the script and stdout is empty. Pinning either value would encode a guess about the runner
-# that this shell cannot check, and the guess is what a green local run cannot falsify. What
-# both outcomes share -- and all this claim needs -- is that neither is the right answer.
+# PINNED PER SHELL, not merely "the two spellings differ". The looser version was satisfied by a
+# fixture that never ran the function at all: QA deleted the `f abcdefg` invocation, leaving the
+# construct on disk and unexecuted, and the detector still counted 1, SAME_OUT was empty,
+# "differs" held, the suite stayed 93/0, and the transcript printed the measurement `[]` on a
+# PASSING line. A demo that passes without demonstrating anything is not a demo.
+#
+# Each shell's outcome is stated in full instead, which needs no guess about the runner because
+# the two behaviours are properties of the two bashes:
+#   bash 3.2 declares both names before assigning, so ${a} is set-and-empty and the answer is a
+#     quietly wrong "pre-", with a zero exit -- the reason a local run said nothing about CI;
+#   bash 4+ leaves `a` unset until its own assignment, so `set -u` aborts the script, stdout is
+#     empty and the exit is non-zero.
+# Both arms pin stdout AND the exit status, so an unexecuted fixture reddens on whichever shell
+# is running rather than passing on both.
 SPLIT_OUT="$("${BASH:-bash}" "$FIXTURES_DIR/split-local-oneline.sh" 2>/dev/null)"
+SPLIT_RC=$?
 SAME_OUT="$("${BASH:-bash}" "$FIXTURES_DIR/same-local-oneline.sh" 2>/dev/null)"
+SAME_RC=$?
 assert_eq "the split form produces the value it is supposed to, in this shell" "$SPLIT_OUT" "pre-abc"
-assert_eq "and the SAME-statement form does NOT, so the two spellings are observably different" \
+assert_eq "and it exits 0, so the correct spelling really ran" "$SPLIT_RC" "0"
+if [[ "${BASH_VERSINFO[0]}" -le 3 ]]; then
+  assert_eq "PINNED on bash ${BASH_VERSINFO[0]}: the same-statement form returns the quietly wrong 'pre-'" \
+    "$SAME_OUT" "pre-"
+  assert_eq "and exits 0, which is exactly why the wrongness is silent on this shell" "$SAME_RC" "0"
+else
+  assert_eq "PINNED on bash ${BASH_VERSINFO[0]}: the same-statement form returns NOTHING" "$SAME_OUT" ""
+  assert_eq "and exits NON-ZERO, because set -u aborts the script before it can print" \
+    "$([[ "$SAME_RC" -ne 0 ]] && echo non-zero || echo "ZERO (rc=$SAME_RC)")" "non-zero"
+fi
+assert_eq "and either way it is NOT the value the correct spelling produces" \
   "$([[ "$SAME_OUT" == "$SPLIT_OUT" ]] && echo "SAME: the construct is harmless on bash ${BASH_VERSINFO[0]}" || echo differs)" \
   "differs"
 # Both readings are REPORTED, and they go in the assertion NAME rather than in its two operands:
