@@ -338,7 +338,30 @@ suite "gate down-region classifier: AC22 -- the docstring states the rule it now
 # at the next reading. Each clause is asserted INDEPENDENTLY: a single combined edit must not
 # be able to satisfy the whole assertion, and each of the three r3 mutations must redden
 # exactly one line below.
-DOCSTRING=$(sed -n '1,60p' "$GATE_SRC")
+#
+# THE WINDOW IS DERIVED FROM THE FILE, NOT PINNED TO A LINE COUNT. This read was `sed -n
+# '1,60p'` while the docstring ran to 95 lines, so the DIALECT BOUNDARIES list and the
+# "Gate-green means" summary -- lines 61-95, the half most likely to acquire a sentence that
+# sides with the old predicate -- sat outside every assertion below. Planting the banned
+# sentence at line 75 left this suite green; the same sentence at line 43 reddened it. A
+# larger literal is the same defect one docstring-growth later, so the window runs from the
+# `/**` opener to the `*/` terminator, whatever lies between.
+DOCSTRING=$(awk '/^\/\*\*/{f=1} f{print} f&&/^ \*\//{exit}' "$GATE_SRC")
+
+# BOTH ENDS OF THAT WINDOW ARE PINNED, because a window derived wrong is not visibly different
+# from one derived right. The far end is asserted against a line read out of the file by an
+# independent derivation (grep for the terminator, sed for the line above it): a window that
+# stops short -- including a regression to any fixed `1,Np` -- fails here rather than silently
+# ceasing to look at the tail of the docstring.
+DOC_END_LINE=$(grep -n '^ \*/' "$GATE_SRC" | head -1 | cut -d: -f1)
+assert_eq "AC22 CONTROL: the docstring block's terminator was located" \
+  "$([[ "${DOC_END_LINE:-0}" -gt 1 ]] && echo ok || echo "line=$DOC_END_LINE")" "ok"
+assert_contains "AC22 CONTROL: and the window reaches the LAST line of that block" \
+  "$DOCSTRING" "$(sed -n "$((DOC_END_LINE - 1))p" "$GATE_SRC")"
+# ...and does not run PAST it, or the assertions below would be reading the module's code and
+# would start passing on a `MySQL` that appears in a string literal rather than in the prose.
+assert_not_contains "AC22 CONTROL: and stops at the block, not somewhere in the code below" \
+  "$DOCSTRING" "import "
 
 assert_not_contains "AC22: the docstring no longer claims a commented-out down region passes" \
   "$DOCSTRING" "entirely commented out passes"
