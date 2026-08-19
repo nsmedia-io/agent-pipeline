@@ -154,9 +154,23 @@ assert_eq "then the surface module, then the routing table" \
 # Each revert is asserted SEPARATELY and in its own scratch clone. A single combined
 # assertion cannot distinguish a clean split from a lucky one, and reverting in the working
 # tree would leave the checkout mutated if the suite were interrupted.
+#
+# THE ANCHOR IS THE IMPLEMENTATION SERIES TIP, NOT HEAD, and that is a correction rather than a
+# convenience. R17's property is that the implementation splits into independently revertable
+# units -- that each commit is separable from the OTHER COMMITS IN ITS OWN SERIES. Anchoring at
+# HEAD silently widens it to "and from every repair anyone ever lands on top", which is not
+# separability and is not achievable: a Phase 4 fix round that repairs a line a commit
+# introduced MUST conflict with reverting that commit, because the two edits are the same
+# lines. (Round 1 of this issue's panel did exactly that to the four panel-composition call
+# sites the surface commit added.) Anchored here, the assertion keeps measuring the split it
+# was written for and stops changing its answer every time a later round touches the file.
+SERIES_TIP_SHA="$(sha_of 'test: repair two unsatisfiable assertions')"
+assert_eq "the implementation series tip is identifiable (without it the reverts below anchor nowhere)" \
+  "$([[ -n "$SERIES_TIP_SHA" ]] && echo found || echo "missing")" "found"
+
 revert_touches() { # <sha> -> "clean:<files>" | "CONFLICT"
   local sha="$1" wt="$TEMP_PROJECT/revert-${sha:0:7}"
-  git -C "$REPO_ROOT" worktree add -q --detach "$wt" HEAD >/dev/null 2>&1 || { printf 'CONFLICT'; return 0; }
+  git -C "$REPO_ROOT" worktree add -q --detach "$wt" "${SERIES_TIP_SHA:-HEAD}" >/dev/null 2>&1 || { printf 'CONFLICT'; return 0; }
   if git -C "$wt" revert --no-commit --no-edit "$sha" >/dev/null 2>&1; then
     printf 'clean:%s' "$(git -C "$wt" diff --cached --name-only | tr '\n' ' ')"
   else
@@ -264,5 +278,35 @@ assert_contains "(2) pipeline.config.json becoming an architectural trigger" "$(
   "Editing \`pipeline.config.json\` now forces the architectural tier"
 assert_contains "(3) the copied-example hazard" "$(cat "$README")" \
   "If you copied the example config, DELETE its \`migrationGlobs\` line"
+
+suite "AC42(b): the upgrade note's exclusion sentence matches what the code actually excludes"
+
+# The sentence said "Markdown is excluded from the narrow set in code, so a docs path under
+# migrations/ does not halt". The code excludes .md/.mdx and nothing else, so
+# docs/migrations/notes.txt DOES halt and the second clause was false. An adopter reading it
+# would plan a docs move that eats a halt.
+assert_eq "the over-broad 'a docs path ... does not halt' claim is gone" \
+  "$(grep -c 'so a docs path under `migrations/` does not halt' "$README" | tr -d ' ')" "0"
+assert_contains "the claim is scoped to MARKDOWN" "$(cat "$README")" \
+  "A Markdown docs path is excluded from the narrow set in code"
+assert_contains "and the README says out loud that other extensions there DO halt" "$(cat "$README")" \
+  "Any other extension there does, including \`.txt\` and images"
+# The sentence is only true because of what the code does. Verified against the real predicate,
+# so this pair goes red if either the prose or the exclusion list moves.
+DL_MOD=""
+for f in "$SCRIPTS_DIR"/*.mjs; do
+  [[ -f "$f" ]] || continue
+  if grep -q 'migrationGlobsForTripwire' "$f" 2>/dev/null; then DL_MOD="$f"; break; fi
+done
+excl() { MOD="$DL_MOD" P="$1" node --input-type=module -e '
+  const m = await import(process.env.MOD);
+  console.log(String(m.isMigrationPath(process.env.P, m.DEFAULT_MIGRATION_GLOBS)));
+'; }
+assert_eq "CODE CHECK: docs/migrations/notes.txt really does halt, as the README now says" \
+  "$(excl 'docs/migrations/notes.txt')" "true"
+assert_eq "CODE CHECK: docs/migrations/diagram.png really does halt too" \
+  "$(excl 'docs/migrations/diagram.png')" "true"
+assert_eq "CONTROL: the .md sibling really does not, so the README's Markdown clause is true as well" \
+  "$(excl 'docs/migrations/upgrade-v2.md')" "false"
 
 finish

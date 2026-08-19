@@ -179,6 +179,8 @@ docs/readme.md
 docs/migrations-guide.md
 docs/migrations/guide.md
 docs/migrations/upgrade-v2.md
+docs/migrations/notes.txt
+docs/migrations/diagram.png
 website/content/docs/migrations/index.mdx
 vendor/acme/migrations/0001.sql
 tests/fixtures/migrations/0001.sql
@@ -494,6 +496,19 @@ assert_eq "the .md exclusion lives in the predicate, not in a missing glob row" 
   "$(dl_run "$R_NONE" narrow-with '["**/migrations/**"]' 'docs/migrations/upgrade-v2.md')" "false"
 assert_eq "non-zero control for the .md exclusion: the SAME glob matches the same directory's .sql file" \
   "$(dl_run "$R_NONE" narrow-with '["**/migrations/**"]' 'docs/migrations/0001.sql')" "true"
+
+# The exclusion is TWO EXTENSIONS, not a notion of "documentation", and the fixtures have to be
+# able to tell those two readings apart. Without a non-.md docs path in the corpus, every
+# fixture sat in the cell where the two readings agree, so the README could claim "a docs path
+# under migrations/ does not halt" and no assertion could contradict it. These two can.
+assert_eq "docs/migrations/notes.txt DOES trip: a .txt docs file is not excluded" \
+  "$(col "$M_NONE" 'docs/migrations/notes.txt' 3)" "true"
+assert_eq "docs/migrations/diagram.png DOES trip: nor is an image" \
+  "$(col "$M_NONE" 'docs/migrations/diagram.png' 3)" "true"
+assert_eq "and its .md sibling in the SAME directory does not, so the difference is the EXTENSION" \
+  "$(col "$M_NONE" 'docs/migrations/upgrade-v2.md' 3)" "false"
+assert_eq "the extension exclusion is exactly two entries, so the README cannot drift into claiming more" \
+  "$(dl_run "$R_NONE" narrow-with '["**/migrations/**"]' 'docs/migrations/notes.txt')" "true"
 
 suite "AC27 EXPECTED SURVIVOR: the redundant preset row changes no verdict"
 
