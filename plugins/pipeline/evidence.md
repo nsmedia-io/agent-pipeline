@@ -10,6 +10,58 @@ The whole file reduces to one sentence. **A check that cannot fail has not passe
 
 ---
 
+## A property over a possibly-empty set is not a check
+
+The commonest defect this pipeline finds, and the one it keeps re-introducing **inside its own
+remedies**, is a criterion that ranges over a collection that can be empty. `for every X in S, assert
+P(X)` is vacuously true when `S` is `∅`, exits 0, and is indistinguishable from a real pass.
+
+One issue produced six instances in four review rounds, three of them in the fix for the previous one:
+
+- A credential-leak guard asserted "every committed fixture contains no credential rows". The same
+  round preferred a GENERATOR over a committed binary — making the committed set empty, so the
+  property passed without looking.
+- Its replacement asserted `|committed ∪ generated| > 0`, which the generated side satisfies alone,
+  so it still said nothing about the committed side — the only side that reaches git history.
+- A mount-closure criterion asserted over `docker compose config --services`, which silently omits
+  profile-gated services. The one service the criterion was written about was profile-gated.
+- The same command exits non-zero without a full env. Swallowed, the service set is empty and
+  "no service mounts the data dir" is vacuously true.
+- A runbook-command extractor that lifts zero commands executes nothing and passes green.
+- A host-side-invocation scan whose count was PINNED to a number: the cheapest way to make a correct
+  scanner return that number is to narrow the pattern until it does, and the narrowing drops exactly
+  the sites nobody knew about. **A pinned count with the answer pre-printed is a target.**
+
+**The rule.** Before a criterion asserts a property over a set, it must assert the set is non-empty
+and of the expected shape, and that whatever produced the set actually ran. Derive counts; never
+pin them. And when you write the guard against this, ask what THAT guard fails to bind before you
+adopt it — three of the six above were introduced by the fix for the one before.
+
+## A number carries the population it was measured on
+
+The second commonest class here. A figure is correct for one grain and gets quoted for another,
+where it is wrong and still plausible. Four instances in one week:
+
+- A vendor's 12-month TRAILING AVERAGE read as a per-month value, so 12 of 16 client-facing cards
+  named the wrong peak month.
+- A per-task price for one API endpoint applied to a different endpoint's workload — 7.75x apart —
+  producing a cost figure 8x too high inside the very issue filed to correct stale cost figures.
+- "N of 20" used for two different quantities in one file; a reviewer conflated them and nearly
+  replaced a correct number with a wrong one.
+- "integrity_check costs 0.64s on the live file" where the measurement was taken on a 343MB COPY and
+  the live file is 505MB, stated two paragraphs from the sentence that said so.
+
+**The rule.** A number in an artifact carries its population, its window and its units, or it does
+not appear. When you quote a figure from another artifact, re-derive it or say you did not.
+
+## Capture the status of the command, not the pipeline
+
+`cmd 2>&1 | head; echo rc=$?` reports `head`'s status. So does `cmd | tail`, and so does any check
+whose liveness gate is written that way — a gate that cannot fail, guarding a gate that cannot fail.
+Observed three times in one session's shell work and once inside an acceptance criterion whose whole
+job was proving a renderer had run. Capture directly, or use `${PIPESTATUS[0]}` (bash) / `$pipestatus`
+(zsh) and be aware they differ.
+
 ## 1. A skip is not a pass
 
 Every `continue`, every early `return`, every `if (!x) continue` inside a verification loop is a

@@ -971,6 +971,53 @@ Because the Librarian is dispatched non-blocking, mark the run terminal at DISPA
 - **The completion summary is the feature complete report** from `${CLAUDE_PLUGIN_ROOT}/voice.md`, used verbatim as the template: what it does now that it did not do before (from a user's point of view), the analogy and where it breaks, what changed grouped by what a person would notice rather than by file, what it means for the owner, what you deliberately did not do, and what to watch for over the next two weeks. This is the report the owner actually reads, and for most runs it is the only part of the pipeline they see. It replaces the changelog dump; do not substitute a verdict line for it.
 - Optional: the Librarian itself (or a later session) removes `.pipeline/<issue>/status.json` or moves the whole dir to `.pipeline/_archived/<issue>/` for audit after it verifies archival.
 
+### Convergence budget (the pipeline's own failure mode)
+
+**This pipeline is much better at finding defects than at converging on a fix, and nothing in it
+notices when that is happening.** Every gate here loops back on a finding, and every loop-back is
+individually justified, so a spec can round-trip indefinitely while each round looks like the gate
+working. Measured on one issue: three Phase 2 rounds, four spec revisions, an 86KB spec that grew to
+95KB while its substance HALVED, two connection failures mid-write that each lost a full round's
+reasoning, and zero lines of code. Every blocker in every round was real. That is the point — real
+findings are not evidence that continuing is correct.
+
+Two budgets, both cheap, both fail-loud:
+
+**1. Round budget.** After the SECOND Phase 2 round returns any `REQUEST_CHANGES`, do NOT loop back
+by default. Stop and present the owner a decision: **split** the spec, **defer** the unresolved half
+to a follow-up issue, or **proceed** to Phase 2.5 carrying the findings as constraints. Say which you
+recommend and why. A third round happens because the owner chose it, not because the loop-back table
+said to.
+
+The same evidence that justifies each round justifies the split: if round two's findings are in a
+different part of the spec from round one's, the spec is too big to review as a unit.
+
+**2. Spec size tripwire.** When a spec crosses **10 requirements or 12 acceptance criteria**, BA must
+either justify the size in `spec.json` or propose a split. These are not hard limits; they are the
+point at which "is this one issue?" stops being rhetorical. On the run above, BA recommended a
+three-way split the first time it was asked directly — and was right — but nothing had asked.
+
+**Write the artifact before composing the reply.** The Phase 4 reviewer preamble already says this.
+It applies to BA too, and for a sharper reason: BA's artifact is the largest single write in the
+pipeline, and a connection drop between "I have concluded" and "I have written it down" costs the
+entire round. When a spec exceeds ~30KB, write it as several smaller files (a delta against the
+prior revision, not a rewrite) and let the orchestrator merge them.
+
+### Match the mechanism to the reversibility, not to the tier table
+
+The architectural tier is the right shape for a change whose failure is unrecoverable — data loss,
+credential exposure, a wrong number reaching a customer. It is the wrong shape for most of a backlog.
+
+Two habits carry most of the value at any tier and cost almost nothing: **a second independent reader
+on anything customer-facing**, and **run the control before believing the zero**. Reach for the full
+apparatus when the downside is permanent; reach for those two when it is not.
+
+A corollary worth stating because it was learned the expensive way: when a review finds a one-file,
+obviously-correct safety defect, **fix it immediately rather than routing it through the pipeline.**
+On the run above, two tracked files were instructing future agents to corrupt the production database.
+Both were found mid-review and both were fixed in ten minutes as their own small PR. Filing them as
+issues to be specced would have left live hazards in the tree for days.
+
 ---
 
 ## Loop-back triggers
