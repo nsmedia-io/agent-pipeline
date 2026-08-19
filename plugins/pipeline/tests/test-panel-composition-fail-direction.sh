@@ -78,6 +78,106 @@ assert_eq "CONTROL: the diff comparison is live -- a one-character edit reads as
   "$(diff <(probe_def "$PANEL_BLOCK") <(probe_def "$DELTA_BLOCK" | sed 's/exit(1)/exit(2)/') >/dev/null && echo identical || echo DIVERGED)" \
   "DIVERGED"
 
+suite "the MANUAL entry point carries the same contract, and cannot drift from it silently"
+
+# `/phase peer-review` claims in its own text to mirror `/pipeline` Phase 4 "exactly, including
+# the delta re-review semantics, so a manual re-run and the auto re-review never diverge". It
+# then described the surface test as "the same one-liners /pipeline Phase 4 uses" and named the
+# three exports and two modules -- and NOTHING about the reserved exit code, the indeterminate
+# branch, or the fail direction. An orchestrator following phase.md alone would have written
+# the two-outcome shape this whole suite exists to refuse, at the entry point a human reaches
+# for when the automatic round has already gone wrong.
+#
+# It survived because no suite read that file: `grep -rn 'phase\.md' tests/*.sh` returned
+# nothing while two suites extracted and executed pipeline.md. The contract below is therefore
+# DERIVED FROM pipeline.md on every run -- the sentinel is read out of the shipped probe, the
+# predicate list out of the shipped delta block -- so changing the contract in one file and not
+# the other reddens here instead of shipping as a divergence.
+PHASE_MD="$PLUGIN_ROOT/commands/phase.md"
+
+phase_peer_review_section() {  # <phase.md> -> the text of its "### peer-review" section
+  awk '/^### peer-review$/{f=1;next} f&&/^### /{exit} f{print}' "$1"
+}
+probe_sentinel() {  # <pipeline.md> -> the reserved NO-MATCH code, read from the probe itself
+  grep -o 'process\.exit(f(paths)?0:[0-9]\{1,\})' "$1" | head -1 | sed 's/.*?0://;s/)$//'
+}
+delta_predicates() {  # <delta block> -> the predicate each shipped probe call names
+  grep '^surface_probe ' "$1" | awk '{print $3}' | sort -u
+}
+phase_md_drift() {  # <phase.md> <pipeline.md> <delta block> -> "" when the two agree
+  local phase="$1"
+  local pipeline="$2"
+  local delta="$3"
+  local sec
+  local sentinel
+  local pred
+  local out=""
+  sec="$(phase_peer_review_section "$phase")"
+  [[ -n "$sec" ]] || { printf 'no ### peer-review section in %s' "$phase"; return 0; }
+  sentinel="$(probe_sentinel "$pipeline")"
+  [[ -n "$sentinel" ]] || { printf 'no probe sentinel found in %s' "$pipeline"; return 0; }
+  case "$sec" in *"$sentinel"*) ;; *) out="$out|does not state the reserved no-match code $sentinel" ;; esac
+  case "$sec" in *INDETERMINATE*) ;; *) out="$out|does not name the INDETERMINATE outcome" ;; esac
+  case "$sec" in *PANEL-NOTE*) ;; *) out="$out|does not carry the PANEL-NOTE record of a seat-on-indeterminate" ;; esac
+  case "$sec" in *surface_probe*) ;; *) out="$out|does not name surface_probe, the shared definition" ;; esac
+  case "$sec" in *commands/pipeline.md*) ;; *) out="$out|does not point at the file that holds the one definition" ;; esac
+  while IFS= read -r pred; do
+    [[ -n "$pred" ]] || continue
+    case "$sec" in *"$pred"*) ;; *) out="$out|never names $pred, which the delta block probes" ;; esac
+  done < <(delta_predicates "$delta")
+  printf '%s' "$out"
+}
+
+# The inputs first. A drift check over an empty section or an unfound sentinel reports whatever
+# its author's optimism supplies, and both failure shapes print something other than "" above.
+assert_eq "phase.md exists and has a peer-review section to check" \
+  "$([[ -n "$(phase_peer_review_section "$PHASE_MD")" ]] && echo present || echo "ABSENT")" "present"
+assert_eq "the reserved no-match code is READ from pipeline.md's probe, not remembered here" \
+  "$(probe_sentinel "$PIPELINE_MD")" "20"
+assert_eq "and the delta block names three predicates for the check to walk" \
+  "$(delta_predicates "$DELTA_BLOCK" | grep -c . | tr -d ' ')" "3"
+
+assert_eq "phase.md's manual peer-review carries the same three-outcome contract as pipeline.md" \
+  "$(phase_md_drift "$PHASE_MD" "$PIPELINE_MD" "$DELTA_BLOCK")" ""
+
+# ONE DEFINITION, not two. The fix for the divergence is a POINTER at pipeline.md's probe, so a
+# second copy of the probe body in phase.md would re-create the thing that drifted.
+assert_eq "phase.md keeps no second copy of the probe body" \
+  "$(grep -c 'process.exit(f(paths)?0:' "$PHASE_MD" | tr -d ' ')" "0"
+assert_eq "CONTROL: the same grep DOES find the body in pipeline.md, where it is defined twice" \
+  "$(grep -c 'process.exit(f(paths)?0:' "$PIPELINE_MD" | tr -d ' ')" "2"
+
+# NON-ZERO CONTROLS, one per way the two files can drift apart. Each mutates a COPY in the
+# scratch project; nothing in the checkout is touched.
+DRIFT_PHASE="$TEMP_PROJECT/phase-no-sentinel.md"
+# EVERY occurrence, not the bolded one: the first spelling of this control replaced `**20**`
+# alone and the check stayed green, because the same sentence states the code three more times
+# in plain text. A mutation that leaves the property standing measures nothing, so the mutated
+# copy is asserted to have really lost it before the control is read.
+sed 's/20/NN/g' "$PHASE_MD" > "$DRIFT_PHASE"
+assert_eq "the mutated phase.md really lost the sentinel (or the control below measures nothing)" \
+  "$(phase_peer_review_section "$DRIFT_PHASE" | grep -c '20' | tr -d ' ')" "0"
+assert_contains "CONTROL: a phase.md that stops stating the sentinel is reported" \
+  "$(phase_md_drift "$DRIFT_PHASE" "$PIPELINE_MD" "$DELTA_BLOCK")" "does not state the reserved no-match code 20"
+DRIFT_PHASE2="$TEMP_PROJECT/phase-no-indeterminate.md"
+sed 's/INDETERMINATE/a no-match/g' "$PHASE_MD" > "$DRIFT_PHASE2"
+assert_contains "CONTROL: a phase.md that loses the indeterminate branch is reported" \
+  "$(phase_md_drift "$DRIFT_PHASE2" "$PIPELINE_MD" "$DELTA_BLOCK")" "does not name the INDETERMINATE outcome"
+# THE DRIFT DIRECTION THAT ACTUALLY HAPPENED: pipeline.md moves and phase.md is left behind.
+DRIFT_PIPELINE="$TEMP_PROJECT/pipeline-sentinel-21.md"
+sed 's/process\.exit(f(paths)?0:20)/process.exit(f(paths)?0:21)/g' "$PIPELINE_MD" > "$DRIFT_PIPELINE"
+assert_eq "the mutated pipeline.md really carries the new sentinel (or the control below measures nothing)" \
+  "$(probe_sentinel "$DRIFT_PIPELINE")" "21"
+assert_contains "CONTROL: moving the sentinel in pipeline.md alone reddens this check" \
+  "$(phase_md_drift "$PHASE_MD" "$DRIFT_PIPELINE" "$DELTA_BLOCK")" "does not state the reserved no-match code 21"
+# ...and the same direction for a NEW probe: adding a fourth surface to the delta block without
+# telling phase.md about it is the divergence one size up.
+DRIFT_DELTA="$TEMP_PROJECT/delta-fourth-probe.sh"
+cp "$DELTA_BLOCK" "$DRIFT_DELTA"
+printf 'surface_probe some-surface.mjs diffTouchesSomethingNew < "$FIX_CHANGED_PATHS"; RC=$?\n' >> "$DRIFT_DELTA"
+assert_contains "CONTROL: a fourth probe in the delta block that phase.md never names is reported" \
+  "$(phase_md_drift "$PHASE_MD" "$PIPELINE_MD" "$DRIFT_DELTA")" "never names diffTouchesSomethingNew"
+
 suite "the shape cannot swallow an exit status"
 
 # The defect class in one line: `<probe> | grep -q` discards the probe's status, so an absent
