@@ -1,0 +1,12 @@
+{
+  "issue_number": null,
+  "current_phase": "1-ba",
+  "started_at": "2026-08-19T20:00:00Z",
+  "updated_at": "2026-08-19T20:00:00Z",
+  "branch": "feat/phase-guard",
+  "ask_text": "Make phase entry granted by a script rather than assumed by the orchestrator, plus typed provenance fields and evidence admissibility.",
+  "risk_tier": "architectural",
+  "review_rounds": 0,
+  "events": [{"phase":"0.5-map","verdict":"complete","at":"2026-08-19T20:00:00Z","note":"26 phase literals / ~20 sequencing rules; corrected the enforcement table; voice-lint rule-table rot is the precedent"}],
+  "flags": []
+}
