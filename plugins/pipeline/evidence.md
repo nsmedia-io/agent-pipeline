@@ -10,6 +10,60 @@ The whole file reduces to one sentence. **A check that cannot fail has not passe
 
 ---
 
+## A machine-readable claim and a human-readable caveat can disagree, and only one is checked
+
+`gate-pre-phase4-frontend.mjs` reads `raw.token_lint_pass === true` and `raw.axe_pass === true` from
+the impl-report. On two consecutive issues in one repo, Dev set both to `true` and wrote an honest
+adjacent note saying **no token-lint script and no axe package exist anywhere in the project.** The
+note was accurate. The boolean was what the gate read.
+
+Nobody lied. The disclosure and the assertion lived in the same object and said different things, and
+the machine consumed the one that could not carry the caveat.
+
+Design caught it both times by looking for the tool rather than reading the field — grepping
+`package.json`, every workspace manifest, the lockfile and the ESLint configs, finding nothing, and
+recording `token_lint: "n/a"` / `axe.status: "not-run"` instead of inheriting `true`. Its own words:
+*a claim I didn't witness, not a run.*
+
+**The rule.** A gate must be satisfied by a COMMAND AND ITS OUTPUT, never by a self-declared boolean.
+Where the tool does not exist, the honest value is "not-run", and a gate that cannot distinguish
+"not-run" from "passed" is not a gate. If you are the author, do not set a pass flag for a check you
+did not execute, however good your substitute was — write the substitute in the note and leave the
+flag false.
+
+## An artifact nobody can read is not the durable half of a fix
+
+`.pipeline/` is gitignored in most projects that use this pipeline. So an implementation report, a
+review shard and a spec are all invisible to the next reader of the repository.
+
+Twice in one day a correction was written into an implementation report and treated as the
+deliverable. One of those was to a report that had ALREADY been corrected at its own Phase 4 — the
+stale claim the new issue existed to fix had moved on, while the same false sentence sat in a
+`printablePath` doc comment in TRACKED CODE, where the next reader actually meets it.
+
+**The rule.** If a fix is a correction to a claim, the correction lands in tracked code — a comment,
+a test name, a doc under `docs/` — or it has not landed. An artifact may RECORD the reasoning; it can
+never BE the fix. Before accepting "corrected in the impl-report", ask whether `git grep` would find
+it.
+
+## Reviewers who RUN tests need isolation, not just reviewers who plant mutations
+
+The existing rule covers mutation-planting. It is too narrow. Three reviewers dispatched into one
+worktree produced 74 failures across 6 files, every one `table 'main.organizations' does not exist` —
+a schema-teardown collision between two concurrent vitest processes sharing one `test.db`. None of
+the failing files was touched by the diff under review.
+
+The cost is not just wasted runs. One reviewer began investigating whether the change under review
+had reordered the suite; another wrote a provisional pessimistic verdict; a third recorded its own
+result as contaminated and refused to report either number. All three were reasoning about the
+orchestrator's mistake as though it were a property of the diff.
+
+**The rule.** Any reviewer that RUNS a suite — not only one that mutates — gets `isolation:
+"worktree"` when the project's tests share state (one test database, one fixture store, one port).
+If isolation is unavailable, dispatch them SERIALLY. And when contamination is discovered, tell every
+running reviewer the window and the files, so they can discard rather than attribute: the failure
+mode is a reviewer confidently explaining your own interference.
+
 ## A property over a possibly-empty set is not a check
 
 The commonest defect this pipeline finds, and the one it keeps re-introducing **inside its own
