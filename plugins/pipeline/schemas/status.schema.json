@@ -10,7 +10,7 @@
     "current_phase": {
       "type": "string",
       "pattern": "^([0-5](\\.5)?-[a-z0-9-]+|halted-error)$",
-      "description": "Examples: 0-setup, 0.5-map, 1-ba, 1-ba-complete, 1-ba-rework-required, 2-constraints, 2-constraints-complete, 2-review, 2-review-complete, 2.5-design, 2.5-design-complete, 3-impl, 3-impl-complete, 3-impl-tripwire, 3-impl-gate-failed, 3-impl-verification-unverified, 3-scope-drift-adjudication, 4-review, 4-review-complete, 4-veto-rework-required, 5-archive, 5-archived, halted-error."
+      "description": "Examples: 0-setup, 0.5-map, 0.5-map-complete, 1-ba, 1-ba-open-questions, 1-ba-complete, 1-ba-rework-required, 2-constraints, 2-constraints-complete, 2-review, 2-review-complete, 2.5-design, 2.5-design-owner-decision, 2.5-design-complete, 3-impl, 3-impl-tripwire, 3-impl-tripwire-indeterminate, 3-impl-gate-failed, 3-impl-frontend-gate-failed, 3-impl-live-verify-unverified, 3-impl-complete, 4-review, 4-review-complete, 4-veto-rework-required, 5-archive, 5-archived, halted-error. The <phase>-error family is a SHAPE and not a literal -- commands/pipeline.md writes <phase>-error for whichever phase failed -- so it is deliberately not enumerated above. The list is exactly the literals commands/pipeline.md writes, PLUS halted-error, which pipeline.md writes nowhere yet the pattern above alternates by name and scripts/gate-phase-entry.mjs returns true for: deriving this list from pipeline.md alone would delete correct work. This is prose in a file nothing validates status.json against, and it rotted once already (#42, which blessed two phases nobody wrote and omitted six that were); it is kept honest now by tests/test-status-schema-contract.sh, which asserts set equality against pipeline.md in BOTH directions."
     },
     "started_at": {"type": "string", "format": "date-time"},
     "updated_at": {"type": "string", "format": "date-time"},
@@ -53,7 +53,7 @@
         "required": ["phase", "at"],
         "properties": {
           "phase": {"type": "string"},
-          "verdict": {"type": "string"},
+          "verdict": {"type": "string", "maxLength": 32, "description": "A TOKEN, not prose: the verdict of the phase this event closes. NOTHING VALIDATES status.json AGAINST THIS SCHEMA -- the file is in no AGENT_RULES entry in scripts/validate-pipeline-artifact.mjs, and that walker does not implement maxLength at all, so this cap refuses nothing on its own. It is honored by the writer and by tests/test-status-schema-contract.sh, which checks every committed record against the value read FROM here. Do not mistake the cap for an enforced control and skip writing the enforcement. The bound exists because status.json is committed AND archived verbatim, so an unbounded string here reaches a public tree at full length; 32 is 1.78x the longest declared verdict (APPROVE_WITH_NOTES, 18) and sits below the length of the sentence this refuses. Optional: an event with no verdict is valid."},
           "at": {"type": "string", "format": "date-time"},
           "note": {"type": "string"}
         }
@@ -108,8 +108,8 @@
         "properties": {
           "phase": {"type": "string"},
           "agent": {"type": "string"},
-          "verdict": {"type": "string"},
-          "summary": {"type": "string", "maxLength": 140},
+          "verdict": {"type": "string", "maxLength": 32, "description": "The same TOKEN-not-prose rule and the same 32-char bound as events[].verdict, and unenforced in exactly the same way: nothing validates status.json against this schema, so the cap is honored by the writer and by tests/test-status-schema-contract.sh rather than by a validator. Capped alongside its twin rather than deferred because it carries the LONGEST verdict in the committed corpus (APPROVE_WITH_NOTES, 18 chars) while events[] tops out at 15. Optional: a flag with no verdict is valid."},
+          "summary": {"type": "string", "maxLength": 140, "description": "ALSO unenforced by any validator: this cap predates the two above and is honored only because commands/pipeline.md restates it as a writer rule."},
           "at": {"type": "string", "format": "date-time"}
         }
       }
