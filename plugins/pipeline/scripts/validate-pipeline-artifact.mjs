@@ -295,10 +295,14 @@ function issueDirs(pipelineDir) {
 //       exists in this root; a signal that is non-numeric or names an absent dir is ignored,
 //       so a stale or malformed env var cannot misdirect the sweep (it falls back to (b)).
 //   (b) the newest status.json mtime among the numeric issue dirs in this root -- the "which
-//       issue is active" mechanism, and the path exercised in normal use.
+//       issue is active" mechanism, and the path exercised in normal use. It must be a STRICT
+//       winner: if two dirs share the newest mtime the scan has not identified an issue, it has
+//       only proved it cannot, so a tie resolves to (c) rather than to either candidate.
 //   (c) neither resolves: return null. The caller then validates nothing in this root
 //       (fail-open): an ad-hoc or non-pipeline session owns no issue dir and must never be
-//       blocked by artifacts it did not write.
+//       blocked by artifacts it did not write. A tie under (b) lands here for the same reason
+//       -- the cost of guessing wrong is blocking a stop for an issue this session never
+//       touched, and there is no evidence available to guess from.
 function activeIssueName(input) {
   const raw =
     (input && input.active_issue) ||
@@ -327,6 +331,7 @@ export function activeIssueDir(pipelineDir, input) {
   }
   let newest = null;
   let newestMtime = -Infinity;
+  let tiedAtNewest = false;
   for (const dir of issueDirs(pipelineDir)) {
     let st;
     try {
@@ -337,9 +342,25 @@ export function activeIssueDir(pipelineDir, input) {
     if (st.mtimeMs > newestMtime) {
       newestMtime = st.mtimeMs;
       newest = dir;
+      tiedAtNewest = false;
+    } else if (st.mtimeMs === newestMtime) {
+      tiedAtNewest = true;
     }
   }
-  return newest; // null when no signal and no status.json anywhere: fail-open
+  // A TIE at the newest mtime is the ABSENCE of a signal, not a weaker one, so it resolves the
+  // same way absence does: null. Both are order-independent -- a strict max does not depend on
+  // enumeration order, and a tie is detected whichever order it arrives in -- which is the
+  // point. Previously the winner of a tie was decided by readdirSync order: hash order on ext4,
+  // roughly insertion order on APFS. That made "which issue is active" a property of the
+  // filesystem, and it is reachable in production, not just in theory: a fresh `git clone`
+  // writes every tracked .pipeline/<issue>/status.json within a few milliseconds, and Linux
+  // stamps file times from a clock that ticks coarser than that, so they land on the identical
+  // mtime and RECENT_MS (30min) does not filter them out. Picking one would be inventing
+  // evidence the scan does not have -- and picking the wrong one blocks a stop, or refuses a
+  // phase entry, for work this session never touched, which is the exact harm the scoping in
+  // this function exists to prevent. Precedence (a) is unaffected: an explicit signal still
+  // resolves, ties or no ties.
+  return tiedAtNewest ? null : newest;
 }
 
 function loadJson(file) {
@@ -1034,13 +1055,26 @@ function selfTest() {
       mkdirSync(schemasDir, { recursive: true });
       mkdirSync(archived, { recursive: true });
       writeFileSync(path.join(issue, "status.json"), JSON.stringify({ issue_number: 1965 }));
-      // Give the NON-issue dirs a NEWER status.json so, absent the numeric guard, the mtime scan
-      // would wrongly select them over the real issue dir.
       writeFileSync(path.join(schemasDir, "status.json"), JSON.stringify({ x: 1 }));
       writeFileSync(path.join(archived, "status.json"), JSON.stringify({ x: 1 }));
-      const later = (Date.now() + 5000) / 1000;
-      utimesSync(path.join(schemasDir, "status.json"), later, later);
-      utimesSync(path.join(archived, "status.json"), later, later);
+
+      // EVERY mtime this block's expectations depend on is stamped explicitly, with seconds of
+      // margin, because two files written microseconds apart do NOT reliably differ in mtime:
+      // Linux stamps from a coarse clock that ticks every few milliseconds, so both writes can
+      // land on the IDENTICAL timestamp, while APFS resolves them apart. activeIssueDir breaks a
+      // tie by readdir order, so leaving the ordering to the host meant the exp- rejection cases
+      // below resolved by whatever readdir returned first -- green on macOS, red as a group on
+      // ubuntu-latest, at a fixed commit. That is issue #27. Ordering is a property of this
+      // fixture now, not of the machine it runs on.
+      const now = Date.now();
+      const stamp = (file, ms) => utimesSync(file, ms / 1000, ms / 1000);
+      // The NON-issue dirs are the NEWEST, so absent the numeric guard the mtime scan would
+      // wrongly select them over the real issue dir.
+      stamp(path.join(schemasDir, "status.json"), now + 5000);
+      stamp(path.join(archived, "status.json"), now + 5000);
+      // The numeric issue dir is deliberately the OLDEST dir the guard admits, so that once
+      // exp-two-owner-gates exists below, the fallback target is unambiguous.
+      stamp(path.join(issue, "status.json"), now - 10_000);
 
       delete process.env.CLAUDE_PIPELINE_ACTIVE_ISSUE;
       delete process.env.PIPELINE_ACTIVE_ISSUE;
@@ -1061,22 +1095,133 @@ function selfTest() {
       const expDir = path.join(pipe, "exp-two-owner-gates");
       mkdirSync(expDir, { recursive: true });
       writeFileSync(path.join(expDir, "status.json"), JSON.stringify({ current_phase: "1-ba" }));
+      stamp(path.join(expDir, "status.json"), now);
       check("active-issue: an exp-<slug> marker resolves its dir",
         activeIssueDir(pipe, { active_issue: "exp-two-owner-gates" }) === expDir ? [] : ["expected exp- marker to resolve"], false);
-      // These assert against expDir, not `issue`: expDir's status.json is now the newest in the
-      // root, so it is what the mtime fallback legitimately resolves to. What each case proves
-      // is that the MALFORMED MARKER was rejected and the fallback ran at all, which is why the
-      // basename check below carries the actual claim.
+
+      // A malformed marker must be rejected on BOTH paths, so plant a real directory for each
+      // one that can be a literal name (and, for the traversal case, at the path the marker
+      // would reach if honored: "exp-a/../b" joins to "<pipe>/b"). Each is stamped NEWEST of
+      // all, so a regex widened to admit any of these shapes fails loudly twice over -- the
+      // marker path would resolve to it, and the mtime scan would start selecting it. Without
+      // these, a rejected marker and an honored-but-absent one are indistinguishable: both
+      // fall through to the same mtime result, so the cases could not fail on what they name.
+      for (const planted of ["exp-", "exp-Two-Owner", "exp--bad", "b"]) {
+        const dir = path.join(pipe, planted);
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(path.join(dir, "status.json"), JSON.stringify({ x: 1 }));
+        stamp(path.join(dir, "status.json"), now + 8000);
+      }
+
+      // The fixture's mtime ordering, asserted ONCE and on its own. Every rejection case below
+      // needs the fallback to land somewhere predictable, but not one of them is a claim about
+      // WHICH dir that is -- so that claim lives here, where breaking it reddens a single case
+      // saying exactly that. Previously it was welded into all four: the message read
+      // "expected exp- to be rejected ... got <dir>/1965" when 1965 WAS the mtime fallback and
+      // the marker HAD been rejected correctly, so a tiebreak flake read as a rejection bug.
+      check("active-issue: with no marker, the newest admitted dir wins the mtime scan",
+        activeIssueDir(pipe, {}) === expDir
+          ? []
+          : [`expected the mtime fallback to pick ${expDir}, got ${activeIssueDir(pipe, {})}`], false);
+
+      // Stated against the no-marker result rather than against expDir by name, so this claim
+      // holds whatever the mtime scan picks. That independence is the point: this is the half
+      // that was never flaky, and it can no longer be reddened by the half that was.
       const rejects = (marker) => {
         const got = activeIssueDir(pipe, { active_issue: marker });
-        return got === expDir && path.basename(got) !== marker
-          ? []
-          : [`expected "${marker}" to be rejected and fall back to mtime, got ${got}`];
+        const bare = activeIssueDir(pipe, {});
+        if (got !== bare) {
+          return [`marker "${marker}" was HONORED: it steered resolution to ${got}, but with no marker at all resolution is ${bare}`];
+        }
+        if (path.basename(String(got)) === marker) {
+          return [`marker "${marker}" resolved to a directory of its own name: ${got}`];
+        }
+        return [];
       };
       check("active-issue: a bare 'exp-' with no slug is rejected", rejects("exp-"), false);
       check("active-issue: an exp- marker with a separator is rejected (traversal guard)", rejects("exp-a/../b"), false);
       check("active-issue: an uppercase exp- marker is rejected (convention is kebab)", rejects("exp-Two-Owner"), false);
       check("active-issue: a double-hyphen exp- marker is rejected", rejects("exp--bad"), false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      if (prevEnv.a === undefined) delete process.env.CLAUDE_PIPELINE_ACTIVE_ISSUE;
+      else process.env.CLAUDE_PIPELINE_ACTIVE_ISSUE = prevEnv.a;
+      if (prevEnv.b === undefined) delete process.env.PIPELINE_ACTIVE_ISSUE;
+      else process.env.PIPELINE_ACTIVE_ISSUE = prevEnv.b;
+    }
+  }
+
+  // ---- active-issue scoping: an mtime TIE is not a signal ----
+  // The tie rule is a deliberate semantic, so it is pinned here rather than left to emerge from
+  // enumeration order. Every mtime below is stamped explicitly: a fixture that wrote these files
+  // and hoped they landed on different timestamps would be testing the host's clock granularity,
+  // which is the bug this rule exists to answer (#27).
+  {
+    const root = mkdtempSync(path.join(tmpdir(), "vpa-tie-"));
+    const prevEnv = { a: process.env.CLAUDE_PIPELINE_ACTIVE_ISSUE, b: process.env.PIPELINE_ACTIVE_ISSUE };
+    try {
+      delete process.env.CLAUDE_PIPELINE_ACTIVE_ISSUE;
+      delete process.env.PIPELINE_ACTIVE_ISSUE;
+      const now = Date.now();
+      const stamp = (file, ms) => utimesSync(file, ms / 1000, ms / 1000);
+      // Build a root of issue dirs and stamp each status.json to an exact millisecond.
+      const build = (name, spec) => {
+        const pipe = path.join(root, name, ".pipeline");
+        const dirs = {};
+        for (const [issue, offsetMs] of Object.entries(spec)) {
+          const dir = path.join(pipe, issue);
+          mkdirSync(dir, { recursive: true });
+          writeFileSync(path.join(dir, "status.json"), JSON.stringify({ issue_number: Number(issue) }));
+          stamp(path.join(dir, "status.json"), now + offsetMs);
+          dirs[issue] = dir;
+        }
+        return { pipe, dirs };
+      };
+
+      // The production shape: a fresh clone writes every tracked status.json in one go, so on a
+      // host whose timestamps are coarser than the write burst they all land on one mtime.
+      const tie = build("tie", { 1965: 0, 1964: 0 });
+      check("active-issue: two dirs tied at the newest mtime resolve to null (a tie is not a signal)",
+        activeIssueDir(tie.pipe, {}) === null
+          ? []
+          : [`expected null for a tie, got ${activeIssueDir(tie.pipe, {})}`], false);
+
+      // CONTROL for the case above: the same fixture, one dir bumped a single millisecond clear,
+      // must resolve. Without this, a resolver that returned null unconditionally would pass.
+      const strict = build("strict", { 1965: 1, 1964: 0 });
+      check("active-issue: CONTROL a one-millisecond strict winner still resolves",
+        activeIssueDir(strict.pipe, {}) === strict.dirs[1965]
+          ? []
+          : [`expected ${strict.dirs[1965]}, got ${activeIssueDir(strict.pipe, {})}`], false);
+
+      // Only a tie AT THE TOP is ambiguous. Two stale dirs sharing an mtime say nothing about
+      // the one dir that is strictly newer than both.
+      const below = build("below", { 1965: 5000, 1964: 0, 1963: 0 });
+      check("active-issue: a tie BELOW the newest does not suppress a strict winner",
+        activeIssueDir(below.pipe, {}) === below.dirs[1965]
+          ? []
+          : [`expected ${below.dirs[1965]}, got ${activeIssueDir(below.pipe, {})}`], false);
+
+      const three = build("three", { 1965: 0, 1964: 0, 1963: 0 });
+      check("active-issue: a three-way tie at the newest resolves to null",
+        activeIssueDir(three.pipe, {}) === null
+          ? []
+          : [`expected null for a three-way tie, got ${activeIssueDir(three.pipe, {})}`], false);
+
+      // Precedence (a) is untouched by the tie rule: an explicit signal is evidence the scan
+      // does not have, so it resolves through an ambiguity that would otherwise abstain. This is
+      // what keeps the rule from weakening a run that names its issue.
+      check("active-issue: an explicit marker still resolves through an ambiguous mtime scan",
+        activeIssueDir(tie.pipe, { active_issue: "1965" }) === tie.dirs[1965]
+          ? []
+          : [`expected the marker to win, got ${activeIssueDir(tie.pipe, { active_issue: "1965" })}`], false);
+
+      // ...but a marker naming a dir that is not here is not evidence either: it falls through
+      // to the scan, which is still tied, so the answer is still null.
+      check("active-issue: a marker for an absent dir does NOT rescue a tie",
+        activeIssueDir(tie.pipe, { active_issue: "9999" }) === null
+          ? []
+          : [`expected null, got ${activeIssueDir(tie.pipe, { active_issue: "9999" })}`], false);
     } finally {
       rmSync(root, { recursive: true, force: true });
       if (prevEnv.a === undefined) delete process.env.CLAUDE_PIPELINE_ACTIVE_ISSUE;

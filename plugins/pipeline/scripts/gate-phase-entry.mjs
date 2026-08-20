@@ -29,6 +29,16 @@
  *     able to NARROW the subject: pointing it at a satisfied dir would be the env-var opt-out
  *     the design rejected, and it would leave no trace in the archived record. So both the
  *     signal-named dir and the mtime-derived dir are evaluated, and EITHER may refuse (R6b).
+ *   - A TIE in that mtime fallback resolves to NO subject, and this guard then falls silent.
+ *     Stated as a limitation rather than left to be discovered, because it is a DISARM VECTOR
+ *     that nobody has to choose: a fresh `git clone` writes every tracked status.json inside a
+ *     single coarse-clock tick on Linux, so all of them share one mtime and the seam abstains
+ *     (#27). The alternative was judging a run on a dir picked by readdirSync order, which is
+ *     what this used to do -- and which made the subject a property of the filesystem rather
+ *     than of the tree. Abstaining is the accepted trade: this guard would rather judge nothing
+ *     than judge a run the session does not own. It lands on the fail-open tooling branch R11
+ *     already declares ("no resolvable active issue"), so the fail-direction split is unchanged.
+ *     Pinned by AC14 cell (c) in tests/test-gate-phase-entry.sh, with a control.
  *
  * FAIL-DIRECTION SPLIT (R11), which is a contract change to a hook that declares itself
  * fail-open, so it is stated in both places. The DECISION is fail-CLOSED: a recognised phase
