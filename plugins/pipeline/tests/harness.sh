@@ -14,6 +14,37 @@ TESTS_PASSED=0
 TESTS_FAILED=0
 CURRENT_SUITE=""
 
+# ---- the assertion LEDGER: a counter that survives a subshell ----------------
+#
+# WHY A FILE. TESTS_PASSED/TESTS_FAILED are shell variables, so an assertion evaluated inside a
+# `( ... )`, a `$( ... )` or a pipeline element increments a COPY that is discarded when that
+# subshell exits. assert_* also returns 0 on both branches (the printf succeeds either way), so
+# the subshell's own exit status carries nothing either. The result is an assertion that PRINTS
+# its FAIL line and cannot fail the build: seven of them shipped in one suite, including two
+# non-zero CONTROLs whose only job was to be falsifiable, and the suite reported failed=0.
+#
+# Every assertion therefore records itself HERE as well, by appending a line. A file append
+# crosses a subshell boundary where a variable increment does not, so finish() can compare what
+# was RECORDED against what was COUNTED and refuse the mismatch. $BASH_SUBSHELL (present in bash
+# 3.2, which is what macOS ships) names the offenders rather than only reporting an arithmetic
+# gap.
+#
+# NOT mktemp: test-harness.sh sources this file with a deliberately failing mktemp stub on PATH,
+# and a harness that could not be sourced under that stub would break the suite that proves
+# new_tmpdir refuses an empty path. $$ is the SUITE's pid and stays the suite's pid inside a
+# subshell, which is exactly the scope wanted.
+_ASSERT_LEDGER="${TMPDIR:-/tmp}/.pipeline-test-harness-ledger.$$"
+: > "$_ASSERT_LEDGER" 2>/dev/null || _ASSERT_LEDGER=""
+
+# _ledger <ok|FAIL> <name>. Called AFTER the counter increment, so the recorded index is the
+# value the incrementing shell saw.
+_ledger() {
+  [[ -n "$_ASSERT_LEDGER" ]] || return 0
+  printf '%s\t%s\t%s\t%s\n' "$((TESTS_PASSED + TESTS_FAILED))" "$BASH_SUBSHELL" "$1" "$2" \
+    >> "$_ASSERT_LEDGER" 2>/dev/null
+  return 0
+}
+
 suite() {
   CURRENT_SUITE="$1"
   printf '\n%s\n' "$CURRENT_SUITE"
@@ -24,9 +55,11 @@ assert_eq() {
   local name="$1" actual="$2" expected="$3"
   if [[ "$actual" == "$expected" ]]; then
     TESTS_PASSED=$((TESTS_PASSED + 1))
+    _ledger ok "$name"
     printf '  ok    %s\n' "$name"
   else
     TESTS_FAILED=$((TESTS_FAILED + 1))
+    _ledger FAIL "$name"
     printf '  FAIL  %s\n        expected: %s\n        actual:   %s\n' "$name" "$expected" "$actual"
   fi
 }
@@ -35,9 +68,11 @@ assert_contains() {
   local name="$1" haystack="$2" needle="$3"
   if [[ "$haystack" == *"$needle"* ]]; then
     TESTS_PASSED=$((TESTS_PASSED + 1))
+    _ledger ok "$name"
     printf '  ok    %s\n' "$name"
   else
     TESTS_FAILED=$((TESTS_FAILED + 1))
+    _ledger FAIL "$name"
     printf '  FAIL  %s\n        expected to contain: %s\n        actual: %s\n' \
       "$name" "$needle" "$(printf '%s' "$haystack" | head -3)"
   fi
@@ -47,9 +82,11 @@ assert_not_contains() {
   local name="$1" haystack="$2" needle="$3"
   if [[ "$haystack" != *"$needle"* ]]; then
     TESTS_PASSED=$((TESTS_PASSED + 1))
+    _ledger ok "$name"
     printf '  ok    %s\n' "$name"
   else
     TESTS_FAILED=$((TESTS_FAILED + 1))
+    _ledger FAIL "$name"
     printf '  FAIL  %s\n        expected NOT to contain: %s\n' "$name" "$needle"
   fi
 }
@@ -132,6 +169,9 @@ _cleanup_tmpdirs() {
     _remove_owned_tmpdir "$line"
   done <<< "$registry"
   TMP_REGISTRY=""                      # idempotent: a second run removes nothing
+  # The ledger is a single FILE at a path this process composed from its own pid, so it is
+  # removed by exact name and never through the dir registry above.
+  [[ -n "$_ASSERT_LEDGER" ]] && rm -f "$_ASSERT_LEDGER"
   return $rc
 }
 
@@ -181,8 +221,29 @@ trap '_cleanup_tmpdirs' EXIT
 trap '_cleanup_tmpdirs; exit 130' INT
 trap '_cleanup_tmpdirs; exit 143' TERM
 
+# Every assertion this suite RAN, versus every assertion it COUNTED. A mismatch means at least
+# one assert_* ran somewhere its increment could not survive -- a subshell, a command
+# substitution, a pipeline element -- so its FAIL would print and the suite would still exit 0.
+# That is an assertion which cannot fail the build, and it is indistinguishable from a passing
+# one in the output. Reported as a FAILURE of the suite, because a suite whose count is wrong
+# cannot support any claim about what it checked.
+_assert_count_guard() {
+  [[ -n "$_ASSERT_LEDGER" && -f "$_ASSERT_LEDGER" ]] || return 0
+  local recorded counted
+  recorded="$(grep -c . "$_ASSERT_LEDGER" | tr -d ' ')"
+  counted=$((TESTS_PASSED + TESTS_FAILED))
+  [[ "$recorded" -eq "$counted" ]] && return 0
+  printf '\nHARNESS: %s assertion(s) ran but %s were counted.\n' "$recorded" "$counted" >&2
+  printf 'An uncounted assertion prints its result and cannot fail the build.\n' >&2
+  printf 'Ran outside the shell that owns the counters (level > 0):\n' >&2
+  awk -F'\t' '$2 != 0 { printf "  [subshell level %s] %s  %s\n", $2, $3, $4 }' "$_ASSERT_LEDGER" >&2
+  printf 'Scope the environment/cwd around the CHILD PROCESS, not around the assertion.\n' >&2
+  return 1
+}
+
 finish() {
   printf '\npassed=%s failed=%s\n' "$TESTS_PASSED" "$TESTS_FAILED"
+  _assert_count_guard || return 1
   [[ "$TESTS_FAILED" -eq 0 ]]
 }
 
