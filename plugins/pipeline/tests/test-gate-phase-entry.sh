@@ -508,9 +508,11 @@ done
 # ---------------------------------------------------------------------------
 suite "AC14: fail-OPEN on vocabulary, fail-CLOSED on sequence"
 # ---------------------------------------------------------------------------
-# The live case, not a hypothetical: status.schema.json:13's own description blesses
-# 3-scope-drift-adjudication, and pipeline.md never writes it. Under deny-by-default that
-# record would refuse every stop in the project that holds it.
+# Not a hypothetical: until #42, status.schema.json:13's own description named
+# 3-scope-drift-adjudication as an example phase, and pipeline.md never wrote it. Under
+# deny-by-default a record holding it would refuse every stop in the project. The schema no
+# longer names it, but the INPUT below stays exactly as it is -- pipeline.md still writes it
+# nowhere, so it remains a phase this guard can genuinely meet and must not refuse.
 for p in "3-scope-drift-adjudication" "3-something-nobody-writes"; do
   new_case 4242 "$(mk_status "$p" '"architectural"' "$NO_EVENTS")"
   gate "$CASE_ROOT"
@@ -708,9 +710,11 @@ assert_eq "  and no stderr" "$GATE_ERR" ""
 # ---------------------------------------------------------------------------
 suite "AC19: a SECOND ground truth, derived from the committed RECORDS rather than from prose"
 # ---------------------------------------------------------------------------
-# Prose alone is provably insufficient: status.schema.json:13 blesses two phases pipeline.md
-# never writes, which is live evidence that a vocabulary in this repo has ALREADY rotted in the
-# one file a prose-derived test does not read.
+# Prose alone is provably insufficient, and it was measured rather than argued: until #42,
+# status.schema.json:13 named two phases pipeline.md never wrote and omitted six it did. A
+# vocabulary in this repo HAD rotted, in the one file no prose-derived test read. The list is
+# corrected and now has its own set-equality test, so that is history -- but a second ground
+# truth derived from the committed RECORDS is still the point of this suite.
 CORPUS="$(git -C "$REPO_ROOT" ls-files '.pipeline/*/status.json' 2>/dev/null)"
 CORPUS_N="$(printf '%s\n' "$CORPUS" | grep -c . | tr -d ' ')"
 assert_eq "VACUITY CONTROL: the corpus walk found at least 4 committed records" \
