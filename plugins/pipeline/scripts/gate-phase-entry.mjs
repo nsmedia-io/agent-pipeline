@@ -208,12 +208,18 @@ function eventsSatisfy(events, tokens) {
  * artifact is, so an unapproved spec.json would be waved through by the event that recorded the
  * BA dispatch. The events path exists for the fresh checkout, where the artifact is absent
  * because everything except status.json is gitignored, and there it is knowingly weaker.
+ *
+ * Returns WHICH SOURCE decided as well as the outcome, because the two refusals need different
+ * messages: telling an operator that a file they are looking at is not present, and telling them
+ * to re-run the phase that already produced it, are both false on a content failure.
  */
 function prerequisiteSatisfied(issueDir, row, events) {
-  if (!row.file) return true;
+  if (!row.file) return { ok: true, artifact: "none" };
   const artifactPath = path.join(issueDir, row.file);
-  if (existsSync(artifactPath)) return contentSatisfies(artifactPath, row);
-  return eventsSatisfy(events, row.tokens);
+  if (existsSync(artifactPath)) {
+    return { ok: contentSatisfies(artifactPath, row), artifact: "present" };
+  }
+  return { ok: eventsSatisfy(events, row.tokens), artifact: "absent" };
 }
 
 /**
@@ -275,17 +281,21 @@ function decideForDir(issueDir, now) {
   }
 
   const row = rowFor(phase, tier);
-  if (prerequisiteSatisfied(issueDir, row, status.events)) {
+  const prereq = prerequisiteSatisfied(issueDir, row, status.events);
+  if (prereq.ok) {
     return decided("granted", `${at}: its prerequisite is satisfied.`);
   }
+  const reason =
+    prereq.artifact === "present"
+      ? `${at} (${tier}) has a \`${row.file}\` that does not satisfy this row, and a present artifact is not rescued by events[].`
+      : `${at} (${tier}) has no \`${row.file}\` and no events[] entry recording that phase closing.`;
   return {
-    ...decided(
-      "refused",
-      `${at} (${tier}) has no \`${row.file}\` and no events[] entry recording that phase closing.`,
-    ),
+    ...decided("refused", reason),
     phase,
     file: row.file,
     tier,
+    artifact: prereq.artifact,
+    content: row.content || null,
   };
 }
 
@@ -297,15 +307,39 @@ function decideForDir(issueDir, now) {
  * i.e. it treats that field as one that can receive a pasted token before anyone notices, and
  * stderr is fed straight back into the transcript.
  */
+const CONTENT_DIAGNOSIS = {
+  "ba-approved": "carries no `ba_approved_at`",
+  "non-empty": "is empty",
+};
+
+const CONTENT_REPAIR = {
+  "ba-approved": "Record BA's approval: set `ba_approved_at` in",
+  "non-empty": "Write the content that phase produces into",
+};
+
 function refusalMessage(result) {
   const dir = `.pipeline/${result.issue_dir}`;
+  // A refusal on a PRESENT artifact must not send the operator after a missing file. Both of the
+  // absent-case lines are false there -- the file is in front of them, and re-running the phase
+  // that produced it changes nothing -- and this is the text a blocked turn reads.
+  const present = result.artifact === "present";
+  const diagnosis = present
+    ? `Its prerequisite \`${result.file}\` IS present in ${dir}, but it ${CONTENT_DIAGNOSIS[result.content] || "does not satisfy this row"}. A present artifact settles the row on its own; events[] are not consulted to rescue it, or the event that recorded the phase being DISPATCHED would stand in for its approval.`
+    : `Its prerequisite \`${result.file}\` is not present in ${dir}, and no events[] entry records that phase closing.`;
+  const route1 = present
+    ? `  1. ${CONTENT_REPAIR[result.content] || "Supply the content this row requires in"} ${dir}/${result.file}, then commit it.`
+    : `  1. Run the phase that produces \`${result.file}\`, then append its events[] entry and commit ${dir}/status.json.`;
   return [
     `Phase-entry guard: this turn cannot end with ${dir} recorded at \`${result.phase}\`.`,
-    `Its prerequisite \`${result.file}\` is not present in ${dir}, and no events[] entry records that phase closing.`,
+    diagnosis,
     `Work already done in this turn is not undone; only the turn boundary is blocked.`,
-    `Two ways to clear it:`,
-    `  1. Run the phase that produces \`${result.file}\`, then append its events[] entry and commit ${dir}/status.json.`,
+    `Ways to clear it:`,
+    route1,
     `  2. If the skip was deliberate, record it: append an events[] entry for the phase you skipped with "verdict": "SKIPPED" and a non-empty "note" saying why.`,
+    // The guard only holds turns for a run it can still see in flight, so concluding an abandoned
+    // one clears it and refuses nothing. Without this route the in-flight predicate's own escape
+    // hatch was undocumented at the only moment anyone needs it.
+    `  3. If this run is over, conclude it: give ${dir}/status.json a \`final_verdict\`, a \`completed_at\`, or \`"current_phase": "5-archived"\`. A run this guard cannot see in flight is never refused.`,
     `A /phase re-run that did the work records it the same way, as a \`<phase-token>-rerun\` event (e.g. \`1-ba-rerun\`); the bare \`phase-rerun\` label resolves to no phase and clears nothing.`,
   ].join("\n");
 }

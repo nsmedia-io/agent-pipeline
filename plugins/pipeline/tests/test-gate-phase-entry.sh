@@ -351,8 +351,8 @@ suite "R3 kind: content-conditioned rows test CONTENT on path (a), not mere pres
 # artifact-absent-with-event cell is the non-zero control that makes the rest mean anything: it
 # is what proves the event in cells 1 and 2 really does satisfy the row, so a refusal alongside
 # it is the ARTIFACT overriding the event rather than an inert fixture.
-r3_row() {  # r3_row <phase> <tier> <file> <failing-body> <satisfying-body> <satisfying-event-json>
-  local phase="$1" tier="$2" file="$3" bad="$4" good="$5" ev="$6"
+r3_row() {  # r3_row <phase> <tier> <file> <failing-body> <satisfying-body> <satisfying-event-json> <repair-token>
+  local phase="$1" tier="$2" file="$3" bad="$4" good="$5" ev="$6" repair="$7"
 
   # 1. THE MISSING LEG: present-and-failing, WITH an event that would satisfy the row on its own.
   new_case 4242 "$(mk_status "$phase" "\"$tier\"" "$ev")"
@@ -361,6 +361,15 @@ r3_row() {  # r3_row <phase> <tier> <file> <failing-body> <satisfying-body> <sat
   assert_eq "$phase ($tier): a failing $file is NOT rescued by a satisfying events[] entry" \
     "$GATE_DEC" "refused"
   assert_eq "  and the refusal exits 2" "$GATE_RC" "2"
+  # The operator-facing half of the same cell. The message a blocked turn reads used to say the
+  # file was NOT PRESENT and send them to re-run the phase that produced it -- both false when
+  # the file is sitting in front of them, and the wrong repair either way.
+  assert_not_contains "  and the refusal does not claim the file is missing" \
+    "$GATE_ERR" "\`$file\` is not present"
+  assert_contains "  it says the file IS present" "$GATE_ERR" "\`$file\` IS present"
+  assert_contains "  and names the repair this row actually needs ($repair)" "$GATE_ERR" "$repair"
+  assert_not_contains "  and does not send them back to the phase that already produced it" \
+    "$GATE_ERR" "Run the phase that produces"
 
   # 2. Same fixture, same event, CONTENT REPAIRED. The twin: without it, cell 1's refusal could
   #    be about the phase, the tier or the event rather than about the content.
@@ -386,9 +395,31 @@ r3_row() {  # r3_row <phase> <tier> <file> <failing-body> <satisfying-body> <sat
 BA_EVENT='[{"phase":"1-ba","verdict":"complete","at":"2026-01-01T00:00:00Z"}]'
 P2_EVENT='[{"phase":"2-constraints","verdict":"complete","at":"2026-01-01T00:00:00Z"}]'
 
-r3_row 2-review     architectural spec.json      '{"issue_number":4242}' "$SPEC_APPROVED"  "$BA_EVENT"
-r3_row 2-constraints standard     spec.json      '{"issue_number":4242}' "$SPEC_APPROVED"  "$BA_EVENT"
-r3_row 3-impl       standard      constraints.md ''                      '# real content' "$P2_EVENT"
+r3_row 2-review      architectural spec.json      '{"issue_number":4242}' "$SPEC_APPROVED" "$BA_EVENT" ba_approved_at
+r3_row 2-constraints standard      spec.json      '{"issue_number":4242}' "$SPEC_APPROVED" "$BA_EVENT" ba_approved_at
+r3_row 3-impl        standard      constraints.md ''                      '# real content' "$P2_EVENT" "is empty"
+
+# NON-ZERO CONTROL for the four message assertions above: the ABSENT case must still say the two
+# things the present case must not. Without it, "does not claim the file is missing" is satisfied
+# by a template that lost the absent-case wording entirely, and the operator blocked by a genuinely
+# missing artifact is the one who pays.
+new_case 4242 "$(mk_status "2-review" '"architectural"' "$NO_EVENTS")"
+gate "$CASE_ROOT"
+assert_contains "CONTROL: an ABSENT prerequisite still says it is not present" \
+  "$GATE_ERR" "\`spec.json\` is not present"
+assert_contains "CONTROL: and still sends the operator to the phase that produces it" \
+  "$GATE_ERR" "Run the phase that produces"
+assert_not_contains "CONTROL: and does not claim a file that is absent IS present" \
+  "$GATE_ERR" "\`spec.json\` IS present"
+
+# The route the in-flight predicate exists for, which the message never named. Concluding an
+# abandoned run is the escape that works -- inFlight is false on a final_verdict, and isTerminal
+# is true on completed_at and on 5-archived, each already asserted by AC12/AC15 -- so this route
+# refuses nothing that was not already refused.
+assert_contains "the refusal offers the abandoned-run route" "$GATE_ERR" "If this run is over"
+assert_contains "  naming final_verdict" "$GATE_ERR" "final_verdict"
+assert_contains "  and completed_at" "$GATE_ERR" "completed_at"
+assert_contains "  and 5-archived" "$GATE_ERR" "5-archived"
 
 # The stated consequence, asserted rather than left as prose: on a fresh checkout the SAME run
 # is granted through path (b), because an event attests DISPATCH and not APPROVAL. This is the
