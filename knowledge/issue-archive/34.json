@@ -1,6 +1,6 @@
 {
   "issue_number": 34,
-  "archived_at": "2026-08-20T18:37:19.923Z",
+  "archived_at": "2026-08-20T19:51:35.886Z",
   "spec": {
     "issue_number": 34,
     "title": "Bound the unbounded verdict fields and de-rot the phase list in status.schema.json",
@@ -347,7 +347,7 @@
               "reader": "plugins/pipeline/commands/pipeline.md",
               "rederives": "The phase vocabulary. pipeline.md's current_phase writes are the GROUND TRUTH that the schema's description example list is supposed to mirror; the list is a hand-maintained second copy, which is the whole defect in #42.",
               "impact": "This is the source R3 derives from. Direction matters: the schema follows pipeline.md, never the reverse.",
-              "verified_by": "grep -o '\"\\?current_phase\"\\?: *\"[^\"]*\"' plugins/pipeline/commands/pipeline.md | sed 's/.*: *\"\\(.*\\)\"/\\1/' | sort -u  -> 26 tokens, 25 literals plus the <phase>-error template"
+              "verified_by": "grep -o '\"\\?current_phase\"\\?: *\"[^\"]*\"' plugins/pipeline/commands/pipeline.md | sed 's/.*: *\"\\(.*\\)\"/\\1/' | sort -u  -> 27 tokens, 26 literals plus the <phase>-error template. CORRECTED at Phase 4 (BA-3): this line previously recorded 26/25, which is the NARROW grep's population (grep -o 'current_phase: *\"[^\"]*\"', no optional quote, as used by test-voice-lint.sh:232), not the WIDE grep quoted here as this line's own source. The missing member is 0-setup, which pipeline.md:53 writes only in JSON-quoted form (\"current_phase\": \"0-setup\"). Verified at HEAD d8686bc and at the spec's measurement commit 5408339, between which pipeline.md is byte-identical. Not load-bearing: AC5 derives both sets live and pins no count."
             },
             {
               "reader": "plugins/pipeline/scripts/gate-phase-entry.mjs:115, :241",
@@ -482,7 +482,7 @@
   },
   "tasks": {
     "issue_number": 34,
-    "worktree_path": "/Users/brandonsmith/WebstormProjects/agent-pipeline/.claude/worktrees/34-phase3-20260820-094843",
+    "worktree_path": "<redacted-absolute-path>",
     "branch": "fix/34-bound-archived-verdict-fields",
     "base_branch": "main",
     "tasks": [
@@ -567,7 +567,7 @@
     ],
     "branch": "fix/34-bound-archived-verdict-fields",
     "base_branch": "main",
-    "worktree_path": "/Users/brandonsmith/WebstormProjects/agent-pipeline/.claude/worktrees/34-phase3-20260820-094843",
+    "worktree_path": "<redacted-absolute-path>",
     "pre_change_commit": "4a6f164",
     "commits": [
       {
@@ -594,6 +594,14 @@
           "plugins/pipeline/tests/test-status-schema-contract.sh"
         ],
         "files_removed": []
+      },
+      {
+        "sha": "2129276",
+        "message": "fix(tests): re-found the events/flags discrimination on a crafted tree (#34, #42)",
+        "files_changed": [
+          "plugins/pipeline/tests/test-status-schema-contract.sh"
+        ],
+        "files_removed": []
       }
     ],
     "files_removed": [],
@@ -613,7 +621,20 @@
       "post_change_total": 2056,
       "post_change_failed": 0,
       "delta": 67,
-      "delta_grain": "assertions, not tests and not suites. The +67 is exactly the new suite's own count; no pre-existing suite gained or lost an assertion, which is checkable because the delta equals the new suite's standalone total."
+      "delta_grain": "assertions, not tests and not suites. The +67 is exactly the new suite's own count; no pre-existing suite gained or lost an assertion, which is checkable because the delta equals the new suite's standalone total.",
+      "post_nitfix_commit": "748f37c",
+      "post_nitfix_total": 2064,
+      "post_nitfix_failed": 0,
+      "post_nitfix_suites": 33,
+      "post_nitfix_delta": 8,
+      "post_nitfix_delta_reconciliation": "2056 -> 2064 on the SAME host as both earlier figures (Darwin 25.5.0 x86_64, bash 3.2.57, node v24.19.0), per #47's runner-gap rule. The +8 reconciles exactly and every member is named: 3 in the AC1 suite (the two R6 writer-rule assertions plus the scoped-extraction control) and 5 in AC10 (4 per-verb control cells, 1 past-tense negative control). AC10's pinned floor was REPLACED by the derived equality one-for-one, so it contributes 0. No pre-existing suite gained or lost an assertion.",
+      "post_nitfix_command": "bash plugins/pipeline/tests/run.sh, summing passed+failed across every suite's `passed=N failed=M` line (33 suites)",
+      "post_cifix_commit": "2129276",
+      "post_cifix_total": 2071,
+      "post_cifix_failed": 0,
+      "post_cifix_suites": 33,
+      "post_cifix_delta": 7,
+      "post_cifix_delta_reconciliation": "2064 -> 2071 on the SAME host as every earlier figure (Darwin 25.5.0 x86_64, bash 3.2.57, node v24.19.0), per #47 runner-gap rule. Net +7 inside test-status-schema-contract.sh alone (75 -> 82): one live-corpus silence cell REMOVED, eight crafted-fixture cells ADDED (1 fixture-length control, 4 fire/silent discrimination cells, 2 verdict-count earned-zero controls, 1 completed-run conformance cell). No other suite gained or lost an assertion; the 5 red assertions CI reported were this one cell plus its cascade through test-issue17-integration.sh AC41(c), which reruns the whole suite inside a fresh clone."
     },
     "mutation_battery": {
       "discipline": "Every mutation was applied AFTER the three commits landed and restored with `git checkout -- <path>`, never from memory. Each cell printed the changed line as proof that the mutation applied was the mutation intended; one cell (M12, first attempt) silently failed to apply and was caught by exactly that proof step, then redone. Tree verified clean (0 dirty) after every restore.",
@@ -820,9 +841,9 @@
       }
     ],
     "scope_drift": {
-      "detected": false,
+      "detected": true,
       "description": "One deliberate in-spirit extension, recorded rather than silent: flags[].summary's existing maxLength 140 gained a description saying it too is unenforced. R6 says 'each capped field', summary is a capped field, and it is the exact claim #34 got wrong. No other file, field, or behaviour was touched. events[].phase, flags[].phase and flags[].agent were left alone as the spec directs, and no follow-up issue is claimed to exist for flags[].agent.",
-      "resolution": null
+      "resolution": "RULED IN by BA at Phase 4 (BA-4), and relabelled here rather than rebuilt. BA's ruling verbatim in substance: the CHANGE is correct -- R6 says 'the description of each capped field', flags[].summary IS a capped field, the added sentence is the exact claim #34 got wrong ('the mechanism exists; it was simply never applied here'), it alters no constraint and no behaviour, and it appears in no out_of_scope entry. But it contradicts a written spec line (sibling_causes_considered says 'Not changed here'), so the honest label is detected: true with the ruling recorded. Reporting hygiene only; nothing rebuilt. The 140 cap itself is asserted untouched at test-status-schema-contract.sh:197."
     },
     "tripwire": {
       "fired": false,
@@ -838,7 +859,7 @@
       "test": true,
       "lint": true,
       "command": "bash plugins/pipeline/tests/run.sh (the repo's checkCommand; it is the whole gate -- there is no separate typecheck or lint step in this repo)",
-      "result": "All test suites passed. 2056 assertions, failed=0, exit 0."
+      "result": "All test suites passed. 2071 assertions, failed=0, exit 0 (at 2129276, after the CI-red fix)."
     },
     "knowledge_drift_claims": [],
     "qa_signoff": {
@@ -978,10 +999,122 @@
         }
       ],
       "verdict": "APPROVE",
-      "notes": "Coverage record only, not an independent sign-off: this is the standard tier, so the same context authored the code and the tests. QA's Phase 4 audit is the first independent look and should scrutinise this contract hardest. Three places to point it at. (1) The floor derivation in AC2 is the judgement call -- see edge_cases_deferred; it refuses the empty walk but not a corpus that shrinks on both sides at once. (2) AC1's single literal 32 is a deliberate split from AC4's schema-read: one site pins the ruled value, every corpus assertion reads the schema. Under the expected-survivor mutation (32 -> 64) AC1 reddens and AC3 does not, and that asymmetry is the intended reading, not a bug. (3) The AC10 self-exemption is a real hole in exactly one file, argued above."
+      "notes": "Coverage record only, not an independent sign-off: this is the standard tier, so the same context authored the code and the tests. QA's Phase 4 audit is the first independent look and should scrutinise this contract hardest. Three places to point it at. (1) The floor derivation in AC2 is the judgement call -- see edge_cases_deferred; it refuses the empty walk but not a corpus that shrinks on both sides at once. (2) AC1 holds the literal 32 at TWO sites, one pin per capped field, which is a deliberate split from AC4's schema-read: AC1 requires each field pinned separately (a single shared pin is satisfied by the events[] copy while flags[] sits bare, the exact hole #34 shipped), and every corpus assertion reads the schema instead. CORRECTED at Phase 4 (QA G5 / Dev D2): this sentence previously said 'single literal', and the file's comments at :15 and :179 said the same; grep -n '\"32\"' returns two lines. Under the expected-survivor mutation (32 -> 64) AC1 reddens and AC3 does not, and that asymmetry is the intended reading, not a bug. (3) The AC10 self-exemption is a real hole in exactly one file, argued above."
     },
     "pr_url": "https://github.com/nsmedia-io/agent-pipeline/pull/51",
-    "completed_at": "2026-08-20T00:00:00Z"
+    "completed_at": "2026-08-20T12:40:00Z",
+    "phase4_nit_fixes": {
+      "verdict_that_triggered_this": "APPROVE_WITH_NOTES x4 (ba, dev, qa, secops); no blockers, no veto. Nits fixed in place per the rubric; no panel re-run.",
+      "commit": "748f37cca56a6d0d2f996ea7c99812496a905902",
+      "scope_ruled_by_owner": [
+        "OUT: AC2's numeric floor (BA-1). QA ruled the current derived shape acceptable and pinning any number contradicts the derive-counts rule this round enforces elsewhere; the disagreement is going to a follow-up issue, not into this diff.",
+        "OUT: capping events[].note / veto_reason / error (SecOps S2, QA G3). SecOps ruled a length cap the wrong instrument -- the 616-char note in the corpus is correct audit work -- and filed #52.",
+        "OUT: the third-derivation / 0-setup divergence (Dev D1, BA-2). Filed separately by the owner; both BA and Dev-review placed it out of scope for #34/#42.",
+        "OUT: a run.sh aggregate total (QA G4, Dev D4/D5). Belongs to #47."
+      ],
+      "fixes": [
+        {
+          "id": "F1",
+          "source": "QA G5 + Dev D2",
+          "kind": "false sentence, no assertion changed",
+          "was": "test-status-schema-contract.sh:15 'One site below holds the literal 32' and :179 'THE ONE SITE THAT HOLDS THE LITERAL'; impl-report qa_signoff.notes repeated it.",
+          "is": "Both comments now say TWO sites, one pin per capped field, and say WHY two is right (AC1 requires each field pinned separately). qa_signoff.notes corrected above.",
+          "why_not_the_assertions": "AC4 is not compromised and both QA and Dev-review re-ran the schema-only mutation (32 -> 17) and watched AC3 -- the corpus assertion, which reads LIVE_CAP from the schema -- move. The defect was the sentence."
+        },
+        {
+          "id": "F2",
+          "source": "SecOps S1",
+          "kind": "a claimed rule that existed nowhere, now written AND asserted",
+          "was": "Both verdict descriptions say the cap 'is honored by the writer and by tests/...'. The second half was true; the first named a rule nobody wrote. commands/pipeline.md restated the 140-char summary cap at :92 and the verdict cap nowhere, while the flags[].summary description eight lines below correctly named ITS mechanism -- so the asymmetry read as symmetry.",
+          "is": "commands/pipeline.md gains a 'Rules for `verdict`' block beside the 140 rule, in that file's voice: TOKEN not prose, strict 32-char cap matching the schema's maxLength, reasoning goes in summary, and the restatement IS the write-time honorer because nothing validates the file. Three assertions added in the AC1 suite, keyed to the cap READ FROM the schema, so the writer's copy cannot rot silently -- a rule nobody reads is a comment.",
+          "gate_bites_proof": "Recorded, isolated worktree at 748f37c. (A) schema maxLength 32 -> 64, writer copy untouched: FAIL 'R6: commands/pipeline.md restates the verdict cap to the WRITER' expected to contain '64-char cap', suite 72/3. (B) delete the pipeline.md verdict block: FAIL on both R6 assertions with empty haystacks, suite 73/2. (C) delete the blank line that terminates the sed range: FAIL 'CONTROL: the extraction is SCOPED', expected 0 actual 1, suite 74/1. Restored from git after each; clean tree and 75/0 re-verified."
+        },
+        {
+          "id": "F3",
+          "source": "QA G1",
+          "kind": "demonstrated escape, closed and re-run",
+          "was": "AC10's anti-vacuity floor was `[[ \"$AC10_EXAMINED\" -ge 8 ]]` against a real population of 33 -- room for 24 suites to fall out of the glob in silence. QA planted a violation (66/1, needle alive), then planted the identical violation with the glob narrowed to 9 files and got 67/0 GREEN, violation unseen.",
+          "is": "AC10_EXPECTED is derived from an independent enumeration of the same glob, minus the single self-exemption, and asserted by equality rather than by floor. Non-vacuous by construction: an empty glob yields -1 against 0 examined, which is red.",
+          "escape_rerun": "Isolated worktree. Violation planted in test-voice-lint.sh (outside the narrowed glob) and the loop glob narrowed to test-g*.sh test-h*.sh test-i*.sh (9 files, exactly QA's M15b). RED: 'AC10: and the walk examined EVERY suite but its own (population DERIVED from the glob, not pinned)' expected 32 actual 9, suite 74/1. The violation itself is still unseen in that cell -- which is precisely why the population assertion has to be the one that bites, and it does."
+        },
+        {
+          "id": "F4",
+          "source": "Dev D3",
+          "kind": "demonstrated escape, closed and re-run",
+          "was": "AC10_NEEDLE='schema\\.json.*bl[e]sses' matched one verb while :434 stated the class as 'names/blesses' and :455's assertion name said 'names'. Dev-review appended '# status.schema.json:13 names 3-scope-drift-adjudication, and pipeline.md writes it nowhere.' to a suite and it passed 67/0. Not hypothetical: test-gate-phase-entry.sh:511, rewritten by this PR, uses 'named' for this subject.",
+          "is": "AC10_VERBS='bl[e]sses|n[a]mes|lists|claims' with the needle anchored on both sides (grep -E, \\b...\\b) and every call site switched to -E. One control cell per verb over the same sentence, generated from AC10_VERBS. Two negative cells: the surviving TRUE sentence about the control input, and the re-anchored PAST-tense history wording -- a needle that swallowed 'named' would redden on the corrected comments it exists to enforce. The bracket trick is carried on n[a]mes as well as bl[e]sses so the needle cannot match its own control definitions.",
+          "escape_rerun": "Isolated worktree, Dev-review's exact line appended to test-gate-phase-entry-drift.sh. RED: 'AC10: no suite still claims in the present tense that the schema names an unwritten phase' expected 'none' actual ' test-gate-phase-entry-drift.sh:279', suite 74/1. Restored from git; 75/0.",
+          "verb_class_scan": "grep -lE over all 33 suites at the widened needle returns only this file (self-exempt). Checked the near misses by hand: test-gate-phase-entry-hook.sh:104 ('says outright'), test-telemetry-exit-attribution.sh:16 ('sides with'), test-voice-lint.sh:191 ('names' precedes the filename, and the needle requires schema.json FIRST). 'says' and 'sides' are deliberately outside the class: they are not claims about the schema naming a phase."
+        },
+        {
+          "id": "F5",
+          "source": "BA-3",
+          "kind": "wrong number in an artifact",
+          "was": ".pipeline/34/map.json recorded '26 tokens, 25 literals plus the <phase>-error template' against the WIDE grep quoted as that line's own source.",
+          "is": "27 tokens / 26 literals, with the population named. Re-derived at HEAD: the wide grep (optional-quote) yields 27, the narrow grep (no optional quote, as used by test-voice-lint.sh:232) yields 26, and comm shows the sole difference is 0-setup, which pipeline.md:53 writes only as \"current_phase\": \"0-setup\". 26/25 is separately correct for the narrow derivation, so the correction names which grep produced which figure. Verified pipeline.md byte-identical between 5408339 and d8686bc (empty git diff), so the figure was wrong at the spec's own measurement commit too. Not load-bearing: AC5 derives both sets live and pins no count."
+        },
+        {
+          "id": "F6",
+          "source": "BA-4",
+          "kind": "reporting flag",
+          "was": "scope_drift.detected: false, resolution: null.",
+          "is": "detected: true with BA's ruling recorded in resolution. The finding stands and the build stands; only the label was wrong."
+        }
+      ],
+      "expected_survivor": {
+        "mutation": "AC10_VERBS='bl[e]sses|n[a]mes|lists|claims' -> 'bl[e]sses|n[a]mes|lists' (drop one verb from the class)",
+        "result": "SURVIVED, green at 74/0, as expected and documented rather than discovered.",
+        "why": "The per-verb control cells are generated FROM AC10_VERBS, so narrowing the class narrows its own controls with it. This is the same recursion QA's G1 named one level up: the guard against a narrowed population cannot itself notice being narrowed. The only tell is the assertion count dropping 75 -> 74, and nothing reads an aggregate total today.",
+        "issue": "#47 (run.sh emits no aggregate and no floor is re-derived per run). Named here so a future reader does not read 'every mutation reddened' off this battery."
+      }
+    },
+    "post_ci_fix": {
+      "commit": "2129276",
+      "trigger": "CI RED on 347b072 (the completed run record for this run). 2059 assertions, 5 failed, ONE root cause at test-status-schema-contract.sh:313.",
+      "root_cause": "The AC3 fixture matrix asserted over the LIVE corpus that at cap 17 the events[] branch reports zero violations while flags[] reports one -- a discrimination proving the two branches are separately exercised. Sound intent, resting on a corpus property that correctly stopped being true: commands/pipeline.md makes each events[] entry the EXIT marker of the phase it closes, so a Phase 4 panel returning APPROVE_WITH_NOTES writes those 18 characters into events[]. .pipeline/34/status.json now reads events: SKIPPED(7), complete(8) x3, APPROVE_WITH_NOTES(18). Every completed run whose panel returns APPROVE_WITH_NOTES would have reddened this assertion; reverting the record would have hidden it until the next such run landed on main.",
+      "class": "evidence.md, a control anchored to a live defect has a shelf life -- arriving one PR early, and in the SILENCE direction specifically.",
+      "fix": "The discrimination now runs on two trees this file builds via the existing new_tmpdir idiom. Each holds one crafted over-cap violator in exactly ONE field plus a record shaped like a real completed run, carrying the 18-char APPROVE_WITH_NOTES in events[] AND flags[]. One branch fires and NAMES its file, the other is silent, asserted in BOTH directions, with the per-tree verdict count pinned so each silence is earned rather than unvisited.",
+      "direction_rule": "What may rest on the live corpus is decided by direction. A FIRES cell may: the corpus only grows by a run committing its own record, and an added record cannot remove a long verdict. A SILENCE cell may not: any added record can break it. The cap-14 FIRES cell over the live corpus is therefore kept; only the silence cell moved to a crafted tree.",
+      "untouched": [
+        "AC3 live-corpus assertion (no committed verdict exceeds the cap) -- still walks the real corpus.",
+        "AC3 NON-ZERO CONTROL at cap 17 including its expiry guard (the corpus maximum is still the 18-char value) -- passed before and after, logic unchanged.",
+        ".pipeline/34/status.json -- NOT edited. The record is honest and it is the evidence for this fix.",
+        "Everything else from the previous round."
+      ],
+      "label_correction": "One neighbouring cap-17 control label read \"...names the FLAGS entry, not an events entry\". Its assertion (assert_contains flags[) still holds, but the \"not an events entry\" clause became false of the report the moment events[] gained an 18-char value. Label text only, no logic change: now \"...names the FLAGS entry that carries the 18-char value\".",
+      "gate_bites_proof": {
+        "isolation": "git worktree add --detach /tmp/dev-34-fix2 fix/34-bound-archived-verdict-fields, at 7acc605 (pre-amend content-identical to 2129276 for the walker and the cells). Each mutation applied by literal string replacement with a match-count assertion (exit 9 on != 1 match), the changed line printed back, restored with git checkout -- <path> and the tree verified clean. Worktree removed after.",
+        "mutations": [
+          {
+            "id": "M-CI-1",
+            "mutation": "walker: for (const field of [\"events\", \"flags\"]) -> for (const field of [\"flags\"]) -- the events[] branch is never inspected",
+            "result": "RED, suite 82/0 -> 76/6",
+            "observed": "FAIL  AC3 FIXTURE MATRIX: with the over-long value in events[], the events[] branch fires and NAMES it / expected to contain: .pipeline/ev/status.json events[0] / actual: (empty)   ||   FAIL  both branches were INSPECTED in the events[] tree (4 verdicts read) / expected: 4 / actual: 2   ||   FAIL  and in the flags[] tree too / expected: 4 / actual: 2",
+            "documented_survivors": "The two SILENCE cells stayed GREEN under this mutation, and that is expected, not a gap: a walker that never inspects events[] emits no events[ label, which is indistinguishable from a correct silence by the silence cell alone. That is precisely what the paired verdict-count controls exist to catch, and they went red. Reported rather than papered over, per the keep-one-survivor rule."
+          },
+          {
+            "id": "M-CI-2",
+            "mutation": "walker: out.violations.push(f + \" \" + field + ...) -> ... + \"events\" + ... -- one branch MASKS the other by mislabelling every flags[] violation as an events[] one",
+            "result": "RED, suite 82/0 -> 78/4",
+            "observed": "FAIL  AC3 FIXTURE MATRIX: ...and the events[] branch is silent on that same tree (the two cells differ) / expected: 0 / actual: 1   ||   FAIL  with the over-long value in flags[], the flags[] branch fires and NAMES it / expected to contain: .pipeline/fl/status.json flags[0] / actual: .pipeline/fl/status.json events[0].verdict=\"AAA...\" len=33 cap=32",
+            "why_it_matters": "This is the masking defect the replaced cell existed to catch, now caught on a crafted tree instead of on a corpus property. The NEW silence cell itself goes red here, so it is not a cell that cannot fail."
+          }
+        ],
+        "regression_probe": {
+          "question": "Can a future APPROVE_WITH_NOTES run break the new cell again?",
+          "method": "In the isolated worktree, a REAL completed record (.pipeline/34/status.json, events[4].verdict = APPROVE_WITH_NOTES, 18 chars -- captured, not hand-written) was copied into BOTH crafted trees as a third record, mimicking a future run landing in the population.",
+          "result": "All four discrimination cells stayed GREEN (events fires / flags silent, flags fires / events silent), as did the completed-run conformance cell. Only the two verdict-COUNT controls moved (4 -> 18), because they pin the size of a population this file owns outright.",
+          "answer": "No. The cells cannot be reached by a pipeline run: their population is built inside the suite by new_tmpdir and no run can add a record to it. The probe had to inject the record by hand to move anything, and what it moved was a count literal, not the discrimination. Only an edit to this file can move that literal, which is loud and correct -- the failure mode of the cell it replaced was that a correct run somewhere else moved it silently."
+        }
+      },
+      "checks": {
+        "command": "bash plugins/pipeline/tests/run.sh",
+        "result": "All test suites passed. 33 suites, 2071 assertions, failed=0, exit 0.",
+        "platform": "macOS, Darwin 25.5.0 x86_64, bash 3.2.57(1)-release, node v24.19.0 (brandons.macbook.pro.lan) -- the same host as every other figure in assertion_counts.",
+        "shellcheck": "shellcheck -S warning on the edited file reports only the two PRE-EXISTING SC2010 warnings at lines 227 and 540; the new block adds none."
+      },
+      "scope": "One assertion, one root cause, plus one falsified neighbouring label. No other file touched."
+    }
   },
   "peer-review": {
     "ba": {
@@ -1163,7 +1296,61 @@
         "fifth_vocabulary_copy": "No NEW copy of the phase VOCABULARY is introduced (the suite derives it; the only phase literals in it are single-purpose control inputs at :246, :309, :368). But a new copy of the DERIVATION is introduced, and it diverges -- see D1. The pre-existing full-label enumeration in gate-phase-entry.mjs (PREREQUISITES + UNGUARDED + TERMINAL, :74-121) is a fifth hand-maintained copy, but it predates this diff and is partitioned against pipeline.md by test-gate-phase-entry-drift.sh -- with the strict derivation, which is why it too is blind to 0-setup."
       },
       "knowledge_drift_claims": [],
-      "notes": "The shared worktree showed ' M .pipeline/34/status.json' before and after my run; I did not write it and did not touch it. My mutations ran only in /tmp/dev-34-mutate (detached at d8686bc), were restored FROM GIT, and the worktree was verified clean before removal."
+      "notes": "The shared worktree showed ' M .pipeline/34/status.json' before and after my run; I did not write it and did not touch it. My mutations ran only in /tmp/dev-34-mutate (detached at d8686bc), were restored FROM GIT, and the worktree was verified clean before removal.",
+      "phase4_nit_resolution": {
+        "commit": "748f37cca56a6d0d2f996ea7c99812496a905902",
+        "run": "bash plugins/pipeline/tests/run.sh -> 33 suites, 2064 passed, 0 failed (Darwin 25.5.0 x86_64, bash 3.2.57, node v24.19.0)",
+        "resolved": [
+          {
+            "id": "D2 / G5",
+            "resolved": true,
+            "how": "Comments at :15 and :179 now say TWO sites, one pin per capped field, and say why AC1 requires that. qa_signoff.notes corrected. No assertion changed."
+          },
+          {
+            "id": "D3",
+            "resolved": true,
+            "how": "Needle widened to the verb class (bl[e]sses|n[a]mes|lists|claims), grep -E at all three call sites, one control cell per verb plus a past-tense negative cell. Your exact planted line now reddens: expected 'none', actual ' test-gate-phase-entry-drift.sh:279'."
+          },
+          {
+            "id": "G1",
+            "resolved": true,
+            "how": "Pinned floor of 8 replaced by a population derived from the glob minus the self-exemption. Your M15b re-run reddens: expected 32, actual 9."
+          },
+          {
+            "id": "S1",
+            "resolved": true,
+            "how": "'Rules for `verdict`' added to commands/pipeline.md beside the 140 rule, plus three assertions keyed to the cap read from the schema. Gate-bites recorded three ways (schema-only raise, block deletion, range runaway)."
+          },
+          {
+            "id": "BA-3",
+            "resolved": true,
+            "how": "map.json corrected to 27/26 with the population named (wide vs narrow grep, 0-setup the sole difference)."
+          },
+          {
+            "id": "BA-4",
+            "resolved": true,
+            "how": "scope_drift.detected -> true with your ruling in resolution. Nothing rebuilt."
+          }
+        ],
+        "not_resolved_by_owner_ruling": [
+          {
+            "id": "BA-1",
+            "disposition": "OUT of this diff by owner ruling; QA ruled the current derived shape acceptable and pinning a number contradicts the derive-counts rule this round enforces. Follow-up issue filed by the owner."
+          },
+          {
+            "id": "S2 / G3",
+            "disposition": "OUT; SecOps ruled a length cap the wrong instrument and filed #52."
+          },
+          {
+            "id": "D1 / BA-2",
+            "disposition": "OUT; the third-derivation / 0-setup divergence is being filed separately by the owner. Both BA and Dev-review placed it out of scope for #34/#42."
+          },
+          {
+            "id": "G4 / D4 / D5",
+            "disposition": "OUT; belongs to #47 (run.sh aggregate) and to the refactor lane."
+          }
+        ]
+      }
     },
     "qa": {
       "verdict": "APPROVE_WITH_NOTES",
@@ -1172,14 +1359,14 @@
       "reviewed_commit": "d8686bc19d317d89d1ec29b8d2cf13c196bb30ff",
       "diff_base": "origin/main",
       "isolation": {
-        "mutation_worktree": "/tmp/qa-34-mutate (detached HEAD at d8686bc, created with `git worktree add --detach`)",
+        "mutation_worktree": "<redacted-absolute-path>",
         "shared_worktree_mutated": false,
         "note": "Every mutation below was planted and reverted in /tmp/qa-34-mutate. The shared worktree at .claude/worktrees/34-phase3-20260820-094843 was READ only. Each mutation was reverted with `git checkout -- .` and the tree confirmed clean (only the untracked battery.sh harness remained, which planted nothing)."
       },
       "environment": {
         "platform": "darwin, Darwin 25.5.0 (macOS)",
         "node": "v24.19.0",
-        "shell": "/bin/bash (system bash 3.2), suites invoked as `bash <suite>`",
+        "shell": "<redacted-absolute-path>",
         "caveat": "This is the bash/darwin half. The remote CI half is ubuntu-latest per .github/workflows/tests.yml. See zsh_exposure below."
       },
       "independent_verification": {
