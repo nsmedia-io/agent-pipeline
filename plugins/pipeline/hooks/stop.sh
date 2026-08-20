@@ -1,8 +1,18 @@
 #!/usr/bin/env bash
-# Stop hook (agent-pipeline plugin). When the project defines a check command AND the working
-# tree has uncommitted changes, run the check; block completion (exit 2 + stderr) if it fails,
-# nudging the model to fix rather than declare the task done. No-op (exit 0) when no check is
-# configured. Fail-open on any tooling error.
+# Stop hook (agent-pipeline plugin). Two blocking steps, in this order: the phase-entry guard
+# (a pipeline run may not END a turn at a phase whose prerequisite was never produced), then
+# the project check (when a check command is configured AND the tree has uncommitted changes,
+# run it and block completion with exit 2 + stderr if it fails, nudging the model to fix rather
+# than declare the task done). No-op (exit 0) when neither applies.
+#
+# FAIL DIRECTION, which is no longer one rule. The project check and the voice lint are
+# fail-open throughout: any tooling error is a no-op. The phase-entry guard splits the two
+# apart, because they are events in different environments: its DECISION is fail-CLOSED (a
+# recognised phase with an absent prerequisite refuses, and that is discretion exercised inside
+# the agent session), while its TOOLING stays fail-OPEN (no node, no script, no readable
+# record -> exit 0 in silence, because that is the operator's machine and not a decision at
+# all). A tooling fail-open is invisible by construction, so hooks/session-start.sh reports a
+# disarmed guard once per session.
 #
 # Deliberately `set -u` only (NOT -e / pipefail): the check's exit code is handled explicitly,
 # and an early abort would defeat the block-on-failure behavior.
@@ -27,7 +37,30 @@ git rev-parse --is-inside-work-tree >/dev/null 2>&1 || exit 0
 PAYLOAD=""
 if [[ ! -t 0 ]]; then PAYLOAD=$(cat 2>/dev/null || true); fi
 
-# Opt-out for one-off iterations.
+# Phase-entry guard. Placement is a WINDOW, not a floor. It sits BELOW the PAYLOAD read because
+# stdin is not re-readable: above it, this step would consume the payload, PAYLOAD would come
+# back empty, and the voice lint would be skipped by its own emptiness test with no error
+# anywhere. It sits ABOVE every early exit below it, all five of which are states in which a
+# turn very commonly ends -- a checkpoint commit leaves the tree CLEAN, and an adopting project
+# with no checkCommand and no package.json typecheck script exits before the clean-tree check
+# is ever reached, so a guard placed lower would be inert exactly when it matters most.
+#
+# Only exit code 2 blocks. Its stderr is a fixed template built from the phase table, never
+# from status.json's free text, and nothing else this step could print is repeated here.
+GATE="$(dirname "${BASH_SOURCE[0]}")/../scripts/gate-phase-entry.mjs"
+if [[ -f "$GATE" ]] && command -v node >/dev/null 2>&1; then
+  GATE_ERR=$(node "$GATE" --root "$PROJECT_DIR" 2>&1 >/dev/null </dev/null)
+  GATE_RC=$?
+  if [[ "$GATE_RC" -eq 2 && -n "$GATE_ERR" ]]; then
+    printf '%s\n' "$GATE_ERR" >&2
+    exit 2
+  fi
+fi
+
+# CLAUDE_HOOK_STOP_SKIP bypasses the voice lint and the project check for one-off iterations,
+# but NOT the phase-entry guard, which sits above this line and can still exit 2: an
+# environment variable that disarms a halting control leaves no trace in the archived run
+# record, and this repo has already refused that shape twice.
 [[ "${CLAUDE_HOOK_STOP_SKIP:-0}" == "1" ]] && exit 0
 
 # Voice lint. Runs BEFORE the project check because it is the cheaper of the two and its
