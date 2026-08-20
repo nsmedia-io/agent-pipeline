@@ -2,7 +2,7 @@
   "issue_number": 39,
   "current_phase": "3-impl",
   "started_at": "2026-08-19T20:00:00Z",
-  "updated_at": "2026-08-19T23:56:46.082Z",
+  "updated_at": "2026-08-20T00:20:34.754Z",
   "branch": "feat/phase-guard",
   "ask_text": "Make phase entry granted by a script rather than assumed by the orchestrator, plus typed provenance fields and evidence admissibility.",
   "risk_tier": "architectural",
@@ -31,6 +31,12 @@
       "verdict": "complete",
       "at": "2026-08-19T23:56:46.082Z",
       "note": "spec rev2: 18 reqs, 31 ACs, gate 31/31 orchestrator-verified; OWNER RULING on OQ4: guard applies to /phase, refusal names the override, phase.md:34 corrected"
+    },
+    {
+      "phase": "2.5-design",
+      "verdict": "SKIPPED",
+      "at": "2026-08-20T00:20:34.753Z",
+      "note": "DELIBERATE DEVIATION, recorded late and that is itself the finding: the orchestrator skipped the bake-off and did not record it at the time. QA caught it because the guard this very run is building refuses run 39 for exactly that. Reason for the skip: the map, the three Phase 2 shards and BA rev2 had already closed the design space (per-row satisfying token sets over a phaseFamily map, and that choice was argued on evidence rather than sketched). In hindsight there WAS a genuine fork here and a bake-off would have been defensible; the honest record is that it was skipped for cost, not because no fork existed."
     }
   ],
   "flags": []
