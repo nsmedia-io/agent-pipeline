@@ -1,8 +1,8 @@
 {
   "issue_number": 34,
-  "current_phase": "5-archive",
+  "current_phase": "5-archived",
   "started_at": "2026-08-20T13:32:41Z",
-  "updated_at": "2026-08-20T18:34:45Z",
+  "updated_at": "2026-08-20T18:35:20Z",
   "branch": "claude/mechanical-group-impl-bfb9ce",
   "ask_text": "Bound events[].verdict with a maxLength in status.schema.json (#34) and correct the rotted current_phase description example list at line 13 (#42). Both are single-file edits to plugins/pipeline/schemas/status.schema.json.",
   "events": [
@@ -38,6 +38,12 @@
       "verdict": "merged",
       "at": "2026-08-20T18:34:45Z",
       "note": "PR #51 rebase-merged to main; #34 and #42 auto-closed. Nit round applied under the APPROVE_WITH_NOTES rubric, no panel re-run. Suite 2071/0 on main, verified by the orchestrator, not relayed."
+    },
+    {
+      "phase": "5-archive",
+      "verdict": "dispatched",
+      "at": "2026-08-20T18:35:20Z",
+      "note": "Librarian dispatched non-blocking; the run is terminal at dispatch time, not on its return. Shipped in 0.23.0 (c064b3b)."
     }
   ],
   "flags": [
@@ -219,5 +225,6 @@
     "request_changes": 0,
     "request_refactor": 0,
     "veto": 0
-  }
+  },
+  "completed_at": "2026-08-20T18:35:20Z"
 }
