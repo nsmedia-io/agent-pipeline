@@ -1,0 +1,10 @@
+{
+  "issue_number": 34,
+  "current_phase": "1-ba",
+  "started_at": "2026-08-20T13:32:41Z",
+  "updated_at": "2026-08-20T13:32:41Z",
+  "branch": "claude/mechanical-group-impl-bfb9ce",
+  "ask_text": "Bound events[].verdict with a maxLength in status.schema.json (#34) and correct the rotted current_phase description example list at line 13 (#42). Both are single-file edits to plugins/pipeline/schemas/status.schema.json.",
+  "events": [],
+  "flags": []
+}
