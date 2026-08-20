@@ -230,6 +230,13 @@ done
 ln -sf "$(command -v node)" "$WITH_NODE_BIN/node"
 DECLINE_PREPEND="$NO_NODE_HOME/decline-path-prepend.sh"
 printf 'readonly PATH\n' > "$DECLINE_PREPEND"
+# THE COUPLING THIS FIXTURE RESTS ON, pinned rather than left in the prose above. `readonly PATH`
+# works because the hook's failed `export PATH=...` is a diagnostic and not a control-flow change,
+# which is only true while stop.sh stays `set -u` ONLY. Add -e and the assignment aborts the hook
+# before its body, and AC23(a) below plus its rc=2 CONTROL both go red for a reason that has
+# nothing to do with the guard.
+assert_not_contains "the declined-prepend fixture requires stop.sh to stay set -u only" \
+  "$(cat "$HOOK")" "set -e"
 NO_NODE_ENV=(BASH_ENV="$DECLINE_PREPEND" HOME="$NO_NODE_HOME" PATH="$NO_NODE_BIN")
 WITH_NODE_ENV=(BASH_ENV="$DECLINE_PREPEND" HOME="$NO_NODE_HOME" PATH="$WITH_NODE_BIN")
 

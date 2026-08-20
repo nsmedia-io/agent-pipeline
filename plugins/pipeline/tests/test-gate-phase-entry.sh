@@ -430,10 +430,18 @@ assert_not_contains "CONTROL: and does not claim a file that is absent IS presen
 # abandoned run is the escape that works -- inFlight is false on a final_verdict, and isTerminal
 # is true on completed_at and on 5-archived, each already asserted by AC12/AC15 -- so this route
 # refuses nothing that was not already refused.
-assert_contains "the refusal offers the abandoned-run route" "$GATE_ERR" "If this run is over"
+assert_contains "the refusal offers the abandoned-run route" "$GATE_ERR" "If this run is YOURS and is over"
 assert_contains "  naming final_verdict" "$GATE_ERR" "final_verdict"
 assert_contains "  and completed_at" "$GATE_ERR" "completed_at"
 assert_contains "  and 5-archived" "$GATE_ERR" "5-archived"
+# The ownership clause is the whole of what the TEXT can do about route 3 being the widest and
+# cheapest disarm the guard has. It cannot withhold the capability -- that belongs to the
+# in-flight predicate, and the spec discloses it in does_not_stop -- but an unqualified "if this
+# run is over" reads to a blocked session as a licence over whatever run the guard happened to
+# resolve, which on this hook is usually the newest status.json in the project rather than
+# theirs. Pinned so a wording refresh cannot drop it back to the unqualified form.
+assert_not_contains "  and does not offer it unqualified, over whatever run got resolved" \
+  "$GATE_ERR" "If this run is over"
 
 # The stated consequence, asserted rather than left as prose: on a fresh checkout the SAME run
 # is granted through path (b), because an event attests DISPATCH and not APPROVAL. This is the
