@@ -1,8 +1,8 @@
 {
   "issue_number": 34,
-  "current_phase": "2-constraints",
+  "current_phase": "4-review-complete",
   "started_at": "2026-08-20T13:32:41Z",
-  "updated_at": "2026-08-20T13:47:36Z",
+  "updated_at": "2026-08-20T16:34:45Z",
   "branch": "claude/mechanical-group-impl-bfb9ce",
   "ask_text": "Bound events[].verdict with a maxLength in status.schema.json (#34) and correct the rotted current_phase description example list at line 13 (#42). Both are single-file edits to plugins/pipeline/schemas/status.schema.json.",
   "events": [
@@ -16,6 +16,22 @@
       "phase": "1-ba",
       "verdict": "complete",
       "at": "2026-08-20T13:47:36Z"
+    },
+    {
+      "phase": "2-constraints",
+      "verdict": "complete",
+      "at": "2026-08-20T13:48:59Z",
+      "note": "dba 12 / devops 11 / secops 13 lines, each verified non-empty separately; extracted from the repo agents dir, not the stale plugin cache."
+    },
+    {
+      "phase": "3-impl",
+      "verdict": "complete",
+      "at": "2026-08-20T15:02:13Z"
+    },
+    {
+      "phase": "4-review",
+      "verdict": "APPROVE_WITH_NOTES",
+      "at": "2026-08-20T15:50:58Z"
     }
   ],
   "flags": [
@@ -25,7 +41,177 @@
       "verdict": "complete",
       "summary": "spec+map written, tier standard; nothing validates status.json against this schema, so the cap needs a corpus check (R4) to bite",
       "at": "2026-08-20T13:47:36Z"
+    },
+    {
+      "phase": "3-impl",
+      "agent": "dev",
+      "verdict": "complete",
+      "summary": "PR #51: both verdict fields capped 32, phase list de-rotted; new suite 67 assertions, total 2056 (was 1989)",
+      "at": "2026-08-20T15:02:13Z"
+    },
+    {
+      "phase": "3-impl",
+      "agent": "orchestrator",
+      "verdict": "NOTE",
+      "summary": "TRIPWIRE-NOTE: the mis-tier tripwire effective glob set matches zero tracked files in this repo, so it cannot fire here",
+      "at": "2026-08-20T15:02:13Z"
+    },
+    {
+      "phase": "4-review",
+      "agent": "orchestrator",
+      "verdict": "NOTE",
+      "summary": "SecOps dispatch 1 lost to a connection drop after announcing the write; shard absent, re-dispatched write-first. Round not lost.",
+      "at": "2026-08-20T15:33:08Z"
+    },
+    {
+      "phase": "4-review",
+      "agent": "ba",
+      "verdict": "APPROVE_WITH_NOTES",
+      "summary": "0-setup divergence: a third phase derivation, unreconciled; map.json 26/25 is wrong (27/26 correct); AC2 floor is >=1 not >=6",
+      "at": "2026-08-20T15:50:58Z"
+    },
+    {
+      "phase": "4-review",
+      "agent": "dev",
+      "verdict": "APPROVE_WITH_NOTES",
+      "summary": "third derivation of the phase vocabulary; a false one-site-holds-32 comment; AC10 needle matches only the verb blesses",
+      "at": "2026-08-20T15:50:58Z"
+    },
+    {
+      "phase": "4-review",
+      "agent": "qa",
+      "verdict": "APPROVE_WITH_NOTES",
+      "summary": "G1 demonstrated: AC10 pinned floor >=8 over 33 files, violation escaped green; events[].note max 616 chars beside a 32 cap",
+      "at": "2026-08-20T15:50:58Z"
+    },
+    {
+      "phase": "4-review",
+      "agent": "secops",
+      "verdict": "APPROVE_WITH_NOTES",
+      "summary": "detects rather than prevents, but in the right environment; S1: schema claims a writer rule that does not exist; filed #52",
+      "at": "2026-08-20T15:50:58Z"
+    },
+    {
+      "phase": "4-review",
+      "agent": "orchestrator",
+      "verdict": "NOTE",
+      "summary": "deferral ledger discharged: #52 (secops), #53 (0-setup), #54 (cap-vs-config + AC2 floor), #47 comment (assertion totals)",
+      "at": "2026-08-20T16:34:45Z"
     }
   ],
-  "risk_tier": "standard"
+  "risk_tier": "standard",
+  "pr_url": "https://github.com/nsmedia-io/agent-pipeline/pull/51",
+  "panel_roles": [
+    "ba",
+    "dev",
+    "qa",
+    "secops"
+  ],
+  "review_rounds": 1,
+  "telemetry": {
+    "phase_elapsed_ms": {
+      "1": 622000,
+      "2": 83000,
+      "3": 4394000
+    },
+    "total_lead_time_ms": 5099000,
+    "unattributed_ms": 0,
+    "unattributed_events": 0,
+    "untimed_events": 0,
+    "review_rounds": 1,
+    "events_counted": 4,
+    "attribution": "exit"
+  },
+  "effective_config": {
+    "migration_globs_tripwire": [
+      "**/migrations/**",
+      "**/Migrations/**",
+      "**/db/migrate/**",
+      "**/db/migration/**",
+      "**/db/changelog/**",
+      "**/alembic/versions/**",
+      "**/schema.prisma",
+      "**/prisma/schema/**",
+      "**/drizzle/**",
+      "**/db/schema.ts",
+      "**/db/schema/**",
+      "**/supabase/schemas/**",
+      "**/policies/**.sql",
+      "**/supabase/policies/**",
+      "**/schema.sql"
+    ],
+    "migration_globs_gate": [
+      "**/migrations/**",
+      "**/Migrations/**",
+      "**/db/migrate/**",
+      "**/db/migration/**",
+      "**/db/changelog/**",
+      "**/alembic/versions/**",
+      "**/schema.prisma",
+      "**/prisma/schema/**",
+      "**/drizzle/**",
+      "**/db/schema.ts",
+      "**/db/schema/**",
+      "**/supabase/schemas/**",
+      "**/policies/**.sql",
+      "**/supabase/policies/**",
+      "**/schema.sql"
+    ],
+    "data_layer_globs": [
+      "**/migrations/**",
+      "**/Migrations/**",
+      "**/db/migrate/**",
+      "**/db/migration/**",
+      "**/db/changelog/**",
+      "**/alembic/versions/**",
+      "**/schema.prisma",
+      "**/prisma/schema/**",
+      "**/drizzle/**",
+      "**/db/schema.ts",
+      "**/db/schema/**",
+      "**/supabase/schemas/**",
+      "**/policies/**.sql",
+      "**/supabase/policies/**",
+      "**/schema.sql",
+      "**/db/**",
+      "**/queries/**",
+      "**/policies/**",
+      "**/repositories/**",
+      "**/prisma/**",
+      "**/supabase/**",
+      "**/alembic/**",
+      "**/schema.ts",
+      "**/database.types.ts",
+      "**/*.generated.types.ts"
+    ],
+    "infra_globs": [
+      "**/.github/workflows/**",
+      ".github/**",
+      "**/infra/**",
+      "**/terraform/**",
+      "**/k8s/**",
+      "**/helm/**",
+      "**/deploy/**",
+      "**/deploy.sh",
+      "**/deploy.config",
+      "**/*.tf",
+      "**/*.tfvars",
+      "**/Dockerfile",
+      "**/docker-compose.yml",
+      "**/docker-compose.yaml"
+    ],
+    "models": {
+      "ba": "sonnet",
+      "dev": "sonnet"
+    },
+    "rejected_absolute_globs": 0
+  },
+  "final_verdict": "APPROVE_WITH_NOTES",
+  "peer_review_verdict_counts": {
+    "approve": 0,
+    "approve_with_notes": 4,
+    "request_changes": 0,
+    "request_refactor": 0,
+    "veto": 0
+  }
 }
