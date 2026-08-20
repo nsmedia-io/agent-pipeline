@@ -19,7 +19,7 @@ The phases are **gates, not a one-way waterfall**. The shape of the work, not th
 **Argument:** `$ARGUMENTS`
 
 Parse the argument:
-- If starts with `--resume <issue>`: set `ISSUE=<issue>`, read `.pipeline/<issue>/status.json`, continue from the phase after `current_phase`.
+- If starts with `--resume <issue>`: set `ISSUE=<issue>`, read `.pipeline/<issue>/status.json`, and re-enter the phase named by `current_phase` from the top (see the durable-checkpoint convention below; `current_phase` is an ENTRY marker, so the phase it names has not been completed).
 - If starts with `--issue <number>`: set `ISSUE=<number>` (existing tracker issue), start at Phase 2 (skip BA spec creation; BA reads the existing issue and seeds spec.json).
 - Otherwise: treat as a fresh ask text. No issue number yet. BA will create one.
 
@@ -63,6 +63,8 @@ Non-negotiables (carry through to every subagent prompt you construct):
 **`ask_text` is a truncated, human-written task summary. It must never carry a secret.** If a /pipeline argument contains a token-shaped substring (API key, Bearer token, OAuth code, password, `.env` line), redact it before writing `ask_text`, because `status.json` is committed to git history (see the durable-checkpoint convention below) and a pasted secret would persist there. Only the truncated ask, phase events, and 140-char flag summaries are written to `status.json`; no code path copies provider tokens, Bearer tokens, OAuth codes, or database rows into it.
 
 Append an entry to `events` after each phase transition: `{"phase": "1-ba", "verdict": "<agent verdict>", "at": "<iso>"}`.
+
+**The exit event for phase N and the entry checkpoint for phase N+1 are ONE write, in that order, committed together.** Appending the closing event first and checkpointing the next phase second are not two steps to be interleaved with anything, least of all with the end of a turn. The Stop hook fires at the turn boundary and a turn very commonly ends right after a checkpoint commit, so checkpointing first and appending later leaves a window in which the record says "entering 3-impl" with neither `design.json` (absent in a fresh checkout, because every artifact except `status.json` is gitignored) nor a closing 2.5 event. The phase-entry guard is CORRECT to refuse in that window -- the record is the only truth it has, and it genuinely does not show the phase closed -- so this convention, not a guard exemption, is what prevents the state.
 
 **`events[]` entries are EXIT markers and `current_phase` is an ENTRY marker.** An event is appended AFTER a phase finishes and carries that phase's `verdict`, so it records a phase CLOSING; `current_phase` is set BEFORE a phase begins and names the phase being ENTERED. Two fields with opposite conventions five lines apart is the trap that made the telemetry credit every interval to the wrong phase, so the two are named here rather than left to be inferred.
 
