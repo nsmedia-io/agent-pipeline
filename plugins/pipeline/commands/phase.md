@@ -32,7 +32,7 @@ Example invocations:
 1. **Resolve the absolute artifact dir.** Run `PIPELINE_BASE="$(git rev-parse --show-toplevel)/.pipeline"`, `ARTIFACT_DIR="$PIPELINE_BASE/<issue>"`. Pass `ARTIFACT_DIR` (fully expanded) into the subagent prompt, exactly as `/pipeline` does, so the subagent reads and writes artifacts at an absolute path and never resolves `.pipeline/...` from its own cwd. For a phase that runs inside the implementation worktree (`dev`, `qa`, `peer-review`), `ARTIFACT_DIR` is `<WORKTREE_PATH>/.pipeline/<issue>` instead, matching `/pipeline` Phases 3-4.
 2. If `--issue` provided: verify `$ARTIFACT_DIR/` exists. If not, halt and tell the owner.
 3. Read `$ARTIFACT_DIR/status.json` (if present) to understand the pipeline's current state.
-4. Verify the phase is a valid next step or a re-run. Do not block on order; the owner may be intentionally re-running.
+4. Verify the phase is a valid next step or a re-run. A re-run is legitimate and this command does not police order, but it is not exempt from the phase-entry guard: the guard runs at YOUR turn boundary, it cannot tell a `/phase` invocation from a `/pipeline` one, and it judges the record rather than the intent. So a `/phase ba` on an architectural run whose record shows no `map.json` and no `0.5-map` event is refused when the turn ends, and correctly: the run genuinely has no map. Clear it the way the refusal says -- run the missing phase, or record the deviation as a `SKIPPED` event with a written note.
 
 ---
 
@@ -116,7 +116,7 @@ In the full `/pipeline` run the Librarian is dispatched NON-BLOCKING at Phase 5 
 
 After the subagent returns:
 1. Validate the expected artifact was written or updated.
-2. Update `.pipeline/<issue>/status.json` to append a `"phase-rerun"` event with timestamp.
+2. Update `.pipeline/<issue>/status.json` to append a `<phase-token>-rerun` event with timestamp: `{"phase": "1-ba-rerun", "verdict": "<verdict>", "at": "<iso>"}` for `/phase ba`, `3b-dev-rerun` for `/phase dev`, and so on. The token prefix is load-bearing rather than cosmetic: a phase-less label resolves to no phase at all, so a re-run that did real work would leave a record that cannot clear the phase-entry guard, and the owner would be refused at their own turn boundary for work they just watched complete.
 3. Return to the owner with the subagent's verdict, in your own words per `${CLAUDE_PLUGIN_ROOT}/voice.md`.
 
 **On voice.** You are invoked by hand, so the owner is sitting there waiting on this one result: you are talking to them directly, not to a parent orchestrator. Do not relay the subagent's raw text. It was written for a machine reader, in its specialist's register (table names, CVE severity, line numbers), and it assumes context the owner does not have.
