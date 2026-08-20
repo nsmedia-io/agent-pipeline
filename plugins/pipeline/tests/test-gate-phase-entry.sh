@@ -747,12 +747,26 @@ assert_eq "  CONTROL: a report missing the key reads as <no-field:strays>, never
   "$(AC19_REPORT='{"total":9,"read":9}' ac19_field strays)" "<no-field:strays>"
 assert_eq "  CONTROL: and an absent report still reads as <no-report>" \
   "$(AC19_REPORT='' ac19_field strays)" "<no-report>"
+ac19_scalar() {  # ac19_scalar <json-key> -> the number, or a sentinel
+  [[ -n "$AC19_REPORT" ]] || { printf '<no-report>'; return; }
+  case "$AC19_REPORT" in *"\"$1\":"*) ;; *) printf '<no-field:%s>' "$1"; return ;; esac
+  printf '%s' "$AC19_REPORT" | sed -n "s/.*\"$1\":\\([0-9]*\\).*/\\1/p"
+}
 AC19_STRAYS="$(ac19_field strays)"
 AC19_UNREAD="$(ac19_field unreadable)"
 assert_eq "every committed record's current_phase is a member of one of the four sets" \
   "$AC19_STRAYS" ""
 assert_eq "and the walk ACCOUNTS for every record rather than continuing past it" \
   "$AC19_UNREAD" ""
+# The `unreadable` zero above is EARNED here rather than assumed. Both `total` and `read` were
+# already computed and already carried in the report, and neither was asserted -- so an empty
+# `unreadable` list was equally consistent with a walk that read every record and with one that
+# read none. A POSITIVE assertion over the same population, against the count the shell derived
+# independently, turns that zero into a derived result. No temp tree, no planted record.
+assert_eq "the walk READ every record the corpus listed (which is what makes the zero above a result)" \
+  "$(ac19_scalar read)" "$CORPUS_N"
+assert_eq "and it was handed the whole corpus in the first place" \
+  "$(ac19_scalar total)" "$CORPUS_N"
 
 # ---------------------------------------------------------------------------
 suite "AC24: no committed record is REFUSED (a zero, whose non-zero control is AC1's 14)"
