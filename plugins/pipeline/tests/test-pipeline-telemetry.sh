@@ -721,12 +721,41 @@ UNREADABLE=$(printf '%s' "$CORPUS_RESULT" | node -e 'let s="";process.stdin.on("
 HITS=$(printf '%s' "$CORPUS_RESULT" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).hits.join(" ")))')
 
 # The corpus size is REPORTED, not assumed. If the archive is still empty the suite says so
-# rather than reporting a silent pass over nothing: today knowledge/issue-archive/ holds zero
-# JSON files, so this number is carried by the .pipeline status files alone.
+# rather than reporting a silent pass over nothing: this number is carried by the .pipeline
+# status files plus however many archives exist, and the archive half is counted just below.
 assert_eq "the real corpus is non-empty (a zero over an empty corpus proves nothing)" \
   "$([[ "$SCANNED" -ge 1 ]] && echo "scanned>=1" || echo "scanned=$SCANNED: NOTHING WAS WALKED")" "scanned>=1"
-assert_eq "the archive corpus is stated rather than assumed: it is empty today" \
-  "$(cd "$REPO_ROOT" && git ls-files | grep -cE 'knowledge/issue-archive/.*\.json$' | tr -d ' ')" "0"
+
+# THE ARCHIVE HALF IS DERIVED, NEVER PINNED. This site read `git ls-files | grep -c
+# 'knowledge/issue-archive/.*\.json$'` against a literal 0, described in its own comment as
+# "stated rather than assumed" -- a tripwire meant to fire exactly once, on the day the first
+# archive landed. It fired. Pinning the new number rebuilds the same tripwire one higher, and
+# the old form was counting the wrong population regardless: it read the TRACKED set while the
+# walk above reads the tracked/on-disk union, so an untracked archive carrying a real leaked
+# path sat outside the number and inside the walk. It was reproduced exactly that way.
+#
+# The durable claim is the RELATION, not the size: every archive record the corpus enumerates
+# is a record this walk READ. An archive is a terminal record written in one writeFileSync, so
+# unlike the in-flight .pipeline half there is no legitimate unreadable case to excuse here,
+# and a walk that read fewer than it enumerated goes red rather than reporting a clean pass
+# over records it never opened.
+ARCHIVE_CORPUS=()
+while IFS= read -r f; do [[ -n "$f" ]] && ARCHIVE_CORPUS+=("$REPO_ROOT/$f"); done \
+  < <(corpus_files "$REPO_ROOT" 'knowledge/issue-archive/*.json')
+scanned_of() {
+  node "$WALK" "$@" 2>/dev/null \
+    | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).scanned))'
+}
+ARCHIVE_SCANNED=$(scanned_of ${ARCHIVE_CORPUS[@]+"${ARCHIVE_CORPUS[@]}"})
+printf '  note  archive records this walk enumerated: %s (REPORTED, never pinned)\n' "${#ARCHIVE_CORPUS[@]}"
+assert_eq "every archive record the corpus enumerates is one this walk read" \
+  "read=$ARCHIVE_SCANNED of=${#ARCHIVE_CORPUS[@]}" "read=${#ARCHIVE_CORPUS[@]} of=${#ARCHIVE_CORPUS[@]}"
+# NON-ZERO CONTROL, and it is what keeps the cell above from being vacuous while the archive
+# directory is empty: 0-of-0 passes for the same reason 3-of-3 does, so the accounting is put
+# in front of a record it CANNOT read and must report the shortfall.
+printf '%s' '{"issue_number":34,"tasks":{' > "$TEMP_PROJECT/archive-unreadable.json"
+assert_eq "CONTROL: the same accounting reports a shortfall on an archive record it cannot read" \
+  "read=$(scanned_of "$TEMP_PROJECT/archive-unreadable.json") of=1" "read=0 of=1"
 # EVERY RECORD LEAVES THIS WALK THROUGH ONE COUNTER, the same six-counter convention the
 # partition walk above uses. The catch used to increment nothing and `scanned` was asserted
 # only `>= 1`, so a record the walk never read was indistinguishable from a clean one: a
