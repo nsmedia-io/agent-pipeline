@@ -176,26 +176,115 @@ suite "AC23: the DECISION is fail-closed; the TOOLING is fail-open"
 # environment and is not discretion. A fail-closed-on-tooling control would refuse 100% of
 # legitimate stops in every adopting project without Node on the hook's PATH.
 
-# (a) node not on PATH. HOME is redirected too, because stop.sh explicitly prepends the newest
-#     nvm Node from $HOME/.nvm; leaving HOME alone would put node back on the PATH it just
-#     stripped, and the case would pass while testing nothing.
+# (a) node not on PATH. THE CONDITION IS CONSTRUCTED THROUGH THE PATH THE HOOK ACTUALLY RUNS
+#     WITH, not the one this file hands it, and the difference between those two is the whole of
+#     issue #46.
+#
+#     stop.sh and session-start.sh both OPEN with an unconditional
+#       export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
+#     so a PATH= passed on the command line is REBUILT by the hook before `command -v node` ever
+#     runs. On ubuntu-latest node is /usr/local/bin/node, so the guard was ARMED in CI: this cell
+#     got exit 2 where it expects 0, and -- because it was armed -- AC28(a) below correctly
+#     emitted no notice where it expects 1. One cause, both failures. It passed on the author's
+#     macOS only because that machine's node lives under ~/.nvm, which is in none of the four
+#     prepended dirs. The old precondition measured `command -v node` under the PATH THIS FILE
+#     builds, before stop.sh mutated it, so it inspected something other than what acts and
+#     reported "absent" while the hook went on to find node three lines later.
+#
+#     SHADOWING WAS TRIED FIRST AND CANNOT WORK. A `node` planted in an earlier PATH entry does
+#     not SUPPRESS a later one: bash's path search skips a non-executable file, a directory and a
+#     dangling symlink alike and walks on to the real binary (all three measured, against a
+#     control that reports NOTFOUND when the later dir is empty). And a shadow that IS found makes
+#     `command -v node` SUCCEED, which arms the guard and lands the run on case (d)'s
+#     runs-and-crashes leg -- this cell would go green for the wrong reason and AC28(a) would fail
+#     outright. There is no directory this suite can write to that sits ahead of /usr/local/bin.
+#
+#     So the prepend is DECLINED rather than out-run. BASH_ENV names a file bash sources before
+#     the hook body, and that file marks PATH readonly; the hook's own `export PATH=...` then
+#     fails (one diagnostic line on stderr, no change of control flow -- these hooks are `set -u`
+#     only, and the assignment is a standalone statement) and PATH stays exactly the node-free
+#     directory built below. Nothing here doctors an ANSWER: `command -v node` fails because node
+#     genuinely is not on the PATH the hook is holding at the moment it asks. That is the property
+#     the two rejected alternatives lack -- a stub on PATH and an override of the `command`
+#     builtin both leave the real node reachable and only change what the hook is told.
+#
+#     WHAT THIS CELL STILL DOES NOT PROVE: that an operator whose node sits in one of those four
+#     hardcoded dirs can ever present a node-free PATH to these hooks. They cannot, and that is a
+#     property of the prepend rather than of the guard. It is #46's sibling half and belongs to
+#     whoever owns that posture, not to this fixture.
 mk_project "$REFUSING_STATUS" '{"checkCommand":"true"}'
 new_tmpdir || exit 90
 NO_NODE_HOME="$NEW_TMPDIR"
 NO_NODE_BIN="$NO_NODE_HOME/bin"
-mkdir -p "$NO_NODE_BIN"
-for t in git bash cat mktemp rm tail dirname grep sed; do
-  p="$(command -v "$t" 2>/dev/null)" && ln -sf "$p" "$NO_NODE_BIN/$t"
+WITH_NODE_BIN="$NO_NODE_HOME/bin-with-node"
+mkdir -p "$NO_NODE_BIN" "$WITH_NODE_BIN"
+# THE LIST HAS TO BE COMPLETE NOW, which it did not before. With the system dirs declined these
+# two dirs are the hooks' whole world, and a missing tool does not fail loudly: stop.sh exits 0 at
+# its is-inside-work-tree line the moment `git` is unreachable, which is the same exit code this
+# cell asserts. The WITH_NODE control below is what tells those two apart.
+for t in git bash sh cat cut mktemp rm rmdir tail head dirname basename grep sed tr wc find ls sort env; do
+  p="$(command -v "$t" 2>/dev/null)" || continue
+  ln -sf "$p" "$NO_NODE_BIN/$t"
+  ln -sf "$p" "$WITH_NODE_BIN/$t"
 done
-assert_eq "  precondition: node is genuinely unreachable from the stripped PATH+HOME" \
-  "$(env -i HOME="$NO_NODE_HOME" PATH="$NO_NODE_BIN" bash -c 'command -v node >/dev/null 2>&1 && echo FOUND || echo absent')" \
-  "absent"
-# NON-ZERO CONTROL, on the SAME fixture. Without it, "exit 0" is indistinguishable from a
-# guard that never runs at all -- which is exactly the state this contract is authored in.
+ln -sf "$(command -v node)" "$WITH_NODE_BIN/node"
+DECLINE_PREPEND="$NO_NODE_HOME/decline-path-prepend.sh"
+printf 'readonly PATH\n' > "$DECLINE_PREPEND"
+NO_NODE_ENV=(BASH_ENV="$DECLINE_PREPEND" HOME="$NO_NODE_HOME" PATH="$NO_NODE_BIN")
+WITH_NODE_ENV=(BASH_ENV="$DECLINE_PREPEND" HOME="$NO_NODE_HOME" PATH="$WITH_NODE_BIN")
+
+# THE PRECONDITION IS THE HOOK'S OWN PROLOGUE, cut out of stop.sh at the first line that stops
+# touching PATH, so it measures the effective PATH rather than restating how it is built. A
+# hand-written copy of the prepend here would be a second vocabulary with no drift test behind it.
+# stop.sh's prologue is a superset of session-start.sh's (same four dirs, plus the ~/.nvm entry),
+# so node unreachable here is node unreachable there too, and one probe covers both AC23(a) and
+# AC28(a).
+HOOK_PROLOGUE="$NO_NODE_HOME/hook-prologue-probe.sh"
+awk '/^PROJECT_DIR=/{exit} {print}' "$HOOK" > "$HOOK_PROLOGUE"
+printf 'command -v node >/dev/null 2>&1 && echo FOUND || echo absent\n' >> "$HOOK_PROLOGUE"
+node_on_hook_path() { env "$@" bash "$HOOK_PROLOGUE" 2>/dev/null; }
+assert_contains "  precondition: the probe really carries the hook's PATH prepend, or it measures nothing" \
+  "$(cat "$HOOK_PROLOGUE")" 'export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH"'
+assert_eq "  precondition: node is unreachable from the EFFECTIVE PATH stop.sh builds, not the one passed in" \
+  "$(node_on_hook_path "${NO_NODE_ENV[@]}")" "absent"
+assert_eq "  CONTROL: the same probe says FOUND once node is put back, so 'absent' is a measurement" \
+  "$(node_on_hook_path "${WITH_NODE_ENV[@]}")" "FOUND"
+
+# THE DECLINED PREPEND IS LOAD-BEARING, and this is where that is watched rather than asserted.
+# On the machine this suite was written on, node lives under ~/.nvm and none of the four hardcoded
+# dirs contains it, so the cell below would go green with or without any of the above -- luck
+# about one machine's layout, which is precisely how #46 shipped. stop.sh carries a SECOND prepend
+# that is reproducible anywhere: point HOME at an nvm layout holding a node and the hook rebuilds
+# a PATH that reaches it, the same shape /usr/local/bin/node produced on ubuntu-latest. So the red
+# is reproduced here, on purpose, and then shown to turn green on the declined prepend alone --
+# same fixture, same hook, same caller PATH, one variable. session-start.sh has no ~/.nvm block,
+# so its half of the red is only reproducible where the hardcoded prepend reaches a node; it
+# shares the first prepend and this same construction.
+new_tmpdir || exit 90
+NVM_HOME="$NEW_TMPDIR"
+mkdir -p "$NVM_HOME/.nvm/versions/node/v99.0.0/bin"
+ln -sf "$(command -v node)" "$NVM_HOME/.nvm/versions/node/v99.0.0/bin/node"
+assert_eq "  CONTROL: left alone, the hook's own prepend reaches a node the caller's PATH does not" \
+  "$(node_on_hook_path HOME="$NVM_HOME" PATH="$NO_NODE_BIN")" "FOUND"
+run_stop "$HOOK" "$HP_ROOT" '' HOME="$NVM_HOME" PATH="$NO_NODE_BIN"
+assert_eq "  CONTROL: so the guard is ARMED and refuses -- this is the #46 red, reproduced" "$STOP_RC" "2"
+assert_eq "  CONTROL: declining the prepend, and nothing else, makes node unreachable again" \
+  "$(node_on_hook_path BASH_ENV="$DECLINE_PREPEND" HOME="$NVM_HOME" PATH="$NO_NODE_BIN")" "absent"
+run_stop "$HOOK" "$HP_ROOT" '' BASH_ENV="$DECLINE_PREPEND" HOME="$NVM_HOME" PATH="$NO_NODE_BIN"
+assert_eq "  CONTROL: and the same run then exits 0, which is the fix and not the machine" "$STOP_RC" "0"
+# NON-ZERO CONTROLS, on the SAME fixture. Without them, "exit 0" is indistinguishable from a
+# guard that never runs at all -- which is exactly the state this contract is authored in. The
+# FIRST of the two is the one #46 added: it holds the constructed environment fixed and changes
+# only node, so it fails if the stripped bin dir is missing anything the hook needs.
+run_stop "$HOOK" "$HP_ROOT" '' "${WITH_NODE_ENV[@]}"
+assert_eq "  CONTROL: the same fixture in that same stripped env, node restored -> refuses, exit 2" "$STOP_RC" "2"
 run_stop "$HOOK" "$HP_ROOT" ''
 assert_eq "  CONTROL: this same fixture DOES refuse when the tooling is present" "$STOP_RC" "2"
-run_stop "$HOOK" "$HP_ROOT" '' HOME="$NO_NODE_HOME" PATH="$NO_NODE_BIN"
+run_stop "$HOOK" "$HP_ROOT" '' "${NO_NODE_ENV[@]}"
 assert_eq "(a) node absent -> exit 0, the guard does not wedge the operator's environment" "$STOP_RC" "0"
+# ...and it exited 0 because the guard never RAN, not because it ran and chose to allow. The
+# refusal template is the only thing that distinguishes those two from outside.
+assert_not_contains "  and it is silent about the phase it did not check" "$(lower "$STOP_ERR")" "cannot end"
 
 # (b) the guard script itself missing. A COPY of the plugin, minus the one file.
 new_tmpdir || exit 90
@@ -312,8 +401,16 @@ start_notice() {
 }
 
 mk_project "$REFUSING_STATUS" '{"checkCommand":"true"}'
-start_notice "$SESSION_START" "$HP_ROOT" HOME="$NO_NODE_HOME" PATH="$NO_NODE_BIN"
+# Same constructed environment as AC23(a): session-start.sh opens with the same unconditional
+# PATH prepend, so a bare PATH= here is rebuilt before line 151's `command -v node` and the notice
+# is correctly withheld -- a cell that fails for the guard being ARMED, not for the notice being
+# broken.
+start_notice "$SESSION_START" "$HP_ROOT" "${NO_NODE_ENV[@]}"
 assert_eq "(a) guarded run in flight + node absent -> exactly one notice line" "$NOTICE_N" "1"
+# NON-ZERO CONTROL for (a), holding the stripped environment fixed and changing only node: the
+# notice has to be a statement about the DISARM rather than about running in a bare environment.
+start_notice "$SESSION_START" "$HP_ROOT" "${WITH_NODE_ENV[@]}"
+assert_eq "  CONTROL: node restored in that same stripped env -> no notice" "$NOTICE_N" "0"
 
 start_notice "$COPY_ROOT/hooks/session-start.sh" "$HP_ROOT"
 assert_eq "(b) guarded run in flight + guard script missing -> exactly one notice line" "$NOTICE_N" "1"
@@ -323,7 +420,7 @@ assert_eq "(c) both present -> no notice" "$NOTICE_N" "0"
 
 # (d) The cell a positive-only test omits, and where a notice that ALWAYS fires would hide.
 mk_project "$(printf '{"issue_number":4242,"current_phase":"5-archived","risk_tier":"architectural","updated_at":"%s","events":[]}' "$FRESH_ISO")" '{"checkCommand":"true"}'
-start_notice "$SESSION_START" "$HP_ROOT" HOME="$NO_NODE_HOME" PATH="$NO_NODE_BIN"
+start_notice "$SESSION_START" "$HP_ROOT" "${NO_NODE_ENV[@]}"
 assert_eq "(d) no in-flight GUARDED run -> no notice, even with node absent" "$NOTICE_N" "0"
 
 finish
