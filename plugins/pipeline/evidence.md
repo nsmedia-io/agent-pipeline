@@ -10,6 +10,112 @@ The whole file reduces to one sentence. **A check that cannot fail has not passe
 
 ---
 
+## A machine-readable claim and a human-readable caveat can disagree, and only one is checked
+
+`gate-pre-phase4-frontend.mjs` reads `raw.token_lint_pass === true` and `raw.axe_pass === true` from
+the impl-report. On two consecutive issues in one repo, Dev set both to `true` and wrote an honest
+adjacent note saying **no token-lint script and no axe package exist anywhere in the project.** The
+note was accurate. The boolean was what the gate read.
+
+Nobody lied. The disclosure and the assertion lived in the same object and said different things, and
+the machine consumed the one that could not carry the caveat.
+
+Design caught it both times by looking for the tool rather than reading the field — grepping
+`package.json`, every workspace manifest, the lockfile and the ESLint configs, finding nothing, and
+recording `token_lint: "n/a"` / `axe.status: "not-run"` instead of inheriting `true`. Its own words:
+*a claim I didn't witness, not a run.*
+
+**The rule.** A gate must be satisfied by a COMMAND AND ITS OUTPUT, never by a self-declared boolean.
+Where the tool does not exist, the honest value is "not-run", and a gate that cannot distinguish
+"not-run" from "passed" is not a gate. If you are the author, do not set a pass flag for a check you
+did not execute, however good your substitute was — write the substitute in the note and leave the
+flag false.
+
+## An artifact nobody can read is not the durable half of a fix
+
+`.pipeline/` is gitignored in most projects that use this pipeline. So an implementation report, a
+review shard and a spec are all invisible to the next reader of the repository.
+
+Twice in one day a correction was written into an implementation report and treated as the
+deliverable. One of those was to a report that had ALREADY been corrected at its own Phase 4 — the
+stale claim the new issue existed to fix had moved on, while the same false sentence sat in a
+`printablePath` doc comment in TRACKED CODE, where the next reader actually meets it.
+
+**The rule.** If a fix is a correction to a claim, the correction lands in tracked code — a comment,
+a test name, a doc under `docs/` — or it has not landed. An artifact may RECORD the reasoning; it can
+never BE the fix. Before accepting "corrected in the impl-report", ask whether `git grep` would find
+it.
+
+## Reviewers who RUN tests need isolation, not just reviewers who plant mutations
+
+The existing rule covers mutation-planting. It is too narrow. Three reviewers dispatched into one
+worktree produced 74 failures across 6 files, every one `table 'main.organizations' does not exist` —
+a schema-teardown collision between two concurrent vitest processes sharing one `test.db`. None of
+the failing files was touched by the diff under review.
+
+The cost is not just wasted runs. One reviewer began investigating whether the change under review
+had reordered the suite; another wrote a provisional pessimistic verdict; a third recorded its own
+result as contaminated and refused to report either number. All three were reasoning about the
+orchestrator's mistake as though it were a property of the diff.
+
+**The rule.** Any reviewer that RUNS a suite — not only one that mutates — gets `isolation:
+"worktree"` when the project's tests share state (one test database, one fixture store, one port).
+If isolation is unavailable, dispatch them SERIALLY. And when contamination is discovered, tell every
+running reviewer the window and the files, so they can discard rather than attribute: the failure
+mode is a reviewer confidently explaining your own interference.
+
+## A property over a possibly-empty set is not a check
+
+The commonest defect this pipeline finds, and the one it keeps re-introducing **inside its own
+remedies**, is a criterion that ranges over a collection that can be empty. `for every X in S, assert
+P(X)` is vacuously true when `S` is `∅`, exits 0, and is indistinguishable from a real pass.
+
+One issue produced six instances in four review rounds, three of them in the fix for the previous one:
+
+- A credential-leak guard asserted "every committed fixture contains no credential rows". The same
+  round preferred a GENERATOR over a committed binary — making the committed set empty, so the
+  property passed without looking.
+- Its replacement asserted `|committed ∪ generated| > 0`, which the generated side satisfies alone,
+  so it still said nothing about the committed side — the only side that reaches git history.
+- A mount-closure criterion asserted over `docker compose config --services`, which silently omits
+  profile-gated services. The one service the criterion was written about was profile-gated.
+- The same command exits non-zero without a full env. Swallowed, the service set is empty and
+  "no service mounts the data dir" is vacuously true.
+- A runbook-command extractor that lifts zero commands executes nothing and passes green.
+- A host-side-invocation scan whose count was PINNED to a number: the cheapest way to make a correct
+  scanner return that number is to narrow the pattern until it does, and the narrowing drops exactly
+  the sites nobody knew about. **A pinned count with the answer pre-printed is a target.**
+
+**The rule.** Before a criterion asserts a property over a set, it must assert the set is non-empty
+and of the expected shape, and that whatever produced the set actually ran. Derive counts; never
+pin them. And when you write the guard against this, ask what THAT guard fails to bind before you
+adopt it — three of the six above were introduced by the fix for the one before.
+
+## A number carries the population it was measured on
+
+The second commonest class here. A figure is correct for one grain and gets quoted for another,
+where it is wrong and still plausible. Four instances in one week:
+
+- A vendor's 12-month TRAILING AVERAGE read as a per-month value, so 12 of 16 client-facing cards
+  named the wrong peak month.
+- A per-task price for one API endpoint applied to a different endpoint's workload — 7.75x apart —
+  producing a cost figure 8x too high inside the very issue filed to correct stale cost figures.
+- "N of 20" used for two different quantities in one file; a reviewer conflated them and nearly
+  replaced a correct number with a wrong one.
+- "integrity_check costs 0.64s on the live file" where the measurement was taken on a 343MB COPY and
+  the live file is 505MB, stated two paragraphs from the sentence that said so.
+
+**The rule.** A number in an artifact carries its population, its window and its units, or it does
+not appear. When you quote a figure from another artifact, re-derive it or say you did not.
+
+## Capture the status of the command, not the pipeline
+
+`cmd 2>&1 | head; echo rc=$?` reports `head`'s status. So does `cmd | tail`, and so does any check
+whose liveness gate is written that way — a gate that cannot fail, guarding a gate that cannot fail.
+Observed three times in one session's shell work and once inside an acceptance criterion whose whole
+job was proving a renderer had run. Capture directly, or use `${PIPESTATUS[0]}` (bash) / `$pipestatus`
+(zsh) and be aware they differ.
+
 ## 1. A skip is not a pass
 
 Every `continue`, every early `return`, every `if (!x) continue` inside a verification loop is a
