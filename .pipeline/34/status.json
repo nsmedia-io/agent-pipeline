@@ -2,9 +2,16 @@
   "issue_number": 34,
   "current_phase": "1-ba",
   "started_at": "2026-08-20T13:32:41Z",
-  "updated_at": "2026-08-20T13:32:41Z",
+  "updated_at": "2026-08-20T13:37:14Z",
   "branch": "claude/mechanical-group-impl-bfb9ce",
   "ask_text": "Bound events[].verdict with a maxLength in status.schema.json (#34) and correct the rotted current_phase description example list at line 13 (#42). Both are single-file edits to plugins/pipeline/schemas/status.schema.json.",
-  "events": [],
+  "events": [
+    {
+      "phase": "0.5-map",
+      "verdict": "SKIPPED",
+      "at": "2026-08-20T13:37:14Z",
+      "note": "No separate 0.5-map dispatch: pipeline.md folds the map into the Phase 1 BA dispatch below the architectural tier, and BA (in flight) writes map.json alongside spec.json. Recorded as a skip rather than waited on because this record carries no risk_tier yet -- the tier is BA output, while pipeline.md mandates checkpointing 1-ba BEFORE dispatching BA -- so gate-phase-entry.mjs:133 normalizes the absent tier to architectural and switches on the architectural-only 1-ba row. That is issue #45 reproduced live. Revisit if BA promotes the tier, which needs the deep three-layer map as its own dispatch."
+    }
+  ],
   "flags": []
 }
