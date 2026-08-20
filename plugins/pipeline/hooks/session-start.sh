@@ -137,6 +137,36 @@ if [[ -d .pipeline ]]; then
     printf '%s' "$ACTIVE"
     echo ""
   fi
+
+  # --- Phase-entry guard availability ---
+  #
+  # The Stop-hook guard (scripts/gate-phase-entry.mjs) fails OPEN on tooling: a missing node or
+  # a missing script disarms it exactly like a grant, permanently, with nothing said at the
+  # moment it happens. That disarm occurs in the OPERATOR's environment, and session start is
+  # the only place in that environment this plugin already speaks, so the check is paid once
+  # here instead of at every stop.
+  GATE_SCRIPT="$(dirname "${BASH_SOURCE[0]}")/../scripts/gate-phase-entry.mjs"
+  GATE_DISARM=""
+  [[ -f "$GATE_SCRIPT" ]] || GATE_DISARM="its script is not installed"
+  command -v node >/dev/null 2>&1 || GATE_DISARM="node is not on this hook's PATH"
+  if [[ -n "$GATE_DISARM" ]]; then
+    # "In flight" is APPROXIMATED here, and it has to be: this must report in the very
+    # environment where node is absent, so there is nothing available to parse an ISO
+    # `updated_at`. The file's own mtime stands in for it. "Guarded" reuses the phase-5 /
+    # completed_at / final_verdict exclusions rather than restating the guard's 15-row phase
+    # table, which would be a second vocabulary with no drift test behind it, so the notice is
+    # a superset: a run parked in a tripwire state is not guarded but is still reported here.
+    for dir in .pipeline/[0-9]*/ .pipeline/exp-*/; do
+      [[ -f "$dir/status.json" ]] || continue
+      grep -q '"completed_at"\|"final_verdict"' "$dir/status.json" 2>/dev/null && continue
+      PHASE=$(grep -oE '"current_phase"[[:space:]]*:[[:space:]]*"[^"]*"' "$dir/status.json" 2>/dev/null | head -1 | sed -E 's/.*:[[:space:]]*"([^"]*)"/\1/')
+      [[ "$PHASE" == 5-* ]] && continue
+      [[ -n "$(find "$dir/status.json" -mtime -1 2>/dev/null)" ]] || continue
+      echo "NOTICE: a pipeline run is in flight and the phase-entry guard (scripts/gate-phase-entry.mjs) is DISARMED because $GATE_DISARM. A turn can end at a phase whose prerequisite was never produced and nothing will refuse it."
+      echo ""
+      break
+    done
+  fi
 fi
 
 # CUSTOMIZE: if your project wires monitoring / DB / log / docs data sources (via MCP or CLI),
