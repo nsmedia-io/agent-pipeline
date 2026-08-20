@@ -481,12 +481,7 @@ two_dirs() {
   touch -t "$2" "$CASE_ROOT/.pipeline/6160/status.json"
 }
 
-two_dirs 202601010101 202601010102        # granting dir is newest
-( unset CLAUDE_PIPELINE_ACTIVE_ISSUE PIPELINE_ACTIVE_ISSUE; gate "$CASE_ROOT"
-  assert_eq "(a) signal unset: the mtime-derived (granting) dir is the one evaluated" "$GATE_DEC" "granted"
-  assert_contains "  and the decision names that dir" "$GATE_ISSUE" "6160" )
-
-# gate_signal <root> <VAR=VAL ...> -> GATE_OUT, GATE_RC, GATE_DEC, GATE_ISSUE
+# gate_signal <root> <env-arg ...> -> GATE_OUT, GATE_RC, GATE_DEC, GATE_ISSUE
 # The env has to be set for the child, so this cannot reuse gate() as written.
 gate_signal() {
   local root="$1"; shift
@@ -497,6 +492,22 @@ gate_signal() {
   GATE_ISSUE="$(printf '%s' "$GATE_OUT" | sed -n 's/.*"issue_dir"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
   [[ -n "$GATE_ISSUE" ]] || GATE_ISSUE="<no-issue-dir-on-stdout>"
 }
+
+# gate_nosignal <root> -> the same outputs, with BOTH signal names removed from the CHILD's
+# environment.
+#
+# `env -u` rather than the `( unset ...; assert ... )` this used to be, and the difference is the
+# whole reason the cells below count. harness.sh tracks TESTS_PASSED/TESTS_FAILED in shell
+# variables and assert_* returns 0 on both branches, so an assertion evaluated inside a `( ... )`
+# printed its FAIL line and incremented nothing that survived the subshell: seven assertions in
+# this file -- including the two (b') CONTROLs, whose entire job is to be falsifiable -- could not
+# fail the build. Scope the environment around the CHILD process, never around the assertion.
+gate_nosignal() { gate_signal "$1" -u CLAUDE_PIPELINE_ACTIVE_ISSUE -u PIPELINE_ACTIVE_ISSUE; }
+
+two_dirs 202601010101 202601010102        # granting dir is newest
+gate_nosignal "$CASE_ROOT"
+assert_eq "(a) signal unset: the mtime-derived (granting) dir is the one evaluated" "$GATE_DEC" "granted"
+assert_contains "  and the decision names that dir" "$GATE_ISSUE" "6160"
 
 two_dirs 202601010102 202601010101        # refusing dir is newest; signal points at the granting one
 gate_signal "$CASE_ROOT" CLAUDE_PIPELINE_ACTIVE_ISSUE=6160
@@ -514,8 +525,8 @@ for signal_var in CLAUDE_PIPELINE_ACTIVE_ISSUE PIPELINE_ACTIVE_ISSUE; do
   two_dirs 202601010101 202601010102      # granting dir (6160) is newest; 5150 refuses
   # NON-ZERO CONTROL, on this exact fixture: with no signal the answer is `granted`, so the
   # refusal below is attributable to the signal and to nothing else about the tree.
-  ( unset CLAUDE_PIPELINE_ACTIVE_ISSUE PIPELINE_ACTIVE_ISSUE; gate "$CASE_ROOT"
-    assert_eq "  CONTROL ($signal_var): with no signal this same tree GRANTS (mtime picks 6160)" "$GATE_DEC" "granted" )
+  gate_nosignal "$CASE_ROOT"
+  assert_eq "  CONTROL ($signal_var): with no signal this same tree GRANTS (mtime picks 6160)" "$GATE_DEC" "granted"
   gate_signal "$CASE_ROOT" "$signal_var=5150"
   assert_eq "(b') $signal_var naming the REFUSING dir is honoured, not discarded for mtime" "$GATE_DEC" "refused"
   assert_eq "  and the decision names the signal-named dir" "$GATE_ISSUE" "5150"
@@ -523,13 +534,12 @@ for signal_var in CLAUDE_PIPELINE_ACTIVE_ISSUE PIPELINE_ACTIVE_ISSUE; do
 done
 
 two_dirs 202601010103 202601010103        # the measured tie: three records in this tree share one mtime
-( unset CLAUDE_PIPELINE_ACTIVE_ISSUE PIPELINE_ACTIVE_ISSUE
-  gate "$CASE_ROOT"; FIRST_DEC="$GATE_DEC"; FIRST_DIR="$GATE_ISSUE"
-  gate "$CASE_ROOT"
-  assert_eq "(c) an mtime tie is DETERMINISTIC across runs (decision)" "$GATE_DEC" "$FIRST_DEC"
-  assert_eq "  and deterministic in the dir it names" "$GATE_ISSUE" "$FIRST_DIR"
-  assert_eq "  and it names one of the two dirs rather than nothing" \
-    "$([[ "$FIRST_DIR" == "5150" || "$FIRST_DIR" == "6160" ]] && echo named || echo "UNNAMED: $FIRST_DIR")" "named" )
+gate_nosignal "$CASE_ROOT"; FIRST_DEC="$GATE_DEC"; FIRST_DIR="$GATE_ISSUE"
+gate_nosignal "$CASE_ROOT"
+assert_eq "(c) an mtime tie is DETERMINISTIC across runs (decision)" "$GATE_DEC" "$FIRST_DEC"
+assert_eq "  and deterministic in the dir it names" "$GATE_ISSUE" "$FIRST_DIR"
+assert_eq "  and it names one of the two dirs rather than nothing" \
+  "$([[ "$FIRST_DIR" == "5150" || "$FIRST_DIR" == "6160" ]] && echo named || echo "UNNAMED: $FIRST_DIR")" "named"
 
 # ---------------------------------------------------------------------------
 suite "AC17: exp-<slug> runs are GUARDED, not exempt"
