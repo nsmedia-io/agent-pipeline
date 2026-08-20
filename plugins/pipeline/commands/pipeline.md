@@ -93,6 +93,9 @@ Rules for `summary`:
 - Quote the agent's own concern, do not editorialize.
 - Verdict-only ("APPROVE") agents still get an entry with `summary: ""`.
 
+Rules for `verdict` (the same rule governs `events[].verdict`):
+- A TOKEN, not prose: strict 32-char cap, matching the `maxLength` on both verdict fields in `schemas/status.schema.json`. Write the agent's verdict word and nothing else; the reasoning goes in `summary`. Nothing validates status.json against that schema, so this restatement IS the write-time honorer.
+
 When dispatching Phase 4 reviewer prompts (see the Phase 4 section below), include the line `Prior flags: see status.json flags array; the digest is authoritative for what earlier agents already raised.` This avoids each Phase 4 reviewer re-parsing review.json and impl-report.json from cold.
 
 ### Risk-tiered orchestration depth

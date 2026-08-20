@@ -12,10 +12,11 @@
 # population #34 cares about -- status.json is committed AND archived verbatim into the
 # knowledge store, so whatever lands in it lands in a public tree at full length.
 #
-# THE CAP IS READ FROM THE SCHEMA, NEVER COPIED. One site below holds the literal 32, and it is
-# the pin on the value the spec ruled (q2). Every assertion OVER THE CORPUS uses the value read
-# out of the schema, so changing the schema alone moves this suite's verdict. A test carrying
-# its own copy of 32 would stay green while the schema drifted away underneath it.
+# THE CAP IS READ FROM THE SCHEMA, NEVER COPIED. TWO sites below hold the literal 32 -- one pin
+# per capped field, because AC1 requires each field pinned SEPARATELY -- and both pin the value
+# the spec ruled (q2). Every assertion OVER THE CORPUS uses the value read out of the schema, so
+# changing the schema alone moves this suite's verdict. A test carrying its own copy of 32 would
+# stay green while the schema drifted away underneath it.
 
 . "$(dirname "${BASH_SOURCE[0]}")/harness.sh"
 require_node
@@ -176,9 +177,12 @@ SCHEMA_FACTS="$(node -e '
 assert_eq "status.schema.json parses as JSON at all" \
   "$([[ -n "$SCHEMA_FACTS" ]] && echo parsed || echo "UNPARSEABLE or unreadable: $SCHEMA")" "parsed"
 
-# THE ONE SITE THAT HOLDS THE LITERAL. This is the pin on the ruled value (spec q2: 32 = the
-# 18-char longest DECLARED verdict plus headroom for a longer token, below the length of the
-# prose sentence the bound refuses). Every corpus assertion below reads the schema instead.
+# THE TWO SITES THAT HOLD THE LITERAL, one pin per capped field. Two, not one, because AC1's
+# whole point is that "the schema contains maxLength" is satisfied by the events[] copy while
+# flags[] sits bare; a single shared pin cannot tell those apart. Both pin the ruled value (spec
+# q2: 32 = the 18-char longest DECLARED verdict plus headroom for a longer token, below the
+# length of the prose sentence the bound refuses). Every corpus assertion below reads the schema
+# instead, so a cap change moves this suite's verdict through the corpus, not through the pins.
 assert_eq "AC1: events[].verdict is capped at the ruled 32" "$(rfield "$SCHEMA_FACTS" events_cap)" "32"
 assert_eq "AC1: flags[].verdict is capped at the ruled 32 (folded in by R2; #34 names only events[])" \
   "$(rfield "$SCHEMA_FACTS" flags_cap)" "32"
@@ -196,6 +200,19 @@ assert_contains "R6: flags[].verdict says the same" \
   "$(rfield "$SCHEMA_FACTS" flags_desc)" "nothing validates status.json against this schema"
 assert_eq "flags[].summary's pre-existing 140 cap is untouched" \
   "$(rfield "$SCHEMA_FACTS" summary_cap)" "140"
+
+# THE WRITER RULE THE DESCRIPTIONS NAME. Both verdict descriptions say the cap "is honored by the
+# writer", and commands/pipeline.md is the only document the writer reads. A rule nobody reads is
+# a comment, so the claim is asserted rather than trusted -- and asserted against the number read
+# out of the SCHEMA, not a literal repeated here, so raising the cap in the schema alone reddens
+# this until the writer's copy follows.
+PIPELINE_VERDICT_RULE="$(sed -n '/^Rules for `verdict`/,/^$/p' "$PIPELINE_MD")"
+assert_contains "R6: commands/pipeline.md restates the verdict cap to the WRITER, beside the 140 summary rule" \
+  "$PIPELINE_VERDICT_RULE" "$(rfield "$SCHEMA_FACTS" events_cap)-char cap"
+assert_contains "R6: ...and says what the field is for, so the cap is not read as a truncation budget" \
+  "$PIPELINE_VERDICT_RULE" "TOKEN, not prose"
+assert_eq "CONTROL: the extraction is SCOPED -- the range stops at the blank line and does not run on into the next section" \
+  "$(printf '%s' "$PIPELINE_VERDICT_RULE" | grep -c 'When dispatching Phase 4' | tr -d ' ')" "0"
 
 # ---------------------------------------------------------------------------
 suite "AC2: VACUITY CONTROL over the corpus, asserted BEFORE any property of it"
@@ -436,26 +453,45 @@ suite "AC10: the three rot comments read as HISTORY, not as a live claim"
 # it" is deliberately NOT part of the needle: that sentence is still TRUE, and still load-bearing,
 # for the control input at test-gate-phase-entry.sh:514.
 #
+# THE VERB IS A CLASS, NOT AN EXAMPLE. The needle used to enumerate one spelling, `blesses`, while
+# the assertion below claimed the whole class -- and the escape was not hypothetical: a planted
+# `status.schema.json:13 names 3-scope-drift-adjudication` passed green, in the very wording the
+# sibling suite at test-gate-phase-entry.sh:511 uses for this subject. Each verb gets its own
+# control cell below, because a class proven through one member is an example again. PRESENT
+# tense only: `named`/`blessed` are how the re-anchored comments correctly state the history, and
+# a needle that swallowed the past tense would refuse the fix it exists to enforce.
+#
+# The `bl[e]sses`/`n[a]mes` brackets are not decoration: this file is exempt from the walk, but
+# the CONTROL cells below grep hand-written strings, and a needle that matched its own definition
+# would report the checker instead of the repo.
+#
 # DISCOVERY IS THE test-*.sh GLOB, with ONE exemption. This suite is exempt because it is the file
 # that has to carry the needle and the pre-change wording in order to check them at all -- an
 # unexempted walk reports its own source and can never go green, which measures the checker rather
 # than the repo. The exemption is by basename and is the only one; a new suite is covered the day
 # it lands.
-AC10_NEEDLE='schema\.json.*bl[e]sses'
+AC10_VERBS='bl[e]sses|n[a]mes|lists|claims'
+AC10_NEEDLE="schema\.json.*\b($AC10_VERBS)\b"
 AC10_VIOLATORS=""
 AC10_EXAMINED=0
 for f in "$TESTS_DIR"/test-*.sh; do
   [[ -f "$f" ]] || continue
   [[ "$(basename "$f")" == "test-status-schema-contract.sh" ]] && continue
   AC10_EXAMINED=$((AC10_EXAMINED + 1))
-  if grep -qn "$AC10_NEEDLE" "$f"; then
-    AC10_VIOLATORS="$AC10_VIOLATORS $(basename "$f"):$(grep -n "$AC10_NEEDLE" "$f" | head -1 | cut -d: -f1)"
+  if grep -qEn "$AC10_NEEDLE" "$f"; then
+    AC10_VIOLATORS="$AC10_VIOLATORS $(basename "$f"):$(grep -En "$AC10_NEEDLE" "$f" | head -1 | cut -d: -f1)"
   fi
 done
 assert_eq "AC10: no suite still claims in the present tense that the schema names an unwritten phase" \
   "${AC10_VIOLATORS:-none}" "none"
-assert_eq "AC10: and the walk examined the suites rather than passing against an empty glob" \
-  "$([[ "$AC10_EXAMINED" -ge 8 ]] && echo ok || echo "only $AC10_EXAMINED examined")" "ok"
+# THE POPULATION IS DERIVED, NOT PINNED -- the same rule this suite applies to AC2's corpus floor,
+# applied to its own walk. The floor used to be `-ge 8` against a real population of 33, which is
+# room for 24 suites to fall out of the glob in silence: a planted violation in an excluded file
+# passed green with 9 walked. Enumerating the glob independently of the loop closes that, and it
+# is non-vacuous by construction -- an empty glob yields -1 here against 0 examined, which is red.
+AC10_EXPECTED=$(( $(ls "$TESTS_DIR"/test-*.sh 2>/dev/null | grep -c . | tr -d ' ') - 1 ))  # -1 = the single self-exemption
+assert_eq "AC10: and the walk examined EVERY suite but its own (population DERIVED from the glob, not pinned)" \
+  "$AC10_EXAMINED" "$AC10_EXPECTED"
 # The control is the three sites' ACTUAL pre-change wording, one cell each, because a needle
 # proven against one hand-written line proves nothing about the other two.
 AC10_WAS_1="# insufficient: status.schema.json:13's own description blesses \`3-scope-drift-adjudication\`"
@@ -463,10 +499,22 @@ AC10_WAS_2="# The live case, not a hypothetical: status.schema.json:13's own des
 AC10_WAS_3="# Prose alone is provably insufficient: status.schema.json:13 blesses two phases pipeline.md"
 for w in "$AC10_WAS_1" "$AC10_WAS_2" "$AC10_WAS_3"; do
   assert_eq "AC10 CONTROL: the needle fires on the pre-change wording -- ${w:0:44}..." \
-    "$(printf '%s\n' "$w" | grep -c "$AC10_NEEDLE" | tr -d ' ')" "1"
+    "$(printf '%s\n' "$w" | grep -cE "$AC10_NEEDLE" | tr -d ' ')" "1"
 done
+# ONE CELL PER VERB, over the same sentence, so no member of the class rides on another's cell.
+# The `names` cell is the demonstrated escape: this exact line passed green before the widening.
+while IFS= read -r verb; do
+  assert_eq "AC10 CONTROL: the needle fires on the claim spelled '$verb' (one cell per verb in the class)" \
+    "$(printf '%s\n' "# status.schema.json:13 $verb 3-scope-drift-adjudication, and pipeline.md writes it nowhere." \
+      | grep -cE "$AC10_NEEDLE" | tr -d ' ')" "1"
+done < <(printf '%s\n' "$AC10_VERBS" | tr '|' '\n' | tr -d '[]')
 assert_eq "AC10 CONTROL: and it does NOT fire on the surviving true sentence about the control input" \
-  "$(printf '%s\n' "# pipeline.md still writes 3-scope-drift-adjudication nowhere, so it stays a valid input" | grep -c "$AC10_NEEDLE" | tr -d ' ')" "0"
+  "$(printf '%s\n' "# pipeline.md still writes 3-scope-drift-adjudication nowhere, so it stays a valid input" | grep -cE "$AC10_NEEDLE" | tr -d ' ')" "0"
+# The PAST tense is the shape the fix itself uses (test-gate-phase-entry.sh:511 "until #42 ...
+# named"). A needle that swallowed it would redden on the corrected comments, which is why the
+# verb class is anchored on both sides rather than left as a bare substring.
+assert_eq "AC10 CONTROL: nor on the re-anchored HISTORY wording, which is the corrected form" \
+  "$(printf '%s\n' "# Not a hypothetical: until #42, status.schema.json:13's own description named two phases" | grep -cE "$AC10_NEEDLE" | tr -d ' ')" "0"
 for f in test-gate-phase-entry-drift.sh test-gate-phase-entry.sh; do
   assert_eq "AC10: $f restates the rot as history naming #42" \
     "$([[ "$(grep -c 'until #42\|#42' "$TESTS_DIR/$f" | tr -d ' ')" -ge 1 ]] && echo anchored || echo "no #42 reference: the comment was deleted rather than re-anchored")" "anchored"
