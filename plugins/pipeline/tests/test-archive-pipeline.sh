@@ -158,6 +158,15 @@ assert_eq "a foreign home directory embedded in prose is redacted, and only that
 # go green on a Windows-authored artifact.
 assert_eq "a Windows drive-rooted path is redacted rather than passed through" \
   "$(jget "$ARC" impl-report.windows_shaped)" "<redacted-absolute-path>"
+# THE SURVIVING MUTATION, named so this battery is not a rubber stamp. Five mutations to the
+# redactor redden cells here (kill the relativize branch; narrow the value predicate to
+# /Users/; stop redacting keys; drop the home arm of the embedded pattern; drop the embedded
+# pass). One SURVIVES: narrowing DRIVE_VALUE's separator class from [\\/] to [\\] changes
+# nothing, because the fixture above is the backslash spelling and no fixture uses `C:/x`.
+# Left standing on purpose. A battery in which every mutation reddens cannot tell coverage
+# from a harness that always fires, and closing this one buys a SPELLING of a class already
+# covered rather than a class. If a redactor change ever makes the two spellings behave
+# differently, this note is the place to add the twin.
 assert_contains "a path-shaped KEY is redacted on the same predicate as a value" \
   "$(cat "$ARC")" '"keyed/by/path"'
 # CONTROL, and the suite is a rubber stamp without it: a redactor that blanked every string
