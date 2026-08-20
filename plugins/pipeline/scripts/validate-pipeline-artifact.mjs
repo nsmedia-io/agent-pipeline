@@ -271,7 +271,12 @@ function pipelineDirs(input, rootsOverride) {
 // "experiment runs never block" carve-out for the open-questions gate, that meant BOTH halves
 // of a gate went inert on exactly the runs nobody is watching. The alternation stays anchored
 // and separator-free, so `..`, `a/b`, `schemas` and `_archived` are all still rejected.
-const ISSUE_DIR_RE = /^(\d+|exp-[a-z0-9]+(-[a-z0-9]+)*)$/;
+// EXPORTED so the other consumers of this vocabulary import it rather than restate it.
+// voice-lint.mjs used to carry its own /^\d+$/ copy, which is how `exp-` runs ended up
+// invisible to the voice check long after this alternation was widened to admit them: the
+// second copy could not be widened by widening the first. A shared constant makes that drift
+// structurally impossible rather than merely tested for.
+export const ISSUE_DIR_RE = /^(\d+|exp-[a-z0-9]+(-[a-z0-9]+)*)$/;
 
 function issueDirs(pipelineDir) {
   try {

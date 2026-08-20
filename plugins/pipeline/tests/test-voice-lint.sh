@@ -246,4 +246,71 @@ grep -q '"9-does-not-exist"' "$LINT_SRC" \
   && assert_eq "CONTROL: the drift grep can report a miss" "found" "not found" \
   || assert_eq "CONTROL: the drift grep can report a miss" "not found" "not found"
 
+# ---------------------------------------------------------------------------
+suite "voice-lint: exp-<slug> runs are LINTED, not exempt"
+# ---------------------------------------------------------------------------
+# voice-lint.mjs used to declare its OWN issue-dir pattern, /^\d+$/, so resolveStatus could not
+# see an experiment run at all: no active issue, no phase, no lint. The control went quiet on
+# exactly the runs nobody is watching, and it did so silently -- the same defect shape, in a
+# third copy of the same vocabulary, that widening the validator's pattern already fixed for
+# artifact validation and that AC17 in test-gate-phase-entry.sh pins for the phase-entry guard
+# ("exp-<slug> runs are GUARDED, not exempt"). The pattern is now IMPORTED from the validator,
+# so these cases also stand as the behavioural witness that the import is wired up.
+#
+# This block deliberately runs LAST: it repoints TEMP_PROJECT/TEMP_ISSUE_DIR/TRANSCRIPT at a
+# fresh root whose only issue dir is an exp- one, which would break the cases above if it ran
+# before them.
+EXP_SLUG="exp-two-owner-gates"
+make_temp_project "$EXP_SLUG" || exit 90
+TRANSCRIPT="$TEMP_PROJECT/transcript.jsonl"
+
+# NO active-issue signal, because that is the shape production runs in: the Stop payload does
+# not carry one, so the mtime scan is the branch that has to admit an exp- dir. Both signal
+# names are unset around the CHILD, never around the assertion.
+exp_lint_nosignal() {
+  local errf="$TEMP_PROJECT/err.txt"
+  printf '%s' "{\"cwd\":\"$TEMP_PROJECT\",\"transcript_path\":\"$TRANSCRIPT\"}" \
+    | ( cd "$TEMP_PROJECT" && env -u CLAUDE_PIPELINE_ACTIVE_ISSUE -u PIPELINE_ACTIVE_ISSUE \
+        CLAUDE_PROJECT_DIR="$TEMP_PROJECT" node "$LINT" ) 2>"$errf" >/dev/null
+  RC=$?
+  ERR=$(cat "$errf")
+}
+
+# The OTHER branch: the explicit signal is regex-tested against the same vocabulary, so a
+# numeric-only pattern rejected an exp- signal too. Widening one branch and not the other would
+# pass every case above.
+exp_lint_signal() {
+  local errf="$TEMP_PROJECT/err.txt"
+  printf '%s' "{\"cwd\":\"$TEMP_PROJECT\",\"transcript_path\":\"$TRANSCRIPT\"}" \
+    | ( cd "$TEMP_PROJECT" && env CLAUDE_PIPELINE_ACTIVE_ISSUE="$EXP_SLUG" \
+        CLAUDE_PROJECT_DIR="$TEMP_PROJECT" node "$LINT" ) 2>"$errf" >/dev/null
+  RC=$?
+  ERR=$(cat "$errf")
+}
+
+set_phase "2.5-design-owner-decision"
+write_transcript "I picked approach B because it is cleaner. Moving on to implementation."
+exp_lint_nosignal
+assert_eq "an exp- run at a decision moment is LINTED (mtime path) and exits 2" "$RC" "2"
+assert_contains "and names the phase" "$ERR" "2.5-design-owner-decision"
+
+exp_lint_signal
+assert_eq "and the explicit-signal branch admits an exp- slug too" "$RC" "2"
+assert_contains "and names the phase" "$ERR" "2.5-design-owner-decision"
+
+# CONTROL, on the same exp- root: a compliant message is silent. Without it these cases would
+# pass just as well against a lint that had started reddening everything, and "exp- is no
+# longer exempt" would be indistinguishable from "exp- is now always refused".
+write_transcript "$GOOD_DECISION"
+exp_lint_nosignal
+assert_eq "CONTROL: the same exp- moment WITH the decision block exits 0" "$RC" "0"
+assert_eq "CONTROL: and says nothing" "$ERR" ""
+
+# CONTROL: the exemption was phase-blind, so prove the lint still discriminates BY PHASE inside
+# an exp- dir rather than simply biting on every exp- run it can now see.
+set_phase "3-impl"
+write_transcript "Refactored the parser — it now handles the nested case — and tests pass."
+exp_lint_nosignal
+assert_eq "CONTROL: a NON-voice phase in an exp- dir is still silent, em dashes and all" "$RC" "0"
+
 finish
