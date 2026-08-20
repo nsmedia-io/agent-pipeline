@@ -1,0 +1,17 @@
+{
+  "title": "Known unenforced pipeline artifact constraints (validate-pipeline-artifact.mjs gaps)",
+  "domain": "architecture",
+  "status": "current",
+  "last_updated": "2026-08-20T18:35:20Z",
+  "updated_by_issue": 34,
+  "tags": [
+    "validate-pipeline-artifact",
+    "status-schema",
+    "enforcement-gap"
+  ],
+  "content": "Recorded from #34's review (merged PR #51, 2026-08-20) so a future 'add a constraint to a schema' task does not re-discover this expensively. plugins/pipeline/schemas/status.schema.json has NO entry in validate-pipeline-artifact.mjs's AGENT_RULES table, so status.json is never validated against it at all, by anything. Separately, and more generally, that walker's own header states maxLength is unimplemented (the token 'maxLength' appears exactly once in validate-pipeline-artifact.mjs, in the comment that says so) -- so even a schema that IS registered in AGENT_RULES would not have a maxLength constraint enforced by the generic walker; a schema author needs either a bespoke check (the established precedent is the groundOpenQuestions check at validate-pipeline-artifact.mjs:538, which handles one field's constraint outside the walker) or a dedicated corpus-conformance test suite (the pattern #34 used for status.schema.json's verdict-field caps: see knowledge/living-context/testing--status-schema-verdict-cap-enforcement.json). Practical consequence: a maxLength or pattern constraint added to any schema file in this repo is documentation, not a guard, until one of those two enforcement paths exists for it. #34 explicitly declined to close this gap generally (out_of_scope: 'Adding maxLength or pattern support to validate-pipeline-artifact.mjs's schema walker... would change the validation behaviour of EVERY schema at once' and 'Registering status.json in AGENT_RULES... is a new enforcement surface with its own fail-open/fail-closed design questions, not a schema annotation'). If the owner wants either closed, it is scoped as its own issue, not a schema-annotation follow-on.",
+  "see_also": [
+    "testing--status-schema-verdict-cap-enforcement.json",
+    "architecture--status-schema-json-consumers.json"
+  ]
+}
