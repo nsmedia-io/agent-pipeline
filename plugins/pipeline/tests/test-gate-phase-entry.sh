@@ -333,25 +333,68 @@ suite "R3 kind: content-conditioned rows test CONTENT on path (a), not mere pres
 # CONTENT while path (b) tests only that the phase was DISPATCHED. Without these, an
 # existsSync-only implementation satisfies every criterion in the spec while the `kind` column
 # means nothing, and the guard's strength silently depends on which machine it runs on.
-new_case 4242 "$(mk_status "2-review" '"architectural"' "$NO_EVENTS")"
-printf '{"issue_number":4242}' > "$CASE_DIR/spec.json"        # present, but never BA-approved
-gate "$CASE_ROOT"
-assert_eq "2-review: a spec.json with no ba_approved_at does NOT satisfy the row" "$GATE_DEC" "refused"
+#
+# A FIXTURE MATRIX, NOT A REPRESENTATIVE FIXTURE, and that distinction is what this block was
+# missing. `prerequisiteSatisfied` is a COMPOUND predicate -- the artifact decides the row BY
+# ITSELF when it is present, and events[] are consulted only when it is absent -- and every cell
+# here used to build the artifact-present half with NO_EVENTS. So every fixture sat in one cell
+# of the conjunction, and the branch that makes the whole `content` column dead was never run:
+# `if (existsSync(p)) return contentSatisfies(p,row)` could be rewritten to
+# `if (existsSync(p) && contentSatisfies(p,row)) return true` -- falling through to the events
+# path on a content FAILURE -- with zero failures across all three suites. That rewrite is the
+# implementation's own docstring inverted: a dispatch event for the phase is always present by
+# the time its artifact is, so an unapproved spec.json would be waved through by the very event
+# that recorded the BA dispatch.
+#
+# The cross product is therefore {absent, present-and-failing, present-and-satisfying} x {no
+# events, a SATISFYING event}. Cell (absent, no events) is AC1 and is not repeated. The
+# artifact-absent-with-event cell is the non-zero control that makes the rest mean anything: it
+# is what proves the event in cells 1 and 2 really does satisfy the row, so a refusal alongside
+# it is the ARTIFACT overriding the event rather than an inert fixture.
+r3_row() {  # r3_row <phase> <tier> <file> <failing-body> <satisfying-body> <satisfying-event-json>
+  local phase="$1" tier="$2" file="$3" bad="$4" good="$5" ev="$6"
 
-new_case 4242 "$(mk_status "2-constraints" '"standard"' "$NO_EVENTS")"
-printf '{"issue_number":4242}' > "$CASE_DIR/spec.json"
-gate "$CASE_ROOT"
-assert_eq "2-constraints: same, at the standard tier" "$GATE_DEC" "refused"
+  # 1. THE MISSING LEG: present-and-failing, WITH an event that would satisfy the row on its own.
+  new_case 4242 "$(mk_status "$phase" "\"$tier\"" "$ev")"
+  printf '%s' "$bad" > "$CASE_DIR/$file"
+  gate "$CASE_ROOT"
+  assert_eq "$phase ($tier): a failing $file is NOT rescued by a satisfying events[] entry" \
+    "$GATE_DEC" "refused"
+  assert_eq "  and the refusal exits 2" "$GATE_RC" "2"
 
-new_case 4242 "$(mk_status "3-impl" '"standard"' "$NO_EVENTS")"
-printf '' > "$CASE_DIR/constraints.md"                        # present, and empty
-gate "$CASE_ROOT"
-assert_eq "3-impl at standard: an EMPTY constraints.md does not satisfy the row" "$GATE_DEC" "refused"
+  # 2. Same fixture, same event, CONTENT REPAIRED. The twin: without it, cell 1's refusal could
+  #    be about the phase, the tier or the event rather than about the content.
+  new_case 4242 "$(mk_status "$phase" "\"$tier\"" "$ev")"
+  printf '%s' "$good" > "$CASE_DIR/$file"
+  gate "$CASE_ROOT"
+  assert_eq "  CONTROL: the same fixture with a SATISFYING $file is granted" "$GATE_DEC" "granted"
+
+  # 3. The event alone, artifact absent: path (b) is weaker on purpose, and this is the cell that
+  #    proves the event is live. If this ever refuses, cell 1 stops being about priority at all.
+  new_case 4242 "$(mk_status "$phase" "\"$tier\"" "$ev")"
+  gate "$CASE_ROOT"
+  assert_eq "  CONTROL: with no $file at all, that same event GRANTS (path (b) attests dispatch)" \
+    "$GATE_DEC" "granted"
+
+  # 4. Present-and-failing with NO events: the original cell, kept as a cell of the matrix.
+  new_case 4242 "$(mk_status "$phase" "\"$tier\"" "$NO_EVENTS")"
+  printf '%s' "$bad" > "$CASE_DIR/$file"
+  gate "$CASE_ROOT"
+  assert_eq "  and a failing $file with no events at all is refused too" "$GATE_DEC" "refused"
+}
+
+BA_EVENT='[{"phase":"1-ba","verdict":"complete","at":"2026-01-01T00:00:00Z"}]'
+P2_EVENT='[{"phase":"2-constraints","verdict":"complete","at":"2026-01-01T00:00:00Z"}]'
+
+r3_row 2-review     architectural spec.json      '{"issue_number":4242}' "$SPEC_APPROVED"  "$BA_EVENT"
+r3_row 2-constraints standard     spec.json      '{"issue_number":4242}' "$SPEC_APPROVED"  "$BA_EVENT"
+r3_row 3-impl       standard      constraints.md ''                      '# real content' "$P2_EVENT"
 
 # The stated consequence, asserted rather than left as prose: on a fresh checkout the SAME run
 # is granted through path (b), because an event attests DISPATCH and not APPROVAL. This is the
 # weakness R3 names and declines to defend against; a test that pins it is what stops it being
-# quietly "fixed" into a rejecting-verdict blocklist over free text.
+# quietly "fixed" into a rejecting-verdict blocklist over free text. A REJECTING verdict is used
+# here on purpose: cell 3 above already covers the ordinary case.
 new_case 4242 "$(mk_status "2-review" '"architectural"' \
   '[{"phase":"1-ba","verdict":"REWORK_REQUIRED","at":"2026-01-01T00:00:00Z"}]')"
 gate "$CASE_ROOT"
