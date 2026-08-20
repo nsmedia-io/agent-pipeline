@@ -10,9 +10,13 @@
 # LINES and would silently lower a count if two occurrences shared one.
 #
 # AND WHY THERE IS A SECOND GROUND TRUTH (in the sibling suite, AC19). Prose alone is provably
-# insufficient: status.schema.json:13's own description blesses `3-scope-drift-adjudication`
-# and `3-impl-verification-unverified`, and pipeline.md writes NEITHER. A vocabulary in this
-# repo has already rotted, in the one file a prose-derived test does not read.
+# insufficient, and this repo paid for the lesson: until #42, status.schema.json:13's own
+# description named `3-scope-drift-adjudication` and `3-impl-verification-unverified`, which
+# pipeline.md wrote NEITHER of, and omitted six literals it did write. A vocabulary in this repo
+# HAD rotted, in the one file no prose-derived test read. That list is corrected and now carries
+# a set-equality test of its own (test-status-schema-contract.sh), so it is history rather than
+# live evidence -- but the argument it paid for stands: a hand-maintained second copy of a
+# vocabulary rots silently unless something compares it to the first.
 
 . "$(dirname "${BASH_SOURCE[0]}")/harness.sh"
 require_node
