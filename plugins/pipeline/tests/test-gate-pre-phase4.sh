@@ -57,6 +57,32 @@ write_spec() {
 EOF
 }
 
+# write_report_checks <requirement_checks-json-array>
+# The same schema-valid envelope write_report builds, with the checks array supplied whole.
+# The coverage rules below turn on RELATIONS BETWEEN ENTRIES -- whether a majority carry an AC
+# label, how many distinctive tokens one entry shares -- and a one-entry helper cannot express
+# either. Fixture discipline is unchanged: every field the schema requires is present here, so
+# an exit 1 in those cases is the coverage rule and not a missing field.
+write_report_checks() {
+  cat > "$PROJ_ISSUE_DIR/impl-report.json" <<EOF
+{
+  "issue_number": $ISSUE,
+  "branch": "feat/script-coverage",
+  "commits": [],
+  "checks_passed": {"typecheck": true, "test": true, "lint": true},
+  "completed_at": "2026-01-01T00:00:00Z",
+  "requirement_checks": $1
+}
+EOF
+}
+
+# write_spec_criteria <acceptance_criteria-json-array>
+write_spec_criteria() {
+  cat > "$PROJ_ISSUE_DIR/spec.json" <<EOF
+{"issue_number": $ISSUE, "acceptance_criteria": $1}
+EOF
+}
+
 write_config() { printf '%s' "$1" > "$PROJ/pipeline.config.json"; }
 
 # write_migration <rel-path> <sql>
@@ -413,5 +439,251 @@ drop table foo;
 '
 gate --issue "$ISSUE"
 assert_eq "GUARANTEE: an executable (uncommented) down region now halts" "$RC" "1"
+
+suite "pre-Phase-4 gate: the up section is CLASSIFIED, not line-prefix matched (#31)"
+
+# THE HOLE, and why a bare RC pin would not have caught it. The up rule used to ask whether any
+# non-blank line before the marker failed to start with `--`. A block-commented up section has
+# no such line -- `/*`, the statements, and `*/` all fail the prefix test -- so the gate called
+# it an up section and passed a migration that applies NOTHING. The direction is the one this
+# whole suite exists to catch: a check saying yes too easily. It is the same divergence class
+# #30 closed for the down region, so it closes the same way, through the SAME classifier.
+new_project up-block-commented
+write_spec "AC1: migrations are reversible"
+write_report "AC1 handled" '[{"sha":"a1","message":"m","files_changed":["migrations/024_block_up.sql"]}]'
+write_migration "migrations/024_block_up.sql" '/*
+create table foo (id int);
+*/
+-- DOWN
+-- drop table foo;
+'
+gate --issue "$ISSUE"
+assert_eq "a block-commented up region is NOT an up section" "$RC" "1"
+assert_contains "and it reports the up-section failure" "$ERR" \
+  'migration "migrations/024_block_up.sql" has no up section'
+assert_contains "the message says what the region actually is" "$ERR" \
+  "nothing before the down marker is live SQL"
+# A NARROWING OWES A REMEDY. An adopting project that meets a new refusal with no way out
+# deletes the gate, so the message naming the fix is part of the rule, not decoration.
+assert_contains "and names the remedy for the block form specifically" "$ERR" \
+  'remedy: uncomment the up statements, or remove the enclosing `/* */` delimiters.'
+assert_contains "and names the correct work it refuses" "$ERR" "REFUSES a placeholder migration"
+assert_not_contains "the up-section halt is not an incidental schema error" "$ERR" "impl-report schema:"
+assert_not_contains "and does not claim the down section is missing" "$ERR" "has no down section"
+assert_not_contains "the down region of this file is clean and is not reported" "$ERR" "down region"
+
+# NON-ZERO CONTROL for the case above: the SAME statements with the two delimiter lines removed
+# pass. Without this, a fixture that halted for any unrelated reason would read as the rule
+# firing, and the narrowing could be "fixed" into refusing every migration with the case above
+# still green.
+new_project up-block-commented-control
+write_spec "AC1: migrations are reversible"
+write_report "AC1 handled" '[{"sha":"a1","message":"m","files_changed":["migrations/024_ctl.sql"]}]'
+write_migration "migrations/024_ctl.sql" 'create table foo (id int);
+-- DOWN
+-- drop table foo;
+'
+gate --issue "$ISSUE"
+assert_eq "CONTROL: the same statements unwrapped ARE an up section" "$RC" "0"
+
+# THE FALSE-HALT CONTROL, and the one that bounds the narrowing. A block comment is ordinary in
+# a real migration -- a header, a ticket link, a note above the DDL -- and refusing every file
+# that opens with one would be a far worse bug than the one being fixed. The scan is
+# first-token-wins, so what matters is that a CLOSED block is stepped over rather than treated
+# as the whole region.
+new_project up-block-preamble
+write_spec "AC1: migrations are reversible"
+write_report "AC1 handled" '[{"sha":"a1","message":"m","files_changed":["migrations/025_preamble.sql"]}]'
+write_migration "migrations/025_preamble.sql" '/* seeds the table the courier roster reads */
+create table foo (id int);
+-- DOWN
+-- drop table foo;
+'
+gate --issue "$ISSUE"
+assert_eq "a block-comment PREAMBLE above live statements is still an up section" "$RC" "0"
+
+# The other non-clean verdict, isolated. This file carries NO `*/` anywhere, so the down region
+# ("-- drop table foo;") classifies clean and the up rule is the only rule that can fire. Both
+# non-clean verdicts refuse, and they refuse with DIFFERENT messages -- pinning RC alone would
+# leave which-one-fired resting on nothing.
+new_project up-unterminated
+write_spec "AC1: migrations are reversible"
+write_report "AC1 handled" '[{"sha":"a1","message":"m","files_changed":["migrations/026_unterm.sql"]}]'
+write_migration "migrations/026_unterm.sql" '/*
+create table foo (id int);
+-- DOWN
+-- drop table foo;
+'
+gate --issue "$ISSUE"
+assert_eq "an unterminated block comment before the marker is NOT an up section" "$RC" "1"
+assert_contains "and it reports the up-section failure" "$ERR" \
+  'migration "migrations/026_unterm.sql" has no up section'
+assert_contains "naming the unterminated block and where it opened" "$ERR" \
+  "an unterminated block comment opened at line 1, column 1"
+assert_contains "and its own remedy, which is not the commented-out one" "$ERR" \
+  "remedy: close the block, or delete its"
+assert_not_contains "the indeterminate message is NOT the commented-out message" "$ERR" \
+  "nothing before the down marker is live SQL"
+assert_not_contains "the up-section halt is not an incidental schema error" "$ERR" "impl-report schema:"
+assert_not_contains "and the clean down region is not reported" "$ERR" "down region is"
+
+# THE REGION BOUND, which is the one behaviour a scan borrowed wholesale from the down rule
+# gets wrong. Here a `/*` opens before the marker and its `*/` lands AFTER it. An unbounded
+# lookahead finds that `*/`, calls the up region closed, runs off the end of the region and
+# reports `clean` -- i.e. "every statement here is commented out", vouched for by a delimiter
+# from outside the region. Both readings refuse the file, so RC cannot tell them apart; the
+# MESSAGE is the whole assertion, and the not_contains below is what goes red on a regression.
+new_project up-block-straddles-marker
+write_spec "AC1: migrations are reversible"
+write_report "AC1 handled" '[{"sha":"a1","message":"m","files_changed":["migrations/027_straddle.sql"]}]'
+write_migration "migrations/027_straddle.sql" '/*
+create table foo (id int);
+-- DOWN
+*/
+-- drop table foo;
+'
+gate --issue "$ISSUE"
+assert_eq "a block that opens before the marker and closes after it halts" "$RC" "1"
+assert_contains "and the up region is reported" "$ERR" \
+  'migration "migrations/027_straddle.sql" has no up section'
+assert_contains "as UNTERMINATED, because the closing delimiter is outside the region" "$ERR" \
+  "an unterminated block comment opened at line 1, column 1"
+assert_not_contains "NOT as commented-out: a \`*/\` past the marker must not vouch for the region" \
+  "$ERR" "nothing before the down marker is live SQL"
+
+# A DOCUMENTED BOUNDARY, pinned so the next editor meets the intent rather than the behaviour.
+# The down rule REFUSES a `/*!` opener because MySQL/MariaDB RUN its body. For the up region
+# that same fact is the answer to the question being asked -- something does run -- so it
+# counts as an up section. Tightening it is not available at this scan's granularity: the scan
+# returns at the FIRST token, so an ordinary mysqldump `/*!40101 SET NAMES utf8 */` preamble
+# above a perfectly good `create table` would take the whole migration down with it.
+new_project up-conditional-execution
+write_spec "AC1: migrations are reversible"
+write_report "AC1 handled" '[{"sha":"a1","message":"m","files_changed":["migrations/028_cond.sql"]}]'
+write_migration "migrations/028_cond.sql" '/*!40101 SET NAMES utf8 */;
+-- DOWN
+-- session-scoped, nothing to undo;
+'
+gate --issue "$ISSUE"
+assert_eq "BOUNDARY: a MySQL conditional-execution opener counts as an up section" "$RC" "0"
+
+suite "pre-Phase-4 gate: an AC label is AUTHORITATIVE, not a hint (#48)"
+
+# THE #48 REPRODUCTION, in miniature and as a non-zero control. On the real 54-criterion spec
+# that found this, AC23 and AC28 were deleted from requirement_checks and the gate still
+# reported full coverage: token overlap from the OTHER 52 entries covered them. The three
+# entries below are that shape -- criterion AC23, checks AC22 and AC24, and wording so close
+# that the token path matches on 7 shared tokens. Restore the fall-through to token overlap and
+# this case goes green while the gate is once again claiming coverage it never checked.
+new_project label-authoritative
+write_spec_criteria '["AC23: the pre-Phase-4 gate halts when a migration down region contains executable SQL"]'
+write_report_checks '[
+  {"requirement_index": 0, "requirement_text": "AC22: the pre-Phase-4 gate halts when a migration down region is empty", "status": "PASS", "notes": "pinned by the fixture"},
+  {"requirement_index": 1, "requirement_text": "AC24: the pre-Phase-4 gate halts when a migration down region is indeterminate", "status": "PASS", "notes": "pinned by the fixture"}
+]'
+gate --issue "$ISSUE"
+assert_eq "a labelled criterion no check names is uncovered, despite heavy token overlap" "$RC" "1"
+assert_contains "the halt says which rule fired" "$ERR" \
+  "acceptance criterion not covered by any requirement_check"
+assert_contains "and names the label that went unanswered" "$ERR" "no check names AC23"
+assert_contains "and says token overlap was deliberately not consulted" "$ERR" \
+  "Token overlap is deliberately not consulted here"
+assert_contains "and names the remedy in the convention the report already uses" "$ERR" \
+  "remedy: name AC23 in the covering check's requirement_text or notes"
+assert_not_contains "the coverage halt is not an incidental schema error" "$ERR" "impl-report schema:"
+
+# NON-ZERO CONTROL: the same fixture with the label written down passes. This is what proves the
+# rule is about the LABEL and not about the fixture being unmatchable by any means.
+new_project label-authoritative-control
+write_spec_criteria '["AC23: the pre-Phase-4 gate halts when a migration down region contains executable SQL"]'
+write_report_checks '[
+  {"requirement_index": 0, "requirement_text": "AC22: the pre-Phase-4 gate halts when a migration down region is empty", "status": "PASS", "notes": "pinned by the fixture"},
+  {"requirement_index": 1, "requirement_text": "AC23: refuses a down region a database would run", "status": "PASS", "notes": "pinned by the fixture"}
+]'
+gate --issue "$ISSUE"
+assert_eq "CONTROL: the same criterion passes once one check names AC23" "$RC" "0"
+# ...and the covering check's WORDING shares almost nothing with the criterion, so this also
+# pins the reason the label path exists at all: BA and Dev write these arrays independently.
+
+# THE PRECONDITION, first direction. A report whose checks carry no labels at all is NOT made
+# stricter -- the label is not a shared vocabulary there, and demanding one would false-halt
+# every project that does not use them. Coverage falls back to wording, as it always did.
+new_project label-not-in-force
+write_spec_criteria '["AC5: screenshots stay inside the pipeline issue directory"]'
+write_report_checks '[
+  {"requirement_index": 0, "requirement_text": "verify screenshots remain inside the issue directory tree", "status": "PASS", "notes": "pinned by the fixture"}
+]'
+gate --issue "$ISSUE"
+assert_eq "a labelled criterion still matches on wording when NO check carries a label" "$RC" "0"
+
+# THE PRECONDITION, second direction, and the reason it is a MAJORITY rather than "any". One
+# stray `see AC4 for context` in one entry's notes is not evidence a report keeps the
+# convention. If a single label armed the strict rule, that one phrase would refuse every
+# labelled criterion in an otherwise label-free report -- a mass false halt produced by a
+# passing remark.
+new_project label-one-stray
+write_spec_criteria '["AC9: the courier roster rotates on the hour"]'
+write_report_checks '[
+  {"requirement_index": 0, "requirement_text": "the courier roster rotates on the hour", "status": "PASS", "notes": "pinned by the fixture"},
+  {"requirement_index": 1, "requirement_text": "couriers cannot be double-assigned", "status": "PASS", "notes": "see AC4 for context"},
+  {"requirement_index": 2, "requirement_text": "screenshots stay inside the issue directory", "status": "PASS", "notes": "pinned by the fixture"}
+]'
+gate --issue "$ISSUE"
+assert_eq "one labelled check out of three does NOT arm the strict rule" "$RC" "0"
+
+new_project label-majority-arms
+write_spec_criteria '["AC9: the courier roster rotates on the hour"]'
+write_report_checks '[
+  {"requirement_index": 0, "requirement_text": "the courier roster rotates on the hour", "status": "PASS", "notes": "pinned by the fixture"},
+  {"requirement_index": 1, "requirement_text": "AC4: couriers cannot be double-assigned", "status": "PASS", "notes": "pinned by the fixture"},
+  {"requirement_index": 2, "requirement_text": "AC7: screenshots stay inside the issue directory", "status": "PASS", "notes": "pinned by the fixture"}
+]'
+gate --issue "$ISSUE"
+assert_eq "two labelled checks out of three DO arm it, and AC9 goes unanswered" "$RC" "1"
+assert_contains "naming the unanswered label" "$ERR" "no check names AC9"
+
+suite "pre-Phase-4 gate: the token floor is proportional, not flat (#48)"
+
+# `min(3, half)` asked the same three tokens of a 19-token criterion as of a six-token one --
+# roughly 16% overlap -- and long criteria are exactly where unrelated text accumulates three
+# shared words by accident. The criterion below carries 19 distinctive tokens and the check
+# shares precisely three of them (`report`, `commit`, `list`). Under the flat threshold that
+# was full coverage; the quarter floor asks for five.
+new_project token-floor-long
+write_spec_criteria '["The orchestrator refuses a peer-review panel whenever the implementation report omits the branch name, the commit list, or the completion timestamp recorded during phase three"]'
+write_report_checks '[
+  {"requirement_index": 0, "requirement_text": "verified the report names each commit in the list", "status": "PASS", "notes": "pinned by the fixture"}
+]'
+gate --issue "$ISSUE"
+assert_eq "three incidental words do not cover a 19-token criterion" "$RC" "1"
+assert_contains "and the halt quotes the criterion" "$ERR" \
+  "The orchestrator refuses a peer-review panel"
+assert_not_contains "the token-floor halt is not the label rule wearing its message" "$ERR" \
+  "Token overlap is deliberately not consulted here"
+assert_not_contains "nor an incidental schema error" "$ERR" "impl-report schema:"
+
+# NON-ZERO CONTROL, and the one that keeps the floor honest. A stricter matcher that refused
+# everything would satisfy the case above. This check is a genuine paraphrase of the SAME
+# criterion -- different sentence, six shared tokens -- and it must still pass, or the floor has
+# stopped catching noise and started policing wording.
+new_project token-floor-long-control
+write_spec_criteria '["The orchestrator refuses a peer-review panel whenever the implementation report omits the branch name, the commit list, or the completion timestamp recorded during phase three"]'
+write_report_checks '[
+  {"requirement_index": 0, "requirement_text": "verified the report omits neither the branch nor the commit list before the panel opens", "status": "PASS", "notes": "pinned by the fixture"}
+]'
+gate --issue "$ISSUE"
+assert_eq "CONTROL: a real paraphrase of the same long criterion still covers it" "$RC" "0"
+
+# THE FLOOR DOES NOT MOVE FOR SHORT AND MID-LENGTH CRITERIA, which is what makes it a bounded
+# change rather than a new policy. Below 13 distinctive tokens `max(3, size/4)` is still 3, so
+# every match that passed before still passes -- `cov-tokens` above is the mid-length case, and
+# this is the short one, three tokens matched out of four.
+new_project token-floor-short-unchanged
+write_spec_criteria '["Concurrent claims cannot double-assign a courier"]'
+write_report_checks '[
+  {"requirement_index": 0, "requirement_text": "concurrent claims are rejected for one courier", "status": "PASS", "notes": "pinned by the fixture"}
+]'
+gate --issue "$ISSUE"
+assert_eq "a short criterion still matches on three tokens, exactly as before" "$RC" "0"
 
 finish

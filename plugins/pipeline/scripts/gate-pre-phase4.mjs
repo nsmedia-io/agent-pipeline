@@ -10,8 +10,19 @@
  * What it checks:
  *   (a) impl-report.json validates against ../schemas/impl-report.schema.json.
  *   (b) every acceptance_criteria entry in spec.json is covered by at least one
- *       requirement_checks entry in impl-report.json.
- *   (c) any migration file ADDED in the diff has BOTH an up section and a down section.
+ *       requirement_checks entry in impl-report.json. Matching is by AC LABEL first, and where
+ *       a majority of the checks carry labels that match is AUTHORITATIVE: a labelled criterion
+ *       no check names is uncovered, full stop, with no fall-through to token overlap. Only a
+ *       label-free report is scored on token overlap, and that score now carries a
+ *       proportional floor so a long criterion cannot be covered by three incidental words.
+ *   (c) any migration file ADDED in the diff has BOTH an up section and a down section. A down
+ *       section's PRESENCE is still the marker's job; an up section's is decided by the same
+ *       scanner rule (d) uses on the down region, run over the text BEFORE the marker and read
+ *       for the opposite verdict: the up region must leave live SQL behind after comment
+ *       stripping, where the down region must not. The up rule was once a `startsWith("--")`
+ *       line-prefix test, which read an up section wrapped in a `/*` block comment as
+ *       statements and passed a no-op migration. Do not reintroduce a line-prefix test for
+ *       either region.
  *       # CUSTOMIZE: migration detection is OPT-IN and configurable. Added files are
  *       matched by migrationGlobsForGate in data-layer-surface.mjs: `migrationGlobs` from
  *       pipeline.config.json REPLACES the built-in framework-preset union (Rails, Django,
@@ -240,23 +251,24 @@ function lineTextAt(sql, index) {
     .replace(/\r/g, "\\r");
 }
 
-/**
- * Classify a migration's down region as `clean`, `executable` or `indeterminate`.
- *
- * ONE left-to-right scan; the first-encountered token wins. See the module docstring for why
- * two-pass stripping, nesting, and stripping a `/*!` opener each pass a live DROP.
- *
- * @returns {null | {kind: "clean"} | {kind: "executable"|"indeterminate", ...}} null when the
- *          migration has no down marker at all (the missing-down rule reports that instead).
- */
-export function classifyDownRegion(sql, marker = DEFAULT_DOWN_MARKER) {
-  if (typeof sql !== "string") return null;
-  const start = downRegionStart(sql, marker);
-  if (start === -1) return null;
-
+// THE SCAN, over the half-open byte range [start, end). Both region rules run through here and
+// there is deliberately only ONE of these: the up rule used to carry its own `startsWith("--")`
+// line-prefix test, which read a `/* ... */`-wrapped up section as live SQL and passed a no-op
+// migration (#31). A second scanner is a second set of dialect rules to keep in step, and the
+// divergence class is exactly what #30 and #31 exist to close -- so if the up region ever needs
+// a rule the down region does not, add it HERE behind a parameter, never in a private copy.
+//
+// `end` is honoured by every lookahead, not just the loop test. A block comment that OPENS
+// inside the range and CLOSES outside it is unterminated AS FAR AS THIS REGION IS CONCERNED,
+// and reporting it as closed would let text from beyond the boundary vouch for the region.
+// Positions are reported against the WHOLE `sql`, so line and column stay file-absolute.
+//
+// See the module docstring for why two-pass stripping, nesting, and stripping a `/*!` opener
+// each pass a live DROP.
+function scanRegion(sql, start, end = sql.length) {
   let closedBlock = null;
   let i = start;
-  while (i < sql.length) {
+  while (i < end) {
     const ch = sql[i];
     if (ch === " " || ch === "\t" || ch === "\r" || ch === "\n") {
       i++;
@@ -267,13 +279,13 @@ export function classifyDownRegion(sql, marker = DEFAULT_DOWN_MARKER) {
       // there and everything after the CR on that line is live SQL. Scanning to the next \n
       // only would strip that SQL as if it were commentary. Stop at whichever comes first and
       // leave the terminator itself to the whitespace skip, so CRLF is unaffected.
-      let end = i + 2;
-      while (end < sql.length && sql[end] !== "\n" && sql[end] !== "\r") end++;
-      i = end;
+      let stop = i + 2;
+      while (stop < end && sql[stop] !== "\n" && sql[stop] !== "\r") stop++;
+      i = stop;
       continue;
     }
     if (ch === "/" && sql[i + 1] === "*") {
-      const opener = sql.slice(i + 2, i + 4);
+      const opener = sql.slice(i + 2, Math.min(i + 4, end));
       if (opener.startsWith("!") || opener.startsWith("M!")) {
         return {
           kind: "executable",
@@ -284,7 +296,7 @@ export function classifyDownRegion(sql, marker = DEFAULT_DOWN_MARKER) {
       }
       const open = lineColAt(sql, i);
       const close = sql.indexOf("*/", i + 2);
-      if (close === -1) {
+      if (close === -1 || close + 2 > end) {
         return { kind: "indeterminate", ...open, lineText: lineTextAt(sql, i) };
       }
       closedBlock = { open, close: lineColAt(sql, close) };
@@ -300,6 +312,22 @@ export function classifyDownRegion(sql, marker = DEFAULT_DOWN_MARKER) {
     };
   }
   return { kind: "clean" };
+}
+
+/**
+ * Classify a migration's down region as `clean`, `executable` or `indeterminate`.
+ *
+ * ONE left-to-right scan; the first-encountered token wins. See the module docstring for why
+ * two-pass stripping, nesting, and stripping a `/*!` opener each pass a live DROP.
+ *
+ * @returns {null | {kind: "clean"} | {kind: "executable"|"indeterminate", ...}} null when the
+ *          migration has no down marker at all (the missing-down rule reports that instead).
+ */
+export function classifyDownRegion(sql, marker = DEFAULT_DOWN_MARKER) {
+  if (typeof sql !== "string") return null;
+  const start = downRegionStart(sql, marker);
+  if (start === -1) return null;
+  return scanRegion(sql, start, sql.length);
 }
 
 // A down region with no non-blank content at all. In this project a down region is
@@ -365,49 +393,165 @@ function classificationFailure(rel, result) {
   return msg;
 }
 
-// A migration has an up section when it carries any non-comment, non-blank SQL line that
-// appears BEFORE the down marker. Intentionally minimal: the gate proves reversibility (up
-// AND down both present), not SQL correctness (CI's job).
-export function hasUpSection(sql, marker = DEFAULT_DOWN_MARKER) {
-  if (typeof sql !== "string") return false;
-  const downIdx = downMarkerIndex(sql, marker);
-  const head = downIdx === -1 ? sql : sql.slice(0, downIdx);
-  return head.split(/\r?\n/).some((line) => {
-    const t = line.trim();
-    return t.length > 0 && !t.startsWith("--");
-  });
+// The up-section refusal. #31 NARROWED what this rule accepts -- a block-commented up region
+// used to pass -- and a narrowing owes the reader two things: the correct work it refuses, and
+// the remedy. Every branch opens with the same `has no up section` sentence the message has
+// always carried, so a reader grepping the old string still lands here.
+function upSectionFailure(rel, result) {
+  const head = `migration "${rel}" has no up section`;
+  if (result && result.kind === "indeterminate") {
+    return (
+      `${head}: an unterminated block comment opened at line ${result.line}, column ` +
+      `${result.column} and runs past the down marker, so no dialect applies what follows it: ` +
+      `${result.lineText}\n` +
+      `    remedy: close the block, or delete its \`/*\` so the statements below it are live SQL.`
+    );
+  }
+  return (
+    `${head}: nothing before the down marker is live SQL -- the region is empty or entirely ` +
+    `commented out (\`--\` or \`/* */\`), so applying this migration runs nothing.\n` +
+    `    this REFUSES a placeholder migration landed with its statements commented out ahead of ` +
+    `time; land the file once it carries the statements it applies.\n` +
+    `    remedy: uncomment the up statements, or remove the enclosing \`/* */\` delimiters.`
+  );
 }
 
-// The tokenizer and AC-label matcher are single-sourced from validate-pipeline-artifact.mjs
-// (imported above), so the fail-OPEN SubagentStop validator and this fail-CLOSED gate score
-// fuzzy criterion matching identically. Acceptance criteria and requirement_text are written
-// by different roles (BA vs Dev) and routinely differ in wording while describing the same
-// item, so exact-string matching would false-fail; AC labels (AC1, AC2, ...) are the
-// strongest signal when both sides carry them.
+// Classify the UP region -- everything BEFORE the down marker's line -- with the same scanner
+// the down region uses. The two rules read the same bytes for opposite verdicts: the down
+// region must survive the strip with NOTHING left (documentation), the up region must leave
+// something behind (statements a database actually applies).
+//
+// The old rule asked whether any non-blank line failed to start with `--`. That is a
+// line-prefix test, and it called a `/* ... */`-wrapped up section live SQL (#31): the gate
+// reported a reversible migration where a no-op had been committed, discovered later by the
+// first check that expected the table. It is the same hole #30 closed for the down region, so
+// it closes the same way -- by reusing that classifier, not by growing a second one.
+//
+// Returns null for a non-string, as classifyDownRegion does.
+export function classifyUpRegion(sql, marker = DEFAULT_DOWN_MARKER) {
+  if (typeof sql !== "string") return null;
+  const downIdx = downMarkerIndex(sql, marker);
+  return scanRegion(sql, 0, downIdx === -1 ? sql.length : downIdx);
+}
 
-// A criterion is covered when some requirement_checks entry shares its AC label, OR shares
-// enough distinctive tokens. Threshold is lenient (the smaller of 3 tokens or half the
-// criterion's tokens): we are catching the missing-coverage shape (a criterion with NO
-// corresponding check at all), not policing wording.
-export function criterionCovered(criterion, checks) {
-  const critLabels = acLabels(criterion);
-  if (critLabels.size > 0) {
-    for (const c of checks) {
-      const haystack = `${c.requirement_text || ""} ${c.notes || ""}`;
-      const checkLabels = acLabels(haystack);
-      for (const lbl of critLabels) if (checkLabels.has(lbl)) return true;
-    }
+// A migration has an up section when its up region classifies `executable`: a database reading
+// it runs something. Intentionally minimal: the gate proves reversibility (up AND down both
+// present), not SQL correctness (CI's job).
+//
+// `clean` and `indeterminate` are both NOT an up section, and that is the fail-closed reading
+// of each. `clean` means every statement is commented out. `indeterminate` means an
+// unterminated `/*` opened before the marker: SQLite would swallow the rest of the file as a
+// comment, and PostgreSQL and MySQL would refuse the file outright for the unterminated
+// comment -- no dialect applies the statements inside it, so none of them is an up section.
+//
+// A `/*!` CONDITIONAL-EXECUTION opener COUNTS as an up section, and that is the one place this
+// rule reads the classifier's `executable` more leniently than the down rule would like. The
+// down region refuses it because MySQL RUNS the body; for the up region that same fact is the
+// answer to the question being asked, so refusing it would be backwards. The residual boundary
+// is narrow and stated rather than closed: an up region consisting of NOTHING but a `/*!`
+// comment is a real up section on MySQL/MariaDB and a no-op everywhere else, and this passes
+// it. Making it halt instead is not available at this scan's granularity -- the scan returns at
+// the FIRST token, so a `/*!40101 SET NAMES utf8 */` preamble (ordinary mysqldump output)
+// followed by a perfectly good `create table` returns `conditional-execution` and would take
+// the whole migration down with it.
+export function hasUpSection(sql, marker = DEFAULT_DOWN_MARKER) {
+  const r = classifyUpRegion(sql, marker);
+  return r !== null && r.kind === "executable";
+}
+
+// The TOKENIZER and the AC-LABEL EXTRACTOR are single-sourced from validate-pipeline-artifact.mjs
+// (imported above), so the fail-OPEN SubagentStop validator and this fail-CLOSED gate read the
+// same words and the same labels out of the same text. The POLICY built on top of them is this
+// gate's own and is deliberately stricter -- see the label rule below. Acceptance criteria and
+// requirement_text are written by different roles (BA vs Dev) and routinely differ in wording
+// while describing the same item, so exact-string matching would false-fail; AC labels
+// (AC1, AC2, ...) are the strongest signal when both sides carry them.
+
+// A criterion is covered when some requirement_checks entry shares its AC label, OR -- only
+// where labels are not the shared vocabulary -- shares enough distinctive tokens.
+//
+// THE LABEL RULE IS AUTHORITATIVE, NOT ADVISORY, AND THAT IS THE FIX FOR #48. A labelled
+// criterion whose label no check carries used to FALL THROUGH to token overlap, and on a real
+// 54-criterion spec that fall-through covered AC23 and AC28 out of the wording of the OTHER 52
+// checks: both were deleted from requirement_checks and the gate still reported full coverage.
+// A gate whose entire job is refusing "claims more than it enforces" was doing exactly that, on
+// the transition into the six-agent panel -- the most expensive phase in the system.
+//
+// So when the criterion names its own label AND the checks speak that language, an unmatched
+// label is a REFUSAL and the token path is not consulted. What that refuses is a check which
+// genuinely covers AC23 but never writes "AC23" while its neighbours do; the remedy is one
+// token in requirement_text or notes, in the convention the report is already using.
+//
+// The precondition is a MAJORITY of checks carrying a label, not a single one. A lone
+// "see AC4 for context" in one entry's notes is not evidence that a report keeps the
+// convention, and letting it arm the strict rule would false-halt every labelled criterion in
+// an otherwise label-free report -- a mass refusal produced by one stray phrase.
+function labelVerdict(critLabels, checks) {
+  if (critLabels.size === 0) return "not-in-force";
+  let labelled = 0;
+  let matched = false;
+  for (const c of checks) {
+    const checkLabels = acLabels(`${c.requirement_text || ""} ${c.notes || ""}`);
+    if (checkLabels.size === 0) continue;
+    labelled++;
+    for (const lbl of critLabels) if (checkLabels.has(lbl)) matched = true;
   }
+  if (matched) return "covered";
+  return checks.length > 0 && labelled * 2 >= checks.length ? "uncovered" : "not-in-force";
+}
+
+// Token threshold, for the label-free vocabularies the rule above steps aside for. Lenient by
+// design -- we are catching the missing-coverage shape (a criterion with NO corresponding check
+// at all), not policing wording -- but no longer FLAT. `min(3, half)` asked the same 3 tokens of
+// a 40-token criterion as of a 6-token one, i.e. 7% overlap, which is noise rather than
+// coverage: long criteria are precisely where unrelated text accumulates three shared words by
+// accident. A quarter-of-the-criterion floor bites only at 13+ distinctive tokens (roughly a
+// 25-word sentence) and leaves every shorter criterion scoring exactly as before, so no match
+// that passes today on a normal-length criterion regresses.
+//
+// What the floor refuses: a very long criterion whose covering check is written in almost
+// entirely different words. Remedy: carry the AC label (the rule above then answers it
+// outright), or echo more of the criterion's own terms in requirement_text.
+//
+// Note this is the point where the gate's policy diverges from overlapsSome() in
+// validate-pipeline-artifact.mjs, which keeps the flat threshold. That is deliberate and not
+// drift: that validator is fail-OPEN and advisory at SubagentStop, this gate is fail-CLOSED and
+// halts the panel. Tightening the advisory one buys nothing and can wedge a session.
+export function criterionCovered(criterion, checks) {
+  const list = checks || [];
+  const verdict = labelVerdict(acLabels(criterion), list);
+  if (verdict === "covered") return true;
+  if (verdict === "uncovered") return false;
+
   const critTokens = tokens(criterion);
   if (critTokens.size === 0) return true; // nothing distinctive to match: do not block
-  const need = Math.min(3, Math.ceil(critTokens.size / 2));
-  for (const c of checks) {
+  const need = Math.min(critTokens.size, Math.max(3, Math.ceil(critTokens.size / 4)));
+  for (const c of list) {
     const cand = tokens(`${c.requirement_text || ""} ${c.notes || ""}`);
     let hit = 0;
     for (const t of critTokens) if (cand.has(t)) hit++;
     if (hit >= need) return true;
   }
   return false;
+}
+
+// The uncovered-criterion refusal. WHICH RULE refused decides which remedy is the true one:
+// the label rule wants a label written down, the token floor wants wording. Handing the reader
+// the wrong remedy costs a round trip through the most expensive transition in the pipeline,
+// and an unactionable halt is how an adopting project ends up deleting the gate.
+function uncoveredCriterionFailure(criterion, checks) {
+  const head = `acceptance criterion not covered by any requirement_check: "${criterion.slice(0, 120)}"`;
+  const labels = acLabels(criterion);
+  if (labelVerdict(labels, checks || []) !== "uncovered") return head;
+  const named = [...labels].map((l) => l.toUpperCase()).join(", ");
+  return (
+    `${head}\n` +
+    `    the criterion names ${named} and the requirement_checks carry AC labels, so the label ` +
+    `IS the match and no check names ${named}. Token overlap is deliberately not consulted ` +
+    `here: it is what covered two criteria out of the wording of the other 52 on a real spec.\n` +
+    `    remedy: name ${named} in the covering check's requirement_text or notes, or add the ` +
+    `check if it is genuinely missing.`
+  );
 }
 
 function loadSchema() {
@@ -460,17 +604,18 @@ export function runGate({ report, spec, schema, migrationSources, downMarker = D
   for (const crit of criteria) {
     if (typeof crit !== "string") continue;
     if (!criterionCovered(crit, checks)) {
-      failures.push(
-        `acceptance criterion not covered by any requirement_check: "${crit.slice(0, 120)}"`,
-      );
+      failures.push(uncoveredCriterionFailure(crit, checks));
     }
   }
 
   // (c) each added migration has both an up and a down section
   for (const mig of migrationSources || []) {
     const sql = mig.sql;
+    // hasUpSection is the predicate; the region is re-derived only to WRITE the message, on a
+    // path that is already halting. Going through the exported predicate keeps it load-bearing
+    // rather than a second, drifting copy of the same test.
     if (!hasUpSection(sql, downMarker)) {
-      failures.push(`migration "${mig.rel}" has no up section`);
+      failures.push(upSectionFailure(mig.rel, classifyUpRegion(sql, downMarker)));
     }
     if (!hasDownSection(sql, downMarker)) {
       failures.push(`migration "${mig.rel}" has no down section (expected a "${downMarker}" marker)`);

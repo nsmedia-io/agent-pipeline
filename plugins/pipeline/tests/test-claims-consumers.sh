@@ -83,7 +83,12 @@ suite "AC19: both suites are green, and neither lost an assertion"
 # was added; that is the price of a floor that tracks reality rather than the last person who
 # remembered it. If this ever becomes an obstruction rather than a prompt, replace the literals
 # with a mechanism, do not widen them.
-GATE_FLOOR=56
+# 56 -> 95 closing #31 (the up section is classified, not line-prefix matched) and #48 (an AC
+# label is authoritative, and the token floor is proportional). Nothing was deleted: three
+# suites were added, 22 + 11 + 6, each rule pinned in both directions with its own non-zero
+# control. The alarm below is what forced this line to be re-read rather than the deletion
+# window being opened by thirty-nine.
+GATE_FLOOR=95
 # 99 -> 106 in the Phase 4 fix round: one `unreadable == 0` pin over the LIVE corpus was
 # REPLACED (a concurrent phase-transition write makes it a transient, not a defect) by five
 # crafted cells that construct the half-written record on demand, plus two accounting
