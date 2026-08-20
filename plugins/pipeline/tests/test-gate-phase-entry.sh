@@ -738,8 +738,21 @@ suite "AC19: a SECOND ground truth, derived from the committed RECORDS rather th
 # truth derived from the committed RECORDS is still the point of this suite.
 CORPUS="$(git -C "$REPO_ROOT" ls-files '.pipeline/*/status.json' 2>/dev/null)"
 CORPUS_N="$(printf '%s\n' "$CORPUS" | grep -c . | tr -d ' ')"
-assert_eq "VACUITY CONTROL: the corpus walk found at least 4 committed records" \
-  "$([[ "${CORPUS_N:-0}" -ge 4 ]] && echo enough || echo "ONLY $CORPUS_N")" "enough"
+# RETAINED DELIBERATELY (#43 AC12(b)/(c)). Do NOT finish this floor off after reading the
+# general argument against floors at AC24's exact accounting below: this floor is that
+# accounting's OWN anti-vacuity companion. `EVALUATED + UNREADABLE == CORPUS_N` is trivially
+# true at 0 == 0 + 0, and AC24's "no committed record is refused" zero is trivially true over
+# an empty population too, so a broken glob, a wrong cwd or a rename of `.pipeline/` satisfies
+# both without this. Nothing in the repo STATES what the corpus should contain and inferring it
+# from history is forbidden, so a floor is the only shape available here.
+# The CONSTANT is 1, not 4: the corpus BOTH GROWS AND IS ARCHIVED (pipeline.md's Phase 5
+# sanctions moving a record to `.pipeline/_archived/<n>/`, two levels deep and outside this
+# glob), so 4 is a measurement of a population a documented operation shrinks. 0 is the only
+# value that makes the equality trivially true, so >= 1 keeps the whole property with no
+# false-failure mode -- and a false failure in THIS suite is the disarm pressure #43 exists to
+# reduce.
+assert_eq "VACUITY CONTROL: the corpus walk found at least 1 committed record" \
+  "$([[ "${CORPUS_N:-0}" -ge 1 ]] && echo enough || echo "ONLY $CORPUS_N")" "enough"
 
 AC19_REPORT="$(cd "$REPO_ROOT" && node --input-type=module -e '
   import { readFileSync } from "node:fs";
@@ -809,12 +822,14 @@ suite "AC24: no committed record is REFUSED (a zero, whose non-zero control is A
 # only status.json is tracked, so this is the fresh-checkout case the two-source rule exists for.
 AC24_REFUSED=""
 AC24_EVALUATED=0
+AC24_UNREADABLE=0
 while IFS= read -r rec; do
   [[ -n "$rec" ]] || continue
   name="$(basename "$(dirname "$rec")")"
   new_case "$name" '{}'
   if ! capture "$REPO_ROOT/$rec" "$CASE_DIR/status.json" "{\"updated_at\":\"$FRESH_ISO\"}" 2>/dev/null; then
     AC24_REFUSED="$AC24_REFUSED $name(UNREADABLE)"      # accounted for, never skipped
+    AC24_UNREADABLE=$((AC24_UNREADABLE + 1))
     continue
   fi
   AC24_EVALUATED=$((AC24_EVALUATED + 1))
@@ -829,8 +844,445 @@ while IFS= read -r rec; do
     *)                      AC24_REFUSED="$AC24_REFUSED $name(NO-DECISION:$GATE_DEC)" ;;
   esac
 done <<< "$CORPUS"
-assert_eq "VACUITY CONTROL: at least 4 committed records were actually evaluated" \
-  "$([[ "$AC24_EVALUATED" -ge 4 ]] && echo enough || echo "ONLY $AC24_EVALUATED")" "enough"
+# REPLACES the `AC24_EVALUATED >= 4` floor that stood here (#43 AC12(a)). An EXACT accounting,
+# not a floor: the loop's only non-evaluating exit records the record BY NAME and increments
+# AC24_UNREADABLE, so nothing can leave the walk silently, and a `continue` inserted anywhere
+# else reddens this by exactly the number of records it skipped. A floor could not see that
+# over a 6-record corpus. Its anti-vacuity companion is the retained `CORPUS_N >= 1` control in
+# the AC19 walk above -- read the two as a pair, because this equality is trivially true at 0.
+assert_eq "#43-C1 the walk ACCOUNTS for every committed record: evaluated + unreadable == the corpus" \
+  "$((AC24_EVALUATED + AC24_UNREADABLE))" "$CORPUS_N"
 assert_eq "no committed record is refused by the table" "${AC24_REFUSED# }" ""
+
+# ===========================================================================================
+# #43 / #45 -- the two branches no fixture in this suite could reach through its own builders.
+#
+# WHY EVERY LABEL BELOW CARRIES A `#43-` PREFIX. This suite already owns `suite "AC11: ..."`
+# and `suite "AC12: ..."`, which are DIFFERENT criteria wearing the numbers #43's spec gave
+# its own. A mutation battery discharges itself by naming an assertion label a reader can grep
+# for, so a colliding label makes that grep return two unrelated sites and the discharge stops
+# discriminating. Continuing this suite's own numbering (AC31+) does not work either: two other
+# open issues name this file in their bodies, so two branches both appending AC31 re-create the
+# collision at merge time. An issue number is unique by construction and tells the next reader
+# which issue introduced the cell. Measured before relying on it: `git grep -c -- '#43-'` over
+# the whole tree at merge-base 2ec6dd7 returns ZERO files, while `AC31` already returns two.
+#
+# WHAT IS RED HERE AND WHAT IS NOT, stated because a reader who expects a Phase-3a contract to
+# be uniformly red will otherwise mistrust the parts that are green:
+#   - RED at the merge-base: the three undetermined-tier cells (#43-T4/T5/T6) and the
+#     content-agreement checks (#43-K1/K2/K3). Those are the behaviour change.
+#   - GREEN at the merge-base BY DESIGN: everything else. #43/#45 is a test-gap issue -- the
+#     undatable branch and the resolved-tier column already BEHAVE correctly, they were merely
+#     unexercised, which is why MUT-A and MUT-C survived all 345 assertions. A gap-closing pin
+#     cannot be red before the gap is closed. Its bite is proved by mutation, never by colour.
+# ===========================================================================================
+
+# ONE variable, used in THREE places: the fixture body, the fixture-shape probe, and the
+# negative assertion. That is what stops "the output does not contain GARBAGE" going vacuous
+# the day somebody rewords the fixture. It is deliberately not a real word, and specifically
+# not `deep` -- which this suite's own ac11 helper already passes as its unknown-string
+# spelling, so a negative assertion on it would be a false failure waiting for a reword.
+GARBAGE_TIER="ZZQ-NOT-A-TIER-43"
+
+# The id ledger. Every `#43-` id is registered as its cell RUNS, and the two checks at the
+# bottom compare what ran against every id that appears in this file's own source.
+AC43_IDS=""
+reg43() { AC43_IDS="$AC43_IDS$1
+"; }
+
+# probe43 <status.json> <fresh|undatable> <absent|null|exact:VALUE> -> "ok" or the diagnosis.
+#
+# ONE line per cell, at the only moment it is free. `decideForDir` reaches `not-applicable` by
+# FOUR routes before the tier check is evaluated -- a truthy `completed_at` (never parsed, so
+# "TBD" counts), an UNGUARDED phase, an unrecognised phase, and !inFlight (a truthy
+# `final_verdict`, including a value outside the schema's closed enum, OR undatable OR stale)
+# -- and the last emits ONE reason string for three different causes. So a decision assertion
+# alone cannot say WHICH route fired, and a fixture that quietly took another one would pass
+# while testing nothing. The probe asserts the fixture qualifies for exactly the route its own
+# cell names.
+#
+# It also parses the record, which covers the FIFTH pre-tier exit: `decideForDir` returns null
+# on an unreadable or non-object record and the caller renders that as SILENCE -- rc 0, empty
+# stdout, indistinguishable from `not-applicable` to an rc-only assertion. That binds hardest
+# on the hand-written-body cells below, where a typo'd fixture IS unparseable JSON.
+probe43() {
+  node --input-type=module -e '
+    import { readFileSync } from "node:fs";
+    const mod = await import(process.argv[1]);
+    const guarded = new Set([...mod.ENTRY, ...mod.EXIT]);
+    let s;
+    try { s = JSON.parse(readFileSync(process.argv[2], "utf8")); }
+    catch (e) { process.stdout.write("UNPARSEABLE FIXTURE: " + e.message.slice(0, 60)); process.exit(0); }
+    if (!s || typeof s !== "object" || Array.isArray(s)) { process.stdout.write("NON-OBJECT FIXTURE"); process.exit(0); }
+    const bad = [];
+    if (s.completed_at) bad.push("completed_at is truthy: this fixture exits by the isTerminal route");
+    if (s.final_verdict) bad.push("final_verdict is truthy: this fixture exits by the concluded route");
+    if (typeof s.current_phase !== "string" || !guarded.has(s.current_phase)) {
+      bad.push("current_phase " + JSON.stringify(s.current_phase) + " is not a GUARDED row");
+    }
+    const parsed = Date.parse(s.updated_at);
+    if (process.argv[3] === "fresh") {
+      if (!Number.isFinite(parsed)) bad.push("updated_at is NOT datable, but this cell is the datable control");
+      else if (Date.now() - parsed > 24 * 3600e3) bad.push("updated_at is past the 24h ceiling: this cell would test staleness");
+    } else if (process.argv[3] === "undatable") {
+      if (Number.isFinite(parsed)) bad.push("updated_at IS datable, so this cell tests staleness, not undatability");
+    } else bad.push("the cell asked for an unknown datability: " + process.argv[3]);
+    const want = process.argv[4];
+    const has = Object.prototype.hasOwnProperty.call(s, "risk_tier");
+    if (want === "absent") { if (has) bad.push("the risk_tier KEY is present, but this cell tests the absent spelling"); }
+    else if (want === "null") { if (!has || s.risk_tier !== null) bad.push("risk_tier is " + JSON.stringify(s.risk_tier) + ", not JSON null"); }
+    else if (want.startsWith("exact:")) {
+      const v = want.slice(6);
+      if (s.risk_tier !== v) bad.push("risk_tier is " + JSON.stringify(s.risk_tier) + ", not the exact literal " + JSON.stringify(v));
+    } else bad.push("the cell asked for an unknown tier shape: " + want);
+    process.stdout.write(bad.length ? bad.join("; ") : "ok");
+  ' "$GUARD" "$1" "$2" "$3" 2>&1
+}
+
+# ---------------------------------------------------------------------------
+suite "#43 the 1-ba row x tier: a tiers-restricted row and an UNDETERMINED tier (#45)"
+# ---------------------------------------------------------------------------
+# The live defect, reproduced at merge-base 2ec6dd7 before this family was written:
+#   trivial -> not-applicable rc 0   standard -> not-applicable rc 0   architectural -> refused rc 2
+#   ABSENT  -> refused rc 2          null     -> refused rc 2          garbage -> refused rc 2
+# The tier is BA's OUTPUT and `1-ba` is checkpointed BEFORE BA runs, so at that phase the tier
+# is NECESSARILY absent -- and the bottom row is therefore what every non-architectural run
+# actually meets at its first turn boundary. `normalizeTier` resolves the absence to the
+# strictest row, which switches on a map.json requirement that standard-tier runs fold into
+# Phase 1 and trivial-tier runs may skip entirely.
+#
+# THE ARCHITECTURAL CELL IS A CONTROL, not decoration. Two different failures make every other
+# cell in this family pass: a row whose `tiers` column was deleted, and a call site left at the
+# old argument count (the tiers column then reads as disabled at EVERY tier). Both turn the
+# architectural cell from refused into not-applicable, and nothing else in these 345 assertions
+# notices either.
+#
+# id | label | risk_tier as written into the fixture (OMIT = no key at all) | probe shape | decision | rc | kind
+AC43_T_ROWS=(
+  '#43-T1|trivial|"trivial"|exact:trivial|not-applicable|0|off'
+  '#43-T2|standard|"standard"|exact:standard|not-applicable|0|off'
+  '#43-T3|architectural|"architectural"|exact:architectural|refused|2|applies'
+  '#43-T4|absent|OMIT|absent|not-applicable|0|undetermined'
+  '#43-T5|null|null|null|not-applicable|0|undetermined'
+  "#43-T6|an unknown string|\"$GARBAGE_TIER\"|exact:$GARBAGE_TIER|not-applicable|0|undetermined"
+)
+AC43_T_COVERED=""      # what the table ACTUALLY drove, accumulated as each cell runs
+AC43_UNDETERMINED=""   # the undetermined tail of it, which the byTier family below re-uses
+for row in "${AC43_T_ROWS[@]}"; do
+  IFS='|' read -r id label tierjson probetier expdec exprc kind <<< "$row"
+  case "$probetier" in
+    "exact:$GARBAGE_TIER") covers="unknown-string" ;;
+    exact:*)               covers="${probetier#exact:}" ;;
+    *)                     covers="$probetier" ;;
+  esac
+  AC43_T_COVERED="$AC43_T_COVERED $covers"
+  [[ "$kind" == "undetermined" ]] && AC43_UNDETERMINED="$AC43_UNDETERMINED $covers"
+  if [[ "$tierjson" == "OMIT" ]]; then
+    # ROUTE: hand-written body. mk_status() always interpolates a risk_tier key, so the ABSENT
+    # spelling is unconstructible through the builder; this is the same route the ac11 helper
+    # above already uses for exactly this problem. The probe is load-bearing here precisely
+    # because a hand-written body carries no builder guarantee about the other four fields.
+    body="$(printf '{"issue_number":4242,"current_phase":"1-ba","updated_at":"%s","events":[]}' "$FRESH_ISO")"
+  else
+    body="$(mk_status "1-ba" "$tierjson" "$NO_EVENTS")"   # ROUTE: the builder, unmodified
+  fi
+  new_case 4243 "$body"
+  reg43 "$id"
+  assert_eq "$id probe: the fixture qualifies for the tier route ONLY ($label)" \
+    "$(probe43 "$CASE_DIR/status.json" fresh "$probetier")" "ok"
+  gate "$CASE_ROOT"
+  assert_eq "$id: 1-ba with no map.json at risk_tier $label -> $expdec" "$GATE_DEC" "$expdec"
+  assert_eq "$id: and it exits $exprc" "$GATE_RC" "$exprc"
+  # THE POSITIVE HALF OF EVERY NEGATIVE BELOW. A decision line that is EMPTY -- the guard threw
+  # and the fail-open branch swallowed it -- satisfies any assert_not_contains vacuously. These
+  # two say the output exists AND came from this fixture, so a silent build cannot look like a
+  # prohibition being honoured.
+  assert_contains "$id: and the decision names THIS fixture's issue dir" "$GATE_OUT" "4243"
+  assert_contains "$id: and names the phase under test" "$GATE_OUT" "1-ba"
+  case "$kind" in
+    applies)
+      assert_contains "$id: and the surviving refusal still names map.json" "$GATE_OUT" "map.json"
+      ;;
+    undetermined)
+      # R3's distinct wording, asserted so that reusing the resolved-tier string reddens here
+      # and nowhere else. The wording itself stays Dev's: this matches the word the criterion
+      # uses ("undetermined" / "no determined risk_tier"), case-folded, not a fixed sentence.
+      assert_contains "$id: and the reason says the tier is not DETERMINED" \
+        "$(printf '%s' "$GATE_OUT" | tr 'A-Z' 'a-z')" "determined"
+      assert_not_contains "$id: and NOT the resolved-tier wording, which names a tier the record does not carry" \
+        "$GATE_OUT" "is not a guarded phase at the"
+      # The normalized value must never reach stdout on this branch: `architectural` is what
+      # normalizeTier INVENTS for an unusable tier, and printing it tells an operator the
+      # record says something it does not say.
+      assert_not_contains "$id: and the invented strictest tier never reaches stdout" \
+        "$GATE_OUT" "architectural"
+      ;;
+  esac
+  if [[ "$probetier" == "exact:$GARBAGE_TIER" ]]; then
+    # THE PROHIBITION, made falsifiable. This is the first branch in the guard where the field
+    # is known NOT to be a known tier and has not been normalized away, which is exactly where
+    # an implementer reaches for "${status.risk_tier}". The value is agent-written free text in
+    # a file that is committed and archived verbatim, and nothing enforces the schema's enum at
+    # runtime. The needle and the fixture body are the SAME shell variable.
+    assert_not_contains "$id: and the record's own risk_tier text is NOT interpolated into the reason" \
+      "$GATE_OUT" "$GARBAGE_TIER"
+  fi
+done
+# WHAT THIS IS NOT, because the obvious form of it is vacuous and I measured that it is: an
+# `executed == ${#TABLE[@]}` counter cannot see a DELETED row, since both sides shrink together.
+# Mutated -- one row deleted, loop untouched -- such a counter stayed green at failed=0 and the
+# family silently covered five tiers instead of six. The coverage has to be compared against
+# something the table cannot shrink, so the resolved half is derived from the guard's OWN tier
+# vocabulary (dispatch-model.mjs's KNOWN_TIERS, which gate-phase-entry.mjs imports) and the
+# undetermined half is the three spellings status.schema.json and the workflow can produce. A
+# fourth tier added to KNOWN_TIERS reddens this until the table covers it.
+reg43 "#43-T0"
+assert_eq "#43-T0 the family drove every KNOWN_TIER plus every undetermined spelling, in order" \
+  "${AC43_T_COVERED# }" \
+  "$(MOD43="$SCRIPTS_DIR/dispatch-model.mjs" node --input-type=module \
+      -e 'const m = await import(process.env.MOD43); process.stdout.write(m.KNOWN_TIERS.join(" "))' 2>&1) absent null unknown-string"
+# The module path travels in the ENVIRONMENT, not in argv: dispatch-model.mjs is a CLI as well
+# as a module, and `node -e '...' <path>` makes that path argv[1], which is what its own
+# isMain() seam reads -- so the import runs its main() and the "tier vocabulary" this assertion
+# derives comes back as a dispatch-site error message. Measured, once, in this assertion.
+
+# ---------------------------------------------------------------------------
+suite "#43 the byTier rows are UNCHANGED at an undetermined tier"
+# ---------------------------------------------------------------------------
+# The other branch of the same conjunction. Three cells prove the new distinction FIRES on
+# every undetermined spelling; these three prove it does not LEAK into the byTier path, where
+# the strictest-row default is correct and stays correct -- `3-impl` is only reached after
+# Phase 1 copied the tier, so an undetermined tier there means a corrupted or hand-edited
+# record, not the mandated ordering.
+#
+# The discriminating fixture is spec.json PRESENT and design.json ABSENT: the one presence
+# combination where the trivial row and the architectural row disagree. Any other combination
+# passes under both, which is what makes this family a discrimination rather than a restatement.
+#
+# NOTE FOR THE BATTERY: MUT-D (normalizeTier's default -> trivial) reddens the suite's own
+# `AC11:` trio AND these three cells, so its expected count is no longer the 6 measured at the
+# merge-base. Derive it; do not restate it.
+#
+# id | label | risk_tier as written (OMIT = no key) | probe shape
+AC43_B_ROWS=(
+  '#43-B1|absent|OMIT|absent'
+  '#43-B2|null|null|null'
+  "#43-B3|an unknown string|\"$GARBAGE_TIER\"|exact:$GARBAGE_TIER"
+)
+AC43_B_COVERED=""
+for row in "${AC43_B_ROWS[@]}"; do
+  IFS='|' read -r id label tierjson probetier <<< "$row"
+  case "$probetier" in
+    "exact:$GARBAGE_TIER") AC43_B_COVERED="$AC43_B_COVERED unknown-string" ;;
+    *)                     AC43_B_COVERED="$AC43_B_COVERED $probetier" ;;
+  esac
+  if [[ "$tierjson" == "OMIT" ]]; then
+    body="$(printf '{"issue_number":4242,"current_phase":"3-impl","updated_at":"%s","events":[]}' "$FRESH_ISO")"
+  else
+    body="$(mk_status "3-impl" "$tierjson" "$NO_EVENTS")"
+  fi
+  new_case 4243 "$body"
+  printf '{}' > "$CASE_DIR/spec.json"          # the trivial row's prerequisite, present
+  reg43 "$id"
+  assert_eq "$id probe: the fixture qualifies for the tier route ONLY ($label)" \
+    "$(probe43 "$CASE_DIR/status.json" fresh "$probetier")" "ok"
+  gate "$CASE_ROOT"
+  assert_eq "$id: 3-impl at risk_tier $label is still evaluated at the STRICTEST row -> refused" \
+    "$GATE_DEC" "refused"
+  assert_contains "$id: and it still names design.json, not spec.json" "$GATE_OUT" "design.json"
+done
+# Cross-derived against the family above rather than against its own length: the two families
+# are the two branches of ONE conjunction, so they must cover the SAME undetermined spellings.
+# A row deleted from either table reddens this; a counter over the table's own length cannot.
+reg43 "#43-B0"
+assert_eq "#43-B0 the byTier family drove exactly the undetermined spellings the tiers family did" \
+  "${AC43_B_COVERED# }" "${AC43_UNDETERMINED# }"
+
+# ---------------------------------------------------------------------------
+suite "#43 the in-flight predicate's UNDATABLE branch, which mk_status() cannot construct"
+# ---------------------------------------------------------------------------
+# `mk_status()` always interpolates a well-formed `updated_at`, so the branch that stops an
+# UNDATABLE record from holding a project's turns open forever has never been exercised:
+# mutating `if (!Number.isFinite(updated)) return false;` to `return true;` passes all 345
+# assertions at the merge-base. Every cell here is paired with a fresh-updated_at CONTROL at
+# the SAME phase and the SAME issue dir (#43-D1), so each undatable cell discriminates instead
+# of passing over an empty population -- and the probe separates it from the STALENESS branch,
+# whose reason string is byte-identical.
+#
+# id | label | fixture route | probe datability | decision | rc | the shape it covers
+AC43_D_ROWS=(
+  '#43-D1|fresh (the non-zero CONTROL)|builder|fresh|refused|2|datable-control'
+  '#43-D2|the key DELETED|capture-null|undatable|not-applicable|0|key-absent'
+  '#43-D3|an unparseable string|mk-updated|undatable|not-applicable|0|unparseable-string'
+  '#43-D4|JSON null|hand-written|undatable|not-applicable|0|json-null'
+)
+AC43_D_COVERED=""
+for row in "${AC43_D_ROWS[@]}"; do
+  IFS='|' read -r id label route probeage expdec exprc covers <<< "$row"
+  AC43_D_COVERED="$AC43_D_COVERED $covers"
+  case "$route" in
+    builder)
+      new_case 4243 "$(mk_status "3-impl" '"architectural"' "$NO_EVENTS")"
+      ;;
+    capture-null)
+      # ROUTE: capture()'s documented null-deletes-the-key patch. mk_status() cannot emit a
+      # record with no updated_at key, and mk_status() is not modified.
+      new_case 4243 "$(mk_status "3-impl" '"architectural"' "$NO_EVENTS")"
+      capture "$CASE_DIR/status.json" "$CASE_DIR/status.json" '{"updated_at":null}'
+      ;;
+    mk-updated)
+      # ROUTE: the MK_UPDATED env seam the builder already reads.
+      MK_UPDATED="not-a-date"
+      new_case 4243 "$(mk_status "3-impl" '"architectural"' "$NO_EVENTS")"
+      MK_UPDATED=""
+      ;;
+    hand-written)
+      # ROUTE: a hand-written body. capture()'s patch cannot SET null -- null is its delete
+      # sentinel -- and status.schema.json permits the field present and null, which is a shape
+      # the workflow can actually write. Kept as a schema-shape witness: no mutation of the
+      # guard distinguishes JSON null from an absent key (`Date.parse(null)` is NaN exactly as
+      # `Date.parse(undefined)` is), so every mutation that reddens this cell has already
+      # reddened #43-D2. If a future reviewer finds one that reddens this and NOT #43-D2, that
+      # is a real asymmetry in the guard and this note should be retired, not defended.
+      new_case 4243 "$(printf '{"issue_number":4242,"current_phase":"3-impl","risk_tier":"architectural","updated_at":null,"events":[]}')"
+      ;;
+  esac
+  reg43 "$id"
+  assert_eq "$id probe: the fixture is $probeage, and takes no other pre-tier route ($label)" \
+    "$(probe43 "$CASE_DIR/status.json" "$probeage" exact:architectural)" "ok"
+  gate "$CASE_ROOT"
+  assert_eq "$id: 3-impl with no design.json and updated_at $label -> $expdec" "$GATE_DEC" "$expdec"
+  assert_eq "$id: and it exits $exprc" "$GATE_RC" "$exprc"
+  assert_contains "$id: and the decision came from THIS fixture (names the issue dir)" "$GATE_OUT" "4243"
+done
+# A COVERAGE CONTRACT, not a count: these are the three undatable shapes status.schema.json
+# permits a writer to produce, plus the datable control that makes them results. No code-side
+# vocabulary enumerates them (which is itself why this branch went unexercised), so the set is
+# written out -- and because it is written out, deleting a row reddens this instead of shrinking
+# the family in silence, which is what an `executed == table length` counter does.
+reg43 "#43-D0"
+assert_eq "#43-D0 the family drove the datable control and every undatable shape a record can carry" \
+  "${AC43_D_COVERED# }" "datable-control key-absent unparseable-string json-null"
+
+# ---------------------------------------------------------------------------
+suite "#43 the tier distinction must not LEAK into the exported satisfyingTokens"
+# ---------------------------------------------------------------------------
+# satisfyingTokens is the guard's exported surface and has four consumers outside this file.
+# The new distinction belongs to the tiers-restricted ROW, not to the token sets, so every
+# undetermined spelling must still resolve through the strictest-row default and return exactly
+# what the architectural tier returns.
+#
+# THE COMPARISON CARRIES ITS OWN CONTROL (#43-S3), and it is not decoration: a walk of this
+# shape reported "IDENTICAL" three times while comparing empty files, and the only thing that
+# exposed it was a mutant that MUST have differed and did not. A "no difference" result is
+# worth nothing until the comparison has been shown able to see one.
+AC43_TOKENS="$(node --input-type=module -e '
+  const mod = await import(process.argv[1]);
+  const rows = [...mod.ENTRY, ...mod.EXIT];
+  const tiers = [["trivial", "trivial"], ["standard", "standard"], ["architectural", "architectural"],
+                 ["garbage", process.argv[2]], ["null", null], ["absent", undefined]];
+  const col = {};
+  for (const [name, t] of tiers) col[name] = rows.map((r) => JSON.stringify(mod.satisfyingTokens(r, t))).join("|");
+  process.stdout.write(JSON.stringify({
+    rows: rows.length,
+    cells: rows.length * tiers.length,
+    undetermined_matches_architectural:
+      ["garbage", "null", "absent"].every((n) => col[n] === col.architectural) ? "yes" : "NO",
+    trivial_differs_from_architectural: col.trivial !== col.architectural ? "yes" : "NO",
+  }));
+' "$GUARD" "$GARBAGE_TIER" 2>&1)"
+ac43_field() {  # ac43_field <key> -> the value, or a sentinel that cannot be mistaken for one
+  [[ -n "$AC43_TOKENS" ]] || { printf '<no-report>'; return; }
+  case "$AC43_TOKENS" in *"\"$1\":"*) ;; *) printf '<no-field:%s>' "$1"; return ;; esac
+  printf '%s' "$AC43_TOKENS" | sed -n "s/.*\"$1\":\"\\{0,1\\}\\([^\",}]*\\).*/\\1/p"
+}
+reg43 "#43-S1"
+assert_eq "#43-S1 the walk covered every guarded row at every tier spelling (15 rows x 6 spellings)" \
+  "$(ac43_field cells)" "$(( ${#GUARDED_ROWS[@]} * 6 ))"
+reg43 "#43-S2"
+assert_eq "#43-S2 every undetermined spelling returns the architectural token sets, byte for byte" \
+  "$(ac43_field undetermined_matches_architectural)" "yes"
+reg43 "#43-S3"
+assert_eq "#43-S3 CONTROL: the same comparison CAN see a difference (trivial != architectural)" \
+  "$(ac43_field trivial_differs_from_architectural)" "yes"
+
+# ---------------------------------------------------------------------------
+suite "#43 the guard and pipeline.md must AGREE, in writing, about the 1-ba ordering"
+# ---------------------------------------------------------------------------
+# A content check, and the round-1 form of this criterion was satisfiable by a ZERO-LINE DIFF:
+# `1-ba` and `risk_tier` already co-occur in both files (5/5 and 2/13 occurrences at 2ec6dd7),
+# so a conjunction of common tokens passed before anything was written. Hence ONE CONTIGUOUS
+# DISTINCTIVE STRING, the SAME one in both files -- two independently chosen per-file strings
+# cannot witness the word "agree" -- matched with whitespace normalized so a comment reflow is
+# not a false failure.
+#
+# THIS STRING IS THE CONTRACT. Reword it here and in BOTH files, or not at all.
+ANCHOR_43='the 1-ba checkpoint is written before BA runs, so at 1-ba the risk_tier is necessarily absent'
+PIPELINE_MD="$PLUGIN_ROOT/commands/pipeline.md"
+
+# block43 <file> <marker> -> the ONE comment block containing <marker>, comment leaders
+# stripped and whitespace squeezed; `<no-block>` when no block holds it. Co-location, not a
+# fixed address: a whole-file grep passes with the sentence pasted anywhere, and the criterion
+# is that the new prose sits in the SAME block as the existing strictest-default sentence. If
+# Dev moves both to the file prologue together, this still holds.
+block43() {
+  node -e '
+    const fs = require("fs");
+    const src = fs.readFileSync(process.argv[1], "utf8");
+    const blocks = src.match(/\/\*[\s\S]*?\*\//g) || [];
+    const lines = src.split("\n");
+    let run = [];
+    for (const ln of lines) {          // maximal runs of consecutive // comment lines count too
+      if (/^\s*\/\//.test(ln)) run.push(ln);
+      else { if (run.length) blocks.push(run.join("\n")); run = []; }
+    }
+    if (run.length) blocks.push(run.join("\n"));
+    const hit = blocks.find((b) => b.includes(process.argv[2]));
+    process.stdout.write(hit ? hit.replace(/^\s*(\*|\/\/)\s?/gm, "").replace(/\s+/g, " ").trim() : "<no-block>");
+  ' "$1" "$2" 2>&1
+}
+norm43() { sed 's/^[[:space:]]*\*[[:space:]]\{0,1\}//' "$1" | tr '\n' ' ' | tr -s '[:space:]' ' '; }
+# present/ABSENT rather than assert_contains, for the pipeline.md half ONLY: that haystack is
+# the whole normalized file, and a failing assert_contains would print it as one 60KB line,
+# burying the one thing the reader needs. The needle is in the assertion NAME instead.
+contains43() { case "$1" in *"$2"*) printf 'present' ;; *) printf 'ABSENT' ;; esac; }
+
+GUARD_BLOCK_43="$(block43 "$GUARD" "STRICTEST row")"
+reg43 "#43-K4"
+assert_contains "#43-K4 CONTROL: the block extractor found the block holding the strictest-default sentence" \
+  "$GUARD_BLOCK_43" "An unusable risk_tier resolves to the STRICTEST row, never the loosest."
+reg43 "#43-K5"
+assert_not_contains "#43-K5 CONTROL: and it reports absence for a string that is not in that block" \
+  "$GUARD_BLOCK_43" "ZZQ-NOT-IN-THIS-BLOCK-43"
+reg43 "#43-K6"
+assert_eq "#43-K6 CONTROL: commands/pipeline.md was read, and still mandates the 1-ba checkpoint" \
+  "$(contains43 "$(norm43 "$PIPELINE_MD")" 'current_phase: "1-ba"')" "present"
+
+reg43 "#43-K1"
+assert_eq "#43-K1 commands/pipeline.md carries the shared anchor clause: \"$ANCHOR_43\"" \
+  "$(contains43 "$(norm43 "$PIPELINE_MD")" "$ANCHOR_43")" "present"
+reg43 "#43-K2"
+assert_contains "#43-K2 and the guard states THE SAME clause, in the comment block that holds the strictest-default sentence" \
+  "$GUARD_BLOCK_43" "$ANCHOR_43"
+reg43 "#43-K3"
+assert_contains "#43-K3 and the guard cites #61 as where the retired map requirement is re-sited -- IF THIS FAILS, #61 landed or the citation moved: re-anchor this assertion to the new siting, do NOT delete it" \
+  "$GUARD_BLOCK_43" "#61"
+
+# ---------------------------------------------------------------------------
+suite "#43 the label namespace itself: unique, and every id that exists actually RAN"
+# ---------------------------------------------------------------------------
+# A mutation battery discharges itself by naming an assertion label a reader can grep for, so
+# the label has to be unique or the grep returns two sites and proves nothing. And an id that
+# appears in this file but never ran is the shrinking-cell failure one size up: the per-family
+# counters above catch a row that stops executing, this catches a whole family that does.
+reg43 "#43-C1"   # lives in the AC24 walk above, registered here where the ledger is defined
+reg43 "#43-Z1"
+reg43 "#43-Z2"
+AC43_UNIQ="$(printf '%s' "$AC43_IDS" | grep . | sort -u)"
+assert_eq "#43-Z1 no #43 assertion id is used twice (a colliding label makes the battery's grep return two unrelated sites)" \
+  "$(printf '%s\n' "$AC43_IDS" | grep -c . | tr -d ' ')" "$(printf '%s\n' "$AC43_UNIQ" | grep -c . | tr -d ' ')"
+assert_eq "#43-Z2 every #43 id written in this file was REGISTERED by a cell that ran" \
+  "$(printf '%s\n' "$AC43_UNIQ" | grep -c . | tr -d ' ')" \
+  "$(grep -o '#43-[A-Za-z0-9][A-Za-z0-9]*' "${BASH_SOURCE[0]}" | sort -u | grep -c . | tr -d ' ')"
 
 finish
