@@ -60,6 +60,18 @@ suite "validate-pipeline-artifact: the shipped 56-case self-test runs under chec
   > "$TEMP_PROJECT/selftest.out" 2>&1
 SELFTEST_RC=$?
 SELFTEST_OUT=$(cat "$TEMP_PROJECT/selftest.out")
+
+# The self-test names every case it runs, but this wrapper captured that output and threw it
+# away, so a red here said only "4 failed" and never which four. That is issue #27: a gate that
+# reddens without saying why is the gate that eventually gets switched off, and it cost a
+# main-is-red investigation that could not proceed past the summary line. Echo the failing
+# cases -- and ONLY on failure, so the ~60 ok lines do not drown the transcript.
+if [ "$SELFTEST_RC" != "0" ]; then
+  printf '%s\n' "--- self-test failing cases (issue #27) ---" >&2
+  printf '%s\n' "$SELFTEST_OUT" | grep -iE '^[[:space:]]*(FAIL|not ok)' >&2 || \
+    printf '%s\n' "(no FAIL-shaped line found; full output follows)" "$SELFTEST_OUT" >&2
+  printf '%s\n' "--- end self-test failing cases ---" >&2
+fi
 assert_eq "node validate-pipeline-artifact.mjs --self-test exits 0" "$SELFTEST_RC" "0"
 
 # This wrapper delegates 56 of the suite's cases, so it has to be able to tell 56 from ZERO.
