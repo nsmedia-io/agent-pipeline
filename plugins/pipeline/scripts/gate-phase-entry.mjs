@@ -339,7 +339,17 @@ function refusalMessage(result) {
     // The guard only holds turns for a run it can still see in flight, so concluding an abandoned
     // one clears it and refuses nothing. Without this route the in-flight predicate's own escape
     // hatch was undocumented at the only moment anyone needs it.
-    `  3. If this run is over, conclude it: give ${dir}/status.json a \`final_verdict\`, a \`completed_at\`, or \`"current_phase": "5-archived"\`. A run this guard cannot see in flight is never refused.`,
+    //
+    // It is also the WIDEST and CHEAPEST disarm this guard has, and naming it here is what made
+    // that worth stating. Route 2 clears ONE row and costs a written note that stays in the
+    // committed record; route 3 clears every remaining row of the run at once, at zero cost, and
+    // records no reason. Measured: a refusing record at `3-impl` given a `final_verdict` goes
+    // rc 2 -> 0, and every later phase of that run is not-applicable thereafter. That is the same
+    // affirmative-act class as back-dating `updated_at` past the in-flight ceiling, disclosed in
+    // the spec's guarantee_and_threat_model.does_not_stop rather than defended against -- the
+    // capability is the in-flight predicate's, not this message's. Hence "YOURS": the one thing
+    // the text can do is stop reading as a licence to conclude somebody else's run.
+    `  3. If this run is YOURS and is over, conclude it: give ${dir}/status.json a \`final_verdict\`, a \`completed_at\`, or \`"current_phase": "5-archived"\`. A run this guard cannot see in flight is never refused.`,
     `A /phase re-run that did the work records it the same way, as a \`<phase-token>-rerun\` event (e.g. \`1-ba-rerun\`); the bare \`phase-rerun\` label resolves to no phase and clears nothing.`,
   ].join("\n");
 }
