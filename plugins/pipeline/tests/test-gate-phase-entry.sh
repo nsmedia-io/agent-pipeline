@@ -351,8 +351,15 @@ suite "R3 kind: content-conditioned rows test CONTENT on path (a), not mere pres
 # artifact-absent-with-event cell is the non-zero control that makes the rest mean anything: it
 # is what proves the event in cells 1 and 2 really does satisfy the row, so a refusal alongside
 # it is the ARTIFACT overriding the event rather than an inert fixture.
-r3_row() {  # r3_row <phase> <tier> <file> <failing-body> <satisfying-body> <satisfying-event-json> <repair-token>
-  local phase="$1" tier="$2" file="$3" bad="$4" good="$5" ev="$6" repair="$7"
+# The `  1. ` line of the refusal, ALONE. Asserting the repair against the whole of stderr does
+# not work and this was measured: the diagnosis line names the same field the repair does, so
+# `assert_contains "$GATE_ERR" ba_approved_at` passes while route 1 says something else entirely.
+# A mutation that replaced the ba-approved repair with "Re-run the phase and rewrite" SURVIVED on
+# the whole-stderr form. The needle has to be searched where it is supposed to be.
+route1() { printf '%s' "$GATE_ERR" | sed -n 's/^  1\. //p'; }
+
+r3_row() {  # r3_row <phase> <tier> <file> <failing-body> <satisfying-body> <event-json> <lack> <repair>
+  local phase="$1" tier="$2" file="$3" bad="$4" good="$5" ev="$6" lack="$7" repair="$8" r1
 
   # 1. THE MISSING LEG: present-and-failing, WITH an event that would satisfy the row on its own.
   new_case 4242 "$(mk_status "$phase" "\"$tier\"" "$ev")"
@@ -367,7 +374,11 @@ r3_row() {  # r3_row <phase> <tier> <file> <failing-body> <satisfying-body> <sat
   assert_not_contains "  and the refusal does not claim the file is missing" \
     "$GATE_ERR" "\`$file\` is not present"
   assert_contains "  it says the file IS present" "$GATE_ERR" "\`$file\` IS present"
-  assert_contains "  and names the repair this row actually needs ($repair)" "$GATE_ERR" "$repair"
+  assert_contains "  and diagnoses what the file lacks ($lack)" "$GATE_ERR" "$lack"
+  r1="$(route1)"
+  assert_eq "  CONTROL: a route 1 line was extracted at all, so the next assertion has a haystack" \
+    "$([[ -n "$r1" ]] && echo found || echo "NO ROUTE 1 LINE")" "found"
+  assert_contains "  and ROUTE 1 ITSELF names the repair this row needs" "$r1" "$repair"
   assert_not_contains "  and does not send them back to the phase that already produced it" \
     "$GATE_ERR" "Run the phase that produces"
 
@@ -395,9 +406,12 @@ r3_row() {  # r3_row <phase> <tier> <file> <failing-body> <satisfying-body> <sat
 BA_EVENT='[{"phase":"1-ba","verdict":"complete","at":"2026-01-01T00:00:00Z"}]'
 P2_EVENT='[{"phase":"2-constraints","verdict":"complete","at":"2026-01-01T00:00:00Z"}]'
 
-r3_row 2-review      architectural spec.json      '{"issue_number":4242}' "$SPEC_APPROVED" "$BA_EVENT" ba_approved_at
-r3_row 2-constraints standard      spec.json      '{"issue_number":4242}' "$SPEC_APPROVED" "$BA_EVENT" ba_approved_at
-r3_row 3-impl        standard      constraints.md ''                      '# real content' "$P2_EVENT" "is empty"
+r3_row 2-review      architectural spec.json '{"issue_number":4242}' "$SPEC_APPROVED" "$BA_EVENT" \
+  'carries no `ba_approved_at`' 'set `ba_approved_at` in .pipeline/4242/spec.json'
+r3_row 2-constraints standard      spec.json '{"issue_number":4242}' "$SPEC_APPROVED" "$BA_EVENT" \
+  'carries no `ba_approved_at`' 'set `ba_approved_at` in .pipeline/4242/spec.json'
+r3_row 3-impl standard constraints.md '' '# real content' "$P2_EVENT" \
+  'it is empty' 'into .pipeline/4242/constraints.md'
 
 # NON-ZERO CONTROL for the four message assertions above: the ABSENT case must still say the two
 # things the present case must not. Without it, "does not claim the file is missing" is satisfied
