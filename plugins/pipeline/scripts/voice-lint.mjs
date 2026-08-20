@@ -105,7 +105,17 @@ function readJson(file) {
   }
 }
 
-/** Newest issue dir holding a status.json, or null. Mirrors the validator's resolution order. */
+/**
+ * Newest issue dir holding a status.json, or null.
+ *
+ * Mirrors the validator's resolution ORDER (explicit signal, then newest mtime, then null),
+ * including its rule that a TIE at the newest mtime resolves to null rather than to either
+ * candidate -- see activeIssueDir in validate-pipeline-artifact.mjs for why (#27: readdirSync
+ * order is hash order on ext4 and insertion order on APFS, so a tie picked the subject by
+ * filesystem). It does NOT mirror the validator's issue-dir VOCABULARY: ISSUE_DIR_RE here is
+ * numeric-only, so `exp-<slug>` experiment runs are invisible to the voice check. That
+ * divergence predates the tie rule and is not resolved by it.
+ */
 export function resolveStatus(projectDir, envIssue) {
   const base = path.join(projectDir, ".pipeline");
   if (!existsSync(base)) return null;
@@ -115,6 +125,7 @@ export function resolveStatus(projectDir, envIssue) {
   }
   let newest = null;
   let newestMs = -1;
+  let tiedAtNewest = false;
   let entries;
   try {
     entries = readdirSync(base, { withFileTypes: true });
@@ -134,8 +145,15 @@ export function resolveStatus(projectDir, envIssue) {
     if (ms > newestMs) {
       newestMs = ms;
       newest = f;
+      tiedAtNewest = false;
+    } else if (ms === newestMs) {
+      tiedAtNewest = true;
     }
   }
+  // A tie is the absence of a signal, not a weaker one: abstain rather than let readdir order
+  // decide whose run gets voice-checked. The caller treats a null status as "no phase", which
+  // is already its fail-open path.
+  if (tiedAtNewest) return null;
   return newest ? readJson(newest) : null;
 }
 
