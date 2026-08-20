@@ -64,6 +64,32 @@ If isolation is unavailable, dispatch them SERIALLY. And when contamination is d
 running reviewer the window and the files, so they can discard rather than attribute: the failure
 mode is a reviewer confidently explaining your own interference.
 
+## A validator that cannot parse its input skips instead of failing
+
+`hooks/stop.sh` enforces the voice contract on phases `voice.md` calls acceptance moments. It reads
+`current_phase` from `status.json` and matches it against the schema pattern
+`^([0-5](\.5)?-[a-z0-9-]+|halted-error)$`.
+
+A live `status.json` carried `current_phase: "3b-impl"`. That matches nothing — `3b` is neither `3`
+nor `3.5` — so the hook could not tell which phase it was in, **and silently stopped checking.** The
+hook's own diagnostic says so: *"a malformed phase silently disables the voice check rather than
+failing it."* Every message from that run passed the voice gate by being unparseable.
+
+**And the malformed value was the reasonable one to write.** `pipeline.md` names the architectural
+write path "Phase 3a" and "Phase 3b" in prose, four times, and then instructs `current_phase:
+"3-impl"` in the checkpoint step. A session wrote what the documentation called the phase. Nothing
+validated `status.json` on write, so the mismatch surfaced only when a downstream consumer needed to
+parse it — and that consumer's failure mode was silence.
+
+**Two rules.**
+
+1. **A validator that cannot parse its input FAILS, it does not skip.** An unrecognized value is a
+   louder signal than a recognized one, because it means a producer and a consumer disagree about
+   the format. Fail-closed is the only direction that surfaces the disagreement.
+2. **A name in prose is a name a producer will write.** If the checkpoint value differs from the
+   phase's own documented name, either accept both or stop calling it something the schema forbids.
+   The current pattern should admit `3a-` and `3b-`, since those are what the docs teach.
+
 ## A property over a possibly-empty set is not a check
 
 The commonest defect this pipeline finds, and the one it keeps re-introducing **inside its own

@@ -4,58 +4,141 @@
   "title": "Status",
   "description": "Live orchestrator state. Source of truth for /pipeline --resume. current_phase is pattern-validated, not enum-validated: the enum drifted out of sync with the phases the orchestrator actually writes (0.5-map, 2-constraints, 2.5-design, 3-impl-tripwire, ...) and a stale enum derails runs. Canonical values are whatever /pipeline's checkpoint steps write; the pattern only pins the <phase-number>-<slug> shape.",
   "type": "object",
-  "required": ["current_phase", "started_at", "updated_at", "branch", "events"],
+  "required": [
+    "current_phase",
+    "started_at",
+    "updated_at",
+    "branch",
+    "events"
+  ],
   "properties": {
-    "issue_number": {"type": ["integer", "null"]},
+    "issue_number": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
     "current_phase": {
       "type": "string",
-      "pattern": "^([0-5](\\.5)?-[a-z0-9-]+|halted-error)$",
+      "pattern": "^([0-5](\\.5)?[a-z]?-[a-z0-9-]+|halted-error)$",
       "description": "Examples: 0-setup, 0.5-map, 1-ba, 1-ba-complete, 1-ba-rework-required, 2-constraints, 2-constraints-complete, 2-review, 2-review-complete, 2.5-design, 2.5-design-complete, 3-impl, 3-impl-complete, 3-impl-tripwire, 3-impl-gate-failed, 3-impl-verification-unverified, 3-scope-drift-adjudication, 4-review, 4-review-complete, 4-veto-rework-required, 5-archive, 5-archived, halted-error."
     },
-    "started_at": {"type": "string", "format": "date-time"},
-    "updated_at": {"type": "string", "format": "date-time"},
-    "completed_at": {"type": "string", "format": "date-time"},
-    "branch": {"type": "string"},
-    "ask_text": {"type": "string", "description": "Truncated, secret-redacted task summary. status.json is committed to git; never let a token-shaped substring through."},
+    "started_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "completed_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "branch": {
+      "type": "string"
+    },
+    "ask_text": {
+      "type": "string",
+      "description": "Truncated, secret-redacted task summary. status.json is committed to git; never let a token-shaped substring through."
+    },
     "risk_tier": {
       "type": "string",
-      "enum": ["trivial", "standard", "architectural"],
+      "enum": [
+        "trivial",
+        "standard",
+        "architectural"
+      ],
       "description": "Copied from spec.json after Phase 1 (post orchestrator tier validation) so checkpoints and re-runs honor the same depth."
     },
     "panel_roles": {
       "type": "array",
-      "items": {"type": "string", "enum": ["ba", "dba", "devops", "secops", "dev", "qa", "design_review", "art_director"]},
+      "items": {
+        "type": "string",
+        "enum": [
+          "ba",
+          "dba",
+          "devops",
+          "secops",
+          "dev",
+          "qa",
+          "design_review",
+          "art_director"
+        ]
+      },
       "description": "The Phase 4 panel composition resolved by tier and diff surfaces. Recorded before dispatch so the merge, the rubric, and --resume agree on who was on the panel. design_review is APPENDED TO THIS ARRAY whenever the diff touches a frontend surface, and art_director whenever a visual-contract.json exists for the issue; both also write their own shard, exactly like every other role."
     },
-    "worktree_path": {"type": "string", "description": "OPTIONAL, and preferably OMITTED: no code reads this field from status.json. The Phase 3 worktree path lives in tasks.json, which is where Dev writes it and where the orchestrator, QA and validate-pipeline-artifact.mjs all read it. When present here it is for audit only and MUST be a path RELATIVE to the project root, e.g. .claude/worktrees/42-phase3-20260101-120000 -- never an absolute path, and never a sentence about the path, which is a free-text note in a field typed as a path. WRITER PROHIBITION, and it is a prohibition rather than a promise because nothing redacts this file: status.json is committed AND archived verbatim into the knowledge store, so it must never carry an absolute filesystem path, a command string, or a credential. archive-pipeline.mjs does not read this field as an artifact fallback; the Phase 4 sync step is what preserves worktree artifacts."},
-    "phase3_qa_test_commit": {"type": "string", "description": "Architectural tier only: SHA of QA's committed failing-test contract, recorded before Dev dispatches."},
-    "pr_url": {"type": "string", "format": "uri"},
+    "worktree_path": {
+      "type": "string",
+      "description": "OPTIONAL, and preferably OMITTED: no code reads this field from status.json. The Phase 3 worktree path lives in tasks.json, which is where Dev writes it and where the orchestrator, QA and validate-pipeline-artifact.mjs all read it. When present here it is for audit only and MUST be a path RELATIVE to the project root, e.g. .claude/worktrees/42-phase3-20260101-120000 -- never an absolute path, and never a sentence about the path, which is a free-text note in a field typed as a path. WRITER PROHIBITION, and it is a prohibition rather than a promise because nothing redacts this file: status.json is committed AND archived verbatim into the knowledge store, so it must never carry an absolute filesystem path, a command string, or a credential. archive-pipeline.mjs does not read this field as an artifact fallback; the Phase 4 sync step is what preserves worktree artifacts."
+    },
+    "phase3_qa_test_commit": {
+      "type": "string",
+      "description": "Architectural tier only: SHA of QA's committed failing-test contract, recorded before Dev dispatches."
+    },
+    "pr_url": {
+      "type": "string",
+      "format": "uri"
+    },
     "final_verdict": {
       "type": "string",
-      "enum": ["APPROVE", "APPROVE_WITH_NOTES", "APPROVE_WITH_NITS", "REQUEST_CHANGES", "REQUEST_REFACTOR", "SECOPS_VETO"]
+      "enum": [
+        "APPROVE",
+        "APPROVE_WITH_NOTES",
+        "APPROVE_WITH_NITS",
+        "REQUEST_CHANGES",
+        "REQUEST_REFACTOR",
+        "SECOPS_VETO"
+      ]
     },
     "peer_review_verdict_counts": {
       "type": "object",
       "properties": {
-        "approve": {"type": "integer"},
-        "approve_with_notes": {"type": "integer"},
-        "request_changes": {"type": "integer"},
-        "request_refactor": {"type": "integer"},
-        "veto": {"type": "integer"}
+        "approve": {
+          "type": "integer"
+        },
+        "approve_with_notes": {
+          "type": "integer"
+        },
+        "request_changes": {
+          "type": "integer"
+        },
+        "request_refactor": {
+          "type": "integer"
+        },
+        "veto": {
+          "type": "integer"
+        }
       }
     },
-    "veto_reason": {"type": "string"},
-    "error": {"type": "string"},
+    "veto_reason": {
+      "type": "string"
+    },
+    "error": {
+      "type": "string"
+    },
     "events": {
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["phase", "at"],
+        "required": [
+          "phase",
+          "at"
+        ],
         "properties": {
-          "phase": {"type": "string"},
-          "verdict": {"type": "string"},
-          "at": {"type": "string", "format": "date-time"},
-          "note": {"type": "string"}
+          "phase": {
+            "type": "string"
+          },
+          "verdict": {
+            "type": "string"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "note": {
+            "type": "string"
+          }
         }
       }
     },
@@ -72,15 +155,47 @@
         "phase_elapsed_ms": {
           "type": "object",
           "description": "Milliseconds spent per phase, keyed by the leading phase LABEL of the event that CLOSED it, resolved through KNOWN_PHASES in scripts/dispatch-model.mjs. events[] entries are EXIT markers -- each carries the `verdict` of the phase it closes, and a verdict is not knowable until that phase has run -- so an interval belongs to the LATER event's phase, not the earlier one. Keys are KNOWN_PHASES tokens and never raw event labels, so an agent-written label can never become a persisted key in this archived file. The token is not always a number: the architectural tier writes 3a and 3b for its two implementation steps, and both are keys here.",
-          "additionalProperties": {"type": "integer", "minimum": 0}
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
         },
-        "total_lead_time_ms": {"type": ["integer", "null"], "description": "Last timed event minus the first. NO `minimum`, deliberately: it is negative when events[] timestamps run backwards, which is a value this repo's own records produce and which the sibling unattributed_ms documents as a supported signal. Forbidding it would be a contract that contradicts its own corpus."},
-        "unattributed_ms": {"type": "integer", "description": "Milliseconds between events that no phase key could absorb. sum(phase_elapsed_ms) + unattributed_ms == total_lead_time_ms holds by construction, so a phase label this pipeline writes but KNOWN_PHASES does not declare shows up here as a visible number instead of being silently dropped. Negative only when events[] timestamps run backwards, which is itself the signal."},
-        "unattributed_events": {"type": "integer", "minimum": 0, "description": "How many event boundaries contributed to unattributed_ms."},
-        "untimed_events": {"type": "integer", "minimum": 0, "description": "How many events[] entries were DROPPED before any figure above was computed, because their `at` was unparseable or their `phase` was not a string. Every other number here, total_lead_time_ms INCLUDED, is computed over the surviving events, so the partition balances whether this is 0 or 20 -- a true statement about a population that quietly lost a member. It cannot be folded into unattributed_ms, because an event with no timestamp contributes no duration to attribute, so it is reported as its own count."},
-        "review_rounds": {"type": "integer", "minimum": 0},
-        "events_counted": {"type": "integer", "minimum": 0},
-        "attribution": {"type": "string", "enum": ["exit"], "description": "Which convention the figures above were computed under. Records written by 0.21.0 or earlier carry no attribution and were computed under the entry-marker convention; treat those figures as historical and stale rather than recomputing them. A closed enum, not free text, because this file is archived verbatim."}
+        "total_lead_time_ms": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "Last timed event minus the first. NO `minimum`, deliberately: it is negative when events[] timestamps run backwards, which is a value this repo's own records produce and which the sibling unattributed_ms documents as a supported signal. Forbidding it would be a contract that contradicts its own corpus."
+        },
+        "unattributed_ms": {
+          "type": "integer",
+          "description": "Milliseconds between events that no phase key could absorb. sum(phase_elapsed_ms) + unattributed_ms == total_lead_time_ms holds by construction, so a phase label this pipeline writes but KNOWN_PHASES does not declare shows up here as a visible number instead of being silently dropped. Negative only when events[] timestamps run backwards, which is itself the signal."
+        },
+        "unattributed_events": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "How many event boundaries contributed to unattributed_ms."
+        },
+        "untimed_events": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "How many events[] entries were DROPPED before any figure above was computed, because their `at` was unparseable or their `phase` was not a string. Every other number here, total_lead_time_ms INCLUDED, is computed over the surviving events, so the partition balances whether this is 0 or 20 -- a true statement about a population that quietly lost a member. It cannot be folded into unattributed_ms, because an event with no timestamp contributes no duration to attribute, so it is reported as its own count."
+        },
+        "review_rounds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "events_counted": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "attribution": {
+          "type": "string",
+          "enum": [
+            "exit"
+          ],
+          "description": "Which convention the figures above were computed under. Records written by 0.21.0 or earlier carry no attribution and were computed under the entry-marker convention; treat those figures as historical and stale rather than recomputing them. A closed enum, not free text, because this file is archived verbatim."
+        }
       }
     },
     "effective_config": {
@@ -88,15 +203,45 @@
       "description": "The surface globs and per-role models that were LIVE for this run, so a narrowing is auditable after the fact rather than reconstructable only from a config file that may have changed since. The two migration sets are SEPARATE named entries deliberately: the gate's set REPLACES the defaults and the tripwire's UNIONS with them, and an auditor who cannot tell which was live for which control has learned nothing. An absolute-path glob is recorded as the literal token <absolute-glob-rejected>.",
       "additionalProperties": false,
       "properties": {
-        "migration_globs_tripwire": {"type": "array", "items": {"type": "string"}},
-        "migration_globs_gate": {"type": "array", "items": {"type": "string"}},
-        "data_layer_globs": {"type": "array", "items": {"type": "string"}},
-        "infra_globs": {"type": "array", "items": {"type": "string"}},
+        "migration_globs_tripwire": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "migration_globs_gate": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "data_layer_globs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "infra_globs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "models": {
           "type": "object",
-          "additionalProperties": {"type": "string", "enum": ["opus", "sonnet", "haiku"]}
+          "additionalProperties": {
+            "type": "string",
+            "enum": [
+              "opus",
+              "sonnet",
+              "haiku"
+            ]
+          }
         },
-        "rejected_absolute_globs": {"type": "integer", "minimum": 0}
+        "rejected_absolute_globs": {
+          "type": "integer",
+          "minimum": 0
+        }
       }
     },
     "flags": {
@@ -104,13 +249,29 @@
       "description": "One-line-per-agent digest appended after each agent returns; Phase 4 reviewers read this instead of re-parsing earlier artifacts from cold.",
       "items": {
         "type": "object",
-        "required": ["phase", "agent", "at"],
+        "required": [
+          "phase",
+          "agent",
+          "at"
+        ],
         "properties": {
-          "phase": {"type": "string"},
-          "agent": {"type": "string"},
-          "verdict": {"type": "string"},
-          "summary": {"type": "string", "maxLength": 140},
-          "at": {"type": "string", "format": "date-time"}
+          "phase": {
+            "type": "string"
+          },
+          "agent": {
+            "type": "string"
+          },
+          "verdict": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string",
+            "maxLength": 140
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          }
         }
       }
     }
