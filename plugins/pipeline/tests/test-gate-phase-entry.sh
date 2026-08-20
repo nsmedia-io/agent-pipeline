@@ -169,8 +169,14 @@ assert_eq "issue 17 at 3-impl-complete, no impl-report.json on disk, is GRANTED 
 # ---------------------------------------------------------------------------
 suite "AC4: event labels resolve through the shared resolver and compare by SET MEMBERSHIP"
 # ---------------------------------------------------------------------------
+# DO NOT inline the events array as "[{\"phase\":...}]". Inside "$(...)" the escaped quotes
+# collapse, the braces end up UNQUOTED, and bash brace-expands `{a,b,c}` into three words: the
+# fixture that reaches disk is `"events":["phase":"3b-dev"]`, which is not valid JSON, so the
+# guard reads it as a tooling failure and the case tests silence instead of set membership.
+# Built in a variable, where no brace expansion happens, exactly like AC7's single-quoted form.
 ac4() {  # ac4 <event-label> <expected-decision>
-  new_case 4242 "$(mk_status "4-review" '"architectural"' "[{\"phase\":\"$1\",\"verdict\":\"complete\",\"at\":\"$FRESH_ISO\"}]")"
+  local events='[{"phase":"'"$1"'","verdict":"complete","at":"'"$FRESH_ISO"'"}]'
+  new_case 4242 "$(mk_status "4-review" '"architectural"' "$events")"
   gate "$CASE_ROOT"
   assert_eq "events[] label '$1' against the 4-review row {3,3b} -> $2" "$GATE_DEC" "$2"
 }
@@ -194,7 +200,8 @@ gate "$CASE_ROOT"
 assert_eq "the SKIPPED 2.5-design entry does NOT fire the hatch for the 2.5-design row" "$GATE_DEC" "refused"
 assert_contains "and the refusal names the review.json it is still missing" "$GATE_OUT" "review.json"
 
-new_case 4242 "$(mk_status "2.5-design" '"architectural"' "[{\"phase\":\"2.5-design\",\"verdict\":\"complete\",\"at\":\"$FRESH_ISO\"}]")"
+AC5_EVENTS='[{"phase":"2.5-design","verdict":"complete","at":"'"$FRESH_ISO"'"}]'   # see the ac4 note
+new_case 4242 "$(mk_status "2.5-design" '"architectural"' "$AC5_EVENTS")"
 gate "$CASE_ROOT"
 assert_eq "and a plain 2.5-design event does not satisfy the 2.5-design row either" "$GATE_DEC" "refused"
 
@@ -224,8 +231,8 @@ assert_eq "AC7: a SKIPPED 2.5-design with a written reason clears entry to 3-imp
 # Three cells. A single 'note absent' fixture passes under a truthiness check that a
 # whitespace-only string defeats, which is the whole point of the trim.
 ac8() {  # ac8 <label> <note-json-fragment-or-empty>
-  new_case 4242 "$(mk_status "3-impl" '"architectural"' \
-    "[{\"phase\":\"2.5-design\",\"verdict\":\"SKIPPED\",\"at\":\"2026-01-01T00:00:00Z\"$2}]")"
+  local events='[{"phase":"2.5-design","verdict":"SKIPPED","at":"2026-01-01T00:00:00Z"'"$2"'}]'  # see the ac4 note
+  new_case 4242 "$(mk_status "3-impl" '"architectural"' "$events")"
   gate "$CASE_ROOT"
   assert_eq "AC8: a skip with $1 is REFUSED" "$GATE_DEC" "refused"
 }
@@ -552,12 +559,20 @@ AC19_REPORT="$(cd "$REPO_ROOT" && node --input-type=module -e '
   // zero it did not earn.
   process.stdout.write(JSON.stringify({ total: files.length, read, unreadable, strays }));
 ' "$GUARD" $CORPUS 2>/dev/null)"
-AC19_STRAYS="$(printf '%s' "$AC19_REPORT" | sed -n 's/.*"strays":\[\(.*\)\]}/\1/p')"
-AC19_UNREAD="$(printf '%s' "$AC19_REPORT" | sed -n 's/.*"unreadable":\[\([^]]*\)\].*/\1/p')"
+# The <no-report> sentinel belongs on the REPORT, never on the extracted value, which is the
+# shape the sibling drift suite's field() already uses. Applying `${VALUE:-<no-report>}` to the
+# value makes both assertions below unsatisfiable in the direction they assert: an EMPTY strays
+# list -- the passing state -- is exactly what `:-` replaces with the sentinel.
+ac19_field() {  # ac19_field <json-key>
+  [[ -n "$AC19_REPORT" ]] || { printf '<no-report>'; return; }
+  printf '%s' "$AC19_REPORT" | sed -n "s/.*\"$1\":\\[\\([^]]*\\)\\].*/\\1/p"
+}
+AC19_STRAYS="$(ac19_field strays)"
+AC19_UNREAD="$(ac19_field unreadable)"
 assert_eq "every committed record's current_phase is a member of one of the four sets" \
-  "${AC19_STRAYS:-<no-report>}" ""
+  "$AC19_STRAYS" ""
 assert_eq "and the walk ACCOUNTS for every record rather than continuing past it" \
-  "${AC19_UNREAD:-<no-report>}" ""
+  "$AC19_UNREAD" ""
 
 # ---------------------------------------------------------------------------
 suite "AC24: no committed record is REFUSED (a zero, whose non-zero control is AC1's 14)"
