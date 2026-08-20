@@ -297,28 +297,79 @@ assert_eq "AC3: and the walk actually inspected verdict strings (which is what m
 C17="$(verdict_report "$REPO_ROOT" 17)"
 assert_contains "AC3 NON-ZERO CONTROL: at cap 17 the check goes red and NAMES the file" \
   "$(rfield "$C17" violations)" ".pipeline/17/status.json"
-assert_contains "AC3 NON-ZERO CONTROL: ...names the FLAGS entry, not an events entry" \
+assert_contains "AC3 NON-ZERO CONTROL: ...names the FLAGS entry that carries the 18-char value" \
   "$(rfield "$C17" violations)" "flags["
 assert_contains "AC3 NON-ZERO CONTROL: ...and quotes the offending value" \
   "$(rfield "$C17" violations)" "APPROVE_WITH_NOTES"
 assert_eq "AC3 NON-ZERO CONTROL: the corpus maximum is still the 18-char value this control rests on" \
   "$(rfield "$LIVE" longestvalue)/$(rfield "$LIVE" longest)" "APPROVE_WITH_NOTES/18"
 
-# BOTH FIELDS, mutated independently. At cap 17 only flags[] fires: events[] tops out at
-# REQUEST_CHANGES (15) and sits in the passing cell of the conjunction, so a control drawn from
-# the 17-cap alone never exercises the events[] branch at all.
+# BOTH FIELDS, mutated independently: a control drawn from one cap over the live corpus can leave
+# a whole branch unexercised, so "the check fired" would not say WHICH branch fired.
+#
+# DIRECTION decides what may rest on the live corpus. This FIRES cell may: the corpus only ever
+# grows by a run committing its own record, and an added record cannot remove a long verdict, so
+# no correct future run can silence it. Its old partner asserted the opposite direction -- that
+# the events[] branch was SILENT at cap 17 -- and a silence over a growing population is broken by
+# any record that adds a long value. One did, correctly: pipeline.md makes each events[] entry the
+# EXIT marker of the phase it closes, so a panel returning APPROVE_WITH_NOTES writes those 18
+# characters into events[], and #34's own completed record did exactly that. That cell is now
+# re-founded on the crafted pair below, where the population is fixed by this file.
 C14="$(verdict_report "$REPO_ROOT" 14)"
-assert_contains "AC3 FIXTURE MATRIX: at cap 14 the events[] branch fires too" \
+assert_contains "AC3 FIXTURE MATRIX: at cap 14 the events[] branch fires on the LIVE corpus" \
   "$(rfield "$C14" violations)" "events["
-assert_eq "AC3 FIXTURE MATRIX: and the events[] branch was silent at cap 17 (so the two cells differ)" \
-  "$(printf '%s' "$(rfield "$C17" violations)" | grep -c 'events\[' | tr -d ' ')" "0"
+
+# THE DISCRIMINATION, on trees this file builds. Each holds one crafted violator in ONE field and
+# one record shaped like a real completed run -- events[] AND flags[] both carrying the 18-char
+# APPROVE_WITH_NOTES that broke the old cell -- so the population already contains the case that
+# comes for it. One branch fires, the other is silent, in both directions: neither can be the
+# other's output mislabelled, and neither can mask the other.
+LONG_VERDICT="$(node -e 'process.stdout.write("A".repeat(Number(process.argv[1])+1))' "$LIVE_CAP")"
+assert_eq "CONTROL: the crafted violator is one character OVER the cap read from the schema (the fixture is the fixture it claims to be)" \
+  "${#LONG_VERDICT}" "$(( LIVE_CAP + 1 ))"
+new_tmpdir || exit 90
+SPLIT_EV="$NEW_TMPDIR"
+new_tmpdir || exit 90
+SPLIT_FL="$NEW_TMPDIR"
+COMPLETED_RUN='{"current_phase":"4-review-complete","events":[{"phase":"4-review","at":"x","verdict":"APPROVE_WITH_NOTES"}],"flags":[{"phase":"4-review","agent":"qa","at":"x","verdict":"APPROVE_WITH_NOTES"}]}'
+for split_root in "$SPLIT_EV" "$SPLIT_FL"; do
+  mkdir -p "$split_root/.pipeline/run"
+  printf '%s' "$COMPLETED_RUN" > "$split_root/.pipeline/run/status.json"
+done
+mkdir -p "$SPLIT_EV/.pipeline/ev" "$SPLIT_FL/.pipeline/fl"
+printf '{"current_phase":"3-impl","events":[{"phase":"3-impl","at":"x","verdict":"%s"}],"flags":[{"phase":"3-impl","agent":"dev","at":"x","verdict":"APPROVE"}]}' \
+  "$LONG_VERDICT" > "$SPLIT_EV/.pipeline/ev/status.json"
+printf '{"current_phase":"3-impl","events":[{"phase":"3-impl","at":"x","verdict":"APPROVE"}],"flags":[{"phase":"3-impl","agent":"dev","at":"x","verdict":"%s"}]}' \
+  "$LONG_VERDICT" > "$SPLIT_FL/.pipeline/fl/status.json"
+EV_ONLY="$(verdict_report "$SPLIT_EV" "$LIVE_CAP")"
+FL_ONLY="$(verdict_report "$SPLIT_FL" "$LIVE_CAP")"
+
+assert_contains "AC3 FIXTURE MATRIX: with the over-long value in events[], the events[] branch fires and NAMES it" \
+  "$(rfield "$EV_ONLY" violations)" ".pipeline/ev/status.json events[0]"
+assert_eq "AC3 FIXTURE MATRIX: ...and the flags[] branch is silent on that same tree" \
+  "$(printf '%s' "$(rfield "$EV_ONLY" violations)" | grep -c 'flags\[' | tr -d ' ')" "0"
+assert_contains "AC3 FIXTURE MATRIX: with the over-long value in flags[], the flags[] branch fires and NAMES it" \
+  "$(rfield "$FL_ONLY" violations)" ".pipeline/fl/status.json flags[0]"
+assert_eq "AC3 FIXTURE MATRIX: ...and the events[] branch is silent on that same tree (the two cells differ)" \
+  "$(printf '%s' "$(rfield "$FL_ONLY" violations)" | grep -c 'events\[' | tr -d ' ')" "0"
+# Each silence above is EARNED, not unvisited: four verdict strings per tree were read, and the
+# 18-char pair among them is the value a completed APPROVE_WITH_NOTES run writes. A walk that
+# stopped inspecting a branch would report the same silence and a smaller count -- which is the
+# one mutation the silence cells cannot see by themselves. The literal 4 is safe BECAUSE this
+# file owns the population outright: no pipeline run can add a record to these trees, so unlike
+# the corpus-anchored cell this replaced, only an edit HERE can move it.
+assert_eq "AC3 FIXTURE MATRIX: both branches were INSPECTED in the events[] tree (4 verdicts read)" \
+  "$(rfield "$EV_ONLY" verdicts)" "4"
+assert_eq "AC3 FIXTURE MATRIX: and in the flags[] tree too" \
+  "$(rfield "$FL_ONLY" verdicts)" "4"
+assert_eq "AC3 FIXTURE MATRIX: the completed-run record conforms in BOTH fields, so a real APPROVE_WITH_NOTES run cannot break these cells" \
+  "$(printf '%s' "$(rfield "$EV_ONLY" violations)$(rfield "$FL_ONLY" violations)" | grep -c 'pipeline/run/' | tr -d ' ')" "0"
 
 # The same two branches against CRAFTED records at the REAL cap, so the matrix does not depend on
 # lowering the cap to reach a cell.
 new_tmpdir || exit 90
 OVER_ROOT="$NEW_TMPDIR"
 mkdir -p "$OVER_ROOT/.pipeline/ev" "$OVER_ROOT/.pipeline/fl" "$OVER_ROOT/.pipeline/ok"
-LONG_VERDICT="$(node -e 'process.stdout.write("A".repeat(Number(process.argv[1])+1))' "$LIVE_CAP")"
 printf '{"current_phase":"3-impl","events":[{"phase":"3-impl","at":"x","verdict":"%s"}]}' "$LONG_VERDICT" \
   > "$OVER_ROOT/.pipeline/ev/status.json"
 printf '{"current_phase":"3-impl","events":[],"flags":[{"phase":"3-impl","agent":"dev","at":"x","verdict":"%s"}]}' "$LONG_VERDICT" \
