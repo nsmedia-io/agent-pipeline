@@ -45,10 +45,16 @@ import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { isMain as isMainScript } from "./lib.mjs";
+// IMPORTED, never restated. This file used to declare its own /^\d+$/, which silently exempted
+// `exp-<slug>` experiment runs from the voice check: the pattern did not match, resolveStatus
+// found no active issue, and the lint went quiet on exactly the runs nobody is watching. That
+// is the same defect, in the same shape, that widening the validator's own pattern fixed for
+// artifact validation, and that AC17 in test-gate-phase-entry.sh pins for the phase-entry
+// guard ("exp-<slug> runs are GUARDED, not exempt"). Sharing the constant is what stops a
+// third copy from drifting away again.
+import { ISSUE_DIR_RE } from "./validate-pipeline-artifact.mjs";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
-
-const ISSUE_DIR_RE = /^\d+$/;
 
 // current_phase -> what voice.md requires of the message that accompanies it.
 //
@@ -112,9 +118,8 @@ function readJson(file) {
  * including its rule that a TIE at the newest mtime resolves to null rather than to either
  * candidate -- see activeIssueDir in validate-pipeline-artifact.mjs for why (#27: readdirSync
  * order is hash order on ext4 and insertion order on APFS, so a tie picked the subject by
- * filesystem). It does NOT mirror the validator's issue-dir VOCABULARY: ISSUE_DIR_RE here is
- * numeric-only, so `exp-<slug>` experiment runs are invisible to the voice check. That
- * divergence predates the tie rule and is not resolved by it.
+ * filesystem), and its issue-dir VOCABULARY, which is now the validator's exported
+ * ISSUE_DIR_RE imported above rather than a second copy that could drift from it.
  */
 export function resolveStatus(projectDir, envIssue) {
   const base = path.join(projectDir, ".pipeline");
