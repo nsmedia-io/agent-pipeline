@@ -1,0 +1,18 @@
+{
+  "title": "status.schema.json consumer catalog",
+  "domain": "architecture",
+  "status": "current",
+  "last_updated": "2026-08-20T18:35:20Z",
+  "updated_by_issue": 34,
+  "tags": [
+    "status-schema",
+    "contracts",
+    "consumer-catalog",
+    "voice-lint",
+    "phase-vocabulary"
+  ],
+  "content": "Load-bearing-contract consumer catalog for plugins/pipeline/schemas/status.schema.json, seeded post-merge of #34 (folds in #42). Surveyed at HEAD 5408339 / merged d8686bc (PR #51). THREE-LAYER SURVEY: (1) application-code call sites: exactly ONE runtime reader in the whole plugin, plugins/pipeline/scripts/voice-lint.mjs:224, and it reads exactly one key, properties.current_phase.pattern -- nothing else in the schema file is consumed at runtime. This was independently re-derived by three separate agents during #34's review (BA, Dev, QA all ran their own grep and landed on the same single reader), which is itself a signal that this fact belongs in the knowledge store rather than being re-earned every run. (2) data-layer-resident readers: none -- this project has no database function/view bodies; status.json is a flat file artifact, not a stored row. (3) independent re-derivations / other readers: plugins/pipeline/commands/pipeline.md is the GROUND TRUTH writer of current_phase literals (the schema's description field is a hand-maintained mirror of what pipeline.md writes, and #42 existed because that mirror had rotted -- 2 stale literals removed, 6 missing literals added, and halted-error correctly kept despite not being a pipeline.md literal because gate-phase-entry.mjs:241 blesses it by name and the schema's own current_phase.pattern alternates it). Three OTHER hand-maintained phase-vocabulary copies exist beyond the schema description and must never be assumed to agree with each other automatically: gate-phase-entry.mjs's exported PREREQUISITES/UNGUARDED/TERMINAL sets, voice-lint.mjs's own VOICE_MOMENTS/NON_VOICE_PHASES table, and dispatch-model.mjs's KNOWN_PHASES. CRITICAL GOVERNANCE FACT carried forward from #34's review: nothing in plugins/pipeline/scripts/validate-pipeline-artifact.mjs's AGENT_RULES validates status.json against this schema at all, and that walker does not implement maxLength (the token appears once in that file, in a comment saying so). So any constraint written into status.schema.json (existing example: flags[].summary's maxLength:140; new as of #34: events[].verdict and flags[].verdict both maxLength:32) is DOCUMENTATION unless a separate corpus-conformance test enforces it -- see knowledge/living-context/testing--status-schema-verdict-cap-enforcement.json for the enforcement mechanism #34 added. A future change to this schema must state up front whether it ships a reader or is merely a documented writer-rule; shipping neither is the exact defect class #34 fixed for the verdict fields.",
+  "see_also": [
+    "testing--status-schema-verdict-cap-enforcement.json"
+  ]
+}
