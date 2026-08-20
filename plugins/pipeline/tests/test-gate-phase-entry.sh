@@ -191,11 +191,52 @@ suite "AC5: NEGATIVE -- 2.5-design does not self-grant, and its SKIPPED note doe
 # escape hatch's own precedent would self-grant the Phase 2 review gate it skipped. The
 # 2.5-design row's satisfying set is {2}, so its own token is NOT a member. Two fixtures,
 # because the plain-satisfaction half and the hatch half fail independently.
+#
+# WHY THE HATCH HALF IS NOT THE WHOLE ISSUE-17 RECORD, which is what the spec's AC5 text names.
+# That record carries TWO events resolving to token 2 (2-review and 2-review-r2, both
+# REQUEST_CHANGES), and {2} IS the 2.5-design row's satisfying set, so the whole record is
+# granted through an entry that has nothing to do with the skip. AC9's second cell asserts
+# exactly that pairing GRANTS ("a review that demanded changes still ran"), so demanding
+# `refused` on a superset of AC9's own fixture asks the guard for two answers to one input.
+# Measured, not reasoned: under the prefix mutation A4 the whole-record fixture is `granted`
+# too, so it never discriminated the reading AC5 names -- it was red either way.
+#
+# The two cells below are the discriminating PAIR. They differ in exactly one thing: whether
+# the other entries are present. (i) fixes the confound in place, so the narrowing is recorded
+# in the suite rather than lost; (ii) is AC5's actual property, on the capture's REAL skip
+# entry with its real note, and is the only cell in this suite that a hatch which self-clears
+# the row it names can redden. Cell 3 below cannot: its entry is not SKIPPED.
 assert_eq "the capture still carries the SKIPPED 2.5-design entry this criterion rests on" \
   "$(grep -c '"SKIPPED"' "$REC17" 2>/dev/null | tr -d ' ')" "1"
+# The confound, named. If anyone strips these the pair below stops discriminating, and this
+# fails loudly instead of the criterion quietly retiring.
+assert_eq "and it carries a non-SKIPPED 2-review* entry, which is WHY the whole record grants" \
+  "$(node -e 'const s=require(process.argv[1]);process.stdout.write(String((s.events||[]).filter(e=>/^2-review/.test(e.phase||"")&&e.verdict!=="SKIPPED").length))' "$REC17")" \
+  "2"
 
+# (i) THE CONFOUND, asserted positively rather than deleted: the whole record at 2.5-design is
+#     granted, and the next cell shows what it is granted BY.
 new_case 17 '{}'
 capture "$REC17" "$CASE_DIR/status.json" "{\"current_phase\":\"2.5-design\",\"updated_at\":\"$FRESH_ISO\"}"
+gate "$CASE_ROOT"
+assert_eq "the WHOLE record at 2.5-design is granted -- by its 2-review entries, per AC9" "$GATE_DEC" "granted"
+
+# (ii) the same capture, events narrowed to the REAL skip entry alone (derived from the record,
+#      never hand-written). Nothing else can satisfy the row, so the decision is now a statement
+#      about the hatch and about nothing else.
+AC5_HATCH_PATCH="$(node -e '
+  const fs = require("fs");
+  const s = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+  const e = (s.events || []).find((x) => x.phase === "2.5-design" && x.verdict === "SKIPPED");
+  process.stdout.write(JSON.stringify({
+    current_phase: "2.5-design", updated_at: process.argv[2], events: e ? [e] : [],
+  }));
+' "$REC17" "$FRESH_ISO")"
+assert_eq "  the narrowed fixture really carries that entry, with its real non-empty note" \
+  "$(printf '%s' "$AC5_HATCH_PATCH" | node -e 'let b="";process.stdin.on("data",d=>b+=d).on("end",()=>{const e=(JSON.parse(b).events||[])[0];process.stdout.write(e&&e.verdict==="SKIPPED"&&String(e.note||"").trim()!==""?"skip-with-note":"MISSING")})')" \
+  "skip-with-note"
+new_case 17 '{}'
+capture "$REC17" "$CASE_DIR/status.json" "$AC5_HATCH_PATCH"
 gate "$CASE_ROOT"
 assert_eq "the SKIPPED 2.5-design entry does NOT fire the hatch for the 2.5-design row" "$GATE_DEC" "refused"
 assert_contains "and the refusal names the review.json it is still missing" "$GATE_OUT" "review.json"
@@ -445,12 +486,41 @@ two_dirs 202601010101 202601010102        # granting dir is newest
   assert_eq "(a) signal unset: the mtime-derived (granting) dir is the one evaluated" "$GATE_DEC" "granted"
   assert_contains "  and the decision names that dir" "$GATE_ISSUE" "6160" )
 
+# gate_signal <root> <VAR=VAL ...> -> GATE_OUT, GATE_RC, GATE_DEC, GATE_ISSUE
+# The env has to be set for the child, so this cannot reuse gate() as written.
+gate_signal() {
+  local root="$1"; shift
+  GATE_OUT="$( cd "$root" && env "$@" node "$GUARD" --root "$root" 2>/dev/null )"
+  GATE_RC=$?
+  GATE_DEC="$(printf '%s' "$GATE_OUT" | sed -n 's/.*"decision"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
+  [[ -n "$GATE_DEC" ]] || GATE_DEC="<no-decision-on-stdout>"
+  GATE_ISSUE="$(printf '%s' "$GATE_OUT" | sed -n 's/.*"issue_dir"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
+  [[ -n "$GATE_ISSUE" ]] || GATE_ISSUE="<no-issue-dir-on-stdout>"
+}
+
 two_dirs 202601010102 202601010101        # refusing dir is newest; signal points at the granting one
-GATE_OUT="$( cd "$CASE_ROOT" && CLAUDE_PIPELINE_ACTIVE_ISSUE=6160 node "$GUARD" --root "$CASE_ROOT" 2>/dev/null )"
-GATE_RC=$?
-GATE_DEC="$(printf '%s' "$GATE_OUT" | sed -n 's/.*"decision"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
-assert_eq "(b) setting the signal to a satisfied dir does NOT disarm the guard" "${GATE_DEC:-<none>}" "refused"
+gate_signal "$CASE_ROOT" CLAUDE_PIPELINE_ACTIVE_ISSUE=6160
+assert_eq "(b) setting the signal to a satisfied dir does NOT disarm the guard" "$GATE_DEC" "refused"
 assert_contains "  and the refusal names WHICH dir refused" "$GATE_OUT" "5150"
+
+# (b') THE OTHER DIRECTION, and the only cell in this suite that requires the signal to be READ
+#      at all. In (a), (b) and (c) the refusing record is always the mtime-newest one, so a
+#      guard that ignores the signal entirely -- resolving only by mtime -- passes every one of
+#      them. Here the signal names the REFUSING dir while the mtime-newest dir GRANTS, so
+#      ignoring the signal answers `granted` and this cell is the thing that says so.
+#      BOTH env names are doors into the same resolver and only one of them was ever opened; a
+#      fix applied to one and not the other passes a suite that tests only the first.
+for signal_var in CLAUDE_PIPELINE_ACTIVE_ISSUE PIPELINE_ACTIVE_ISSUE; do
+  two_dirs 202601010101 202601010102      # granting dir (6160) is newest; 5150 refuses
+  # NON-ZERO CONTROL, on this exact fixture: with no signal the answer is `granted`, so the
+  # refusal below is attributable to the signal and to nothing else about the tree.
+  ( unset CLAUDE_PIPELINE_ACTIVE_ISSUE PIPELINE_ACTIVE_ISSUE; gate "$CASE_ROOT"
+    assert_eq "  CONTROL ($signal_var): with no signal this same tree GRANTS (mtime picks 6160)" "$GATE_DEC" "granted" )
+  gate_signal "$CASE_ROOT" "$signal_var=5150"
+  assert_eq "(b') $signal_var naming the REFUSING dir is honoured, not discarded for mtime" "$GATE_DEC" "refused"
+  assert_eq "  and the decision names the signal-named dir" "$GATE_ISSUE" "5150"
+  assert_eq "  and it exits 2" "$GATE_RC" "2"
+done
 
 two_dirs 202601010103 202601010103        # the measured tie: three records in this tree share one mtime
 ( unset CLAUDE_PIPELINE_ACTIVE_ISSUE PIPELINE_ACTIVE_ISSUE
@@ -563,10 +633,22 @@ AC19_REPORT="$(cd "$REPO_ROOT" && node --input-type=module -e '
 # shape the sibling drift suite's field() already uses. Applying `${VALUE:-<no-report>}` to the
 # value makes both assertions below unsatisfiable in the direction they assert: an EMPTY strays
 # list -- the passing state -- is exactly what `:-` replaces with the sentinel.
+# BOTH of field()'s branches, not just the first. An empty REPORT is one way to measure
+# nothing; a report that is present but does not carry the key is the other, and sed prints
+# nothing for it, which is byte-identical to "the list was empty" -- the passing state. An
+# absence assertion that cannot tell `nothing wrong` from `nothing measured` is not an
+# assertion, and that is the whole reason the sentinel exists.
 ac19_field() {  # ac19_field <json-key>
   [[ -n "$AC19_REPORT" ]] || { printf '<no-report>'; return; }
+  case "$AC19_REPORT" in *"\"$1\":"*) ;; *) printf '<no-field:%s>' "$1"; return ;; esac
   printf '%s' "$AC19_REPORT" | sed -n "s/.*\"$1\":\\[\\([^]]*\\)\\].*/\\1/p"
 }
+# Witnessed, on this exact function: a non-empty report that lost the key must NOT read as an
+# empty list. Without this the hardening above is a claim rather than a control.
+assert_eq "  CONTROL: a report missing the key reads as <no-field:strays>, never as empty" \
+  "$(AC19_REPORT='{"total":9,"read":9}' ac19_field strays)" "<no-field:strays>"
+assert_eq "  CONTROL: and an absent report still reads as <no-report>" \
+  "$(AC19_REPORT='' ac19_field strays)" "<no-report>"
 AC19_STRAYS="$(ac19_field strays)"
 AC19_UNREAD="$(ac19_field unreadable)"
 assert_eq "every committed record's current_phase is a member of one of the four sets" \

@@ -55,16 +55,31 @@ mk_project() {
   git -C "$HP_ROOT" -c user.email=t@t -c user.name=t commit -q -m init >/dev/null 2>&1
 }
 
+# The stderr capture file lives OUTSIDE every fixture repo, and that is load-bearing, not
+# tidiness. A redirection is set up by the shell BEFORE the command runs, so `2>"$root/..."`
+# created an untracked file inside the fixture repo before stop.sh ever started: measured, the
+# tree was [] before run_stop and [?? .stop-err.txt] as the hook saw it. AC26(a) asserts the
+# guard still refuses on a CLEAN tree, and with the capture file inside the repo that fixture
+# was never clean at the moment under test -- the cell could not fail, and a guard gated on a
+# dirty tree passed it.
+new_tmpdir || exit 90
+ERR_DIR="$NEW_TMPDIR"
+ERR_SEQ=0
+
 # run_stop <hook-path> <root> <payload> [VAR=VAL ...] -> STOP_RC, STOP_ERR
 # stdin is ALWAYS piped: stop.sh reads it when it is not a tty, and leaving it inherited makes
 # the result depend on how the suite was launched.
 run_stop() {
   local hook="$1" root="$2" payload="$3"; shift 3
-  local errf="$root/.stop-err.txt"
+  ERR_SEQ=$((ERR_SEQ + 1))
+  local errf="$ERR_DIR/stop-err-$ERR_SEQ.txt"
   printf '%s' "$payload" | env "$@" CLAUDE_PROJECT_DIR="$root" bash "$hook" >/dev/null 2>"$errf"
   STOP_RC=$?
   STOP_ERR="$(cat "$errf" 2>/dev/null)"
 }
+
+# porcelain <root> -> the working-tree status as ONE line, or `[]` when clean.
+porcelain() { printf '[%s]' "$(git -C "$1" status --porcelain 2>/dev/null | tr '\n' ';')"; }
 
 lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
 
@@ -107,9 +122,14 @@ suite "AC26: the placement WINDOW, four cells, one per bound"
 # (a) A checkpoint commit leaves the tree CLEAN, so a guard below the clean-tree exit never
 #     runs at the moment it matters most.
 mk_project "$REFUSING_STATUS" '{"checkCommand":"true"}'
-assert_eq "  precondition: the fixture tree really is clean" \
-  "$(git -C "$HP_ROOT" status --porcelain | grep -c . | tr -d ' ')" "0"
+assert_eq "  precondition: the fixture tree really is clean BEFORE the hook runs" \
+  "$(porcelain "$HP_ROOT")" "[]"
 run_stop "$HOOK" "$HP_ROOT" ''
+# Both sides of the run, because the defect this brackets was a file created by the harness's
+# own redirection at hook-start. stop.sh writes nothing into the project dir (its only temp is
+# an mktemp LOG), so clean-before AND clean-after is the tree the hook saw.
+assert_eq "  precondition: and STILL clean after it, so the hook's own view was clean" \
+  "$(porcelain "$HP_ROOT")" "[]"
 assert_eq "(a) clean tree, guard refuses -> exit 2" "$STOP_RC" "2"
 
 # (b) The opt-out bypasses voice-lint and the project check. It must NOT bypass the guard:
@@ -200,6 +220,41 @@ assert_eq "  CONTROL: the same phase in a PARSEABLE record refuses" "$STOP_RC" "
 mk_project '{"current_phase": "3-impl", "events": [' '{"checkCommand":"true"}'
 run_stop "$HOOK" "$HP_ROOT" ''
 assert_eq "(c) unparseable status.json -> exit 0" "$STOP_RC" "0"
+
+# (d) THE LEG THE OTHER THREE CANNOT REACH: a guard that RUNS and FAILS. (a) is short-circuited
+#     by `command -v node`, (b) by the `-f $GATE` test, and (c) exits 0 inside the guard itself,
+#     so none of them ever reaches the hook's own exit-code test and none distinguishes "blocks
+#     on exactly 2" from "blocks on anything non-zero". A partial install -- scripts/ present
+#     but one of the guard's imports missing -- makes node exit 1 with a message on stderr,
+#     which is the shape that turns a fail-open contract into a permanent wedge: under
+#     `-ne 0` this fixture exits 2, i.e. EVERY turn in EVERY adopting project with a broken
+#     install would be unstoppable, and that is the exact failure R11 exists to prevent.
+new_tmpdir || exit 90
+BROKEN_ROOT="$NEW_TMPDIR"
+mkdir -p "$BROKEN_ROOT/hooks" "$BROKEN_ROOT/scripts"
+cp "$HOOKS_DIR"/*.sh "$BROKEN_ROOT/hooks/" 2>/dev/null
+cp "$SCRIPTS_DIR"/*.mjs "$BROKEN_ROOT/scripts/" 2>/dev/null
+rm -f "$BROKEN_ROOT/scripts/lib.mjs"          # an IMPORT of the guard, not the guard itself
+assert_eq "  precondition: the guard script is PRESENT in the broken copy (unlike case (b))" \
+  "$([[ -f "$BROKEN_ROOT/scripts/gate-phase-entry.mjs" ]] && echo present || echo MISSING)" "present"
+assert_eq "  precondition: and one of its imports is genuinely gone" \
+  "$([[ -f "$BROKEN_ROOT/scripts/lib.mjs" ]] && echo PRESENT || echo absent)" "absent"
+# The leg is only reached if node really runs and really fails NON-ZERO-BUT-NOT-2. Asserted on
+# the guard directly, because "the hook exited 0" is otherwise indistinguishable from a guard
+# that was skipped before it ever started -- which is what the other three cells do.
+BROKEN_ERR="$(node "$BROKEN_ROOT/scripts/gate-phase-entry.mjs" --root "$HP_ROOT" 2>&1 >/dev/null)"
+BROKEN_RC=$?
+assert_eq "  precondition: the broken guard exits non-zero and NOT 2 (it is a crash, not a refusal)" \
+  "$([[ "$BROKEN_RC" -ne 0 && "$BROKEN_RC" -ne 2 ]] && echo "crash($BROKEN_RC)" || echo "UNEXPECTED($BROKEN_RC)")" \
+  "crash($BROKEN_RC)"
+assert_eq "  precondition: and it printed to stderr, so the hook's -n GATE_ERR test is satisfied too" \
+  "$([[ -n "$BROKEN_ERR" ]] && echo nonempty || echo EMPTY)" "nonempty"
+mk_project "$REFUSING_STATUS" '{"checkCommand":"true"}'
+run_stop "$HOOK" "$HP_ROOT" ''
+assert_eq "  CONTROL: the SAME fixture refuses through the intact install" "$STOP_RC" "2"
+run_stop "$BROKEN_ROOT/hooks/stop.sh" "$HP_ROOT" ''
+assert_eq "(d) a guard that RUNS and CRASHES -> exit 0, because only exit 2 blocks" "$STOP_RC" "0"
+assert_eq "  and the crash text is not republished as if it were a refusal" "$STOP_ERR" ""
 
 # ---------------------------------------------------------------------------
 suite "AC25: an ordinary developer session in a project that ran a pipeline once"
