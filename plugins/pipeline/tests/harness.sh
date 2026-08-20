@@ -33,8 +33,9 @@ CURRENT_SUITE=""
 # and a harness that could not be sourced under that stub would break the suite that proves
 # new_tmpdir refuses an empty path. $$ is the SUITE's pid and stays the suite's pid inside a
 # subshell, which is exactly the scope wanted.
-_ASSERT_LEDGER="${TMPDIR:-/tmp}/.pipeline-test-harness-ledger.$$"
-: > "$_ASSERT_LEDGER" 2>/dev/null || _ASSERT_LEDGER=""
+#
+# The ledger FILE is created further down, once the temp registry it is removed through exists.
+_ASSERT_LEDGER=""
 
 # _ledger <ok|FAIL> <name>. Called AFTER the counter increment, so the recorded index is the
 # value the incrementing shell saw.
@@ -162,6 +163,39 @@ _remove_owned_tmpdir() {
   rm -rf "$d"                          # the exact registered dir; never a "$d"/* glob
 }
 
+# ---- the ledger FILE, created inside a directory this process proved it owns ----------------
+#
+# The earlier shape composed a PREDICTABLE path directly in a world-writable dir and opened it
+# with truncation and no exclusivity (`: > "$path"`). MEASURED: with a symlink pre-placed at
+# that name, a 49-byte file elsewhere on disk went to 9 bytes and came back holding this
+# harness's own ledger line; the same run with no symlink left it byte-identical. TMPDIR is
+# unset on ubuntu-latest, so the dir was literally /tmp, and the sticky bit does not help --
+# it stops you deleting someone else's file, not creating an untaken name. run.sh is this
+# project's checkCommand, which stop.sh executes at every dirty-tree turn end, and each
+# run_child gets its own pid, so the blast radius is dozens of predictable names per run.
+#
+# mkdir is the fix that keeps the no-mktemp constraint above: it is atomic, it FAILS on an
+# existing path, and it does not follow a symlink. The ledger then lives inside a dir this
+# process is the only writer of. $RANDOM widens the name beyond the pid so a pre-placed
+# squat has to win a race rather than read a counter.
+_LEDGER_DIR="${TMPDIR:-/tmp}/.pipeline-harness.$$.${RANDOM}"
+if mkdir -m 700 "$_LEDGER_DIR" 2>/dev/null; then
+  TMP_REGISTRY="${TMP_REGISTRY}${_LEDGER_DIR}
+"
+  _ASSERT_LEDGER="$_LEDGER_DIR/ledger"
+else
+  # ANNOUNCE, do not refuse. An unwritable TMPDIR is a tooling condition in the operator's
+  # environment, and a harness that refused over it would be the wrong fail direction (this is
+  # a guard, not a prerequisite like require_node). But the DISARM must not be silent: measured
+  # on the old shape, an identical suite carrying one genuinely uncounted assertion exited 1
+  # with the offender named on a writable tmp and 0 with byte-identical stdout on an unwritable
+  # one. The only signal was bash's own redirection diagnostic, which says nothing about the
+  # guard and does not appear at all for a later append failure. Same shape as the once-per-
+  # session disarm notice in hooks/session-start.sh, for the same reason.
+  printf 'HARNESS: assertion ledger unavailable at %s; the uncounted-assertion guard is DISABLED for this suite.\n' \
+    "$_LEDGER_DIR" >&2
+fi
+
 _cleanup_tmpdirs() {
   local rc=$? line registry="$TMP_REGISTRY"
   while IFS= read -r line; do
@@ -169,9 +203,8 @@ _cleanup_tmpdirs() {
     _remove_owned_tmpdir "$line"
   done <<< "$registry"
   TMP_REGISTRY=""                      # idempotent: a second run removes nothing
-  # The ledger is a single FILE at a path this process composed from its own pid, so it is
-  # removed by exact name and never through the dir registry above.
-  [[ -n "$_ASSERT_LEDGER" ]] && rm -f "$_ASSERT_LEDGER"
+  # The ledger needs no special case: its DIRECTORY is registered like any other, so the loop
+  # above removed it by exact path through the same refusing helper.
   return $rc
 }
 
