@@ -132,6 +132,8 @@ Gate by risk tier (see "Risk-tiered orchestration depth" above): the **trivial**
 
 **Checkpoint first:** set `current_phase: "1-ba"` and commit `status.json` (per the durable-checkpoint convention above) BEFORE dispatching BA.
 
+**The tier is not knowable at this checkpoint, by construction.** `risk_tier` is BA's OUTPUT, and the checkpoint above is committed before BA is dispatched: the 1-ba checkpoint is written before BA runs, so at 1-ba the risk_tier is necessarily absent. Nothing downstream may read a tier from a record at this phase or infer one from its absence. The phase-entry guard honors that ordering rather than guessing (`appliesAtTier`'s `tierDetermined` parameter; re-derive with `git grep -n tierDetermined plugins/pipeline/scripts/gate-phase-entry.mjs`), so a tier-restricted prerequisite is OFF here rather than resolved to the strictest row.
+
 **Skip if:** `--issue <n>` argument provided AND `.pipeline/<n>/spec.json` already exists with `ba_approved_at`.
 
 Invoke BA via the Agent tool:

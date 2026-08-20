@@ -138,7 +138,61 @@ export const TERMINAL = ["5-archived"];
 
 const IN_FLIGHT_MS = 24 * 60 * 60 * 1000;
 
-/** An unusable risk_tier resolves to the STRICTEST row, never the loosest. */
+/**
+ * An unusable risk_tier resolves to the STRICTEST row, never the loosest. That default is right
+ * for a `byTier` row, which is only reached after Phase 1 has copied the tier into the record,
+ * and it is WRONG for a row that exists at one tier BECAUSE its prerequisite is not producible
+ * at the others: the 1-ba checkpoint is written before BA runs, so at 1-ba the risk_tier is
+ * necessarily absent, and resolving that absence to the strictest row demands an artifact the
+ * other two tiers are told not to produce. So the tiers-restricted path -- and only that path
+ * -- takes a separate DETERMINATION signal, computed from the RAW field at the call site and
+ * passed to `appliesAtTier`; a row carrying a `tiers` key does not apply when the tier is
+ * undetermined. Re-derive the ordering claim with
+ * `git grep -n 'current_phase: "1-ba"' -- plugins/pipeline/commands/pipeline.md`, which returns
+ * exactly one hit, the Phase 1 mandate -- NOT `git grep -n 'Checkpoint first'`, which returns
+ * one hit per phase and so cannot answer the question it is being asked.
+ *
+ * WHAT THIS COSTS, stated accurately because the comfortable version of the sentence is false
+ * the moment it is written: `1-ba` is the only row carrying a `tiers` key (re-derive with
+ * `git grep -n 'tiers: \[' plugins/pipeline/scripts/gate-phase-entry.mjs`), and on the path
+ * pipeline.md mandates, its map.json requirement is RETIRED AT EVERY TIER -- not narrowed to
+ * the architectural one. A row gated on a resolved tier cannot fire at the only visit where
+ * map.json can still be missing; it survives only for a re-entry visit to `1-ba`, by which time
+ * map.json necessarily exists. What is traded away is an UNDISCRIMINATING refusal (today the
+ * row refuses trivial, standard and architectural alike at `1-ba`), and what is bought is the
+ * removal of a first-turn refusal that teaches its operator to reach for this guard's widest
+ * disarm. Re-siting the requirement at a phase where the tier IS resolved is #61, which must
+ * also rule on the now-mostly-dead `tiers` key rather than leave a row that looks live.
+ *
+ * THE SECOND COST, accepted: a typo'd risk_tier turns a tiers-restricted row OFF rather than
+ * ON. That does not contradict the strictest default above; it is the same rule one function
+ * down, where `inFlight` refuses to hold a project's turns open on a record it cannot DATE. A
+ * record it cannot TIER is the same shape. Note the precedent's limit: pipeline-status.mjs's
+ * `resolveTier` renders an ABSENT tier as `-` but passes a MALFORMED one through verbatim
+ * (re-derive with `git grep -n 'function resolveTier' plugins/pipeline/scripts/pipeline-status.mjs`),
+ * so it supports the absent half of this rule only. Treating a typo as undetermined is a new
+ * judgement, and it rests on the trade above rather than on a borrowed precedent.
+ *
+ * A THIRD instance of the same fail-open DIRECTION, deliberate rather than overlooked: a record
+ * this guard cannot VALIDATE as concluded is taken at its word. `completed_at` is never parsed,
+ * so `"TBD"` reads as finished, and `final_verdict` is tested for truthiness rather than against
+ * status.schema.json's closed enum, so `"pending"` reads as concluded.
+ *
+ * THE ABSTENTION INVENTORY, so whoever adds a FOURTH way for this guard to say nothing sees the
+ * first three together. (1) Tooling fail-open: an unreadable or non-object record returns null
+ * and the caller renders silence -- rc 0 and empty stdout, which an rc-only reader cannot tell
+ * from a pass. (2) An mtime tie resolves to NO active issue rather than to readdir order
+ * (re-derive with `git log --oneline --grep 'mtime tie'`). (3) This undetermined-tier row-off.
+ * Only (3) names itself in its own output and is pinned by a test. Add the fourth to this list
+ * on the day it is written, not after it has hidden something.
+ *
+ * EVERY CITATION ABOVE IS BY QUOTED TEXT OR SYMBOL PLUS A COMMAND THAT RE-DERIVES IT, never by
+ * line number, and each command must DISCRIMINATE -- one that returns eight hits answers
+ * nothing. This is not house style: three line citations drifted inside this one issue's own
+ * record (a mandate cited at :103 that lives at :133, a knowledge-store citation that moved
+ * 241 -> 251, a token cited at :478 that sits at :477), and this comment is permanent and
+ * defended by a test, so a stale coordinate would rot inside a defended artifact.
+ */
 function normalizeTier(tier) {
   return KNOWN_TIERS.includes(tier) ? tier : "architectural";
 }
@@ -150,10 +204,17 @@ function rowFor(phase, tier) {
   return raw;
 }
 
-/** A row that only exists at some tiers (the deep map is architectural-only). */
-function appliesAtTier(phase, tier) {
+/**
+ * A row that only exists at some tiers. `tierDetermined` has NO DEFAULT and must be derived
+ * from the RAW `status.risk_tier`, never from `normalizeTier`'s output: that output is a member
+ * of KNOWN_TIERS for every input, so deriving it there is always true and silently restores the
+ * behaviour this parameter exists to change.
+ */
+function appliesAtTier(phase, tier, tierDetermined) {
   const raw = PREREQUISITES[phase];
-  return !raw || !raw.tiers || raw.tiers.includes(tier);
+  if (!raw || !raw.tiers) return true;
+  if (!tierDetermined) return false;
+  return raw.tiers.includes(tier);
 }
 
 /**
@@ -285,9 +346,20 @@ function decideForDir(issueDir, now) {
     return decided("not-applicable", `${at} is not in flight (stale or already concluded).`);
   }
 
+  // The RAW field, before normalizeTier resolves every unusable value to the strictest row.
+  const tierDetermined = KNOWN_TIERS.includes(status.risk_tier);
   const tier = normalizeTier(status.risk_tier);
-  if (!appliesAtTier(phase, tier)) {
-    return decided("not-applicable", `${at} is not a guarded phase at the ${tier} tier.`);
+  if (!appliesAtTier(phase, tier, tierDetermined)) {
+    // The undetermined wording interpolates `at` and nothing else. `status.risk_tier` is the one
+    // unbounded record value in scope here, this is the first branch that has neither vetted it
+    // against KNOWN_TIERS nor normalized it away, and the file it comes from is committed and
+    // archived verbatim -- the same reason ask_text, events[].note and error are never echoed.
+    return decided(
+      "not-applicable",
+      tierDetermined
+        ? `${at} is not a guarded phase at the ${tier} tier.`
+        : `${at} carries no determined risk_tier, so a tier-restricted row does not apply.`,
+    );
   }
 
   const row = rowFor(phase, tier);
