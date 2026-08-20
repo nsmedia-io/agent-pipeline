@@ -103,8 +103,13 @@ function parseTime(v) {
  * drop its time: it lands in `unattributed_ms`, which is a number a reader can see. Adding a
  * phase to KNOWN_PHASES is what teaches this function to attribute it, so the declaration and
  * the accounting cannot drift apart.
+ *
+ * EXPORTED because gate-phase-entry.mjs resolves the same labels for a different purpose, and
+ * a second copy of this three-line function would be a fourth phase vocabulary: it would keep
+ * working while KNOWN_PHASES moved underneath it, which is the exact rot the shape regex above
+ * already cost this repo once.
  */
-function phaseKey(phase) {
+export function phaseKey(phase) {
   if (typeof phase !== "string") return null;
   const dash = phase.indexOf("-");
   const token = dash === -1 ? phase : phase.slice(0, dash);
