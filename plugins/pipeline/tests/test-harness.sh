@@ -152,6 +152,62 @@ assert_eq "no new script suite hand-rolls rm -rf" "${RM_VIOLATORS:-none}" "none"
 assert_eq "and the rm -rf check actually examined the script suites" \
   "$([[ "$RM_EXAMINED" -ge 8 ]] && echo ok || echo "only $RM_EXAMINED examined")" "ok"
 
+suite "harness: an UNCOUNTED assertion fails the suite"
+
+# The defect this guards, measured: seven assertions in test-gate-phase-entry.sh sat inside
+# `( unset ...; assert_eq ... )` subshells. Their increments died with the subshell and assert_*
+# returns 0 either way, so a FAIL among them printed and the suite still reported failed=0 and
+# exited 0. Two of the seven were the non-zero CONTROLs for the criterion above them.
+#
+# The child below is that exact shape, reduced: ONE assertion in the parent shell, ONE inside a
+# subshell. Every assertion in it PASSES, so nothing but the count guard can fail it -- which is
+# what makes this a test of the guard rather than of the assertion.
+cat > "$SCRATCH/child-subshell.sh" <<CHILD
+. "$TESTS_DIR/harness.sh"
+suite "scratch"
+assert_eq "counted normally" "a" "a"
+( assert_eq "evaluated where the counters do not survive" "b" "b" )
+finish
+CHILD
+run_child "$SCRATCH/child-subshell.sh"
+assert_eq "a suite with an uncounted assertion exits non-zero" "$RC" "1"
+# The discriminating assertion: the child's OWN tally says nothing is wrong. Without this, the
+# red above is satisfied by a child that simply had a failing assertion.
+assert_contains "  even though its own tally reports no failures" "$OUT" "passed=1 failed=0"
+assert_contains "the guard says how many ran versus how many counted" "$ERR" "2 assertion(s) ran but 1 were counted"
+assert_contains "  and names the assertion that could not fail the build" "$ERR" \
+  "evaluated where the counters do not survive"
+assert_contains "  and says why an uncounted assertion matters" "$ERR" "cannot fail the build"
+assert_not_contains "  and does not accuse the one that WAS counted" "$ERR" "counted normally"
+
+# NON-ZERO CONTROL, on the same child minus the parentheses. Without it, the red above could be
+# produced by a guard that fails every suite, and the 32 green suites in this directory would be
+# the thing disagreeing with it.
+cat > "$SCRATCH/child-nosubshell.sh" <<CHILD
+. "$TESTS_DIR/harness.sh"
+suite "scratch"
+assert_eq "counted normally" "a" "a"
+assert_eq "evaluated where the counters do not survive" "b" "b"
+finish
+CHILD
+run_child "$SCRATCH/child-nosubshell.sh"
+assert_eq "CONTROL: the identical assertions OUTSIDE the subshell exit 0" "$RC" "0"
+assert_contains "CONTROL: and both are counted" "$OUT" "passed=2 failed=0"
+assert_eq "CONTROL: and the guard stays silent" "$ERR" ""
+
+# A subshell around an assertion that FAILS is the case the seven actually threatened: the FAIL
+# is printed, the tally still says zero, and only the guard is left to notice.
+cat > "$SCRATCH/child-subshell-fail.sh" <<CHILD
+. "$TESTS_DIR/harness.sh"
+suite "scratch"
+( assert_eq "a real failure, thrown away" "actual" "expected" )
+finish
+CHILD
+run_child "$SCRATCH/child-subshell-fail.sh"
+assert_contains "a FAIL inside a subshell is still PRINTED" "$OUT" "FAIL  a real failure, thrown away"
+assert_contains "  and still uncounted by the tally" "$OUT" "passed=0 failed=0"
+assert_eq "  but the suite no longer exits 0" "$RC" "1"
+
 suite "harness: node is REQUIRED, never skipped (AC3)"
 
 # Build a PATH with the few externals harness.sh itself needs and, pointedly, no node. This is
