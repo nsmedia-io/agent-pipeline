@@ -45,10 +45,16 @@ import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { isMain as isMainScript } from "./lib.mjs";
+// IMPORTED, never restated. This file used to declare its own /^\d+$/, which silently exempted
+// `exp-<slug>` experiment runs from the voice check: the pattern did not match, resolveStatus
+// found no active issue, and the lint went quiet on exactly the runs nobody is watching. That
+// is the same defect, in the same shape, that widening the validator's own pattern fixed for
+// artifact validation, and that AC17 in test-gate-phase-entry.sh pins for the phase-entry
+// guard ("exp-<slug> runs are GUARDED, not exempt"). Sharing the constant is what stops a
+// third copy from drifting away again.
+import { ISSUE_DIR_RE } from "./validate-pipeline-artifact.mjs";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
-
-const ISSUE_DIR_RE = /^\d+$/;
 
 // current_phase -> what voice.md requires of the message that accompanies it.
 //
@@ -105,7 +111,16 @@ function readJson(file) {
   }
 }
 
-/** Newest issue dir holding a status.json, or null. Mirrors the validator's resolution order. */
+/**
+ * Newest issue dir holding a status.json, or null.
+ *
+ * Mirrors the validator's resolution ORDER (explicit signal, then newest mtime, then null),
+ * including its rule that a TIE at the newest mtime resolves to null rather than to either
+ * candidate -- see activeIssueDir in validate-pipeline-artifact.mjs for why (#27: readdirSync
+ * order is hash order on ext4 and insertion order on APFS, so a tie picked the subject by
+ * filesystem), and its issue-dir VOCABULARY, which is now the validator's exported
+ * ISSUE_DIR_RE imported above rather than a second copy that could drift from it.
+ */
 export function resolveStatus(projectDir, envIssue) {
   const base = path.join(projectDir, ".pipeline");
   if (!existsSync(base)) return null;
@@ -115,6 +130,7 @@ export function resolveStatus(projectDir, envIssue) {
   }
   let newest = null;
   let newestMs = -1;
+  let tiedAtNewest = false;
   let entries;
   try {
     entries = readdirSync(base, { withFileTypes: true });
@@ -134,8 +150,15 @@ export function resolveStatus(projectDir, envIssue) {
     if (ms > newestMs) {
       newestMs = ms;
       newest = f;
+      tiedAtNewest = false;
+    } else if (ms === newestMs) {
+      tiedAtNewest = true;
     }
   }
+  // A tie is the absence of a signal, not a weaker one: abstain rather than let readdir order
+  // decide whose run gets voice-checked. The caller treats a null status as "no phase", which
+  // is already its fail-open path.
+  if (tiedAtNewest) return null;
   return newest ? readJson(newest) : null;
 }
 

@@ -2,8 +2,9 @@
 # status.schema.json's own contract: the verdict cap (#34) and the current_phase example
 # list (#42).
 #
-# WHY THIS FILE EXISTS. status.schema.json has exactly ONE runtime reader -- voice-lint.mjs:224,
-# which reads properties.current_phase.pattern and nothing else. The file appears in no
+# WHY THIS FILE EXISTS. status.schema.json has exactly ONE runtime reader -- voice-lint.mjs:247 (the
+# readFileSync in phaseShapeFailure), which reads properties.current_phase.pattern at :249 and
+# nothing else. The file appears in no
 # AGENT_RULES entry in validate-pipeline-artifact.mjs, and that walker does not implement
 # maxLength at all, so a maxLength written into this schema refuses nothing by itself. Both
 # defects this suite pins are the same condition: a constraint nobody reads can be absent
@@ -483,7 +484,8 @@ assert_eq "AC7 CONTROL: and that literal is still present as a negative-control 
 # ---------------------------------------------------------------------------
 suite "AC8: UNCHANGED CONSUMER -- current_phase.pattern is byte-identical"
 # ---------------------------------------------------------------------------
-# voice-lint.mjs:224 reads exactly this one key out of this file and nothing else. Pinned by
+# voice-lint.mjs:249 (in phaseShapeFailure) reads exactly this one key out of this file and
+# nothing else. Pinned by
 # VALUE, not by presence: a presence check survives any edit to the regex, which is the thing the
 # only runtime reader actually consumes. The literal below is the pre-change bytes.
 assert_eq "AC8: the pattern is byte-identical to its pre-change value" \

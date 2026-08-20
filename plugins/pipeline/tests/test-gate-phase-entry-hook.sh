@@ -375,6 +375,14 @@ suite "AC27: the two suites that already own this hook are UNCHANGED consumers"
 # ---------------------------------------------------------------------------
 # Recorded at f6ba1c4, BEFORE this contract was authored. Exact counts, not just failed=0: a
 # suite that silently stopped running half its cases also reports failed=0.
+#
+# RE-BASELINED ONCE, deliberately, and the reason is recorded because a number bumped without
+# one turns this assertion into a rubber stamp: test-voice-lint.sh went 41 -> 48 when #27 gave
+# voice-lint.mjs the validator's exported ISSUE_DIR_RE, closing the gap where an `exp-<slug>`
+# experiment run resolved to no active issue and was therefore never voice-checked at all. The
+# +7 is one new suite block ("exp-<slug> runs are LINTED, not exempt"): 4 behavioural cases and
+# 3 controls. Nothing existing was removed or renumbered, which is the property this cell is
+# actually guarding -- verify that by diffing the suite, not by trusting this note.
 run_suite_counts() {  # <suite-file> -> SUITE_PASSED, SUITE_FAILED
   local out
   out="$(cd "$TESTS_DIR" && bash "$1" 2>&1 | sed 's/\x1b\[[0-9;]*m//g')"
@@ -385,7 +393,7 @@ run_suite_counts test-stop-hook.sh
 assert_eq "test-stop-hook.sh still passes exactly its 18 pre-existing assertions" "${SUITE_PASSED:-<none>}" "18"
 assert_eq "  with none failing" "${SUITE_FAILED:-<none>}" "0"
 run_suite_counts test-voice-lint.sh
-assert_eq "test-voice-lint.sh still passes exactly its 41 pre-existing assertions" "${SUITE_PASSED:-<none>}" "41"
+assert_eq "test-voice-lint.sh still passes exactly its 48 assertions (41 pre-existing + 7 from #27)" "${SUITE_PASSED:-<none>}" "48"
 assert_eq "  with none failing" "${SUITE_FAILED:-<none>}" "0"
 
 # ---------------------------------------------------------------------------

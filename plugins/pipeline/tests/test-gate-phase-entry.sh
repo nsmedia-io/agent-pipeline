@@ -631,13 +631,34 @@ for signal_var in CLAUDE_PIPELINE_ACTIVE_ISSUE PIPELINE_ACTIVE_ISSUE; do
   assert_eq "  and it exits 2" "$GATE_RC" "2"
 done
 
-two_dirs 202601010103 202601010103        # the measured tie: three records in this tree share one mtime
+# (c) THE MTIME TIE. This cell used to assert the opposite -- that a tie still "names one of the
+#     two dirs rather than nothing" -- because activeIssueDir resolved a tie by readdirSync
+#     order, which is stable on one machine and therefore looked deterministic when measured
+#     here. It is not stable ACROSS machines: hash order on ext4, roughly insertion order on
+#     APFS, so the dir this guard judged on a tie was a property of the filesystem (#27).
+#
+#     A tie now resolves to NO subject, and this guard falls silent. That is a DISARM VECTOR and
+#     it is recorded as one, here and in the module header, rather than left for a reader to
+#     discover: a fresh `git clone` writes every tracked status.json inside one coarse-clock
+#     tick on Linux, which is exactly the tie, so the guard can be silenced without anyone
+#     choosing to silence it. It is accepted as the price of never judging a run this session
+#     does not own, and it routes through the fail-open tooling condition R11 already declares
+#     ("no resolvable active issue"), not through a new one.
+two_dirs 202601010103 202601010103        # the measured tie: both records share one mtime
 gate_nosignal "$CASE_ROOT"; FIRST_DEC="$GATE_DEC"; FIRST_DIR="$GATE_ISSUE"
 gate_nosignal "$CASE_ROOT"
 assert_eq "(c) an mtime tie is DETERMINISTIC across runs (decision)" "$GATE_DEC" "$FIRST_DEC"
 assert_eq "  and deterministic in the dir it names" "$GATE_ISSUE" "$FIRST_DIR"
-assert_eq "  and it names one of the two dirs rather than nothing" \
-  "$([[ "$FIRST_DIR" == "5150" || "$FIRST_DIR" == "6160" ]] && echo named || echo "UNNAMED: $FIRST_DIR")" "named"
+assert_eq "  and a tie resolves to NO subject: silent, not an arbitrary pick" \
+  "$FIRST_DEC" "<no-decision-on-stdout>"
+assert_eq "  and the silence is fail-OPEN (exit 0), never a refusal" "$GATE_RC" "0"
+# CONTROL, on this same tree: break the tie by one minute and a decision comes back. Without it
+# the three assertions above would pass just as well against a guard that had stopped working
+# altogether, which is the failure mode this suite exists to catch.
+two_dirs 202601010103 202601010104        # 6160 (granting) now strictly newest
+gate_nosignal "$CASE_ROOT"
+assert_eq "  CONTROL: breaking the tie by one minute restores a decision" "$GATE_DEC" "granted"
+assert_contains "  and that decision names the strictly-newest dir" "$GATE_ISSUE" "6160"
 
 # ---------------------------------------------------------------------------
 suite "AC17: exp-<slug> runs are GUARDED, not exempt"
