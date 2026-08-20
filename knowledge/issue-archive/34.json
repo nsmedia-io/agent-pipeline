@@ -1,0 +1,2036 @@
+{
+  "issue_number": 34,
+  "archived_at": "2026-08-20T19:51:35.886Z",
+  "spec": {
+    "issue_number": 34,
+    "title": "Bound the unbounded verdict fields and de-rot the phase list in status.schema.json",
+    "ask_source": "owner",
+    "problem": "Two defects in plugins/pipeline/schemas/status.schema.json, a file that is committed to git and archived verbatim by the Librarian. (1) #34: events[].verdict is a bare {\"type\": \"string\"} with no bound, so any prose an agent writes lands in a public tree at full length. The same is true of flags[].verdict, which #34 does not name even though it is the same field, in the same file, under the same archival mechanism, and which in the committed corpus carries the LONGEST observed verdict of the two. (2) #42: the current_phase description's hand-maintained example list has rotted -- verified, it blesses two literals commands/pipeline.md never writes and omits six it does. A material fact that governs both fixes and that neither issue states: status.schema.json appears in NO AGENT_RULES entry in validate-pipeline-artifact.mjs, and that walker does not implement maxLength or pattern at all. The file's ONLY runtime reader is voice-lint.mjs, which reads exactly one key out of it (properties.current_phase.pattern). So a maxLength added here refuses nothing on its own; #34's stated precedent (flags[].summary's maxLength: 140) is likewise unenforced, and is honored in practice only because pipeline.md restates it as a writer rule. The fix must therefore either come with a reader or be labelled as documented intent, not shipped as a guard that does not guard.",
+    "root_cause": "status.schema.json is a documentation contract with a single partial reader. Both defects are the same underlying condition: a constraint written into this file is not read by anything, so it can be wrong (the phase list) or absent (the verdict bound) indefinitely without any check going red. #42 is the fourth member of the 'hand-maintained phase vocabulary rots' class named in #39's spec; #34 is the field that #30 simultaneously promoted to load-bearing (pipeline-telemetry.mjs's docstring makes verdict the tell that fixes the meaning of a stored measurement) and left unbounded.",
+    "requirements": [
+      "R1. events.items.properties.verdict gains maxLength: 32.",
+      "R2. flags.items.properties.verdict gains the SAME maxLength: 32. Ruling on the owner's scope question: FOLD IN, do not defer. It is the same field name, the same file, the same commit-and-archive-verbatim mechanism, and #34's argument applies to it word for word. It is also the field carrying the longest verdict actually observed in the corpus (18 chars, vs 15 for events[]), so deferring would leave the larger of the two values unbounded. A deferral would have to be written as an issue that is #34 with one identifier changed, to produce a second one-line diff to a line eight lines away from this one.",
+      "R3. The current_phase description's example list is corrected to the literals commands/pipeline.md actually writes, PLUS halted-error, and the <phase>-error family is named as a shape rather than omitted. halted-error is the trap: pipeline.md never writes it, so a mechanical derivation from pipeline.md alone DELETES it -- but the schema's own pattern alternates it explicitly (^([0-5](\\.5)?-[a-z0-9-]+|halted-error)$) and gate-phase-entry.mjs:241 returns true for it by name. Removing it would refuse correct work.",
+      "R4. A corpus-conformance check asserts every committed events[].verdict and flags[].verdict conforms to the cap, reading the cap FROM the schema rather than from a copied literal, and preceded by a vacuity control asserting the corpus is non-empty and of the expected shape. Without this, the cap is a comment; with a copied literal, the check and the schema drift.",
+      "R5. The three test comments that cite the schema:13 rot as LIVE present-tense evidence are re-anchored, because R3 makes all three false on landing. They are plugins/pipeline/tests/test-gate-phase-entry-drift.sh:13-14, plugins/pipeline/tests/test-gate-phase-entry.sh:511-512, and plugins/pipeline/tests/test-gate-phase-entry.sh:711. The negative-control INPUT '3-scope-drift-adjudication' at test-gate-phase-entry.sh:514 stays valid (pipeline.md still never writes it); only the justification prose dies, and it must be restated in the past tense naming #42.",
+      "R6. The description of each capped field states plainly that nothing validates status.json against this schema, so a later reader does not mistake the cap for an enforced control and skip writing the enforcement."
+    ],
+    "acceptance_criteria": [
+      "AC1. plugins/pipeline/schemas/status.schema.json parses as JSON, and both events.items.properties.verdict and flags.items.properties.verdict carry maxLength: 32 with type still \"string\".",
+      "AC2. VACUITY CONTROL, asserted BEFORE any property is asserted over the corpus: the walk over .pipeline/*/status.json finds at least 6 committed records, every one of them parses, and every one has events as an array. The floor is a derived >= that can only grow, in the idiom already used at test-gate-phase-entry.sh AC19 ('the corpus walk found at least 4 committed records'). If the walk returns zero the check must FAIL, never pass green.",
+      "AC3. Every events[].verdict and flags[].verdict string in the committed corpus has length <= the cap. NON-ZERO CONTROL, required, not optional: with the schema's cap temporarily set to 17 the check must go RED and must name .pipeline/17/status.json's flags[] entry 'APPROVE_WITH_NOTES' (18 chars) as the violator. A check that has never been watched to fail on this corpus has not been shown to read it.",
+      "AC4. The check reads the cap from status.schema.json, not from a literal in the test. Proven by mutating ONLY the schema's maxLength value and observing the check's verdict change; a test carrying its own copy of 32 passes AC3 and fails this one.",
+      "AC5. The corrected description names exactly the set derivable from commands/pipeline.md by grep -o '\"\\?current_phase\"\\?: *\"[^\"]*\"' , plus halted-error, less the <phase>-error template. Asserted as SET EQUALITY in both directions, not as a substring grep -- voice-lint.mjs's first phase table is the recorded precedent for why a substring grep is insufficient (a phase named in a comment satisfies it).",
+      "AC6. halted-error is STILL named in the description after the fix. This is R3's negative control and it is the criterion most likely to be silently violated, because the obvious mechanical fix removes it: pipeline.md writes it nowhere, yet gate-phase-entry.mjs:241 is `if (phase === \"halted-error\") return true;` and the schema's own pattern alternates it.",
+      "AC7. Neither 3-impl-verification-unverified nor 3-scope-drift-adjudication appears anywhere in status.schema.json after the fix.",
+      "AC8. UNCHANGED CONSUMER: properties.current_phase.pattern is byte-identical before and after. voice-lint.mjs:224 reads exactly this one key out of this file and nothing else; the fix touches the sibling description key and must not perturb it.",
+      "AC9. UNCHANGED CONSUMER, behavioural: plugins/pipeline/tests/test-voice-lint.sh is green after the change, AND one non-zero control is run -- feed voice-lint a malformed current_phase and confirm it still emits the failure naming status.schema.json (test-voice-lint.sh:191 asserts that string). Green alone does not distinguish 'still works' from 'went silent', which is the exact failure voice-lint.mjs's own docstring warns about.",
+      "AC10. No file under plugins/pipeline/tests/ asserts in the PRESENT tense that status.schema.json's description blesses a phase pipeline.md never writes. Checkable by grep over the three sites named in R5; each must read as history referencing #42, not as a live claim.",
+      "AC11. plugins/pipeline/tests/run.sh is green AND the total assertion count is >= the count at the pre-change commit, recorded in impl-report.json as two numbers with the platform each was measured on. Per #47, a suite can lose assertions silently while still reporting failed=0, and per #33 a floor that is not re-derived decays."
+    ],
+    "impacted_domains": [
+      "architecture",
+      "testing"
+    ],
+    "impacted_packages": [
+      "plugins/pipeline/schemas/status.schema.json",
+      "plugins/pipeline/tests/test-gate-phase-entry.sh",
+      "plugins/pipeline/tests/test-gate-phase-entry-drift.sh",
+      "plugins/pipeline/tests/test-pipeline-telemetry.sh"
+    ],
+    "out_of_scope": [
+      "Adding maxLength or pattern support to validate-pipeline-artifact.mjs's schema walker. Its header says these are advisory deliberately, and implementing them would change the validation behaviour of EVERY schema at once -- a far larger and differently-tiered change than two lines in one file. The bespoke groundOpenQuestions check at validate-pipeline-artifact.mjs:538 is the established precedent for handling one field's constraint outside the walker.",
+      "Registering status.json in AGENT_RULES so it gets validated at all. This is a real gap (voice-lint.mjs:238 states it outright: 'Nothing else validates this file') but it is a new enforcement surface with its own fail-open/fail-closed design questions, not a schema annotation. If the owner wants it, it is its own issue.",
+      "Converting events[].verdict or flags[].verdict to an enum. SecOps already ruled against this in #34 and the reasoning is recorded there; not re-litigated.",
+      "events[].phase, which #34 explicitly excludes because #30 closed the key-forming risk at pipeline-telemetry.mjs:181.",
+      "Changing properties.current_phase.pattern. Only the sibling description key is edited.",
+      "Making the phase example list machine-derived at build time. #42 says outright the description is prose with no requirement to be machine-checked; AC5 checks it once, at this edit. A generator is a different change."
+    ],
+    "sibling_causes_considered": [
+      {
+        "name": "flags[].verdict (status.schema.json:111)",
+        "applies": "yes",
+        "reason": "Identical root cause, identical file, identical archive-verbatim exposure, and it carries the LONGEST verdict in the corpus (18 chars) while events[] tops out at 15. Folded into this spec as R2 rather than deferred."
+      },
+      {
+        "name": "flags[].summary's existing maxLength: 140 (status.schema.json:112)",
+        "applies": "partial",
+        "reason": "It is the precedent #34 cites, and it is ALSO unenforced -- the walker does not implement maxLength and status.json is in no AGENT_RULES entry. It is honored only because pipeline.md restates the 140 cap as a writer rule. Not changed here, but it is why R6 exists: the fix must not repeat the claim that the mechanism already works."
+      },
+      {
+        "name": "events[].phase and flags[].phase, both bare strings",
+        "applies": "no",
+        "reason": "The key-forming risk was the material one and #30 closed it (pipeline-telemetry.mjs:181 keys on phaseKey(...), verified against 40 hostile labels). #34 excludes phase by name. Left alone."
+      },
+      {
+        "name": "flags[].agent, a bare string archived verbatim",
+        "applies": "partial",
+        "reason": "Same unbounded-string-in-an-archived-file shape, but agent has a genuinely closed vocabulary already declared eight lines up in panel_roles.items.enum, so a bound is the wrong instrument there and an enum is available. Not folded in: it would triple the diff and it is the one field where #34's cap-not-enum reasoning does NOT transfer. Noted for a future pass, deliberately NOT claimed as filed."
+      },
+      {
+        "name": "The 'hand-maintained phase vocabulary rots' class from #39's spec",
+        "applies": "yes",
+        "reason": "#42 is the fourth member. The other three (status.schema.json's own regex pattern, dispatch-model.mjs's KNOWN_PHASES, voice-lint.mjs's VOICE_MOMENTS/NON_VOICE_PHASES) already carry drift tests from #39. This member is the one in the file no prose-derived test reads, which is why AC5 asserts set equality rather than relying on the existing drift suite."
+      },
+      {
+        "name": "veto_reason and error (status.schema.json:47-48), bare strings in the same archived file",
+        "applies": "no",
+        "reason": "Both are deliberately free-text explanatory fields for a human reader, not tokens. A 32-char cap would refuse their correct work -- a veto reason IS a sentence. This is the concrete case that shows the cap is field-specific reasoning rather than a blanket rule, so it is recorded rather than swept in."
+      }
+    ],
+    "measured_state": [
+      {
+        "label": "Committed status.json corpus size",
+        "value": 6,
+        "grain": "files tracked by git, NOT directories under .pipeline/ and NOT untracked on-disk records",
+        "window": "worktree HEAD 5408339 on branch claude/mechanical-group-impl-bfb9ce, 2026-08-20. Tracked set and on-disk set are identical here (6 = 6), so the union caveat from test-corpus-union.sh does not bite.",
+        "source": "git ls-files '.pipeline/*/status.json' | wc -l"
+      },
+      {
+        "label": "events[] entries across the whole corpus",
+        "value": 23,
+        "grain": "array entries summed across all 6 files, NOT files and NOT distinct phases",
+        "window": "same HEAD. Per-file: 17/10, 34/0, 39/5, exp-airlock/1, exp-claims/1, exp-script-test-coverage/6.",
+        "source": "sum of (JSON.parse(git show HEAD:<f>).events || []).length over the 6 tracked files"
+      },
+      {
+        "label": "events[] entries that actually carry a verdict string",
+        "value": 17,
+        "grain": "entries with a string-typed verdict key, out of the 23 above. The other 6 have no verdict key at all -- all 6 are in .pipeline/exp-script-test-coverage/status.json, and test-gate-phase-entry.sh:287 already depends on that record staying verdict-less.",
+        "window": "same HEAD",
+        "source": "count of entries where typeof e.verdict === 'string'"
+      },
+      {
+        "label": "Longest events[].verdict observed",
+        "value": 15,
+        "grain": "characters in one string ('REQUEST_CHANGES'), max over the 17 verdict-carrying entries above -- not a mean, not per-file",
+        "window": "same HEAD. Full distinct set: REQUEST_CHANGES (15, x3), complete (8, x12), SKIPPED (7, x2).",
+        "source": "max over e.verdict.length for the 17 entries"
+      },
+      {
+        "label": "flags[] entries across the corpus, and how many carry a verdict",
+        "value": 13,
+        "grain": "13 flags[] entries total; 9 of them carry a string verdict. Entries, not files: only 2 of the 6 files have any flags at all (17/9, exp-script-test-coverage/4).",
+        "window": "same HEAD",
+        "source": "sum of (JSON.parse(...).flags || []).length, and the string-verdict subset"
+      },
+      {
+        "label": "Longest flags[].verdict observed -- the corpus maximum for either field",
+        "value": 18,
+        "grain": "characters in one string ('APPROVE_WITH_NOTES'), max over the 9 verdict-carrying flags entries. THREE chars longer than the events[] maximum, which is why R2 folds flags[] in rather than deferring it.",
+        "window": "same HEAD. Distinct set: APPROVE_WITH_NOTES (18, x1, in .pipeline/17/status.json), REQUEST_CHANGES (15, x2), complete (8, x6).",
+        "source": "max over e.verdict.length across flags[] in the 6 tracked files"
+      },
+      {
+        "label": "Longest verdict token in the DECLARED vocabulary, across all four artifact schemas",
+        "value": 18,
+        "grain": "characters in the longest enum member ('APPROVE_WITH_NOTES'), over the union of the verdict enums in status.schema.json:35 (final_verdict), peer-review.schema.json (two enums), and review.schema.json (three enums). This is a declared closed set, not a sample -- it is the primary basis for the cap; the corpus corroborates it.",
+        "window": "worktree HEAD 5408339. Union: APPROVE 7, VETO 4, SECOPS_VETO 11, REQUEST_CHANGES 15, REQUEST_REFACTOR 16, APPROVE_WITH_NITS 17, APPROVE_WITH_NOTES 18. Plus the two orchestrator lifecycle verdicts written into events[]: complete 8, SKIPPED 7.",
+        "source": "grep -o '\"enum\": *\\[[^]]*\\]' over plugins/pipeline/schemas/{status,peer-review,review}.schema.json, filtered to verdict-valued enums, plus the literals in commands/pipeline.md"
+      },
+      {
+        "label": "Proposed cap, as a multiple of the largest legitimate value",
+        "value": 32,
+        "grain": "characters; 1.78x the 18-char maximum of the declared vocabulary. Deliberately NOT 140 (flags[].summary's cap, 7.8x), which evidence.md's headroom corollary calls a comment that throws rather than a control.",
+        "window": "n/a -- a proposed bound, not a measurement",
+        "source": "18 (declared max) + 14 chars headroom; accommodates every plausible longer SCREAMING_SNAKE token (REQUEST_CHANGES_BLOCKING 24, APPROVE_WITH_RESERVATIONS 25) while sitting below the length of essentially any prose sentence, which is the actual mistake being refused"
+      },
+      {
+        "label": "Committed records that a 32-char cap would retroactively invalidate",
+        "value": 0,
+        "grain": "files, out of 6. Also 0 out of 26 verdict-carrying entries (17 events + 9 flags). This is the owner's tier question answered directly: the change is purely forward-looking.",
+        "window": "same HEAD. TWO independent reasons: (a) 18 <= 32, so no stored value exceeds the cap; and (b) nothing validates status.json against this schema at all, so no committed record can fail anything regardless of the cap.",
+        "source": "the length maxima above, plus: status.schema.json appears in no AGENT_RULES entry in validate-pipeline-artifact.mjs (lines 86-124), and its walker header (lines 28-31) states maxLength is unimplemented"
+      },
+      {
+        "label": "Cap value at or below which a committed record WOULD be retroactively invalidated",
+        "value": 17,
+        "grain": "characters. At 17 exactly one entry violates: .pipeline/17/status.json flags[] 'APPROVE_WITH_NOTES'. This number is the floor on the cap, and it is AC3's non-zero control.",
+        "window": "same HEAD",
+        "source": "the flags[] maximum of 18; any cap <= 17 excludes it"
+      },
+      {
+        "label": "Phase literals in the schema:13 description that pipeline.md never writes",
+        "value": 3,
+        "grain": "distinct literals out of the 23 the description names. TWO are genuine rot (3-impl-verification-unverified, 3-scope-drift-adjudication -- confirming #42's claim independently). The THIRD, halted-error, is a FALSE positive of the mechanical derivation and must be kept.",
+        "window": "worktree HEAD 5408339, comparing schema line 13 against commands/pipeline.md",
+        "source": "comm -13 <(grep -o '\"\\?current_phase\"\\?: *\"[^\"]*\"' plugins/pipeline/commands/pipeline.md | sed 's/.*: *\"\\(.*\\)\"/\\1/' | sort -u) <(schema line 13 example list, split on commas, sorted)"
+      },
+      {
+        "label": "Phase literals pipeline.md writes that the description omits",
+        "value": 6,
+        "grain": "distinct literals: 0.5-map-complete, 1-ba-open-questions, 2.5-design-owner-decision, 3-impl-frontend-gate-failed, 3-impl-live-verify-unverified, 3-impl-tripwire-indeterminate. A seventh derived token, <phase>-error (pipeline.md:1048), is a TEMPLATE not a literal and is handled as a shape by R3. #42 names only the rot direction and not this one, so the omission side is 3x larger than the issue reports.",
+        "window": "worktree HEAD 5408339",
+        "source": "comm -23 of the same two sorted sets"
+      },
+      {
+        "label": "Runtime readers of status.schema.json",
+        "value": 1,
+        "grain": "code paths that read the schema FILE at runtime, not files that mention it. The one is voice-lint.mjs:224, and it reads exactly one key: properties.current_phase.pattern. Test files that reference the path (test-pipeline-telemetry.sh:19, test-telemetry-exit-attribution.sh:49) are not runtime readers.",
+        "window": "worktree HEAD 5408339",
+        "source": "grep -rn 'status\\.schema\\.json' plugins/ across .mjs/.sh/.md/.json, minus comment-only and test-fixture references"
+      }
+    ],
+    "falsifiability_pass": {
+      "one_mutation_per_criterion": [
+        {
+          "criterion": "AC1",
+          "mutation": "Delete the maxLength key from flags.items.properties.verdict only (leave events[] capped). Must redden. Mutating only ONE of the two fields is the point: a check written over 'the schema contains maxLength' passes on the events[] copy alone and never notices flags[] is bare, which is the exact hole #34 shipped.",
+          "fixture_matrix": "2 cells minimum, mutated SEPARATELY: {events capped, flags bare} and {events bare, flags capped}. A single whole-file mutation hides a dead entry."
+        },
+        {
+          "criterion": "AC2",
+          "mutation": "Point the corpus walk at an empty directory. Must FAIL with a message naming the count, not exit 0. This is the criterion evidence.md says this pipeline keeps re-breaking inside its own remedies, so it gets the mutation rather than being assumed.",
+          "fixture_matrix": "3 cells: zero files; 6 files one of which is unparseable JSON; 6 files one of which has events as an object rather than an array. The shape conjunct must be mutated apart from the count conjunct or a fixture satisfying both hides whichever is broken."
+        },
+        {
+          "criterion": "AC3",
+          "mutation": "Set the schema's maxLength to 17 and re-run. Must redden AND must NAME .pipeline/17/status.json's APPROVE_WITH_NOTES. Naming is part of the mutation: a check that reddens without identifying the violator cannot be distinguished from one that reddens because the corpus walk broke.",
+          "fixture_matrix": "Both fields must be covered independently: at cap 16 the events[] side (REQUEST_CHANGES, 15) is still clean while flags[] violates, so a fixture set drawn only from events[] sits in the passing cell of the conjunction and never exercises the branch that fires."
+        },
+        {
+          "criterion": "AC4",
+          "mutation": "Change ONLY the schema's maxLength value and change nothing in the test. The check's verdict must move. If it does not, the test carries its own copy of the number and AC3 was passing against a constant that can drift away from the schema silently."
+        },
+        {
+          "criterion": "AC5",
+          "mutation": "Add one bogus literal (e.g. 9-not-a-phase) to the description list, then separately DELETE one real literal (e.g. 3-impl-complete). Both must redden. Two mutations because set equality has two directions and a one-directional check (subset, or a substring grep) catches only the first -- voice-lint.mjs's original phase table failed exactly this way."
+        },
+        {
+          "criterion": "AC6",
+          "mutation": "Remove halted-error from the description. Must redden. This is the mutation the naive fix actually performs, so it is the one most likely to survive an author who derived the list from pipeline.md and never looked at gate-phase-entry.mjs:241."
+        },
+        {
+          "criterion": "AC7",
+          "mutation": "Re-insert 3-scope-drift-adjudication into the description. Must redden. Note this must assert on the SCHEMA file specifically, not on a repo-wide grep: the literal legitimately survives at test-gate-phase-entry.sh:514 as a negative-control input, so a repo-wide grep for it is red before the fix, red after the fix, and therefore asserts nothing."
+        },
+        {
+          "criterion": "AC8",
+          "mutation": "Change one character inside properties.current_phase.pattern (e.g. [0-5] -> [0-6]). Must redden. Asserting on the pattern's VALUE, not on its presence: a presence check survives any edit to the regex, which is the reader voice-lint.mjs actually consumes."
+        },
+        {
+          "criterion": "AC9",
+          "mutation": "Feed voice-lint a current_phase of '99-nonsense' and require the failure string naming status.schema.json. Then, as the control on the control, feed it a well-formed phase and require SILENCE. One direction alone cannot tell a working check from one that fires on everything."
+        },
+        {
+          "criterion": "AC10",
+          "mutation": "Restore one of the three comments to its present-tense wording. Must redden. The grep must key on the CLAIM shape (a present-tense 'blesses'/'never writes' pairing near status.schema.json) and not merely on the phase literal, since the literal legitimately remains at test-gate-phase-entry.sh:514."
+        },
+        {
+          "criterion": "AC11",
+          "mutation": "Delete one assertion from any touched suite and confirm the recorded count drops below the pre-change figure. The two counts must be measured on the SAME platform: per #47 there is a real 32-assertion macOS/ubuntu gap at one commit, so comparing a local post-change count against a CI pre-change count measures the runner, not the change."
+        }
+      ],
+      "unmutable": [
+        {
+          "criterion": "R6's description text (that nothing validates this file)",
+          "why": "It is a prose annotation in a JSON description string. No mutation distinguishes an accurate sentence from an inaccurate one.",
+          "discharged_by": "A weaker but real assertion is available and should be taken instead of leaving this bare: assert that status.schema.json's filename appears in NO entry of validate-pipeline-artifact.mjs's AGENT_RULES table. That is machine-checkable, and it reddens the day someone registers the file -- which is precisely the day the sentence becomes false. Written as an expiry, in the assertion message: 'If this fails, status.json is now validated and R6's sentence in the schema must be deleted.'"
+        }
+      ],
+      "expected_survivor": {
+        "criterion": "AC3, under the mutation 'raise the schema cap from 32 to 64'",
+        "why_it_survives": "It genuinely should survive. The corpus maximum is 18, so every value conforms to 32 and to 64 alike; no committed record can distinguish them. Kept deliberately as the harness's own non-zero control, per evidence.md: a battery in which every mutation reddens cannot tell coverage from a rubber stamp. It also states the honest limit of this criterion out loud -- AC3 constrains the cap from BELOW (via the 17 control) and not from above, so the choice between 32 and 64 rests on the refusal argument in q2, not on the corpus. Anyone who reports this mutation as CAUGHT has a harness bug, not a better test."
+      }
+    },
+    "open_questions": [
+      {
+        "id": "q1",
+        "question": "The cap will not actually stop anything on its own -- nothing in the pipeline validates status.json against this schema. Should we ship the cap plus a small test that checks the committed records against it, or just write the cap down as documented intent?",
+        "why_it_matters": "It decides whether AC3 exists at all. Schema-only means the one acceptance criterion that would prove the cap works cannot be written, because nothing refuses anything -- and a criterion that cannot fail is the defect this project files issues about. Adding the corpus check makes the schema a thing the repo reads, at the cost of one new test file.",
+        "options": [
+          {
+            "label": "Schema only",
+            "implication": "One-line diff per issue, truly minimal. But it ships a constraint nothing reads, repeating exactly the condition that let flags[].summary's 140-cap sit unenforced since it was written. No falsifiable acceptance criterion for #34."
+          },
+          {
+            "label": "Schema + corpus conformance test (recommended)",
+            "implication": "Two files instead of one. The cap becomes load-bearing against the population #34 actually cares about -- the records that reach the public tree -- and the check is environment-correct, since the event is 'a long verdict gets committed' and the environment is this repo."
+          },
+          {
+            "label": "Schema + a writer rule in pipeline.md",
+            "implication": "Mirrors how flags[].summary's cap is really honored (pipeline.md restates it as a truncate-if-longer instruction). But it relies on an agent obeying prose, and #42 exists precisely because prose in this area rots. Best as an addition to option 2, not a substitute."
+          }
+        ],
+        "ba_recommendation": "Schema + corpus conformance test. Without it #34 has no falsifiable acceptance criterion, and the whole point of the issue is that this file's contents reach a public tree -- so the corpus is the right population to check, and it is already walked by two existing suites. I am NOT recommending the pipeline.md writer rule in this change: it widens a two-line fix into the orchestrator's own instruction text, and the corpus check catches the same mistake with a red build instead of a hope.",
+        "blocking": false,
+        "resolution": {
+          "answered_by": "ba_default",
+          "answer": "Schema + corpus conformance test. Without it #34 has no falsifiable acceptance criterion, and the whole point of the issue is that this file's contents reach a public tree -- so the corpus is the right population to check, and it is already walked by two existing suites. I am NOT recommending the pipeline.md writer rule in this change: it widens a two-line fix into the orchestrator's own instruction text, and the corpus check catches the same mistake with a red build instead of a hope.",
+          "at": "2026-08-20T13:47:23Z"
+        }
+      },
+      {
+        "id": "q2",
+        "question": "How long should a verdict be allowed to be -- 32 characters, or 64?",
+        "why_it_matters": "It changes what the cap refuses. The longest verdict that exists anywhere -- declared or observed -- is APPROVE_WITH_NOTES at 18 characters. At 32 the cap refuses a run-on sentence written into the field by mistake; at 64 it refuses only a paragraph, and a short editorial sentence like 'approved with some minor concerns noted' (39 chars) sails through.",
+        "options": [
+          {
+            "label": "32 (recommended)",
+            "implication": "1.78x the largest real value. Leaves room for any plausible new token; refuses free-text. Refuses no correct work I can construct -- every declared verdict across all four artifact schemas is <= 18."
+          },
+          {
+            "label": "64",
+            "implication": "3.6x. Safer against an unusually long future verdict, but stops catching the realistic mistake, which is a sentence rather than a token. evidence.md's corollary applies: a bound with large headroom never fires on a realistic mistake."
+          },
+          {
+            "label": "18 (exactly the observed and declared maximum)",
+            "implication": "Rejected. It refuses the next legitimate verdict at the moment someone records it -- which is #34's own argument against an enum, reappearing as a too-tight cap. A 19-char verdict is not a defect."
+          }
+        ],
+        "ba_recommendation": "32. It is derived rather than round: 18 from the declared closed vocabulary (corroborated by the corpus maximum of 18) plus headroom sized to admit any longer SCREAMING_SNAKE token while sitting under the length of a sentence. On the owner's question of whether 6 committed records are enough to derive from -- they are not, on their own, and I have not relied on them for the bound. The bound comes from the DECLARED enums in the four artifact schemas, which are a closed set rather than a sample; the corpus only confirms that nothing in the wild exceeds it. That distinction is what makes 32 defensible from a small corpus.",
+        "blocking": false,
+        "resolution": {
+          "answered_by": "ba_default",
+          "answer": "32. It is derived rather than round: 18 from the declared closed vocabulary (corroborated by the corpus maximum of 18) plus headroom sized to admit any longer SCREAMING_SNAKE token while sitting under the length of a sentence. On the owner's question of whether 6 committed records are enough to derive from -- they are not, on their own, and I have not relied on them for the bound. The bound comes from the DECLARED enums in the four artifact schemas, which are a closed set rather than a sample; the corpus only confirms that nothing in the wild exceeds it. That distinction is what makes 32 defensible from a small corpus.",
+          "at": "2026-08-20T13:47:23Z"
+        }
+      },
+      {
+        "id": "q3",
+        "question": "#34 names only events[].verdict, but flags[].verdict eight lines below has the identical problem. Fix both now, or file the second separately?",
+        "why_it_matters": "It decides whether this change is one line or two, and whether a second issue must be written before this one merges. If deferred, the deferral rule binds: an issue with full evidence has to exist BEFORE this merges, which on this repo has been claimed-and-not-done more than once (#42 was itself filed to close exactly that failure).",
+        "options": [
+          {
+            "label": "Fold in (recommended)",
+            "implication": "One extra line in the same file. No second issue, no second review cycle, no deferral obligation."
+          },
+          {
+            "label": "Defer to a new issue",
+            "implication": "A tracker issue that is #34 with one identifier changed, plus a second one-line PR to a line eight lines from this one, plus the standing risk that the issue does not actually get written."
+          }
+        ],
+        "ba_recommendation": "Fold in, as R2. Ruled rather than asked, since scope is mine: the two fields are the same name in the same file under the same commit-and-archive mechanism, and the corpus says flags[].verdict carries the LONGER value of the two (18 vs 15), so deferring would leave the bigger half of the problem open while closing the smaller. Recorded here rather than only in ba_notes so Phase 4 can check the diff against the ruling.",
+        "blocking": false,
+        "resolution": {
+          "answered_by": "ba_default",
+          "answer": "Fold in, as R2. Ruled rather than asked, since scope is mine: the two fields are the same name in the same file under the same commit-and-archive mechanism, and the corpus says flags[].verdict carries the LONGER value of the two (18 vs 15), so deferring would leave the bigger half of the problem open while closing the smaller. Recorded here rather than only in ba_notes so Phase 4 can check the diff against the ruling.",
+          "at": "2026-08-20T13:47:23Z"
+        }
+      }
+    ],
+    "trivial": false,
+    "risk_tier": "standard",
+    "ab_build": false,
+    "ba_approved_at": "2026-08-20T00:00:00Z",
+    "ba_notes": "TIER ARGUMENT, since the owner asked for one rather than a label. Standard, and the shared-contract trigger was tested rather than waved off. status.schema.json IS a shared contract, but neither edit changes its SHAPE: no field is added, removed, renamed or retyped; maxLength narrows an existing string domain and description is an annotation. The runtime blast radius is measurably empty -- the file has exactly ONE runtime reader (voice-lint.mjs:224) and it reads exactly one key (properties.current_phase.pattern), which neither edit touches. No auto-promotion trigger fires: no data/security/compliance domain, no migration, no access-policy change, no auth/crypto/webhook surface, no new external intake, no new retained data type. ON THE RETROACTIVE-INVALIDATION QUESTION, checked against the real corpus and answered twice over: zero of 6 committed records and zero of 26 verdict-carrying entries would fail a 32-char cap, because the longest stored verdict is 18; and independently, nothing validates status.json against this schema at all, so no committed record could fail regardless. Purely forward-looking, which is what keeps it standard. A cap of 17 or below WOULD have invalidated a committed record (.pipeline/17/status.json's APPROVE_WITH_NOTES) -- that is a real floor, not a hypothetical, and it is AC3's non-zero control. THE ONE THING #34 GETS WRONG, and Dev must not build on it: #34 says of flags[].summary's maxLength: 140 that 'the mechanism exists; it was simply never applied here'. It does not. validate-pipeline-artifact.mjs's walker header (lines 28-31) says maxLength is unimplemented and advisory, and status.schema.json appears in no AGENT_RULES entry (lines 86-124); voice-lint.mjs:238 states it in one sentence: 'Nothing else validates this file.' The 140-cap is honored only because pipeline.md restates it as a writer rule. That is why q1 and R4 exist -- a maxLength shipped alone here is a comment, not a guard. #42's CLAIM IS CONFIRMED INDEPENDENTLY and the rot is wider than filed: 2 blessed literals are genuinely unwritten, but 6 written literals are missing from the list, a direction #42 does not mention. And halted-error is a trap -- it looks like a third rotted entry (pipeline.md never writes it) but gate-phase-entry.mjs:241 and the schema's own pattern both bless it by name, so the obvious mechanical fix deletes correct work. AC6 is the control on that. BLAST RADIUS BEYOND CODE: three test comments (test-gate-phase-entry-drift.sh:13-14, test-gate-phase-entry.sh:511-512, test-gate-phase-entry.sh:711) cite the schema:13 rot as LIVE present-tense evidence for why their tests exist. All three become false statements when R3 lands -- evidence.md's 'a control anchored to a live defect has a shelf life', arriving on schedule. None of the tests BREAK (the comments are prose and the negative-control input at :514 stays valid), but R5 re-anchors them. SIZE: 6 requirements, 11 acceptance criteria -- under the 10/12 tripwire, but 11 is close enough to say why. The count is driven by the three unchanged-consumer criteria (AC8/AC9/AC10) that a two-line diff would not otherwise carry, and by AC2's vacuity control. I considered splitting #34 and #42 into separate specs and decided against it: they are two edits to one file with one shared root cause (this schema has no reader), they share the entire consumer map, and reviewing them apart would mean two panels reading the same 118-line file. NOT CLAIMED AS FILED: flags[].agent is noted in sibling_causes_considered as a deliberate non-fold with its reasoning; no follow-up issue is asserted to exist for it, because none has been written."
+  },
+  "map": {
+    "issue_number": 34,
+    "folds_in": [
+      42
+    ],
+    "generated_at": "2026-08-20T00:00:00Z",
+    "generated_by": "ba",
+    "basis": "Standard tier: the map is folded into the Phase 1 BA dispatch (pipeline.md:124). Derived at worktree HEAD 5408339 on branch claude/mechanical-group-impl-bfb9ce, from the repo worktree ONLY. No path under .claude/plugins/cache was read or cited.",
+    "seeded_from_catalog": false,
+    "catalog_note": "No catalog seed was available: the worktree has NO knowledge/ directory at all (verified: `ls knowledge/` returns nothing), so knowledge/living-context/*-consumers.json does not exist for status.schema.json or for either verdict field. Stated as an absent-directory fact rather than an empty-search result, because 'the search found nothing' and 'there was nothing to search' are not the same finding. Every consumer below was enumerated by grep over the worktree at HEAD 5408339, not inherited. No knowledge-store drift claims are possible or raised.",
+    "contracts": [
+      {
+        "contract": "status.schema.json (the file itself, as a schema read at runtime)",
+        "location": "plugins/pipeline/schemas/status.schema.json",
+        "change": "Two edits: maxLength added to events[].verdict and flags[].verdict; the current_phase description string rewritten.",
+        "shape_change": false,
+        "shape_change_reason": "No field added, removed, renamed or retyped. maxLength narrows an existing string domain; description is an annotation. This is why the risk tier is standard rather than architectural.",
+        "readers": {
+          "application_code": [
+            {
+              "reader": "plugins/pipeline/scripts/voice-lint.mjs:224",
+              "reads": "properties.current_phase.pattern, and NOTHING else out of this file",
+              "impact": "NONE, and asserted rather than assumed (AC8 pins the pattern byte-identical, AC9 runs the suite plus a non-zero control). This is the ONLY runtime reader of the schema file in the entire plugin. It reads the pattern deliberately rather than copying it, per its own docstring, so the pattern is the one key in this file where an edit has runtime consequence -- and neither edit touches it.",
+              "verified_by": "sed -n '205,245p' plugins/pipeline/scripts/voice-lint.mjs"
+            }
+          ],
+          "data_layer_resident": [],
+          "independent_rederivations": [
+            {
+              "reader": "plugins/pipeline/commands/pipeline.md",
+              "rederives": "The phase vocabulary. pipeline.md's current_phase writes are the GROUND TRUTH that the schema's description example list is supposed to mirror; the list is a hand-maintained second copy, which is the whole defect in #42.",
+              "impact": "This is the source R3 derives from. Direction matters: the schema follows pipeline.md, never the reverse.",
+              "verified_by": "grep -o '\"\\?current_phase\"\\?: *\"[^\"]*\"' plugins/pipeline/commands/pipeline.md | sed 's/.*: *\"\\(.*\\)\"/\\1/' | sort -u  -> 27 tokens, 26 literals plus the <phase>-error template. CORRECTED at Phase 4 (BA-3): this line previously recorded 26/25, which is the NARROW grep's population (grep -o 'current_phase: *\"[^\"]*\"', no optional quote, as used by test-voice-lint.sh:232), not the WIDE grep quoted here as this line's own source. The missing member is 0-setup, which pipeline.md:53 writes only in JSON-quoted form (\"current_phase\": \"0-setup\"). Verified at HEAD d8686bc and at the spec's measurement commit 5408339, between which pipeline.md is byte-identical. Not load-bearing: AC5 derives both sets live and pins no count."
+            },
+            {
+              "reader": "plugins/pipeline/scripts/gate-phase-entry.mjs:115, :241",
+              "rederives": "Its own phase vocabulary (ENTRY/EXIT/UNGUARDED/TERMINAL exported sets), independently of this schema. Line 241 special-cases halted-error by name.",
+              "impact": "CRITICAL to R3 and the reason AC6 exists. gate-phase-entry.mjs blesses halted-error and the schema's own pattern alternates it, but pipeline.md never writes it -- so a fix that derives the description from pipeline.md alone DELETES a value two other authorities recognise. The guard is not broken by that deletion (it does not read the description), which is exactly why nothing would catch it.",
+              "verified_by": "grep -n 'halted-error' plugins/pipeline/scripts/gate-phase-entry.mjs"
+            },
+            {
+              "reader": "plugins/pipeline/scripts/voice-lint.mjs:59-68 (VOICE_MOMENTS / NON_VOICE_PHASES)",
+              "rederives": "A third phase vocabulary, as a table keyed by phase literal.",
+              "impact": "Not edited here. Named because #39's spec identifies it as a sibling member of the same rot class; a description corrected in this change and a table corrected in #39 can still disagree with each other, and only pipeline.md arbitrates.",
+              "verified_by": "grep -n '3-impl-live-verify-unverified' plugins/pipeline/scripts/voice-lint.mjs"
+            },
+            {
+              "reader": "plugins/pipeline/scripts/dispatch-model.mjs (KNOWN_PHASES)",
+              "rederives": "A fourth phase vocabulary. Named in #39's spec as a member of the same class.",
+              "impact": "Not edited here; carries its own drift test from #39.",
+              "verified_by": "#39 spec.json sibling_causes_considered, cross-checked against plugins/pipeline/schemas/status.schema.json:74 which names dispatch-model.mjs's KNOWN_PHASES as the resolver"
+            }
+          ],
+          "prose_and_comments": [
+            {
+              "reader": "plugins/pipeline/tests/test-gate-phase-entry-drift.sh:13-14",
+              "reads": "Cites the schema:13 rot as LIVE evidence that prose-derived tests are insufficient.",
+              "impact": "BECOMES FALSE when R3 lands. Comment only -- the test does not read the schema (verified: the only status.schema.json mention in that file is on line 13). R5 re-anchors it; AC10 checks it.",
+              "verified_by": "grep -n 'status.schema.json' plugins/pipeline/tests/test-gate-phase-entry-drift.sh -> single hit, line 13"
+            },
+            {
+              "reader": "plugins/pipeline/tests/test-gate-phase-entry.sh:511-512 (AC14 suite)",
+              "reads": "'The live case, not a hypothetical: status.schema.json:13's own description blesses 3-scope-drift-adjudication'.",
+              "impact": "Comment BECOMES FALSE. The negative-control INPUT on line 514 stays VALID -- pipeline.md still never writes that literal, so the test keeps its subject. Only the justification needs restating in the past tense. This is the distinction AC7's mutation note turns on: a repo-wide grep for the literal is red before AND after, so AC7 must assert on the schema file specifically.",
+              "verified_by": "sed -n '505,518p' plugins/pipeline/tests/test-gate-phase-entry.sh"
+            },
+            {
+              "reader": "plugins/pipeline/tests/test-gate-phase-entry.sh:711 (AC19 suite)",
+              "reads": "'Prose alone is provably insufficient: status.schema.json:13 blesses two phases pipeline.md never writes, which is live evidence.'",
+              "impact": "Comment BECOMES FALSE. The AC19 test itself is unaffected (it walks the committed corpus via git ls-files and compares against the guard's exported sets). Its VACUITY CONTROL at line 713 ('the corpus walk found at least 4 committed records') is the existing idiom AC2 should follow.",
+              "verified_by": "sed -n '705,730p' plugins/pipeline/tests/test-gate-phase-entry.sh"
+            }
+          ]
+        }
+      },
+      {
+        "contract": "events[].verdict, as a stored value in .pipeline/*/status.json",
+        "location": "plugins/pipeline/schemas/status.schema.json:56",
+        "change": "Gains maxLength: 32. No stored value changes.",
+        "readers": {
+          "application_code": [
+            {
+              "reader": "plugins/pipeline/scripts/gate-phase-entry.mjs:193",
+              "reads": "event.verdict === \"SKIPPED\" -- a VALUE comparison, the only one in the plugin",
+              "impact": "NONE. 'SKIPPED' is 7 chars, well inside 32. Worth naming because it is the one place a cap could in principle refuse working behaviour, and it does not. gate-phase-entry.mjs:180-182 also documents that verdict is OPTIONAL and that a verdict-keyed rule would reject a schema-valid record -- so the cap must not become a requirement.",
+              "verified_by": "grep -n 'verdict' plugins/pipeline/scripts/gate-phase-entry.mjs"
+            },
+            {
+              "reader": "plugins/pipeline/scripts/pipeline-telemetry.mjs:131-132",
+              "reads": "verdict as documentation only -- 'The tell is verdict' -- to justify the exit-marker attribution. It does not branch on the value.",
+              "impact": "NONE. Named because #30 promoted this field to load-bearing, which is #34's stated motivation for bounding it.",
+              "verified_by": "grep -n 'verdict' plugins/pipeline/scripts/pipeline-telemetry.mjs"
+            },
+            {
+              "reader": "plugins/pipeline/scripts/archive-pipeline.mjs:3",
+              "reads": "Copies .pipeline/<n>/*.json wholesale into knowledge/issue-archive/<n>.json. Shape-agnostic: it never names status.json or parses any field.",
+              "impact": "NONE mechanically, but this is the mechanism #34's whole argument rests on -- it is what makes 'archived verbatim' literally true. A glob copy cannot truncate, so the cap is the only place a bound can live.",
+              "verified_by": "grep -n 'status\\|\\.json' plugins/pipeline/scripts/archive-pipeline.mjs -> one hit, the header comment"
+            },
+            {
+              "reader": "plugins/pipeline/scripts/validate-pipeline-artifact.mjs",
+              "reads": "NOTHING. status.schema.json appears in no AGENT_RULES entry (lines 86-124), and the walker does not implement maxLength (header, lines 28-31).",
+              "impact": "THE LOAD-BEARING NEGATIVE. Recorded as a consumer precisely because it is not one: this is why the cap alone enforces nothing and why R4/q1 exist. A reviewer who assumes this file validates status.json will approve a guard that does not guard.",
+              "verified_by": "grep -n 'artifact:' plugins/pipeline/scripts/validate-pipeline-artifact.mjs; corroborated independently by voice-lint.mjs:238, test-open-questions-and-design-lock.sh:204 and test-telemetry-exit-attribution.sh:273, which each say so in their own words"
+            }
+          ],
+          "data_layer_resident": [],
+          "independent_rederivations": [
+            {
+              "reader": "plugins/pipeline/tests/test-gate-phase-entry.sh:287-293",
+              "rederives": "Pins .pipeline/exp-script-test-coverage/status.json's 4-review event as having NO verdict key at all, as a live fixture.",
+              "impact": "NONE from a cap (absent is not over-long), but it constrains the fix: the cap must be added WITHOUT making verdict required, or this suite reddens and a schema-valid record becomes invalid. It also means the corpus check in R4 must skip verdict-less entries rather than treat them as violations -- the 6 verdict-less events are all in that one file.",
+              "verified_by": "sed -n '283,295p' plugins/pipeline/tests/test-gate-phase-entry.sh"
+            }
+          ]
+        }
+      },
+      {
+        "contract": "flags[].verdict, as a stored value in .pipeline/*/status.json",
+        "location": "plugins/pipeline/schemas/status.schema.json:111",
+        "change": "Gains the same maxLength: 32. FOLDED IN by BA ruling (spec R2 / q3); #34 does not name it.",
+        "readers": {
+          "application_code": [
+            {
+              "reader": "NONE found",
+              "reads": "No script in plugins/pipeline/scripts/ reads flags[].verdict by value. pipeline-status.mjs reads the top-level final_verdict (line 98), not flags[].",
+              "impact": "The field is write-and-archive only: agents append it, Phase 4 reviewers read it as prose, archive-pipeline.mjs copies it. That is exactly why it is unbounded and exactly why it needs the cap -- there is no consumer whose parsing would have failed and surfaced a long value.",
+              "verified_by": "grep -n 'verdict\\|flags' plugins/pipeline/scripts/pipeline-status.mjs and a grep for flags across scripts/"
+            }
+          ],
+          "data_layer_resident": [],
+          "independent_rederivations": [
+            {
+              "reader": "plugins/pipeline/commands/pipeline.md:~88-93",
+              "rederives": "The flags[] writer contract, including the strict 140-char rule for summary that is enforced by prose and not by the schema.",
+              "impact": "The precedent that shows a schema cap here is documentation. If q1 is answered 'schema + writer rule', this is the file that changes; under the recommended answer it does not.",
+              "verified_by": "sed -n '88,95p' plugins/pipeline/commands/pipeline.md"
+            }
+          ]
+        }
+      }
+    ],
+    "corpus": {
+      "population": ".pipeline/*/status.json tracked by git at HEAD 5408339",
+      "files": 6,
+      "tracked_equals_ondisk": true,
+      "note": "test-corpus-union.sh (from #30) warns that a git-ls-files-only walk cannot see an untracked in-flight record and that the population must be the UNION of the tracked set and an on-disk enumeration. Here both sets are the same 6 files, so the distinction does not change any number in this spec -- but R4's check should use the union helper anyway, since the set can diverge on any future run.",
+      "verified_by": "git ls-files '.pipeline/*/status.json' vs find .pipeline -name status.json"
+    },
+    "duplicate_check": {
+      "open_prs": "gh pr list --state open -> ZERO open PRs in the repo. No parallel in-flight branch can be a duplicate.",
+      "issues_searched": "gh issue list --state all --search 'status.schema.json OR verdict OR maxLength OR current_phase'",
+      "adjacent_reviewed": {
+        "21": "pipeline.md claims a config-path tier trigger nothing evaluates. Same 'a written expectation no code reads' family as this issue's root cause, but a different file and mechanism.",
+        "33": "Assertion-count floors decay. Shapes AC11; different file, no overlap.",
+        "37": "Test population from a moving ref. No overlap.",
+        "43": "Undatable status.json records -- touches status.json CONTENT handling in gate-phase-entry.mjs and its fixtures, NOT status.schema.json. Nearest neighbour; no diff-surface collision, but if #43 lands first it may edit mk_status() in test-gate-phase-entry.sh, a file R5 also touches. Flagged as a merge-order note, not a duplicate.",
+        "44": "spec.json self-contradiction on AC12. BA-domain, different artifact.",
+        "45": "The tiers column on the phase-entry table has no test. gate-phase-entry.mjs, not the schema.",
+        "47": "32 assertions vanish on ubuntu-latest. Shapes AC11's same-platform requirement.",
+        "48": "Pre-Phase-4 coverage matcher passes on token overlap. Different script."
+      },
+      "conclusion": "No duplicate. No open PR owns any part of this work."
+    }
+  },
+  "tasks": {
+    "issue_number": 34,
+    "worktree_path": "<redacted-absolute-path>",
+    "branch": "fix/34-bound-archived-verdict-fields",
+    "base_branch": "main",
+    "tasks": [
+      {
+        "id": "T1",
+        "description": "R1/R2/R6: add maxLength 32 to events[].verdict and flags[].verdict, each with a description saying nothing validates status.json against this schema",
+        "files_touched": [
+          "plugins/pipeline/schemas/status.schema.json"
+        ],
+        "depends_on": [],
+        "status": "done",
+        "assigned_to": "dev"
+      },
+      {
+        "id": "T2",
+        "description": "R4: new suite test-status-schema-contract.sh -- vacuity control, corpus conformance reading the cap FROM the schema, the cap=17 non-zero control, the AGENT_RULES expiry assertion (AC1-AC4)",
+        "files_touched": [
+          "plugins/pipeline/tests/test-status-schema-contract.sh"
+        ],
+        "depends_on": [
+          "T1"
+        ],
+        "status": "done",
+        "assigned_to": "dev"
+      },
+      {
+        "id": "T3",
+        "description": "R3: rewrite the current_phase description example list to exactly what pipeline.md writes, plus halted-error, with <phase>-error named as a shape",
+        "files_touched": [
+          "plugins/pipeline/schemas/status.schema.json"
+        ],
+        "depends_on": [],
+        "status": "done",
+        "assigned_to": "dev"
+      },
+      {
+        "id": "T4",
+        "description": "AC5-AC8: set-equality assertions in both directions against pipeline.md, halted-error survival, the two rotted literals absent from the SCHEMA file, and the byte-identical current_phase pattern pin",
+        "files_touched": [
+          "plugins/pipeline/tests/test-status-schema-contract.sh"
+        ],
+        "depends_on": [
+          "T3"
+        ],
+        "status": "done",
+        "assigned_to": "dev"
+      },
+      {
+        "id": "T5",
+        "description": "R5/AC10: re-anchor the three present-tense rot comments as history naming #42; leave the negative-control INPUT at test-gate-phase-entry.sh:514 untouched",
+        "files_touched": [
+          "plugins/pipeline/tests/test-gate-phase-entry-drift.sh",
+          "plugins/pipeline/tests/test-gate-phase-entry.sh",
+          "plugins/pipeline/tests/test-status-schema-contract.sh"
+        ],
+        "depends_on": [
+          "T3"
+        ],
+        "status": "done",
+        "assigned_to": "dev"
+      },
+      {
+        "id": "T6",
+        "description": "AC9/AC11: run the full suite, record the assertion count before and after on the same macOS host, run the recorded cap=17 and cap-read mutations",
+        "files_touched": [
+          ".pipeline/34/impl-report.json"
+        ],
+        "depends_on": [
+          "T2",
+          "T4",
+          "T5"
+        ],
+        "status": "done",
+        "assigned_to": "dev"
+      }
+    ]
+  },
+  "impl-report": {
+    "issue_number": 34,
+    "folds_in": [
+      42
+    ],
+    "branch": "fix/34-bound-archived-verdict-fields",
+    "base_branch": "main",
+    "worktree_path": "<redacted-absolute-path>",
+    "pre_change_commit": "4a6f164",
+    "commits": [
+      {
+        "sha": "87d8f7ef80efebbd4f2481c13029e6c27d5ea5e7",
+        "message": "fix(schema): bound the archived verdict fields and de-rot the phase list (#34, #42)",
+        "files_changed": [
+          "plugins/pipeline/schemas/status.schema.json"
+        ],
+        "files_removed": []
+      },
+      {
+        "sha": "5f12ab82a59c750473d9c4e0a361217da9d53e47",
+        "message": "docs(test): re-anchor the schema:13 rot comments as history (#42)",
+        "files_changed": [
+          "plugins/pipeline/tests/test-gate-phase-entry.sh",
+          "plugins/pipeline/tests/test-gate-phase-entry-drift.sh"
+        ],
+        "files_removed": []
+      },
+      {
+        "sha": "d8686bc19d317d89d1ec29b8d2cf13c196bb30ff",
+        "message": "test: read the verdict cap and the phase list back out of the schema (#34, #42)",
+        "files_changed": [
+          "plugins/pipeline/tests/test-status-schema-contract.sh"
+        ],
+        "files_removed": []
+      },
+      {
+        "sha": "2129276",
+        "message": "fix(tests): re-found the events/flags discrimination on a crafted tree (#34, #42)",
+        "files_changed": [
+          "plugins/pipeline/tests/test-status-schema-contract.sh"
+        ],
+        "files_removed": []
+      }
+    ],
+    "files_removed": [],
+    "tests_added": [
+      {
+        "file": "plugins/pipeline/tests/test-status-schema-contract.sh",
+        "description": "67 assertions. The reader that makes status.schema.json's constraints load-bearing: vacuity control over the committed corpus (derived floor, never pinned), corpus conformance at the cap READ FROM the schema, a permanent cap=17 non-zero control that must NAME .pipeline/17/status.json's APPROVE_WITH_NOTES, set equality on the current_phase example list against pipeline.md in both directions with a control per direction, halted-error's survival, the two rotted literals' absence from the schema FILE, the byte-identical pattern pin, R6's expiry assertion over validate-pipeline-artifact.mjs's AGENT_RULES, and AC10's claim-shape grep over the test-*.sh glob."
+      }
+    ],
+    "assertion_counts": {
+      "platform": "macOS, Darwin 25.5.0, Darwin Kernel Version 25.5.0 x86_64 (brandons.macbook.pro.lan). BOTH numbers measured on this same host, per #47: there is a real 32-assertion macOS/ubuntu gap at one commit, so a local post-change count compared against a CI pre-change count measures the runner rather than the change.",
+      "command": "bash plugins/pipeline/tests/run.sh, summing passed+failed across every suite's `passed=N failed=M` line",
+      "pre_change_commit": "4a6f164",
+      "pre_change_total": 1989,
+      "pre_change_failed": 0,
+      "post_change_commit": "d8686bc",
+      "post_change_total": 2056,
+      "post_change_failed": 0,
+      "delta": 67,
+      "delta_grain": "assertions, not tests and not suites. The +67 is exactly the new suite's own count; no pre-existing suite gained or lost an assertion, which is checkable because the delta equals the new suite's standalone total.",
+      "post_nitfix_commit": "748f37c",
+      "post_nitfix_total": 2064,
+      "post_nitfix_failed": 0,
+      "post_nitfix_suites": 33,
+      "post_nitfix_delta": 8,
+      "post_nitfix_delta_reconciliation": "2056 -> 2064 on the SAME host as both earlier figures (Darwin 25.5.0 x86_64, bash 3.2.57, node v24.19.0), per #47's runner-gap rule. The +8 reconciles exactly and every member is named: 3 in the AC1 suite (the two R6 writer-rule assertions plus the scoped-extraction control) and 5 in AC10 (4 per-verb control cells, 1 past-tense negative control). AC10's pinned floor was REPLACED by the derived equality one-for-one, so it contributes 0. No pre-existing suite gained or lost an assertion.",
+      "post_nitfix_command": "bash plugins/pipeline/tests/run.sh, summing passed+failed across every suite's `passed=N failed=M` line (33 suites)",
+      "post_cifix_commit": "2129276",
+      "post_cifix_total": 2071,
+      "post_cifix_failed": 0,
+      "post_cifix_suites": 33,
+      "post_cifix_delta": 7,
+      "post_cifix_delta_reconciliation": "2064 -> 2071 on the SAME host as every earlier figure (Darwin 25.5.0 x86_64, bash 3.2.57, node v24.19.0), per #47 runner-gap rule. Net +7 inside test-status-schema-contract.sh alone (75 -> 82): one live-corpus silence cell REMOVED, eight crafted-fixture cells ADDED (1 fixture-length control, 4 fire/silent discrimination cells, 2 verdict-count earned-zero controls, 1 completed-run conformance cell). No other suite gained or lost an assertion; the 5 red assertions CI reported were this one cell plus its cascade through test-issue17-integration.sh AC41(c), which reruns the whole suite inside a fresh clone."
+    },
+    "mutation_battery": {
+      "discipline": "Every mutation was applied AFTER the three commits landed and restored with `git checkout -- <path>`, never from memory. Each cell printed the changed line as proof that the mutation applied was the mutation intended; one cell (M12, first attempt) silently failed to apply and was caught by exactly that proof step, then redone. Tree verified clean (0 dirty) after every restore.",
+      "cells": [
+        {
+          "id": "M1",
+          "criterion": "AC3 + AC4",
+          "mutation": "schema events[].verdict maxLength 32 -> 17, nothing in the test changed",
+          "result": "RED",
+          "observed": "FAIL  AC3: no committed events[].verdict or flags[].verdict exceeds the cap / expected: (empty) / actual: .pipeline/17/status.json flags[4].verdict=\"APPROVE_WITH_NOTES\" len=18 cap=17   [suite went 67/0 -> 63/4]",
+          "why_it_matters": "AC4 is proven by this cell and not by inspection: a test carrying its own copy of 32 would have stayed green under a schema-only edit. The violator is NAMED, so a red here cannot be confused with a red caused by the walk breaking."
+        },
+        {
+          "id": "M2",
+          "criterion": "AC1 (fixture matrix cell A)",
+          "mutation": "delete maxLength from flags[].verdict ONLY, leaving events[] capped",
+          "result": "RED",
+          "observed": "FAIL  AC1: flags[].verdict is capped at the ruled 32 / expected 32 / actual <absent>. events[] pin stayed green. [65/2]",
+          "why_it_matters": "This is the exact hole #34 shipped: a check written over 'the schema contains maxLength' is satisfied by the events[] copy alone."
+        },
+        {
+          "id": "M3",
+          "criterion": "AC1 (fixture matrix cell B)",
+          "mutation": "delete maxLength from events[].verdict ONLY, leaving flags[] capped",
+          "result": "RED",
+          "observed": "FAIL AC1 events pin (<absent>), and the corpus assertions degraded to <no-field:read> / <no-field:unreadable> rather than to empty strings.",
+          "why_it_matters": "The sentinel discipline is what makes this cell readable. With the cap absent the walker exits on caperror, and an absent report reads as <no-report>/<no-field:...> instead of as the empty list that IS the passing state."
+        },
+        {
+          "id": "M4",
+          "criterion": "AC5 direction 2",
+          "mutation": "add the bogus literal 9-not-a-phase to the description list",
+          "result": "RED",
+          "observed": "FAIL AC5 (direction 2) actual: 9-not-a-phase; and the pattern cross-check also refused it. [65/2]"
+        },
+        {
+          "id": "M5",
+          "criterion": "AC5 direction 1",
+          "mutation": "delete the real literal 3-impl-complete from the description list",
+          "result": "RED",
+          "observed": "FAIL AC5 (direction 1) actual: 3-impl-complete. [66/1]",
+          "why_it_matters": "Two mutations because set equality has two directions and a substring grep catches only the first. voice-lint.mjs's original phase table failed in exactly the direction M5 tests."
+        },
+        {
+          "id": "M6",
+          "criterion": "AC6",
+          "mutation": "remove halted-error from the description -- the mutation the naive pipeline.md-derived fix actually performs",
+          "result": "RED",
+          "observed": "FAIL  AC6: halted-error is still named in the description / expected 1 / actual 0, plus AC5 direction 1 naming halted-error. [64/3]"
+        },
+        {
+          "id": "M7",
+          "criterion": "AC7",
+          "mutation": "re-insert 3-scope-drift-adjudication into the description",
+          "result": "RED",
+          "observed": "FAIL  AC7: 3-scope-drift-adjudication appears nowhere in status.schema.json / expected 0 / actual 1. [64/3]",
+          "why_it_matters": "Asserted on the SCHEMA FILE, not repo-wide: the literal legitimately survives at test-gate-phase-entry.sh:514 as a negative-control input, so a repo-wide grep is red before AND after the fix and asserts nothing."
+        },
+        {
+          "id": "M8",
+          "criterion": "AC8",
+          "mutation": "one character inside current_phase.pattern, [0-5] -> [0-6]",
+          "result": "RED",
+          "observed": "FAIL  AC8: the pattern is byte-identical to its pre-change value / expected ^([0-5](\\.5)?-[a-z0-9-]+|halted-error)$ / actual ^([0-6]... [66/1]",
+          "why_it_matters": "Pinned by VALUE, not presence: a presence check survives any edit to the one key voice-lint.mjs actually consumes. First attempt did not apply (perl escaping of the JSON-escaped backslash); caught by printing the changed line, then redone."
+        },
+        {
+          "id": "M10",
+          "criterion": "AC10",
+          "mutation": "restore test-gate-phase-entry-drift.sh:13 to its present-tense wording",
+          "result": "RED",
+          "observed": "FAIL  AC10: no suite still claims in the present tense that the schema names an unwritten phase / actual: test-gate-phase-entry-drift.sh:13. [65/2]"
+        },
+        {
+          "id": "M12",
+          "criterion": "AC11 (the mechanism, not the floor)",
+          "mutation": "delete one assertion (the AC3 corpus conformance assert_eq) from the new suite",
+          "result": "count dropped 67 -> 66 while the suite still reported failed=0",
+          "observed": "mutated suite -> passed=66 failed=0; restored -> passed=67 failed=0",
+          "why_it_matters": "This is #47's failure mode reproduced: a suite loses an assertion silently and stays green. Only the recorded count catches it, which is why AC11 records two numbers rather than trusting the exit code."
+        },
+        {
+          "id": "M9",
+          "criterion": "AC2",
+          "mutation": "not a file mutation -- AC2's three cells are PERMANENT in-suite fixtures driven against crafted temp trees (zero records; a record whose JSON does not parse; a record whose events is an object rather than an array), each conjunct mutated separately",
+          "result": "each cell asserted, and each is watched to fire",
+          "observed": "CELL(zero records): files=0 and the vacuity predicate REFUSES that count. CELL(unparseable): the walk NAMES .pipeline/b/status.json and read < files. CELL(events is an object): reported on the shape conjunct, while the well-formed sibling .pipeline/a/ is NOT reported.",
+          "why_it_matters": "evidence.md's 'a property over a possibly-empty set is not a check'. A zero-record walk exits with every list empty, which is byte-identical to the passing state, so the empty case has to be refused explicitly rather than assumed away."
+        }
+      ],
+      "expected_survivor": {
+        "id": "M11",
+        "criterion": "AC3, under the mutation 'raise the schema cap from 32 to 64'",
+        "result": "SURVIVED, as predicted by the spec",
+        "observed": "ok    AC3: no committed events[].verdict or flags[].verdict exceeds the cap  (suite 65/2: only AC1's two pins on the ruled value reddened)",
+        "why_it_should_survive": "The corpus maximum is 18, so every committed value conforms to 32 and to 64 alike and no committed record can distinguish them. This is the harness's own non-zero control: a battery in which every mutation reddens cannot tell coverage from a rubber stamp. It also states AC3's honest limit out loud -- AC3 constrains the cap from BELOW (via the 17 control) and not from above; the choice of 32 over 64 rests on the refusal argument in spec q2, not on the corpus. Anyone who reports this cell as CAUGHT has a harness bug. Note the split that makes it readable: AC1's literal-32 pin DOES redden here, deliberately, because that one site pins the value the spec ruled; AC3's corpus assertion is the one that cannot tell the difference."
+      }
+    },
+    "acceptance_criteria_met": [
+      {
+        "criterion": "AC1: both verdict fields carry maxLength 32, type still string",
+        "met": true,
+        "evidence": "test-status-schema-contract.sh 'AC1' block, 5 assertions; mutations M2 and M3 redden each field independently"
+      },
+      {
+        "criterion": "AC2: vacuity control before any corpus property; >= a derived floor; zero must FAIL",
+        "met": true,
+        "evidence": "'AC2' block, 13 assertions incl. 3 crafted-tree cells; floor derived from max(git-index count, on-disk count), never pinned"
+      },
+      {
+        "criterion": "AC3: every committed verdict <= cap, with the cap=17 non-zero control naming the violator",
+        "met": true,
+        "evidence": "permanent in-suite control + mutation M1: .pipeline/17/status.json flags[4].verdict=\"APPROVE_WITH_NOTES\" len=18 cap=17"
+      },
+      {
+        "criterion": "AC4: the cap is read from the schema, not from a literal in the test",
+        "met": true,
+        "evidence": "mutation M1 changed ONLY the schema and the corpus check's verdict moved"
+      },
+      {
+        "criterion": "AC5: set equality in both directions against pipeline.md plus halted-error, less the template",
+        "met": true,
+        "evidence": "'AC5' block with a control per direction; mutations M4 and M5"
+      },
+      {
+        "criterion": "AC6: halted-error still named",
+        "met": true,
+        "evidence": "'AC6' block, 4 assertions incl. the guard and the pattern still blessing it; mutation M6"
+      },
+      {
+        "criterion": "AC7: neither rotted literal appears in status.schema.json",
+        "met": true,
+        "evidence": "'AC7' block, file-scoped not repo-wide, with the control that the input next door survives; mutation M7"
+      },
+      {
+        "criterion": "AC8: current_phase.pattern byte-identical",
+        "met": true,
+        "evidence": "'AC8' block pinning the value; mutation M8"
+      },
+      {
+        "criterion": "AC9: test-voice-lint.sh green plus one non-zero control",
+        "met": true,
+        "evidence": "passed=41 failed=0; the malformed-phase control exits 2 and names status.schema.json, and the well-formed-phase control is silent"
+      },
+      {
+        "criterion": "AC10: no present-tense rot claim in any test file",
+        "met": true,
+        "evidence": "'AC10' block over the test-*.sh glob keyed on the claim SHAPE; mutation M10"
+      },
+      {
+        "criterion": "AC11: run.sh green and assertion count >= the pre-change count, both platforms recorded",
+        "met": true,
+        "evidence": "1989 -> 2056 on the same macOS host; mutation M12 shows the count is what catches a silent loss"
+      }
+    ],
+    "requirement_checks": [
+      {
+        "requirement_index": 0,
+        "requirement_text": "R1. events.items.properties.verdict gains maxLength: 32. [AC1: both events.items.properties.verdict and flags.items.properties.verdict carry maxLength 32 with type still string]",
+        "status": "PASS",
+        "notes": "status.schema.json:56. AC1 pins it in the one site that holds the literal; mutation M3 (delete this field's cap alone) reddens it independently of flags[]."
+      },
+      {
+        "requirement_index": 1,
+        "requirement_text": "R2. flags.items.properties.verdict gains the SAME maxLength: 32 (folded in, not deferred). [AC1, second half]",
+        "status": "PASS",
+        "notes": "status.schema.json:111. Folded per BA's q3 ruling. Mutation M2 (delete this field's cap alone) reddens it independently of events[]; the two caps are also asserted equal to each other."
+      },
+      {
+        "requirement_index": 2,
+        "requirement_text": "R3. The current_phase description's example list is corrected to the literals pipeline.md writes, PLUS halted-error, with the <phase>-error family named as a shape. [AC5 set equality both directions; AC6 halted-error still named; AC7 neither 3-impl-verification-unverified nor 3-scope-drift-adjudication appears anywhere in status.schema.json]",
+        "status": "PASS",
+        "notes": "26 literals derived from pipeline.md at this commit plus halted-error = 27; <phase>-error described as a shape in the prose after the list, so the parsed Examples set excludes it. AC5 is set equality in both directions with a control per direction (M4, M5); AC6 additionally pins that the guard and the pattern still bless halted-error (M6); AC7 is file-scoped (M7). Note for the panel: BA measured pipeline.md as '26 tokens, 25 literals'; the grep BA specified yields 27 tokens / 26 literals at this same commit (plugins/ is unchanged since 5408339). The test derives the set live rather than pinning either number, so the discrepancy is recorded, not inherited."
+      },
+      {
+        "requirement_index": 3,
+        "requirement_text": "R4. A corpus-conformance check asserts every committed verdict conforms to the cap, reading the cap FROM the schema, preceded by a vacuity control. [AC2 vacuity + shape; AC3 conformance + the cap=17 non-zero control; AC4 the cap is read, not copied]",
+        "status": "PASS",
+        "notes": "New suite plugins/pipeline/tests/test-status-schema-contract.sh, 67 assertions. The corpus build is the existing #30 union helper, extracted from test-pipeline-telemetry.sh's marker block rather than reimplemented, so there is still exactly one corpus build. The floor is derived from two independent enumerations (git index, filesystem) and is never a pinned integer: origin/main holds 5 committed records and this branch holds 6, so a pinned 6 would measure the branch. AC3's control is permanent and in-suite, with its expiry written into the assertion message."
+      },
+      {
+        "requirement_index": 4,
+        "requirement_text": "R5. The three test comments citing the schema:13 rot as LIVE present-tense evidence are re-anchored as history naming #42; the negative-control INPUT at test-gate-phase-entry.sh:514 stays. [AC10]",
+        "status": "PASS",
+        "notes": "test-gate-phase-entry-drift.sh:12-19, test-gate-phase-entry.sh:511-515 and :711-715 restated in the past tense naming #42. Line 514's input is byte-unchanged and AC7's control asserts it is still there. AC10's needle is the CLAIM SHAPE (status.schema.json and a present-tense verb on one line), not the phase literal, because the literal legitimately survives; 'pipeline.md never writes it' is deliberately excluded from the needle since that sentence is still true and still load-bearing for the control input."
+      },
+      {
+        "requirement_index": 5,
+        "requirement_text": "R6. The description of each capped field states plainly that nothing validates status.json against this schema.",
+        "status": "PASS",
+        "notes": "Both new descriptions say it outright and both sentences are asserted present. The prose itself is unmutable, so the spec's discharge was taken as well: an EXPIRY assertion pins that status.schema.json is named nowhere in validate-pipeline-artifact.mjs, with the message 'If this fails, status.json is now validated and the sentences in the schema must be DELETED, not this assertion', plus a non-zero control proving that grep can find the string when it is present. Deliberate small extension, flagged rather than smuggled: flags[].summary's pre-existing maxLength 140 also gained a one-line description saying it is unenforced too. It is a capped field, so a plain reading of R6 covers it, and it is the precedent #34 got wrong."
+      },
+      {
+        "requirement_index": 6,
+        "requirement_text": "AC9 (unchanged consumer, behavioural): test-voice-lint.sh green AND one non-zero control run.",
+        "status": "PASS",
+        "notes": "bash plugins/pipeline/tests/test-voice-lint.sh -> passed=41 failed=0. The non-zero control is that suite's own and it RAN: a malformed current_phase ('Phase_Three') exits 2, quotes the offending value, names status.schema.json and says why silence would be the alternative; the control-on-the-control ('3-impl' and '2.5-design-owner-decision' pass the shape check) confirms it is not firing on everything. Green alone would not have distinguished 'still works' from 'went silent'."
+      },
+      {
+        "requirement_index": 7,
+        "requirement_text": "AC11: run.sh green AND the total assertion count >= the pre-change count, recorded as two numbers with the platform each was measured on.",
+        "status": "PASS",
+        "notes": "1989 (pre-change, commit 4a6f164) -> 2056 (post-change, commit d8686bc), both on macOS Darwin 25.5.0 x86_64, both failed=0. Delta +67 = exactly the new suite's standalone count, so no pre-existing suite lost an assertion. Not pinned into any test, per #33: the numbers are recorded here with their population and platform rather than frozen as a constant that decays."
+      }
+    ],
+    "scope_drift": {
+      "detected": true,
+      "description": "One deliberate in-spirit extension, recorded rather than silent: flags[].summary's existing maxLength 140 gained a description saying it too is unenforced. R6 says 'each capped field', summary is a capped field, and it is the exact claim #34 got wrong. No other file, field, or behaviour was touched. events[].phase, flags[].phase and flags[].agent were left alone as the spec directs, and no follow-up issue is claimed to exist for flags[].agent.",
+      "resolution": "RULED IN by BA at Phase 4 (BA-4), and relabelled here rather than rebuilt. BA's ruling verbatim in substance: the CHANGE is correct -- R6 says 'the description of each capped field', flags[].summary IS a capped field, the added sentence is the exact claim #34 got wrong ('the mechanism exists; it was simply never applied here'), it alters no constraint and no behaviour, and it appears in no out_of_scope entry. But it contradicts a written spec line (sibling_causes_considered says 'Not changed here'), so the honest label is detected: true with the ruling recorded. Reporting hygiene only; nothing rebuilt. The 140 cap itself is asserted untouched at test-status-schema-contract.sh:197."
+    },
+    "tripwire": {
+      "fired": false,
+      "reason": "No migration, no table/column/index, no access-policy change, no auth surface, no crypto, no webhook verification. status.schema.json IS a shared contract but its SHAPE is unchanged: no field added, removed, renamed or retyped. maxLength narrows an existing string's domain and description is an annotation. The schema's one runtime reader (voice-lint.mjs:224) reads properties.current_phase.pattern, which is asserted byte-identical."
+    },
+    "constraints_md_conformance": {
+      "dba": "N/A on every line. No migration, no schema/table/column/index, no enum value added, no data-access-policy change, no query of any kind. The diff touches one JSON schema document and three bash test files.",
+      "devops": "N/A on every line. No deploy order, no secret, no config, no resource binding, no queue, no workflow edit.",
+      "secops": "N/A on the endpoint/crypto/webhook/CORS/retention lines. The one line with a bearing: the change NARROWS a string domain rather than widening it, and the fail direction was decided against the real persisted shape -- an ABSENT verdict stays valid (the walker skips a non-string verdict rather than reporting it, and test-gate-phase-entry.sh:287 pins one live record whose event carries no verdict key), so the cap does not become a requirement that would refuse correct records. Zero of 6 committed records and zero of 26 verdict-carrying entries are retroactively invalidated."
+    },
+    "checks_passed": {
+      "typecheck": true,
+      "test": true,
+      "lint": true,
+      "command": "bash plugins/pipeline/tests/run.sh (the repo's checkCommand; it is the whole gate -- there is no separate typecheck or lint step in this repo)",
+      "result": "All test suites passed. 2071 assertions, failed=0, exit 0 (at 2129276, after the CI-red fix)."
+    },
+    "knowledge_drift_claims": [],
+    "qa_signoff": {
+      "signed_off_at": "2026-08-20T00:00:00Z",
+      "test_files": [
+        {
+          "file": "plugins/pipeline/tests/test-status-schema-contract.sh",
+          "assertions": 67,
+          "authored_by": "dev (standard tier: Dev authors the behavioural contract from spec.acceptance_criteria)",
+          "style": "integration-style against the REAL committed corpus and against crafted temp trees. No mocking of any kind; the walker is the same code in both cases, parameterised by root and cap."
+        },
+        {
+          "file": "plugins/pipeline/tests/test-gate-phase-entry.sh",
+          "assertions": 0,
+          "note": "comments re-anchored only; no assertion added, removed or weakened. The negative-control INPUT at :514 is byte-unchanged."
+        },
+        {
+          "file": "plugins/pipeline/tests/test-gate-phase-entry-drift.sh",
+          "assertions": 0,
+          "note": "comment re-anchored only."
+        }
+      ],
+      "edge_cases_covered": [
+        "Zero committed records: the walk reports files=0 and the vacuity predicate REFUSES that count rather than passing green.",
+        "A record whose JSON does not parse: NAMED in `unreadable`, and read < files so the shortfall is visible; the well-formed sibling is asserted NOT to be named.",
+        "A record whose events is an object rather than an array: reported on the shape conjunct, which is mutated apart from the count conjunct.",
+        "An ABSENT verdict key: schema-valid, not a violation, and not counted -- so the cap cannot become a requirement (one live record depends on this).",
+        "A verdict exactly at the cap vs one character over: the over-long fixtures are built as cap+1 characters, derived from the schema value.",
+        "Both fields independently: an over-long events[].verdict and an over-long flags[].verdict are separate crafted records, because at cap 17 the events[] branch sits in the passing cell of the conjunction and is never exercised.",
+        "The reporting instrument itself: an absent report reads <no-report>, a present report missing the key reads <no-field:KEY>, and a present key with an empty list reads empty -- so 'nothing wrong' and 'nothing measured' are distinguishable.",
+        "Set equality in both directions with a control per direction, over a vacuity floor on BOTH sets (two empty sets are equal).",
+        "The pattern accepts every literal the description names, asserted over the whole set rather than a representative member, with a control that the same pattern refuses a malformed phase.",
+        "AC10's grep is proven against the ACTUAL pre-change wording of all three sites, one cell each, plus a negative cell on the sentence that legitimately survives."
+      ],
+      "edge_cases_deferred": [
+        {
+          "case": "A corpus that SHRINKS (a status.json deleted from both the index and the disk) is not caught: both enumerations fall together and the derived floor falls with them.",
+          "why": "The alternative is a pinned integer, which #33 says decays and which here would measure the branch rather than the repo (origin/main 5, this branch 6). The floor refuses the case that actually recurs -- a walk that found NOTHING and reported no problems -- and states its limit here rather than implying coverage it does not have."
+        },
+        {
+          "case": "The suite exempts its own file from AC10's walk.",
+          "why": "It is the one file that must carry both the needle and the pre-change wording in order to check them; an unexempted walk reports its own source and can never go green. The exemption is by basename, is the only one, and every other suite including future ones is covered by the glob."
+        },
+        {
+          "case": "The cap is still unenforced at WRITE time: nothing validates status.json against this schema, so an agent can still write a 400-character verdict and it will be committed.",
+          "why": "Explicitly out of scope in the spec (registering status.json in AGENT_RULES is a new enforcement surface with its own fail-open/fail-closed design, and implementing maxLength in the walker would change every schema at once). What this change buys is that such a value cannot survive a run of the checkCommand unnoticed, and both schema descriptions say the enforcement is missing so a later reader does not skip writing it."
+        }
+      ],
+      "acceptance_mapping": [
+        {
+          "criterion": "AC1",
+          "tests": [
+            "AC1: events[].verdict is capped at the ruled 32",
+            "AC1: flags[].verdict is capped at the ruled 32",
+            "AC1: events/flags still typed string",
+            "AC1: the two caps agree"
+          ]
+        },
+        {
+          "criterion": "AC2",
+          "tests": [
+            "VACUITY CONTROL x3",
+            "AC2: the walk READ every record",
+            "AC2: every record parses",
+            "AC2: events is an ARRAY",
+            "AC2: flags is an array",
+            "CELL(zero records) x2",
+            "CELL(unparseable) x2",
+            "CELL(events is an object) x2"
+          ]
+        },
+        {
+          "criterion": "AC3",
+          "tests": [
+            "AC3: no committed verdict exceeds the cap",
+            "AC3: the walk actually inspected verdict strings",
+            "AC3 NON-ZERO CONTROL x4",
+            "AC3 FIXTURE MATRIX x6"
+          ]
+        },
+        {
+          "criterion": "AC4",
+          "tests": [
+            "AC4: the cap used below came out of the schema",
+            "mutation M1"
+          ]
+        },
+        {
+          "criterion": "AC5",
+          "tests": [
+            "VACUITY x2",
+            "AC5 (direction 1)",
+            "AC5 (direction 2)",
+            "AC5 CONTROL x2"
+          ]
+        },
+        {
+          "criterion": "AC6",
+          "tests": [
+            "AC6 x4",
+            "every literal the description names is accepted by the pattern",
+            "CONTROL: the pattern can reject"
+          ]
+        },
+        {
+          "criterion": "AC7",
+          "tests": [
+            "AC7 x2",
+            "AC7 CONTROL: the input next door survives"
+          ]
+        },
+        {
+          "criterion": "AC8",
+          "tests": [
+            "AC8: the pattern is byte-identical",
+            "AC8: voice-lint still reads it out of the schema"
+          ]
+        },
+        {
+          "criterion": "AC9",
+          "tests": [
+            "test-voice-lint.sh (41 assertions, external suite, run and recorded)"
+          ]
+        },
+        {
+          "criterion": "AC10",
+          "tests": [
+            "AC10 x2 over the glob",
+            "AC10 CONTROL x4"
+          ]
+        },
+        {
+          "criterion": "AC11",
+          "tests": [
+            "run.sh 2056/0; counts recorded in assertion_counts, deliberately NOT pinned into a test"
+          ]
+        }
+      ],
+      "verdict": "APPROVE",
+      "notes": "Coverage record only, not an independent sign-off: this is the standard tier, so the same context authored the code and the tests. QA's Phase 4 audit is the first independent look and should scrutinise this contract hardest. Three places to point it at. (1) The floor derivation in AC2 is the judgement call -- see edge_cases_deferred; it refuses the empty walk but not a corpus that shrinks on both sides at once. (2) AC1 holds the literal 32 at TWO sites, one pin per capped field, which is a deliberate split from AC4's schema-read: AC1 requires each field pinned separately (a single shared pin is satisfied by the events[] copy while flags[] sits bare, the exact hole #34 shipped), and every corpus assertion reads the schema instead. CORRECTED at Phase 4 (QA G5 / Dev D2): this sentence previously said 'single literal', and the file's comments at :15 and :179 said the same; grep -n '\"32\"' returns two lines. Under the expected-survivor mutation (32 -> 64) AC1 reddens and AC3 does not, and that asymmetry is the intended reading, not a bug. (3) The AC10 self-exemption is a real hole in exactly one file, argued above."
+    },
+    "pr_url": "https://github.com/nsmedia-io/agent-pipeline/pull/51",
+    "completed_at": "2026-08-20T12:40:00Z",
+    "phase4_nit_fixes": {
+      "verdict_that_triggered_this": "APPROVE_WITH_NOTES x4 (ba, dev, qa, secops); no blockers, no veto. Nits fixed in place per the rubric; no panel re-run.",
+      "commit": "748f37cca56a6d0d2f996ea7c99812496a905902",
+      "scope_ruled_by_owner": [
+        "OUT: AC2's numeric floor (BA-1). QA ruled the current derived shape acceptable and pinning any number contradicts the derive-counts rule this round enforces elsewhere; the disagreement is going to a follow-up issue, not into this diff.",
+        "OUT: capping events[].note / veto_reason / error (SecOps S2, QA G3). SecOps ruled a length cap the wrong instrument -- the 616-char note in the corpus is correct audit work -- and filed #52.",
+        "OUT: the third-derivation / 0-setup divergence (Dev D1, BA-2). Filed separately by the owner; both BA and Dev-review placed it out of scope for #34/#42.",
+        "OUT: a run.sh aggregate total (QA G4, Dev D4/D5). Belongs to #47."
+      ],
+      "fixes": [
+        {
+          "id": "F1",
+          "source": "QA G5 + Dev D2",
+          "kind": "false sentence, no assertion changed",
+          "was": "test-status-schema-contract.sh:15 'One site below holds the literal 32' and :179 'THE ONE SITE THAT HOLDS THE LITERAL'; impl-report qa_signoff.notes repeated it.",
+          "is": "Both comments now say TWO sites, one pin per capped field, and say WHY two is right (AC1 requires each field pinned separately). qa_signoff.notes corrected above.",
+          "why_not_the_assertions": "AC4 is not compromised and both QA and Dev-review re-ran the schema-only mutation (32 -> 17) and watched AC3 -- the corpus assertion, which reads LIVE_CAP from the schema -- move. The defect was the sentence."
+        },
+        {
+          "id": "F2",
+          "source": "SecOps S1",
+          "kind": "a claimed rule that existed nowhere, now written AND asserted",
+          "was": "Both verdict descriptions say the cap 'is honored by the writer and by tests/...'. The second half was true; the first named a rule nobody wrote. commands/pipeline.md restated the 140-char summary cap at :92 and the verdict cap nowhere, while the flags[].summary description eight lines below correctly named ITS mechanism -- so the asymmetry read as symmetry.",
+          "is": "commands/pipeline.md gains a 'Rules for `verdict`' block beside the 140 rule, in that file's voice: TOKEN not prose, strict 32-char cap matching the schema's maxLength, reasoning goes in summary, and the restatement IS the write-time honorer because nothing validates the file. Three assertions added in the AC1 suite, keyed to the cap READ FROM the schema, so the writer's copy cannot rot silently -- a rule nobody reads is a comment.",
+          "gate_bites_proof": "Recorded, isolated worktree at 748f37c. (A) schema maxLength 32 -> 64, writer copy untouched: FAIL 'R6: commands/pipeline.md restates the verdict cap to the WRITER' expected to contain '64-char cap', suite 72/3. (B) delete the pipeline.md verdict block: FAIL on both R6 assertions with empty haystacks, suite 73/2. (C) delete the blank line that terminates the sed range: FAIL 'CONTROL: the extraction is SCOPED', expected 0 actual 1, suite 74/1. Restored from git after each; clean tree and 75/0 re-verified."
+        },
+        {
+          "id": "F3",
+          "source": "QA G1",
+          "kind": "demonstrated escape, closed and re-run",
+          "was": "AC10's anti-vacuity floor was `[[ \"$AC10_EXAMINED\" -ge 8 ]]` against a real population of 33 -- room for 24 suites to fall out of the glob in silence. QA planted a violation (66/1, needle alive), then planted the identical violation with the glob narrowed to 9 files and got 67/0 GREEN, violation unseen.",
+          "is": "AC10_EXPECTED is derived from an independent enumeration of the same glob, minus the single self-exemption, and asserted by equality rather than by floor. Non-vacuous by construction: an empty glob yields -1 against 0 examined, which is red.",
+          "escape_rerun": "Isolated worktree. Violation planted in test-voice-lint.sh (outside the narrowed glob) and the loop glob narrowed to test-g*.sh test-h*.sh test-i*.sh (9 files, exactly QA's M15b). RED: 'AC10: and the walk examined EVERY suite but its own (population DERIVED from the glob, not pinned)' expected 32 actual 9, suite 74/1. The violation itself is still unseen in that cell -- which is precisely why the population assertion has to be the one that bites, and it does."
+        },
+        {
+          "id": "F4",
+          "source": "Dev D3",
+          "kind": "demonstrated escape, closed and re-run",
+          "was": "AC10_NEEDLE='schema\\.json.*bl[e]sses' matched one verb while :434 stated the class as 'names/blesses' and :455's assertion name said 'names'. Dev-review appended '# status.schema.json:13 names 3-scope-drift-adjudication, and pipeline.md writes it nowhere.' to a suite and it passed 67/0. Not hypothetical: test-gate-phase-entry.sh:511, rewritten by this PR, uses 'named' for this subject.",
+          "is": "AC10_VERBS='bl[e]sses|n[a]mes|lists|claims' with the needle anchored on both sides (grep -E, \\b...\\b) and every call site switched to -E. One control cell per verb over the same sentence, generated from AC10_VERBS. Two negative cells: the surviving TRUE sentence about the control input, and the re-anchored PAST-tense history wording -- a needle that swallowed 'named' would redden on the corrected comments it exists to enforce. The bracket trick is carried on n[a]mes as well as bl[e]sses so the needle cannot match its own control definitions.",
+          "escape_rerun": "Isolated worktree, Dev-review's exact line appended to test-gate-phase-entry-drift.sh. RED: 'AC10: no suite still claims in the present tense that the schema names an unwritten phase' expected 'none' actual ' test-gate-phase-entry-drift.sh:279', suite 74/1. Restored from git; 75/0.",
+          "verb_class_scan": "grep -lE over all 33 suites at the widened needle returns only this file (self-exempt). Checked the near misses by hand: test-gate-phase-entry-hook.sh:104 ('says outright'), test-telemetry-exit-attribution.sh:16 ('sides with'), test-voice-lint.sh:191 ('names' precedes the filename, and the needle requires schema.json FIRST). 'says' and 'sides' are deliberately outside the class: they are not claims about the schema naming a phase."
+        },
+        {
+          "id": "F5",
+          "source": "BA-3",
+          "kind": "wrong number in an artifact",
+          "was": ".pipeline/34/map.json recorded '26 tokens, 25 literals plus the <phase>-error template' against the WIDE grep quoted as that line's own source.",
+          "is": "27 tokens / 26 literals, with the population named. Re-derived at HEAD: the wide grep (optional-quote) yields 27, the narrow grep (no optional quote, as used by test-voice-lint.sh:232) yields 26, and comm shows the sole difference is 0-setup, which pipeline.md:53 writes only as \"current_phase\": \"0-setup\". 26/25 is separately correct for the narrow derivation, so the correction names which grep produced which figure. Verified pipeline.md byte-identical between 5408339 and d8686bc (empty git diff), so the figure was wrong at the spec's own measurement commit too. Not load-bearing: AC5 derives both sets live and pins no count."
+        },
+        {
+          "id": "F6",
+          "source": "BA-4",
+          "kind": "reporting flag",
+          "was": "scope_drift.detected: false, resolution: null.",
+          "is": "detected: true with BA's ruling recorded in resolution. The finding stands and the build stands; only the label was wrong."
+        }
+      ],
+      "expected_survivor": {
+        "mutation": "AC10_VERBS='bl[e]sses|n[a]mes|lists|claims' -> 'bl[e]sses|n[a]mes|lists' (drop one verb from the class)",
+        "result": "SURVIVED, green at 74/0, as expected and documented rather than discovered.",
+        "why": "The per-verb control cells are generated FROM AC10_VERBS, so narrowing the class narrows its own controls with it. This is the same recursion QA's G1 named one level up: the guard against a narrowed population cannot itself notice being narrowed. The only tell is the assertion count dropping 75 -> 74, and nothing reads an aggregate total today.",
+        "issue": "#47 (run.sh emits no aggregate and no floor is re-derived per run). Named here so a future reader does not read 'every mutation reddened' off this battery."
+      }
+    },
+    "post_ci_fix": {
+      "commit": "2129276",
+      "trigger": "CI RED on 347b072 (the completed run record for this run). 2059 assertions, 5 failed, ONE root cause at test-status-schema-contract.sh:313.",
+      "root_cause": "The AC3 fixture matrix asserted over the LIVE corpus that at cap 17 the events[] branch reports zero violations while flags[] reports one -- a discrimination proving the two branches are separately exercised. Sound intent, resting on a corpus property that correctly stopped being true: commands/pipeline.md makes each events[] entry the EXIT marker of the phase it closes, so a Phase 4 panel returning APPROVE_WITH_NOTES writes those 18 characters into events[]. .pipeline/34/status.json now reads events: SKIPPED(7), complete(8) x3, APPROVE_WITH_NOTES(18). Every completed run whose panel returns APPROVE_WITH_NOTES would have reddened this assertion; reverting the record would have hidden it until the next such run landed on main.",
+      "class": "evidence.md, a control anchored to a live defect has a shelf life -- arriving one PR early, and in the SILENCE direction specifically.",
+      "fix": "The discrimination now runs on two trees this file builds via the existing new_tmpdir idiom. Each holds one crafted over-cap violator in exactly ONE field plus a record shaped like a real completed run, carrying the 18-char APPROVE_WITH_NOTES in events[] AND flags[]. One branch fires and NAMES its file, the other is silent, asserted in BOTH directions, with the per-tree verdict count pinned so each silence is earned rather than unvisited.",
+      "direction_rule": "What may rest on the live corpus is decided by direction. A FIRES cell may: the corpus only grows by a run committing its own record, and an added record cannot remove a long verdict. A SILENCE cell may not: any added record can break it. The cap-14 FIRES cell over the live corpus is therefore kept; only the silence cell moved to a crafted tree.",
+      "untouched": [
+        "AC3 live-corpus assertion (no committed verdict exceeds the cap) -- still walks the real corpus.",
+        "AC3 NON-ZERO CONTROL at cap 17 including its expiry guard (the corpus maximum is still the 18-char value) -- passed before and after, logic unchanged.",
+        ".pipeline/34/status.json -- NOT edited. The record is honest and it is the evidence for this fix.",
+        "Everything else from the previous round."
+      ],
+      "label_correction": "One neighbouring cap-17 control label read \"...names the FLAGS entry, not an events entry\". Its assertion (assert_contains flags[) still holds, but the \"not an events entry\" clause became false of the report the moment events[] gained an 18-char value. Label text only, no logic change: now \"...names the FLAGS entry that carries the 18-char value\".",
+      "gate_bites_proof": {
+        "isolation": "git worktree add --detach /tmp/dev-34-fix2 fix/34-bound-archived-verdict-fields, at 7acc605 (pre-amend content-identical to 2129276 for the walker and the cells). Each mutation applied by literal string replacement with a match-count assertion (exit 9 on != 1 match), the changed line printed back, restored with git checkout -- <path> and the tree verified clean. Worktree removed after.",
+        "mutations": [
+          {
+            "id": "M-CI-1",
+            "mutation": "walker: for (const field of [\"events\", \"flags\"]) -> for (const field of [\"flags\"]) -- the events[] branch is never inspected",
+            "result": "RED, suite 82/0 -> 76/6",
+            "observed": "FAIL  AC3 FIXTURE MATRIX: with the over-long value in events[], the events[] branch fires and NAMES it / expected to contain: .pipeline/ev/status.json events[0] / actual: (empty)   ||   FAIL  both branches were INSPECTED in the events[] tree (4 verdicts read) / expected: 4 / actual: 2   ||   FAIL  and in the flags[] tree too / expected: 4 / actual: 2",
+            "documented_survivors": "The two SILENCE cells stayed GREEN under this mutation, and that is expected, not a gap: a walker that never inspects events[] emits no events[ label, which is indistinguishable from a correct silence by the silence cell alone. That is precisely what the paired verdict-count controls exist to catch, and they went red. Reported rather than papered over, per the keep-one-survivor rule."
+          },
+          {
+            "id": "M-CI-2",
+            "mutation": "walker: out.violations.push(f + \" \" + field + ...) -> ... + \"events\" + ... -- one branch MASKS the other by mislabelling every flags[] violation as an events[] one",
+            "result": "RED, suite 82/0 -> 78/4",
+            "observed": "FAIL  AC3 FIXTURE MATRIX: ...and the events[] branch is silent on that same tree (the two cells differ) / expected: 0 / actual: 1   ||   FAIL  with the over-long value in flags[], the flags[] branch fires and NAMES it / expected to contain: .pipeline/fl/status.json flags[0] / actual: .pipeline/fl/status.json events[0].verdict=\"AAA...\" len=33 cap=32",
+            "why_it_matters": "This is the masking defect the replaced cell existed to catch, now caught on a crafted tree instead of on a corpus property. The NEW silence cell itself goes red here, so it is not a cell that cannot fail."
+          }
+        ],
+        "regression_probe": {
+          "question": "Can a future APPROVE_WITH_NOTES run break the new cell again?",
+          "method": "In the isolated worktree, a REAL completed record (.pipeline/34/status.json, events[4].verdict = APPROVE_WITH_NOTES, 18 chars -- captured, not hand-written) was copied into BOTH crafted trees as a third record, mimicking a future run landing in the population.",
+          "result": "All four discrimination cells stayed GREEN (events fires / flags silent, flags fires / events silent), as did the completed-run conformance cell. Only the two verdict-COUNT controls moved (4 -> 18), because they pin the size of a population this file owns outright.",
+          "answer": "No. The cells cannot be reached by a pipeline run: their population is built inside the suite by new_tmpdir and no run can add a record to it. The probe had to inject the record by hand to move anything, and what it moved was a count literal, not the discrimination. Only an edit to this file can move that literal, which is loud and correct -- the failure mode of the cell it replaced was that a correct run somewhere else moved it silently."
+        }
+      },
+      "checks": {
+        "command": "bash plugins/pipeline/tests/run.sh",
+        "result": "All test suites passed. 33 suites, 2071 assertions, failed=0, exit 0.",
+        "platform": "macOS, Darwin 25.5.0 x86_64, bash 3.2.57(1)-release, node v24.19.0 (brandons.macbook.pro.lan) -- the same host as every other figure in assertion_counts.",
+        "shellcheck": "shellcheck -S warning on the edited file reports only the two PRE-EXISTING SC2010 warnings at lines 227 and 540; the new block adds none."
+      },
+      "scope": "One assertion, one root cause, plus one falsified neighbouring label. No other file touched."
+    }
+  },
+  "peer-review": {
+    "ba": {
+      "verdict": "APPROVE_WITH_NOTES",
+      "reviewed_at": "2026-08-20T00:00:00Z",
+      "reviewed_commit": "d8686bc19d317d89d1ec29b8d2cf13c196bb30ff",
+      "lens": "spec conformance and scope",
+      "verification_run": {
+        "suite_new": "bash plugins/pipeline/tests/test-status-schema-contract.sh -> passed=67 failed=0",
+        "suite_all": "bash plugins/pipeline/tests/run.sh -> 33 suites, summed passed=2056 failed=0, exit=0. Matches impl-report assertion_counts.post_change_total exactly. Platform: macOS Darwin 25.5.0, same host class Dev recorded.",
+        "pre_change_total_check": "1989 not re-run at 4a6f164 (would require a second worktree; shared tree must not be mutated). Verified arithmetically instead: 2056 - 67 (the new suite's standalone count) = 1989, and the other two changed files are comment-only in the diff -- every changed line in test-gate-phase-entry.sh and test-gate-phase-entry-drift.sh begins with '#'. NOT INDEPENDENTLY RE-DERIVED; naming that as the gap.",
+        "oracle_correction": "My first sum used awk -F'[= ]' and reported failed=5. That was MY harness bug, not a suite failure: re-derived with an explicit sed capture, all 33 'passed=N failed=0' lines carry failed=0. Recorded because a reviewer's own oracle is a check that can fail."
+      },
+      "open_question_conformance": [
+        {
+          "id": "q1",
+          "resolution": "ship the cap WITH a corpus test, and NOT a pipeline.md writer rule",
+          "built": "HONORED",
+          "evidence": "plugins/pipeline/tests/test-status-schema-contract.sh exists, 67 assertions, walks the real committed corpus at test-status-schema-contract.sh:209-231. commands/pipeline.md is absent from `git diff --stat origin/main...HEAD`, so the writer rule the resolution explicitly declined was not added."
+        },
+        {
+          "id": "q2",
+          "resolution": "cap = 32, not 64",
+          "built": "HONORED",
+          "evidence": "status.schema.json events[].verdict and flags[].verdict both maxLength 32; pinned once each at test-status-schema-contract.sh:182-184 and asserted equal to each other at :187."
+        },
+        {
+          "id": "q3",
+          "resolution": "fold flags[].verdict in rather than defer; and flags[].agent is deliberately NOT claimed as filed",
+          "built": "HONORED",
+          "evidence": "flags[].verdict capped in the same commit 87d8f7e. flags[].agent untouched, and impl-report.scope_drift repeats 'no follow-up issue is claimed to exist for flags[].agent' -- consistent with spec.sibling_causes_considered, so no unwritten deferral obligation."
+        }
+      ],
+      "concerns": [
+        {
+          "id": "BA-1",
+          "severity": "medium",
+          "title": "AC2's numeric floor was built as >= 1, not the spec's >= 6, and the cited precedent is a pinned literal",
+          "evidence": "spec.json AC2: 'the walk over .pipeline/*/status.json finds at least 6 committed records ... in the idiom already used at test-gate-phase-entry.sh AC19 (the corpus walk found at least 4 committed records)'. That cited idiom is a PINNED literal -- test-gate-phase-entry.sh:720 and :811 both hardcode 4. The built version at test-status-schema-contract.sh:214-219 asserts only tracked >= 1, on-disk >= 1, and union >= max(tracked, on-disk). The union assertion is close to tautological (corpus_files returns the union by construction), so the effective floor is 1: a corpus that collapses from 6 records to 1 passes green.",
+          "what_is_met": "AC2's operative sentence -- 'if the walk returns zero the check must FAIL, never pass green' -- IS met and IS mutation-tested, at test-status-schema-contract.sh:238-241 (CELL(zero records): files=0 and the vacuity predicate refuses it). The three-cell shape matrix (unparseable record, events-as-object, well-formed sibling not reported) is present at :243-257 and each conjunct is asserted apart from the count conjunct.",
+          "dev_rationale_and_my_ruling": "Dev's stated reason (test-status-schema-contract.sh:203-208 and impl-report edge_cases_deferred) is that a pinned 6 measures the branch rather than the repo. I VERIFIED that: `git ls-tree -r --name-only origin/main | grep status.json` returns 5, HEAD returns 6. So the argument against pinning 6 is correct. But it is an argument against pinning SIX, not against pinning any number. A pinned 4 -- identical to the AC19 precedent the spec cited, and below both 5 and 6 -- satisfies both concerns.",
+          "recommendation": "Add `[[ \"$CORPUS_N\" -ge 4 ]]` alongside the derived union check, with the AC19 comment style. Non-blocking: disclosed, argued, and the failure mode the spec actually named is covered."
+        },
+        {
+          "id": "BA-2",
+          "severity": "medium",
+          "title": "STRONGEST FINDING. This PR ships a SECOND derivation of the current_phase vocabulary that disagrees with the existing one by exactly one member, and nothing reconciles them",
+          "evidence": "New: test-status-schema-contract.sh:345 uses `grep -o '\"\\?current_phase\"\\?: *\"[^\"]*\"'` -> 27 distinct at HEAD. Existing, unchanged: test-voice-lint.sh:232 and :239 use `grep -o 'current_phase: *\"[^\"]*\"'` -- NO optional quote -> 26 distinct. `diff` of the two sets at HEAD yields exactly one line: `> 0-setup`. pipeline.md writes 0-setup only in JSON-quoted form, at plugins/pipeline/commands/pipeline.md:53 (`\"current_phase\": \"0-setup\",`), so the narrow grep never sees it.",
+          "consequence": "test-voice-lint.sh:234-235 asserts 'every phase pipeline.md writes is accounted for in voice-lint.mjs' and passes -- while `grep -n '0-setup' plugins/pipeline/scripts/voice-lint.mjs` at HEAD d8686bc returns NOTHING. The drift check is blind to 0-setup by a grep artifact, and its own vacuity control cannot notice: it prints 'found 26' against a `>= 20` floor (test-voice-lint.sh:239-241), so the missing member sits comfortably above the floor. An unlisted phase is silently un-linted -- test-voice-lint.sh's own 'RESIDUAL LIMIT: a well-formed unlisted phase is not linted' is the fail-open path this lands in.",
+          "why_it_is_on_this_change": "The schema description this PR writes says in its own words that 'a hand-maintained second copy of a vocabulary rots silently unless something compares it to the first' (test-gate-phase-entry-drift.sh:16-18). This change ADDS the second copy of the derivation and does not add the comparison. The new suite does not compare its derivation against test-voice-lint.sh's.",
+          "in_scope": "NO. It is a pre-existing hole in an unchanged file and neither #34 nor #42 covers it. I am NOT asking for it to be fixed in this PR.",
+          "recommendation": "File it, with this evidence, BEFORE merge -- the deferral rule binds and this repo has claimed-and-not-written before (#42 exists because of exactly that). `gh issue list --state all` at review time shows no issue covering it, and nothing in impl-report or spec claims one. Title suggestion: 'test-voice-lint.sh's phase derivation misses 0-setup, so voice-lint.mjs is unaudited for it'."
+        },
+        {
+          "id": "BA-3",
+          "severity": "low",
+          "title": "map.json's pipeline.md token count is wrong by one, and the number it records is not the number its recorded command produces",
+          "evidence": ".pipeline/34/map.json records '... | sort -u  -> 26 tokens, 25 literals plus the <phase>-error template'. At HEAD d8686bc AND at the spec's own measurement commit 5408339 (pipeline.md is byte-identical between them -- `git diff 5408339 HEAD -- plugins/pipeline/commands/pipeline.md` is empty), the WIDE grep recorded as that line's own `source` yields 27 tokens / 26 literals. 26/25 is the NARROW grep's population -- the one in test-voice-lint.sh -- i.e. the same 0-setup omission as BA-2. This is evidence.md's 'a number carries the population it was measured on', live, inside the intake artifact.",
+          "load_bearing": "NO, verified rather than assumed. (a) The spec's downstream arithmetic is unaffected: 0-setup was already present in the PRE-change description, so it is in neither the 3-unwritten set nor the 6-omitted set, and 23 - 3 + 6 = 26 reconciles to the CORRECT literal count. (b) AC5 derives both sets live and pins no count, so nothing in the build inherited 26/25. (c) The built description DOES include 0-setup and the set equality is green in both directions. Dev caught the discrepancy independently and recorded 27/26.",
+          "recommendation": "Correct map.json's line at Phase 5 so the wrong figure is not inherited by a later reader. No code change."
+        },
+        {
+          "id": "BA-4",
+          "severity": "low",
+          "title": "The flags[].summary description IS drift; the change is right but scope_drift.detected: false is the wrong label",
+          "evidence": "spec.json sibling_causes_considered, entry 'flags[].summary's existing maxLength: 140', says in terms: 'Not changed here'. The diff adds a `description` key to that field (status.schema.json, flags.items.properties.summary). impl-report.scope_drift describes the addition accurately but sets detected: false and resolution: null.",
+          "my_ruling": "The CHANGE is correct and I rule it in, not out. R6 says 'the description of each capped field', flags[].summary IS a capped field, the added sentence is the exact claim #34 got wrong ('the mechanism exists; it was simply never applied here'), it alters no constraint and no behaviour, and it appears in no out_of_scope entry. The 140 cap is asserted untouched at test-status-schema-contract.sh:197. This is honest completion of R6, not creep. But it contradicts a written spec line, so the honest label was detected: true with the ruling in resolution. Reporting hygiene only; nothing to rebuild."
+        },
+        {
+          "id": "BA-5",
+          "severity": "info",
+          "title": ".pipeline/34/status.json in the diff is correct, and creates no circularity with AC2's floor",
+          "evidence": "It arrived from orchestrator checkpoint commits (5408339, f0a341a, 4a6f164), not from Dev's three (87d8f7e, 5f12ab8, d8686bc). Five status.json records are already tracked at origin/main, so committing the run's own record is the established convention. On circularity: AC2's floor is max(tracked, on-disk) and the union is asserted >= it, so adding this run's own record raises BOTH sides of the same inequality -- it can neither strengthen nor weaken the floor. It does enter AC3's cap check, which is the intended direction: the pipeline's own writer is now subject to the bound it just wrote.",
+          "residual": "The union walk includes UNTRACKED on-disk records, so a local in-flight run holding a >32-char verdict reddens this suite for a reason unrelated to the commit under test. Inherited from test-corpus-union.sh's established union precedent, not introduced here. Noted, not charged to this PR."
+        }
+      ],
+      "criteria_checked": {
+        "AC1": "MET. Both fields pinned separately (test-status-schema-contract.sh:182-186), types still string, caps asserted equal. Mutation cells M2/M3 in impl-report redden each field independently -- the fixture matrix the spec demanded.",
+        "AC2": "PARTIALLY MET -- see BA-1. Operative zero-fails requirement met and mutation-tested; the numeric floor is 1 rather than 6.",
+        "AC3": "MET. Live run green with the permanent cap-17 non-zero control in-suite (:280-288) naming .pipeline/17/status.json, the flags[] entry, and APPROVE_WITH_NOTES, plus an expiry note telling the next reader to re-anchor rather than delete. The cap-14 cell (:293-297) exercises the events[] branch that cap-17 leaves in the passing cell.",
+        "AC4": "MET. Proven by mutation M1 (schema-only 32->17 moved the verdict), not by inspection. The single literal 32 at :182-184 is a deliberate pin on the ruled value, documented as such.",
+        "AC5": "MET. Set equality both directions (:360-361) with a control per direction (:365-370), over a vacuity floor on BOTH sets (:353-356) -- the two-empty-sets-are-equal trap is closed.",
+        "AC6": "MET, and it is the criterion most likely to have been silently violated. halted-error survives; the assertion is triangulated against pipeline.md (writes it nowhere), gate-phase-entry.mjs (blesses it), and the schema's own pattern.",
+        "AC7": "MET, file-scoped rather than repo-wide, with the control at :412-413 proving the negative-control INPUT at test-gate-phase-entry.sh:514 still exists.",
+        "AC8": "MET. Pattern pinned by VALUE (:421-422), and voice-lint asserted to still read it rather than copy it (:423-424).",
+        "AC9": "MET. I ran test-voice-lint.sh: passed=41 failed=0, and its non-zero control fires -- 'a malformed current_phase exits 2', 'and names the schema it violates', plus six control-on-the-control cells asserting well-formed phases pass. Discharged by pre-existing assertions, which is exactly what AC9 asked for (an UNCHANGED consumer, run with a control).",
+        "AC10": "MET. Needle keys the claim SHAPE, glob-discovered, with the three sites' actual pre-change wording as three separate control cells and a negative cell on the sentence that legitimately survives. Residual: the needle is 'schema\\.json.*bl[e]sses', so a future present-tense claim worded with 'names' rather than 'blesses' escapes it. The spec's falsifiability entry named 'blesses'/'never writes' and Dev argued the 'never writes' half out correctly (that sentence is still true). Acceptable; noted.",
+        "AC11": "MET as recorded, with one gap I did not close -- see verification_run.pre_change_total_check. Post-change 2056/0 re-derived by me on my own run."
+      },
+      "not_reached": [
+        "I did not re-run run.sh at 4a6f164 to independently confirm pre_change_total=1989. Confirming it needs a second worktree and the shared tree must not be mutated; I closed it arithmetically instead (2056 - 67, other two files comment-only). If the panel wants it hard, it is one scratch-worktree run.",
+        "I did not re-execute the mutation battery. Mutating source in the shared worktree is forbidden by this dispatch and three other panelists are live in it. I read the battery's recorded cells and checked the expected-survivor reasoning (M11, 32->64 survives on AC3 because the corpus max is 18) against the spec's expected_survivor, and they agree including the AC1-reddens/AC3-does-not asymmetry."
+      ],
+      "knowledge_drift_claims": [],
+      "notes": "Spec intent is met. Every requirement R1-R6 is in the diff, all three ba_default resolutions are honored in the build (including q1's explicit refusal to add a pipeline.md writer rule, which is the kind of negative instruction a build usually drops), and the one scope extension is beneficial and disclosed rather than silent. The two things worth a follow-up are both about a SECOND copy of something: BA-1 (the floor number the spec named was replaced with a weaker derived one) and BA-2 (a second phase-vocabulary derivation that disagrees with the existing one by 0-setup, which is the very rot class this PR is closing, reappearing one file over). BA-2 should be written as an issue before merge; it is not a reason to hold the diff."
+    },
+    "dev": {
+      "verdict": "APPROVE_WITH_NOTES",
+      "role": "dev",
+      "lens": "code quality, DRY, SOLID, readability",
+      "reviewed_at": "2026-08-20T15:40:00Z",
+      "reviewed_commit": "d8686bc19d317d89d1ec29b8d2cf13c196bb30ff",
+      "diff_base": "origin/main",
+      "environment": "macOS Darwin 25.5.0, bash 3.2 harness (set -u, no set -e), node present; read-only runs in the shared worktree, all mutations in an isolated worktree at /tmp/dev-34-mutate (removed)",
+      "commands_run": [
+        "bash plugins/pipeline/tests/test-status-schema-contract.sh -> passed=67 failed=0",
+        "bash plugins/pipeline/tests/run.sh -> exit 0, TOTAL passed=2056 failed=0 (summed across suites), macOS Darwin 25.5.0 -- independently reproduces impl-report.json's 2056 on the same platform Dev measured, with the shared worktree carrying one uncommitted .pipeline/34/status.json that the corpus walks read from disk and that did not shift the count",
+        "MUTATION (isolated worktree): schema events[].verdict maxLength 32 -> 17, suite re-run -> failed=4 including 'AC3: no committed events[].verdict or flags[].verdict exceeds the cap'",
+        "MUTATION (isolated worktree): appended a present-tense 'status.schema.json:13 names 3-scope-drift-adjudication' line to test-gate-phase-entry-drift.sh -> suite still passed=67 failed=0",
+        "grep -o '\"\\?current_phase\"\\?: *\"[^\"]*\"' pipeline.md | sort -u | wc -l -> 27 ; strict form -> 26 ; comm difference -> 0-setup",
+        "grep -n '0-setup' plugins/pipeline/scripts/*.mjs -> no matches"
+      ],
+      "concerns": [
+        {
+          "id": "D1",
+          "severity": "note",
+          "must_fix_before_merge": true,
+          "title": "The diff ships a THIRD hand-written derivation of the phase vocabulary, and it measurably disagrees with the two that exist -- in a direction the repo already ruled against by name, 25 lines below prose this same diff edits.",
+          "evidence": {
+            "new_derivation": "plugins/pipeline/tests/test-status-schema-contract.sh:345-346 (read at d8686bc): grep -o '\"\\?current_phase\"\\?: *\"[^\"]*\"'",
+            "existing_derivations": [
+              "plugins/pipeline/tests/test-voice-lint.sh:232 and :239: grep -o 'current_phase: *\"[^\"]*\"' (strict)",
+              "plugins/pipeline/tests/test-gate-phase-entry-drift.sh:44: /current_phase: *\"([^\"]*)\"/g (strict)"
+            ],
+            "the_standing_decision": "test-gate-phase-entry-drift.sh:41-44 at d8686bc says verbatim: 'The STRICT form, matching tests/test-voice-lint.sh:225-239. A looser pattern picks up `0-setup` from the Phase 0 JSON block, so the two checks would disagree about their own population.' The new suite adopts exactly that looser pattern. This diff edits lines 10-19 of that same file and left the contradicting rationale at :41-44 standing.",
+            "measured": "loose = 27 raw / 26 real literals; strict = 26 raw / 25. The sole difference is 0-setup, written by pipeline.md:53 as \"current_phase\": \"0-setup\".",
+            "consequence": "AC5's set equality now REQUIRES 0-setup in the schema description (it is first in the list at d8686bc), making the schema the only authority in the repo that names it. grep -n '0-setup' plugins/pipeline/scripts/*.mjs returns NOTHING: 0-setup is in neither voice-lint.mjs's VOICE_MOMENTS (:64) nor NON_VOICE_PHASES (:76), and in none of gate-phase-entry.mjs's PREREQUISITES/UNGUARDED/TERMINAL (:74-121). Both drift suites derive with the strict pattern, so neither can report it. voice-lint.mjs:249-250 then returns {failures: []} for a run parked at 0-setup -- exactly the 'an unrecognised phase passes silently rather than loudly' hazard its own docstring names at :32."
+          },
+          "why_it_matters_on_this_lens": "The diff's own thesis, restated in its header prose and in the re-anchored comments, is that a hand-maintained second copy of a vocabulary rots silently unless something compares it to the first. It then adds a third copy of the DERIVATION (not of the vocabulary) with no comparison between the three. evidence.md:94 'A number carries the population it was measured on': 26 and 25 are two different populations of 'the phases pipeline.md writes', quoted by three suites as if they were one.",
+          "ask": "Either (a) extract ONE derivation -- a pipeline_phase_literals helper in tests/harness.sh, or a marker-delimited block in the #30 D1 idiom this suite already reuses -- so the three suites cannot disagree; or (b) at minimum, re-anchor the now-stale rationale at test-gate-phase-entry-drift.sh:41-44 (R5 re-anchored its siblings in that exact file) AND write the follow-up issue for 0-setup's unaccounted state in voice-lint.mjs before this merges. Deferring is an action: the issue must exist, not be promised."
+        },
+        {
+          "id": "D2",
+          "severity": "nit",
+          "must_fix_before_merge": true,
+          "title": "Two comments in the new suite assert a single-site fact that the file itself falsifies.",
+          "evidence": "test-status-schema-contract.sh:15 'One site below holds the literal 32' and :179 'THE ONE SITE THAT HOLDS THE LITERAL'. Two assertion sites hold it as a load-bearing expected value: :182 (events_cap) and :184 (flags_cap).",
+          "ac4_ruling": "AC4 is NOT compromised, and I disagree with the framing that any second literal compromises it. AC1 explicitly requires each field to be pinned SEPARATELY, and AC4's own stated proof is 'mutate ONLY the schema's maxLength and observe the check's verdict change'. I ran that mutation (32 -> 17 in the schema alone, isolated worktree): AC3 -- the CORPUS assertion, not the pin -- went red. Every corpus assertion reads LIVE_CAP from the schema (:221). The defect is the sentence, not the design.",
+          "ask": "Reword to 'two sites hold the literal, one pin per capped field; every corpus assertion reads the schema.' In a diff whose subject is a false comment, a false comment about the fix is the one sentence that cannot stay."
+        },
+        {
+          "id": "D3",
+          "severity": "nit",
+          "must_fix_before_merge": true,
+          "title": "AC10's needle enumerates one spelling of the claim class; its own assertion name and comment claim the broader class. Demonstrated escape.",
+          "evidence": "test-status-schema-contract.sh:444 AC10_NEEDLE='schema\\.json.*bl[e]sses'. The comment at :434 states the claim shape as '<present tense: it names/blesses X>' and the assertion name at :455 reads 'no suite still claims in the present tense that the schema NAMES an unwritten phase'. Only 'blesses' is matched. Planted in an isolated worktree, appended to test-gate-phase-entry-drift.sh: '# status.schema.json:13 names 3-scope-drift-adjudication, and pipeline.md writes it nowhere.' -> suite reported passed=67 failed=0, AC10 green.",
+          "why_it_matters_on_this_lens": "evidence.md's 'enumerate CLASSES, not examples' and 'guard where it landed, not how it was spelled'. The tell is present: closing this needs another spelling added to a list. Note the sibling test-gate-phase-entry.sh:511 already uses the verb 'named' for this exact subject, so the alternate spelling is not hypothetical -- it is the wording the diff itself chose next door.",
+          "ask": "Widen to the verb class, e.g. 'schema\\.json.*\\b(bl[e]sses|names|lists|declares)\\b', and add one control cell per verb (the existing three-cell control pattern at :464-467 already has the right shape for it). Alternatively state in the comment that the needle covers only the historical spelling and why that is sufficient -- but then the assertion NAME must narrow to match."
+        },
+        {
+          "id": "D4",
+          "severity": "nit",
+          "must_fix_before_merge": false,
+          "title": "DRY: the marker-extraction preamble is now duplicated verbatim.",
+          "evidence": "test-status-schema-contract.sh:39-48 is a near-copy of test-corpus-union.sh:63-68 + :92-97 (same BEGIN_MARK/END_MARK literals, same awk, same `[[ -s ]] && source` guard). Two consumers now each carry their own copy of how to load the one shared helper.",
+          "ask": "Lift `load_corpus_helper <suite-path>` into tests/harness.sh. Small (8 lines), but this repo's own #30 D1 lesson is 'one build, not two' and the second copy is exactly the shape that lesson names."
+        },
+        {
+          "id": "D5",
+          "severity": "nit",
+          "must_fix_before_merge": false,
+          "title": "One assertion cannot fail independently of its neighbours.",
+          "evidence": "test-status-schema-contract.sh:187-188 'AC1: the two caps agree with each other' compares events_cap to flags_cap, both of which are pinned to the literal 32 at :182 and :184. No schema state reddens :188 without also reddening one of the pins. Confirmed by the 32->17 mutation: it fired alongside, never alone.",
+          "ask": "Drop it, or repoint it at something the pins do not entail (e.g. that no OTHER verdict-shaped field in the schema is left uncapped)."
+        }
+      ],
+      "verified_clean": [
+        "The #30 corpus helper was REUSED, not re-implemented: test-pipeline-telemetry.sh is untouched by this diff (git diff --stat lists only the schema, two existing suites, the new suite, and .pipeline/34/status.json). test-corpus-union.sh's AC15 ('exactly one corpus-helper block is defined') greps $SUITE = test-pipeline-telemetry.sh only, so the new suite's BEGIN_MARK/END_MARK shell literals cannot perturb it. The extraction is asserted rather than assumed at test-status-schema-contract.sh:136, and a failed load also reddens the AC2 vacuity floor.",
+        "The AC10 self-exemption is narrow and cannot silently widen: test-status-schema-contract.sh:449 matches an exact QUOTED basename inside [[ == ]], so the RHS is literal, not a glob; it is the only `continue` in the loop besides the -f guard; and AC10_EXAMINED (:450, :457-458) is counted AFTER the exemption, so a widening that skipped files would drop the count below the >= 8 floor.",
+        "AC8's unchanged-consumer pin is by VALUE, not presence (:421-422), and voice-lint.mjs:224 still reads the pattern out of the schema rather than copying it.",
+        "AC2/AC3 do not range over a possibly-empty set: the floor is DERIVED from two independent enumerations (git index and filesystem, :209-212) and never pinned, the walk's `read` count is asserted against the shell's own count (:225-226) so a continued-past-unreadable walk cannot report an unearned zero, and the empty-corpus cell (:238-241) proves the vacuity predicate refuses files=0.",
+        "The cap=17 non-zero control (:280-288) is anchored to a LIVE record and carries its expiry sentence in the assertion comment (:276-279), per evidence.md's shelf-life rule. It also discriminates rather than merely firing: it names the file, the flags[] side, and the offending value, and the paired cap=14 cell (:293-297) proves the events[] branch is a separate cell rather than a passenger."
+      ],
+      "constraints_md_check": "No line of constraints.md touches this diff: no migration, table, column, index, enum or access-policy change (DBA tripwire clear); no workflow, secret, config, resource binding, queue or deploy-order change (DevOps clear); no auth surface, crypto, webhook verification, external intake or regulated data type (SecOps tripwire clear). The diff is one JSON schema file, two test comments, one new bash test suite, and the run's own status.json.",
+      "blast_radius_check": {
+        "shared_contract": "plugins/pipeline/schemas/status.schema.json",
+        "readers_enumerated": "git grep -n 'status\\.schema' -- . (excluding .pipeline): the ONLY runtime reader is voice-lint.mjs:224, which reads properties.current_phase.pattern and nothing else. gate-phase-entry.mjs:268 and pipeline-telemetry.mjs:39 name the file in comments only. validate-pipeline-artifact.mjs never names it (asserted as an expiry at test-status-schema-contract.sh:327-331, with a non-zero control proving the grep can find the string elsewhere).",
+        "fields_touched": "events[].verdict, flags[].verdict, flags[].summary, current_phase.description -- none of which any runtime reader consumes. The one consumed key (current_phase.pattern) is pinned byte-identical.",
+        "fifth_vocabulary_copy": "No NEW copy of the phase VOCABULARY is introduced (the suite derives it; the only phase literals in it are single-purpose control inputs at :246, :309, :368). But a new copy of the DERIVATION is introduced, and it diverges -- see D1. The pre-existing full-label enumeration in gate-phase-entry.mjs (PREREQUISITES + UNGUARDED + TERMINAL, :74-121) is a fifth hand-maintained copy, but it predates this diff and is partitioned against pipeline.md by test-gate-phase-entry-drift.sh -- with the strict derivation, which is why it too is blind to 0-setup."
+      },
+      "knowledge_drift_claims": [],
+      "notes": "The shared worktree showed ' M .pipeline/34/status.json' before and after my run; I did not write it and did not touch it. My mutations ran only in /tmp/dev-34-mutate (detached at d8686bc), were restored FROM GIT, and the worktree was verified clean before removal.",
+      "phase4_nit_resolution": {
+        "commit": "748f37cca56a6d0d2f996ea7c99812496a905902",
+        "run": "bash plugins/pipeline/tests/run.sh -> 33 suites, 2064 passed, 0 failed (Darwin 25.5.0 x86_64, bash 3.2.57, node v24.19.0)",
+        "resolved": [
+          {
+            "id": "D2 / G5",
+            "resolved": true,
+            "how": "Comments at :15 and :179 now say TWO sites, one pin per capped field, and say why AC1 requires that. qa_signoff.notes corrected. No assertion changed."
+          },
+          {
+            "id": "D3",
+            "resolved": true,
+            "how": "Needle widened to the verb class (bl[e]sses|n[a]mes|lists|claims), grep -E at all three call sites, one control cell per verb plus a past-tense negative cell. Your exact planted line now reddens: expected 'none', actual ' test-gate-phase-entry-drift.sh:279'."
+          },
+          {
+            "id": "G1",
+            "resolved": true,
+            "how": "Pinned floor of 8 replaced by a population derived from the glob minus the self-exemption. Your M15b re-run reddens: expected 32, actual 9."
+          },
+          {
+            "id": "S1",
+            "resolved": true,
+            "how": "'Rules for `verdict`' added to commands/pipeline.md beside the 140 rule, plus three assertions keyed to the cap read from the schema. Gate-bites recorded three ways (schema-only raise, block deletion, range runaway)."
+          },
+          {
+            "id": "BA-3",
+            "resolved": true,
+            "how": "map.json corrected to 27/26 with the population named (wide vs narrow grep, 0-setup the sole difference)."
+          },
+          {
+            "id": "BA-4",
+            "resolved": true,
+            "how": "scope_drift.detected -> true with your ruling in resolution. Nothing rebuilt."
+          }
+        ],
+        "not_resolved_by_owner_ruling": [
+          {
+            "id": "BA-1",
+            "disposition": "OUT of this diff by owner ruling; QA ruled the current derived shape acceptable and pinning a number contradicts the derive-counts rule this round enforces. Follow-up issue filed by the owner."
+          },
+          {
+            "id": "S2 / G3",
+            "disposition": "OUT; SecOps ruled a length cap the wrong instrument and filed #52."
+          },
+          {
+            "id": "D1 / BA-2",
+            "disposition": "OUT; the third-derivation / 0-setup divergence is being filed separately by the owner. Both BA and Dev-review placed it out of scope for #34/#42."
+          },
+          {
+            "id": "G4 / D4 / D5",
+            "disposition": "OUT; belongs to #47 (run.sh aggregate) and to the refactor lane."
+          }
+        ]
+      }
+    },
+    "qa": {
+      "verdict": "APPROVE_WITH_NOTES",
+      "role": "qa",
+      "reviewed_at": "2026-08-20T00:00:00Z",
+      "reviewed_commit": "d8686bc19d317d89d1ec29b8d2cf13c196bb30ff",
+      "diff_base": "origin/main",
+      "isolation": {
+        "mutation_worktree": "<redacted-absolute-path>",
+        "shared_worktree_mutated": false,
+        "note": "Every mutation below was planted and reverted in /tmp/qa-34-mutate. The shared worktree at .claude/worktrees/34-phase3-20260820-094843 was READ only. Each mutation was reverted with `git checkout -- .` and the tree confirmed clean (only the untracked battery.sh harness remained, which planted nothing)."
+      },
+      "environment": {
+        "platform": "darwin, Darwin 25.5.0 (macOS)",
+        "node": "v24.19.0",
+        "shell": "<redacted-absolute-path>",
+        "caveat": "This is the bash/darwin half. The remote CI half is ubuntu-latest per .github/workflows/tests.yml. See zsh_exposure below."
+      },
+      "independent_verification": {
+        "full_suite": "bash plugins/pipeline/tests/run.sh -> rc=0, 33 suites, TOTAL passed=2056 failed=0. Exit status captured to a file, NOT read through a pipe (evidence.md rule 2).",
+        "new_suite": "bash plugins/pipeline/tests/test-status-schema-contract.sh -> passed=67 failed=0",
+        "voice_lint_ac9": "bash plugins/pipeline/tests/test-voice-lint.sh -> passed=41 failed=0; test-voice-lint.sh:191 `assert_contains \"and names the schema it violates\" \"$ERR\" \"status.schema.json\"` is a permanent in-suite non-zero control on the malformed-phase path, so AC9's control is not a one-off an author ran once."
+      },
+      "zsh_exposure": {
+        "new_suite_zsh_assertions": 0,
+        "evidence": "grep -n 'zsh' plugins/pipeline/tests/test-status-schema-contract.sh returns NOTHING. Repo-wide, zsh-tagged columns live only in test-panel-composition-fail-direction.sh and test-mis-tier-tripwire.sh, neither of which this diff touches.",
+        "conclusion": "#47's 'the [zsh] columns do not run on ubuntu-latest' gap does NOT reduce coverage of anything this diff adds. Remote CI green on ubuntu-latest covers 100% of the 67 new assertions. Stated plainly as asked."
+      },
+      "orchestrator_claims_verified": [
+        {
+          "claim": "1. AC2's floor is derived, not pinned; a zero-record walk must FAIL not pass green.",
+          "verdict": "CONFIRMED, and the guard's own limit measured.",
+          "evidence": "M9 (corpus_files neutered to emit nothing): 54/13. The union assertion 'the union walk is at least as large as both enumerations' FAILED, plus 12 downstream. So it is not a tautology in practice -- the two independent enumerations (git index, on-disk ls) are computed WITHOUT corpus_files, so a narrowed helper is caught. M10 (corpus_files returns only the first record): 60/7, also caught. What the guard fails to bind: its absolute lower bound is 1, not the 6 the spec's AC2 named. A corpus that shrinks on BOTH sides at once (archived away) passes. Dev discloses exactly this in qa_signoff.edge_cases_deferred. What actually rescues that case is the AC3 C17 anchor (a DIFFERENT criterion), which reddens the moment .pipeline/17/status.json loses APPROVE_WITH_NOTES. Acceptable, because the anchor carries its own written expiry instruction."
+        },
+        {
+          "claim": "2. AC3's non-zero control is permanent and in-suite; the 32->17 mutation goes 67/0 -> 63/4 naming .pipeline/17/status.json flags[4].verdict.",
+          "verdict": "CONFIRMED INDEPENDENTLY, and pushed further.",
+          "evidence": "M2 (schema cap 32->17, zero test files changed): passed=63 failed=4, FAILs = AC1 events pin, AC1 'two caps agree', AC3 corpus violations, AC3 FIXTURE MATRIX ok-record cell. Pushed further with two mutations of the ASSERTION path rather than the schema: M11 (walker loops [\"events\"] only, never flags) -> 61/6, all four C17 control legs red; M14 (walker counts no verdicts at all) -> 58/9, including 'the walk actually inspected verdict strings'. The zero in AC3 is earned: 29 verdict strings inspected across 6 committed records."
+        },
+        {
+          "claim": "3. AC4 -- exactly one site holds the literal 32.",
+          "verdict": "FALSE AS STATED. Two sites hold it.",
+          "evidence": "grep -n '\"32\"' plugins/pipeline/tests/test-status-schema-contract.sh returns lines 182 AND 184. The file's own header (line 15, 'One site below holds the literal 32') and its inline comment (line 179, 'THE ONE SITE THAT HOLDS THE LITERAL') and impl-report qa_signoff.notes ('AC1's single literal 32') all say one. Materiality is low -- a future cap change fails LOUD on whichever pin was not updated -- but evidence.md rule 8 is 'a comment is a claim', and this file's whole thesis is that a hand-maintained second copy of a value rots silently. It carries two and claims one."
+        },
+        {
+          "claim": "4. AC6 -- halted-error survives; the naive fix's deletion reddens.",
+          "verdict": "CONFIRMED.",
+          "evidence": "M5 (halted-error deleted from the description, i.e. the mechanical derive-from-pipeline.md fix): 64/3 -- AC5 direction 1, the AC5 direction-1 control, and AC6's own assertion. The negative control on the mechanical fix bites."
+        },
+        {
+          "claim": "5. Documented expected survivor: raising the cap 32->64 leaves AC3 green.",
+          "verdict": "TRUE OF AC3, BUT IT IS NOT A SUITE-LEVEL SURVIVOR. Ruled acceptable.",
+          "evidence": "M1 (events cap 32->64): passed=65 failed=2 -- 'AC1: events[].verdict is capped at the ruled 32' and 'AC1: the two caps agree with each other'. AC3 is green, as Dev says. So the survivor is scoped to AC3, and AC1's pin catches the loosening. AC3's claim is literally 'every committed verdict conforms to the cap READ FROM the schema', and that is exactly what it does; it does not claim to police the cap's VALUE. AC3 is therefore not weaker than it claims. See gap G2 for the real residual, which is not this survivor: nothing binds the cap to the DECLARED verdict vocabulary, only to committed history. Also confirmed the flags[] half of the two-entry table is pinned SEPARATELY (evidence.md's 'mutate each entry of a rule table separately'): M3 (flags maxLength deleted) -> 65/2 and M4 (flags 32->64 only) -> 65/2, both naming the flags pin. A whole-schema mutation would have hidden a dead flags entry; it does not."
+        },
+        {
+          "claim": "6. M12 -- deleting one assertion took the suite 67 -> 66 while still reporting failed=0. Verify the harness count guard catches what it claims.",
+          "verdict": "CONFIRMED, and the guard does NOT catch this (nor does it claim to).",
+          "evidence": "My M13 (deleted `assert_eq \"AC1: events[].verdict is still typed string\" ...`): passed=66 failed=0, suite exits 0, nothing reddens. harness.sh:263 _assert_count_guard compares RECORDED (ledger lines) against COUNTED (TESTS_PASSED+TESTS_FAILED) -- it catches an assertion swallowed by a subshell, which is a different failure from an assertion deleted from source. run.sh (read AND run) counts FAILED SUITES only; it prints no aggregate assertion total and grep found no pinned total anywhere in tests/, scripts/ or .github/. So AC11's protection is two hand-recorded numbers in impl-report.json -- a self-declared value, which is the very thing evidence.md's opening rule says cannot satisfy a gate. Pre-existing (#47), not introduced here; see gap G4."
+        },
+        {
+          "claim": "7. .pipeline/34/status.json is in the diff and is a corpus member. Circularity?",
+          "verdict": "NO CIRCULARITY. Proven by removing it.",
+          "evidence": "P1: deleted .pipeline/34 from both the index and the disk in the isolated worktree and re-ran the suite -> passed=67 failed=0. Every binding fact comes from pre-existing records: the C17 anchor and the 18-char corpus maximum are .pipeline/17/status.json; the events[] branch at cap 14 comes from REQUEST_CHANGES in pre-existing records. The PR's own record moves the floor and the walk count together, so it is neutral. No criterion is satisfied by evidence this PR supplies."
+        }
+      ],
+      "mutation_matrix": [
+        {
+          "id": "BASELINE",
+          "target": "none",
+          "result": "67/0",
+          "expected": "green",
+          "outcome": "as expected"
+        },
+        {
+          "id": "M1",
+          "target": "schema events[].verdict maxLength 32->64",
+          "result": "65/2 (AC1 events pin, AC1 caps-agree)",
+          "expected": "AC1 red, AC3 green",
+          "outcome": "DOCUMENTED PARTIAL SURVIVOR -- AC3 survives by design, AC1 kills it"
+        },
+        {
+          "id": "M2",
+          "target": "schema events[].verdict maxLength 32->17",
+          "result": "63/4",
+          "expected": "AC1 + AC3 red",
+          "outcome": "caught"
+        },
+        {
+          "id": "M3",
+          "target": "schema flags[].verdict maxLength DELETED",
+          "result": "65/2",
+          "expected": "flags pin red, events pin green",
+          "outcome": "caught; table entries pinned separately"
+        },
+        {
+          "id": "M4",
+          "target": "schema flags[].verdict 32->64 only",
+          "result": "65/2",
+          "expected": "flags pin red only",
+          "outcome": "caught"
+        },
+        {
+          "id": "M5",
+          "target": "description: delete halted-error (the naive mechanical fix)",
+          "result": "64/3",
+          "expected": "AC6 + AC5 dir1 red",
+          "outcome": "caught"
+        },
+        {
+          "id": "M6",
+          "target": "description: re-add 3-scope-drift-adjudication",
+          "result": "64/3",
+          "expected": "AC5 dir2 + AC7 red",
+          "outcome": "caught"
+        },
+        {
+          "id": "M7",
+          "target": "description: drop 2-review",
+          "result": "65/2",
+          "expected": "AC5 dir1 red",
+          "outcome": "caught"
+        },
+        {
+          "id": "M8",
+          "target": "schema current_phase.pattern [0-5]->[0-6]",
+          "result": "66/1",
+          "expected": "AC8 byte-identity red",
+          "outcome": "caught; the unchanged-consumer pin is by VALUE not presence"
+        },
+        {
+          "id": "M9",
+          "target": "corpus_files helper emits NOTHING (empty walk)",
+          "result": "54/13",
+          "expected": "vacuity must FAIL not pass green",
+          "outcome": "caught -- AC2 cannot be satisfied by an empty walk"
+        },
+        {
+          "id": "M10",
+          "target": "corpus_files returns only the first record",
+          "result": "60/7",
+          "expected": "union < floor red",
+          "outcome": "caught -- a silently NARROWED walk is caught, not just an empty one"
+        },
+        {
+          "id": "M11",
+          "target": "walker loops [\"events\"] only, never flags[]",
+          "result": "61/6",
+          "expected": "all four C17 legs red",
+          "outcome": "caught (mutation of the assertion path, not the code under test)"
+        },
+        {
+          "id": "M12",
+          "target": "status.schema.json named in validate-pipeline-artifact.mjs",
+          "result": "66/1",
+          "expected": "R6 EXPIRY red",
+          "outcome": "caught -- the 'nothing validates this file' sentence carries a live expiry, per evidence.md's shelf-life rule"
+        },
+        {
+          "id": "M13",
+          "target": "delete one assertion from the new suite",
+          "result": "66/0, rc=0",
+          "expected": "SOMETHING should notice 67->66",
+          "outcome": "SURVIVED. Nothing notices. #47's failure mode, pre-existing, see G4"
+        },
+        {
+          "id": "M14",
+          "target": "walker inspects no verdict at all (verdicts=0)",
+          "result": "58/9",
+          "expected": "the zero stops being a result",
+          "outcome": "caught"
+        },
+        {
+          "id": "M15a",
+          "target": "POSITIVE CONTROL: plant the forbidden present-tense wording in an EXAMINED suite (test-voice-lint.sh)",
+          "result": "66/1 (AC10 red)",
+          "expected": "AC10 red",
+          "outcome": "caught -- the needle fires in-suite, so M15b's green is a real result and not a broken probe"
+        },
+        {
+          "id": "M15b",
+          "target": "SAME violation, AC10 glob narrowed from 33 files to 9 (a tests/ reorganisation)",
+          "result": "67/0",
+          "expected": "AC10 should still catch it or at least refuse the narrowed population",
+          "outcome": "SURVIVED. This is gap G1"
+        },
+        {
+          "id": "P1",
+          "target": "delete .pipeline/34 (this PR's own corpus record)",
+          "result": "67/0",
+          "expected": "green if there is no circularity",
+          "outcome": "no circularity"
+        },
+        {
+          "id": "P2",
+          "target": "add a new `current_phase: \"6-brand-new-phase\"` write to pipeline.md",
+          "result": "65/2 (AC5 dir1)",
+          "expected": "the REAL drift direction must redden",
+          "outcome": "caught"
+        }
+      ],
+      "expected_survivors": [
+        {
+          "id": "M1",
+          "survivor": "AC3 stays green when the cap is raised 32->64",
+          "expected": true,
+          "reason": "The committed corpus maximum is 18, so no committed record distinguishes a cap of 32 from 64. AC3's claim is conformance to the cap READ FROM the schema, not policing of the cap's value. AC1's two pins on the literal 32 kill this mutation at suite level (65/2), so it is a survivor of one criterion, not of the suite.",
+          "issue": "#34"
+        }
+      ],
+      "concerns": [
+        {
+          "id": "G1",
+          "severity": "medium",
+          "title": "AC10's vacuity floor is PINNED at 8 against a population of 33, and I demonstrated it failing to bind",
+          "file": "plugins/pipeline/tests/test-status-schema-contract.sh:447-458",
+          "detail": "The AC10 walk iterates `for f in \"$TESTS_DIR\"/test-*.sh` and its only guard against a narrowed population is `assert_eq \"AC10: and the walk examined the suites rather than passing against an empty glob\" \"$([[ \"$AC10_EXAMINED\" -ge 8 ]] && echo ok || ...)\" \"ok\"`. The real population is 33 test-*.sh files (32 after the self-exemption). A pinned floor of 8 leaves room for 24 suites to fall out of the glob silently. Demonstrated, with a positive control: M15a planted the forbidden present-tense wording in test-voice-lint.sh (examined) -> 66/1, AC10 red, so the needle is alive. M15b left the identical violation in place and narrowed the glob to `test-g*.sh test-h*.sh test-i*.sh` (9 files, floor satisfied) -> 67/0 GREEN, violation unseen. This is exactly the recursion the new evidence.md rule demands -- 'when you write the guard against this, ask what THAT guard fails to bind' -- landing inside the diff that cites the rule, and it is the same shape as the origin note's 'three of the six were introduced by the fix for the one before'. Direction (evidence.md rule 7): the guard CLAIMS MORE than it knows, asserting a property over a set it did not fully examine. Reachability: defeatable only by a future edit (a tests/ reorganisation), so it is a ratchet rather than a live gap -- which is why this is a note and not a block.",
+          "missing_test": "Derive the AC10 population the way AC2 derives the corpus floor, from an independent enumeration rather than a magic number:\n    AC10_EXPECTED=$(( $(ls \"$TESTS_DIR\"/test-*.sh 2>/dev/null | grep -c .) - 1 ))   # -1 = the single self-exemption\n    assert_eq \"AC10: the walk examined EVERY suite but its own (population derived, not pinned)\" \"$AC10_EXAMINED\" \"$AC10_EXPECTED\"\nUnder M15b that assertion reads 9 vs 32 and reddens. One line, and it converts the last pinned floor in the file into a derived one.",
+          "same_class_but_harmless": "`VACUITY: pipeline.md yielded a non-empty phase vocabulary` and `VACUITY: ... the Examples list parsed to a non-empty set` both pin >= 10 against an actual 27. Those two ARE rescued downstream: a silently shrunken set on either side reddens the AC5 set-equality comparison (proven by M7 and P2). AC10 has no downstream comparison, which is why it is the one that matters."
+        },
+        {
+          "id": "G2",
+          "severity": "low",
+          "title": "The cap is bound to HISTORY (the committed corpus) and to nothing on the CONFIGURATION side",
+          "file": "plugins/pipeline/schemas/status.schema.json (events[].verdict and flags[].verdict descriptions); plugins/pipeline/tests/test-status-schema-contract.sh:287",
+          "detail": "The schema's own justification is a claim about the DECLARED vocabulary -- '32 is 1.78x the longest declared verdict (APPROVE_WITH_NOTES, 18)'. The suite pins a different population: `longestvalue/longest == APPROVE_WITH_NOTES/18` over the COMMITTED CORPUS. Those are two populations and evidence.md's new rule is explicit that a number carries the one it was measured on. Measured both myself at d8686bc: committed corpus = 6 tracked records, 29 verdict strings, 4 distinct tokens {APPROVE_WITH_NOTES 18, REQUEST_CHANGES 15, complete 8, SKIPPED 7}; declared vocabulary across commands/pipeline.md + agents/*.md + schemas/review.schema.json = APPROVE_WITH_NOTES 18, APPROVE_WITH_NITS 17, REQUEST_REFACTOR 16, rework-required 15, REQUEST_CHANGES 15, TRIPWIRE-NOTE 13, PENDING_CI 10, SKIPPED 7, APPROVE 7, VETO 4. Longest declared = 18, so the cap is adequate TODAY and there is no live defect. The residual is that a longer verdict token declared in an agent prompt reddens nothing until a run commits a record carrying it, and the cheapest fix at that point is to raise the cap -- inferring what the field should hold from what it has held.",
+          "missing_test": "A configuration-side twin of AC3: derive the declared verdict vocabulary (the `verdict\": \"X\"` writes plus the pipe-separated enum lines in commands/pipeline.md and agents/*.md, plus review.schema.json's two `enum` arrays), assert the derived set is non-empty and has >= 5 members, then assert max(len) <= the cap read from status.schema.json. Non-zero control: an injected 40-character token must redden it. review.schema.json:16 and :51 give a machine-readable seed, so this is not a prose grep."
+        },
+        {
+          "id": "G3",
+          "severity": "low",
+          "title": "The stated rationale for the cap is falsified by a sibling field the diff leaves uncapped",
+          "file": "plugins/pipeline/schemas/status.schema.json (events[].note has no maxLength)",
+          "detail": "The new description says the bound exists 'because status.json is committed AND archived verbatim, so an unbounded string here reaches a public tree at full length'. Measured over the same committed corpus: the longest events[].note is 616 characters (.pipeline/39/status.json events[4]), then 600 (.pipeline/34/status.json events[0]) and 372 (.pipeline/17/status.json events[7]) -- 19x the verdict cap, in the same committed, archived-verbatim file, in a field with no maxLength at all. flags[].summary is capped at 140 and conforms (max observed 128, 0 over). So the cap refuses prose in the verdict slot while prose moves next door uncapped. Out of scope for #34 as written and I am not asking Dev to widen it; falsifying the explanation is evidence.md rule 8 and this is where it points.",
+          "missing_test": "None demanded in this PR. Route to BA as a follow-up: either cap events[].note, or amend the rationale sentence so it does not claim a protection the schema does not provide."
+        },
+        {
+          "id": "G4",
+          "severity": "low",
+          "title": "A deleted assertion is still invisible (#47), and AC11's mitigation is a self-declared number",
+          "file": "plugins/pipeline/tests/harness.sh:263 (_assert_count_guard), plugins/pipeline/tests/run.sh",
+          "detail": "Confirmed by M13: 66/0, rc=0, nothing reddens. _assert_count_guard compares ledger lines against the counters, catching a subshell-swallowed assertion, not a deleted one -- it does not claim otherwise. run.sh counts failed SUITES and prints no aggregate. Grep found no pinned total in tests/, scripts/ or .github/. AC11 therefore rests on two numbers hand-recorded into impl-report.json.assertion_counts, which is the self-declared-boolean shape evidence.md opens with. Pre-existing and repo-wide, NOT introduced by this diff, which is why it does not block.",
+          "missing_test": "Belongs in #47, not here. The derived (non-pinning) form: have run.sh sum the `passed=` lines and emit the total, and have CI re-run the suite at the merge base and compare, so the floor is re-derived every run rather than pinned (#33's decay)."
+        },
+        {
+          "id": "G5",
+          "severity": "informational",
+          "title": "Two sites hold the literal 32; three comments and the impl-report say one",
+          "file": "plugins/pipeline/tests/test-status-schema-contract.sh:182 and :184 vs the claims at :15, :179 and impl-report qa_signoff.notes",
+          "detail": "grep -n '\"32\"' returns exactly two lines. Fails loud on a future cap change (whichever pin is stale reddens), so there is no correctness consequence -- but the sentence is wrong and this file's argument is that a hand-maintained second copy rots. Fix the comment to say two, or collapse the flags pin to `assert_eq ... \"$(rfield \"$SCHEMA_FACTS\" events_cap)\"` and let the existing 'the two caps agree' assertion carry the second half."
+        },
+        {
+          "id": "G6",
+          "severity": "informational",
+          "title": "AC5's ground truth is a grep over ONE syntactic form in ONE file; checked complete today",
+          "file": "plugins/pipeline/tests/test-status-schema-contract.sh:345",
+          "detail": "I enumerated all 33 current_phase mentions in commands/pipeline.md at d8686bc. The grep matches 27 (26 literals + the <phase>-error template, which is filtered). The 5 non-matching mentions are prose about the mechanism (lines 22, 69, 73, 78, 1051) and none names a phase literal, so the ground truth is COMPLETE as of this commit. Named per evidence.md rule 6 (name the correct work a control refuses): if a future phase is ever written in a form the grep misses AND is correctly added to the description, AC5 direction 2 refuses correct work. The remedy is obvious and the failure is loud, so this is a note, not a gap."
+        }
+      ],
+      "acceptance_criteria_audit": [
+        {
+          "criterion": "AC1",
+          "mapped": true,
+          "watched_fail_under": [
+            "M1",
+            "M2",
+            "M3",
+            "M4"
+          ],
+          "note": "both fields pinned separately; the two-entry table does not hide a dead entry"
+        },
+        {
+          "criterion": "AC2",
+          "mapped": true,
+          "watched_fail_under": [
+            "M9",
+            "M10"
+          ],
+          "note": "empty walk FAILS; narrowed walk FAILS; floor's absolute bound is 1, disclosed, rescued by the C17 anchor"
+        },
+        {
+          "criterion": "AC3",
+          "mapped": true,
+          "watched_fail_under": [
+            "M2",
+            "M11",
+            "M14"
+          ],
+          "note": "non-zero control is permanent and in-suite and carries a written re-anchoring instruction; 29 verdict strings inspected, so the zero is earned"
+        },
+        {
+          "criterion": "AC4",
+          "mapped": true,
+          "watched_fail_under": [
+            "M1",
+            "M2"
+          ],
+          "note": "the schema-only mutation moves the verdict, which is what AC4 asked to be proven; the 'one literal' claim is off by one (G5)"
+        },
+        {
+          "criterion": "AC5",
+          "mapped": true,
+          "watched_fail_under": [
+            "M6",
+            "M7",
+            "P2"
+          ],
+          "note": "both directions controlled; the REAL drift direction (a new write in pipeline.md) verified by P2"
+        },
+        {
+          "criterion": "AC6",
+          "mapped": true,
+          "watched_fail_under": [
+            "M5"
+          ],
+          "note": "the naive mechanical fix reddens, which is the whole point of the criterion"
+        },
+        {
+          "criterion": "AC7",
+          "mapped": true,
+          "watched_fail_under": [
+            "M6"
+          ],
+          "note": "correctly file-scoped, with a control proving the surviving control INPUT next door still exists"
+        },
+        {
+          "criterion": "AC8",
+          "mapped": true,
+          "watched_fail_under": [
+            "M8"
+          ],
+          "note": "pinned by VALUE not presence; voice-lint.mjs is the only runtime reader and it still reads the key rather than copying it"
+        },
+        {
+          "criterion": "AC9",
+          "mapped": true,
+          "watched_fail_under": [],
+          "note": "test-voice-lint.sh 41/0 run by me; the non-zero control is permanent at test-voice-lint.sh:191, not a one-off"
+        },
+        {
+          "criterion": "AC10",
+          "mapped": true,
+          "watched_fail_under": [
+            "M15a"
+          ],
+          "note": "needle proven alive against all three sites' actual pre-change wording AND against my own planted violation; population floor is the gap (G1)"
+        },
+        {
+          "criterion": "AC11",
+          "mapped": "partial",
+          "watched_fail_under": [],
+          "note": "run.sh 2056/0 rc=0 verified by me on darwin/bash; the count comparison itself is a self-declared number in impl-report (G4, #47)"
+        }
+      ],
+      "blast_radius": {
+        "changed_contract": "status.schema.json properties.current_phase.pattern and the two verdict subschemas",
+        "consumers_grepped": "grep -rn over plugins/pipeline/scripts/ and plugins/pipeline/hooks/ for status.schema.json and current_phase",
+        "findings": "voice-lint.mjs:226 is the ONLY runtime reader of this schema and reads only current_phase.pattern, which AC8 pins byte-identical and M8 proves is load-bearing. validate-pipeline-artifact.mjs names the file nowhere (verified, and M12 shows the R6 expiry assertion notices if that changes) and implements no maxLength, so the new caps refuse nothing at runtime -- correctly and prominently disclosed in the schema's own prose. session-start.sh:129/162 and gate-phase-entry.mjs:260 read current_phase out of status.json with their own greps and are unaffected by a description edit. No parallel re-derivation of the capped values exists. No unchanged consumer is broken."
+      },
+      "knowledge_drift_claims": [],
+      "merge_conditions": [
+        "G1 must be WRITTEN as a tracker issue with the M15a/M15b evidence and the one-line derived-floor replacement BEFORE this merges (evidence.md rule 10: writing it in the issue is the deferral). Alternatively Dev applies the one line now, which is cheaper than filing it.",
+        "G2 and G3 filed as follow-ups (G3 routes to BA, it is a scope question about the rationale sentence, not a test gap).",
+        "G5 is a comment correction and can ride along with G1 or land separately.",
+        "Remote CI green on the PR head is verified at merge, not by this panel. Per zsh_exposure, ubuntu-latest covers 100% of the new suite."
+      ],
+      "notes": "APPROVE_WITH_NOTES. 18 mutations and probes run in an isolated detached worktree; every acceptance criterion except AC11 was watched to fail under a mutation aimed at it, and AC11 was verified by running the command. Two survivors: M1 is documented and correct (AC3 cannot distinguish caps above the 18-char corpus maximum, and AC1's pin kills the mutation at suite level anyway), and M13 is #47's pre-existing blind spot. The one NEW hole I found and demonstrated is G1: AC10's population floor is pinned at 8 against 33 files, and with a positive control proving the needle alive I made the same violation invisible by narrowing the glob. It is defeatable only by a future edit, so by this repo's own ship-or-block line it is a ratchet that gets filed rather than a gap that blocks -- but it is the diff's own headline evidence rule landing inside the diff, and the fix is one line. No circularity: removing this PR's own corpus record leaves the suite at 67/0."
+    },
+    "secops": {
+      "verdict": "APPROVE_WITH_NOTES",
+      "reviewed_at": "2026-08-20T16:05:00Z",
+      "reviewed_commit": "d8686bc19d317d89d1ec29b8d2cf13c196bb30ff",
+      "concerns": [
+        {
+          "severity": "medium",
+          "description": "S1. The 32-char cap has no write-time honorer, and the diff ships prose claiming it has one. Verified at d8686bc: status.schema.json is named nowhere in scripts/validate-pipeline-artifact.mjs (grep returns nothing), and maxLength appears there exactly once, at :30, inside the comment declaring it advisory. commands/pipeline.md -- the only document the WRITER reads -- restates the 140-char summary cap at :92 and restates the 32-char verdict cap nowhere (grep -n '32' returns no relevant hit). The new schema description nevertheless says the cap 'is honored by the writer and by tests/test-status-schema-contract.sh'; the second half is true, the first names a rule nobody wrote down. Contrast the sibling summary description, which correctly names its mechanism ('honored only because commands/pipeline.md restates it as a writer rule'). Remediation, one line: add a verdict bullet beside the 140 rule at pipeline.md:92 ('verdict is a TOKEN, not prose: <= 32 chars'), which makes the sentence true AND gives the cap the write-time honorer it claims. Not a block: R6's blunt all-caps NOTHING VALIDATES sentence is present on both fields and carries the load.",
+          "location": "plugins/pipeline/schemas/status.schema.json:56 + plugins/pipeline/commands/pipeline.md:92 (d8686bc)"
+        },
+        {
+          "severity": "medium",
+          "description": "S2. PRE-EXISTING, routed and WRITTEN as https://github.com/nsmedia-io/agent-pipeline/issues/52 before merge. status.json's secret-redaction rule (pipeline.md:63) is scoped to ask_text alone, while events[].note, veto_reason, error (all unbounded) and flags[].summary are orchestrator-authored free text in the same committed-and-archived file. error is the sharpest: its natural content is copied machine output (a DSN, a failed gh/curl echoing a token, a stack trace). RULING on the dispatch's question 3: a length cap is the WRONG instrument for these fields. The live 600-char events[0].note in this very PR is correct audit work (it records the #45 reproduction), and a 140-cap would refuse it. The security dimension for note/veto_reason/error is CONTENT, not LENGTH. Not introduced by this diff and not a block on it.",
+          "location": "plugins/pipeline/commands/pipeline.md:63 (pre-existing; routed as issue #52)"
+        },
+        {
+          "severity": "info",
+          "description": "S3. Secret scan of the committed corpus is CLEAN, with a non-zero control and a reported enumeration gap. 6 tracked .pipeline/*/status.json read at d8686bc via git show (not the working tree), 287 strings, 11 credential classes: 1 hit, hand-checked benign (.pipeline/17/status.json .phase3_qa_test_commit = a 40-hex git SHA matching the base64 class). Control: the same scanner fired on a planted AKIA... and Bearer ...; a third planted string, pg://u:p4ssw0rdlong@h/db, MISSED because the DB-URL class enumerates postgres|postgresql|mysql|mongodb|redis|amqp and not the pg:// alias. Reported rather than patched out: it is the honest measure of a class list.",
+          "location": "committed corpus: 6 tracked .pipeline/*/status.json at d8686bc"
+        }
+      ],
+      "vulnerabilities": [
+        {
+          "severity": "low",
+          "category": "logging",
+          "description": "The shipped schema description asserts a write-time honorer for the cap that does not exist, in the one file whose documentation-truth failure IS the issue being fixed (#42). Nothing catches it: mutation M4 replaced 'It is honored by the writer and by tests/...' with 'It is ENFORCED at every agent stop by validate-pipeline-artifact.mjs and by tests/...' -- a flatly false enforcement claim -- and the suite stayed 67/0 green, because R6 asserts the PRESENCE of the NOTHING-VALIDATES sentence and prose accuracy is unmutatable. Documented EXPECTED SURVIVOR of my battery.",
+          "location": "plugins/pipeline/schemas/status.schema.json:56 (events[].verdict.description) at d8686bc",
+          "remediation": "Either add the verdict cap as a writer bullet at commands/pipeline.md:92 (preferred: makes the claim true and creates the honorer), or reword to match the sibling summary description and say the writer honors it only by convention."
+        }
+      ],
+      "compliance_flags": [],
+      "knowledge_drift_claims": [],
+      "mutation_battery": {
+        "isolation": "git worktree add /private/tmp/claude-501/secops-34-mutate d8686bc --detach; removed after; shared worktree left with only the orchestrator's pre-existing .pipeline/34/status.json sync",
+        "baseline": "test-status-schema-contract.sh 67/0; full run.sh green (6m56s)",
+        "restore": "git checkout -- <file> after every mutation; tree verified clean by git status --porcelain before removal",
+        "results": [
+          {
+            "id": "M1",
+            "mutation": "events[].verdict maxLength 32 -> 5",
+            "outcome": "RED 63/4",
+            "proves": "the CORPUS walk consumes the schema value, not a copied literal: AC3 'no committed verdict exceeds the cap' reddened, which a test carrying its own 32 could not do"
+          },
+          {
+            "id": "M2",
+            "mutation": "flags[].verdict maxLength removed entirely (restores the #34 defect on the LONGER field)",
+            "outcome": "RED 65/2",
+            "proves": "the folded-in R2 half is pinned separately, not by an 'a maxLength exists somewhere' check"
+          },
+          {
+            "id": "M3",
+            "mutation": "events[].verdict maxLength 32 -> 3200 (the direction that RE-OPENS the exposure)",
+            "outcome": "RED 65/2",
+            "proves": "widening is caught -- but only by AC1's single pinned literal; the corpus check alone goes green on a widened cap, which is the correct division of labour and worth knowing"
+          },
+          {
+            "id": "M4",
+            "mutation": "replace the honored-by-the-writer sentence with a false 'ENFORCED at every agent stop by validate-pipeline-artifact.mjs' claim, leaving the pinned NOTHING-VALIDATES sentence intact",
+            "outcome": "SURVIVED 67/0 (EXPECTED)",
+            "reason": "R6's own comment says prose cannot be mutated into falsity and asserts presence only. This is the documented survivor that keeps the battery from being a rubber stamp, and its issue is the vulnerability recorded above."
+          }
+        ]
+      },
+      "central_ruling_detect_vs_prevent": {
+        "question": "Does the fix reduce the exposure #34 was filed about, or does it only detect a leak already in git history?",
+        "answer": "DETECTS, DOES NOT PREVENT -- but the detection sits in the right environment, so it does reduce the exposure it was filed about.",
+        "write_time": "Nothing. No AGENT_RULES entry, the walker does not implement maxLength (validate-pipeline-artifact.mjs:30), and pipeline.md does not restate the cap to the writer. An over-long verdict is written and committed unimpeded.",
+        "pre_merge": "Real. .github/workflows/tests.yml runs `bash plugins/pipeline/tests/run.sh` on `pull_request`, and the new suite reddens on any committed record whose verdict exceeds the schema cap (M1 proves the walk reads the schema value). The public tree is origin/main; the gate is before the merge into it, and before the Phase 5 archive. Event and environment match.",
+        "residuals": [
+          "By the time CI reddens, the string is already in the BRANCH's git history. A fix-forward commit does not remove it, and nothing in the failure message says 'amend, do not fix forward'.",
+          "The walk covers .pipeline/*/status.json only. The Phase 5 archive copy at knowledge/issue-archive/<n>.json -- written verbatim by knowledge-store.mjs:142-150, no truncation or filter -- is walked by nothing.",
+          "It covers `verdict` only, which is the field LEAST likely to carry a secret. See #52."
+        ],
+        "sufficient_for_the_issue_as_filed": "Yes. #34 asked that an unbounded string not reach a public tree at full length; the path to the public tree is now gated. Write-time enforcement was explicitly ruled out of scope by the spec (registering status.json in AGENT_RULES is its own issue) and that ruling is sound."
+      },
+      "cap_not_enum_reconfirmed": {
+        "population": "29 verdict strings across the 6 git-TRACKED .pipeline/*/status.json files, read at d8686bc via `git show`, NOT the working tree (the shared tree's #34 record carries 2 uncommitted events)",
+        "distinct": "complete(8) x20, REQUEST_CHANGES(15) x5, SKIPPED(7) x3, APPROVE_WITH_NOTES(18) x1",
+        "refused_by_cap_32": 0,
+        "refused_by_the_panelVerdict_enum": 23,
+        "ruling": "32 is consistent with the cap-not-enum ruling and refuses no correct work I can name. Longest verdict-shaped token declared anywhere in plugins/pipeline/schemas is 18 (APPROVE_WITH_NOTES); an enum would refuse 23 of 29 live values, because `complete`, `SKIPPED` and `NOTE` are orchestrator vocabulary that appears in no declared enum. The one composite form I can construct that 32 would refuse ('APPROVE_WITH_NOTES (delta re-review)', 36) is written into `note` by convention, not into verdict -- pipeline.md:870."
+      },
+      "notes": "APPROVE_WITH_NOTES. No vulnerability is introduced by this diff and the security posture strictly improves: the two archived verdict fields are now bounded and the bound is read back out of the schema by a CI-run corpus check whose non-zero control I re-ran. The cap detects rather than prevents, which the diff states honestly on the fields themselves; the one thing it overstates is 'honored by the writer', and the one-line remediation is a verdict bullet at pipeline.md:92. Residual free-text exposure (note/veto_reason/error) is pre-existing, is the WRONG target for a length cap, and is routed as written issue #52."
+    }
+  },
+  "status": {
+    "issue_number": 34,
+    "current_phase": "5-archived",
+    "started_at": "2026-08-20T13:32:41Z",
+    "updated_at": "2026-08-20T18:35:20Z",
+    "branch": "claude/mechanical-group-impl-bfb9ce",
+    "ask_text": "Bound events[].verdict with a maxLength in status.schema.json (#34) and correct the rotted current_phase description example list at line 13 (#42). Both are single-file edits to plugins/pipeline/schemas/status.schema.json.",
+    "events": [
+      {
+        "phase": "0.5-map",
+        "verdict": "SKIPPED",
+        "at": "2026-08-20T13:37:14Z",
+        "note": "No separate 0.5-map dispatch: pipeline.md folds the map into the Phase 1 BA dispatch below the architectural tier, and BA (in flight) writes map.json alongside spec.json. Recorded as a skip rather than waited on because this record carries no risk_tier yet -- the tier is BA output, while pipeline.md mandates checkpointing 1-ba BEFORE dispatching BA -- so gate-phase-entry.mjs:133 normalizes the absent tier to architectural and switches on the architectural-only 1-ba row. That is issue #45 reproduced live. Revisit if BA promotes the tier, which needs the deep three-layer map as its own dispatch."
+      },
+      {
+        "phase": "1-ba",
+        "verdict": "complete",
+        "at": "2026-08-20T13:47:36Z"
+      },
+      {
+        "phase": "2-constraints",
+        "verdict": "complete",
+        "at": "2026-08-20T13:48:59Z",
+        "note": "dba 12 / devops 11 / secops 13 lines, each verified non-empty separately; extracted from the repo agents dir, not the stale plugin cache."
+      },
+      {
+        "phase": "3-impl",
+        "verdict": "complete",
+        "at": "2026-08-20T15:02:13Z"
+      },
+      {
+        "phase": "4-review",
+        "verdict": "APPROVE_WITH_NOTES",
+        "at": "2026-08-20T15:50:58Z"
+      },
+      {
+        "phase": "4-review",
+        "verdict": "merged",
+        "at": "2026-08-20T18:34:45Z",
+        "note": "PR #51 rebase-merged to main; #34 and #42 auto-closed. Nit round applied under the APPROVE_WITH_NOTES rubric, no panel re-run. Suite 2071/0 on main, verified by the orchestrator, not relayed."
+      },
+      {
+        "phase": "5-archive",
+        "verdict": "dispatched",
+        "at": "2026-08-20T18:35:20Z",
+        "note": "Librarian dispatched non-blocking; the run is terminal at dispatch time, not on its return. Shipped in 0.23.0 (c064b3b)."
+      }
+    ],
+    "flags": [
+      {
+        "phase": "1-ba",
+        "agent": "ba",
+        "verdict": "complete",
+        "summary": "spec+map written, tier standard; nothing validates status.json against this schema, so the cap needs a corpus check (R4) to bite",
+        "at": "2026-08-20T13:47:36Z"
+      },
+      {
+        "phase": "3-impl",
+        "agent": "dev",
+        "verdict": "complete",
+        "summary": "PR #51: both verdict fields capped 32, phase list de-rotted; new suite 67 assertions, total 2056 (was 1989)",
+        "at": "2026-08-20T15:02:13Z"
+      },
+      {
+        "phase": "3-impl",
+        "agent": "orchestrator",
+        "verdict": "NOTE",
+        "summary": "TRIPWIRE-NOTE: the mis-tier tripwire effective glob set matches zero tracked files in this repo, so it cannot fire here",
+        "at": "2026-08-20T15:02:13Z"
+      },
+      {
+        "phase": "4-review",
+        "agent": "orchestrator",
+        "verdict": "NOTE",
+        "summary": "SecOps dispatch 1 lost to a connection drop after announcing the write; shard absent, re-dispatched write-first. Round not lost.",
+        "at": "2026-08-20T15:33:08Z"
+      },
+      {
+        "phase": "4-review",
+        "agent": "ba",
+        "verdict": "APPROVE_WITH_NOTES",
+        "summary": "0-setup divergence: a third phase derivation, unreconciled; map.json 26/25 is wrong (27/26 correct); AC2 floor is >=1 not >=6",
+        "at": "2026-08-20T15:50:58Z"
+      },
+      {
+        "phase": "4-review",
+        "agent": "dev",
+        "verdict": "APPROVE_WITH_NOTES",
+        "summary": "third derivation of the phase vocabulary; a false one-site-holds-32 comment; AC10 needle matches only the verb blesses",
+        "at": "2026-08-20T15:50:58Z"
+      },
+      {
+        "phase": "4-review",
+        "agent": "qa",
+        "verdict": "APPROVE_WITH_NOTES",
+        "summary": "G1 demonstrated: AC10 pinned floor >=8 over 33 files, violation escaped green; events[].note max 616 chars beside a 32 cap",
+        "at": "2026-08-20T15:50:58Z"
+      },
+      {
+        "phase": "4-review",
+        "agent": "secops",
+        "verdict": "APPROVE_WITH_NOTES",
+        "summary": "detects rather than prevents, but in the right environment; S1: schema claims a writer rule that does not exist; filed #52",
+        "at": "2026-08-20T15:50:58Z"
+      },
+      {
+        "phase": "4-review",
+        "agent": "orchestrator",
+        "verdict": "NOTE",
+        "summary": "deferral ledger discharged: #52 (secops), #53 (0-setup), #54 (cap-vs-config + AC2 floor), #47 comment (assertion totals)",
+        "at": "2026-08-20T16:34:45Z"
+      }
+    ],
+    "risk_tier": "standard",
+    "pr_url": "https://github.com/nsmedia-io/agent-pipeline/pull/51",
+    "panel_roles": [
+      "ba",
+      "dev",
+      "qa",
+      "secops"
+    ],
+    "review_rounds": 1,
+    "telemetry": {
+      "phase_elapsed_ms": {
+        "1": 622000,
+        "2": 83000,
+        "3": 4394000
+      },
+      "total_lead_time_ms": 5099000,
+      "unattributed_ms": 0,
+      "unattributed_events": 0,
+      "untimed_events": 0,
+      "review_rounds": 1,
+      "events_counted": 4,
+      "attribution": "exit"
+    },
+    "effective_config": {
+      "migration_globs_tripwire": [
+        "**/migrations/**",
+        "**/Migrations/**",
+        "**/db/migrate/**",
+        "**/db/migration/**",
+        "**/db/changelog/**",
+        "**/alembic/versions/**",
+        "**/schema.prisma",
+        "**/prisma/schema/**",
+        "**/drizzle/**",
+        "**/db/schema.ts",
+        "**/db/schema/**",
+        "**/supabase/schemas/**",
+        "**/policies/**.sql",
+        "**/supabase/policies/**",
+        "**/schema.sql"
+      ],
+      "migration_globs_gate": [
+        "**/migrations/**",
+        "**/Migrations/**",
+        "**/db/migrate/**",
+        "**/db/migration/**",
+        "**/db/changelog/**",
+        "**/alembic/versions/**",
+        "**/schema.prisma",
+        "**/prisma/schema/**",
+        "**/drizzle/**",
+        "**/db/schema.ts",
+        "**/db/schema/**",
+        "**/supabase/schemas/**",
+        "**/policies/**.sql",
+        "**/supabase/policies/**",
+        "**/schema.sql"
+      ],
+      "data_layer_globs": [
+        "**/migrations/**",
+        "**/Migrations/**",
+        "**/db/migrate/**",
+        "**/db/migration/**",
+        "**/db/changelog/**",
+        "**/alembic/versions/**",
+        "**/schema.prisma",
+        "**/prisma/schema/**",
+        "**/drizzle/**",
+        "**/db/schema.ts",
+        "**/db/schema/**",
+        "**/supabase/schemas/**",
+        "**/policies/**.sql",
+        "**/supabase/policies/**",
+        "**/schema.sql",
+        "**/db/**",
+        "**/queries/**",
+        "**/policies/**",
+        "**/repositories/**",
+        "**/prisma/**",
+        "**/supabase/**",
+        "**/alembic/**",
+        "**/schema.ts",
+        "**/database.types.ts",
+        "**/*.generated.types.ts"
+      ],
+      "infra_globs": [
+        "**/.github/workflows/**",
+        ".github/**",
+        "**/infra/**",
+        "**/terraform/**",
+        "**/k8s/**",
+        "**/helm/**",
+        "**/deploy/**",
+        "**/deploy.sh",
+        "**/deploy.config",
+        "**/*.tf",
+        "**/*.tfvars",
+        "**/Dockerfile",
+        "**/docker-compose.yml",
+        "**/docker-compose.yaml"
+      ],
+      "models": {
+        "ba": "sonnet",
+        "dev": "sonnet"
+      },
+      "rejected_absolute_globs": 0
+    },
+    "final_verdict": "APPROVE_WITH_NOTES",
+    "peer_review_verdict_counts": {
+      "approve": 0,
+      "approve_with_notes": 4,
+      "request_changes": 0,
+      "request_refactor": 0,
+      "veto": 0
+    },
+    "completed_at": "2026-08-20T18:35:20Z"
+  }
+}

@@ -94,7 +94,13 @@ GATE_FLOOR=95
 # crafted cells that construct the half-written record on demand, plus two accounting
 # assertions on the absolute-path walk. Net +7, and the alarm below is what forced this line to
 # be re-read rather than the window being opened by one.
-TELEM_FLOOR=106
+#
+# 106 -> 107 for the archive redaction fix: the `the archive corpus is ... empty today` pin,
+# a deliberate one-shot tripwire, fired when the first archive landed and was re-founded on the
+# derived relation (every archive record enumerated is one the walk read), which is one cell
+# for one cell -- plus a non-zero control, because that relation reads 0-of-0 while the archive
+# directory is empty and a vacuous pass is what the pin was there to prevent. Net +1.
+TELEM_FLOOR=107
 run_suite() { bash "$1" 2>&1 | tail -1; }
 
 GATE_LINE=$(run_suite "$GATE_SUITE")

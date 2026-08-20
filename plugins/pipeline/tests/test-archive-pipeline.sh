@@ -98,6 +98,99 @@ printf '%s' 'not a dir' > "$TEMP_PROJECT/afile"
 ap --issue 102 --from "$TEMP_PROJECT/afile" --root "$ROOT"
 assert_eq "a non-directory source exits 1" "$RC" "1"
 
+suite "archive-pipeline: absolute paths do not survive the archival boundary"
+
+# THE LEAK THIS EXISTS FOR. tasks.json and impl-report.json both carry worktree_path, both are
+# folded into knowledge/issue-archive/<n>.json verbatim, and that file is COMMITTED -- so a
+# contributor's home directory reached a public tree, twice, in one archive. status.schema.json
+# had the right prohibition on the wrong file: it covers status.json, which no longer carries
+# the field, while the two artifacts that do carry it had no rule at all.
+RED="$TEMP_PROJECT/redact"
+mkdir -p "$RED"
+REDROOT="$TEMP_PROJECT/redroot"
+mkdir -p "$REDROOT"
+cat > "$RED/tasks.json" <<EOF
+{"issue_number":34,
+ "worktree_path":"$REDROOT/.claude/worktrees/34-phase3-20260820-094843",
+ "elsewhere":"/Users/someone/other-checkout/.pipeline/34",
+ "relative_path":".claude/worktrees/34-phase3-20260820-094843",
+ "tasks":[{"id":"T1","files_touched":["$REDROOT/plugins/pipeline/scripts/x.mjs"]}]}
+EOF
+cat > "$RED/impl-report.json" <<EOF
+{"issue_number":34,
+ "a_key_nobody_listed":"/home/ci-runner/work/agent-pipeline",
+ "windows_shaped":"C:\\\\Users\\\\someone\\\\repo",
+ "notes":"reproduce with: cd $REDROOT/.claude/worktrees/34-phase3-20260820-094843 && bash run.sh",
+ "foreign_home_note":"the run was in /Users/someone/other-checkout and then moved",
+ "$REDROOT/keyed/by/path":"a value under a path-shaped KEY"}
+EOF
+ap --issue 34 --from "$RED" --root "$REDROOT"
+assert_eq "the archive still exits 0" "$RC" "0"
+ARC="$REDROOT/knowledge/issue-archive/34.json"
+
+# UNDER THE REPO ROOT -> REPO-RELATIVE. The information survives; the machine it was on does not.
+assert_eq "a worktree_path under the repo root becomes repo-relative" \
+  "$(jget "$ARC" tasks.worktree_path)" ".claude/worktrees/34-phase3-20260820-094843"
+# OUTSIDE IT -> A MARKER, and the KEY IS STILL THERE. Dropping the key would leave a reader
+# unable to tell whether a path was redacted or was never written.
+assert_eq "an absolute path outside the repo root becomes a marker, not a deletion" \
+  "$(jget "$ARC" tasks.elsewhere)" "<redacted-absolute-path>"
+# BY SHAPE, NOT BY KEY NAME. `worktree_path` is the key that leaked once; a redactor that keys
+# on that name is a blocklist of one, and the next leak arrives under a name nobody listed.
+assert_eq "BY SHAPE: an absolute path under a key no rule mentions is redacted too" \
+  "$(jget "$ARC" impl-report.a_key_nobody_listed)" "<redacted-absolute-path>"
+assert_contains "BY SHAPE: and one buried in an array, at depth, under a third key" \
+  "$(jget "$ARC" tasks.tasks)" "plugins/pipeline/scripts/x.mjs"
+assert_not_contains "with no trace of the root it was rewritten from" \
+  "$(jget "$ARC" tasks.tasks)" "$REDROOT"
+assert_not_contains "an absolute path embedded MID-STRING in a note does not survive either" \
+  "$(jget "$ARC" impl-report.notes)" "$REDROOT"
+assert_contains "and the surrounding prose does survive, so the note is still readable" \
+  "$(jget "$ARC" impl-report.notes)" "reproduce with: cd .claude/worktrees/34-phase3-20260820-094843 && bash run.sh"
+# A FIXTURE PER CELL OF THE RULE, not one representative fixture. The mid-string case above sits
+# under the repo root, so on its own it exercises only the root arm of the embedded pattern and
+# a mutation to the home arm would land in a branch nothing runs. This is the home arm, and it
+# is the leak in its most common disguise: a home directory quoted inside a sentence.
+assert_eq "a foreign home directory embedded in prose is redacted, and only that span" \
+  "$(jget "$ARC" impl-report.foreign_home_note)" "the run was in <redacted-absolute-path> and then moved"
+# The Windows arm, for the same reason: it is unreachable from a POSIX fixture tree otherwise,
+# and the AC34 walk reddens on this shape, so a redactor blind to it ships a suite that cannot
+# go green on a Windows-authored artifact.
+assert_eq "a Windows drive-rooted path is redacted rather than passed through" \
+  "$(jget "$ARC" impl-report.windows_shaped)" "<redacted-absolute-path>"
+# THE SURVIVING MUTATION, named so this battery is not a rubber stamp. Five mutations to the
+# redactor redden cells here (kill the relativize branch; narrow the value predicate to
+# /Users/; stop redacting keys; drop the home arm of the embedded pattern; drop the embedded
+# pass). One SURVIVES: narrowing DRIVE_VALUE's separator class from [\\/] to [\\] changes
+# nothing, because the fixture above is the backslash spelling and no fixture uses `C:/x`.
+# Left standing on purpose. A battery in which every mutation reddens cannot tell coverage
+# from a harness that always fires, and closing this one buys a SPELLING of a class already
+# covered rather than a class. If a redactor change ever makes the two spellings behave
+# differently, this note is the place to add the twin.
+assert_contains "a path-shaped KEY is redacted on the same predicate as a value" \
+  "$(cat "$ARC")" '"keyed/by/path"'
+# CONTROL, and the suite is a rubber stamp without it: a redactor that blanked every string
+# would pass every cell above. A path that was never absolute is copied through untouched.
+assert_eq "CONTROL: an already-relative path is recorded verbatim" \
+  "$(jget "$ARC" tasks.relative_path)" ".claude/worktrees/34-phase3-20260820-094843"
+# CONTROL over the whole file rather than the fields this test happened to name: the archive is
+# the artifact, and the claim is about all of it.
+assert_eq "CONTROL: no string anywhere in the written archive starts with a POSIX root" \
+  "$(node --input-type=module -e '
+     import { readFileSync } from "node:fs";
+     const hits = [];
+     (function walk(v, p) {
+       if (typeof v === "string") { if (/^\//.test(v)) hits.push(p + "=" + v); return; }
+       if (Array.isArray(v)) return v.forEach((x, i) => walk(x, p + "[" + i + "]"));
+       if (v && typeof v === "object") return Object.entries(v).forEach(([k, x]) => { walk(k, p + ".<key>"); walk(x, p + "." + k); });
+     })(JSON.parse(readFileSync(process.argv[1], "utf8")), "");
+     console.log(hits.join(" "));
+   ' "$ARC")" ""
+# The count makes the redaction VISIBLE. A silent rewrite is one nobody notices stopping.
+assert_contains "the run reports how many absolute paths it redacted" "$OUT" "absolute paths redacted: 8"
+ap --issue 88 --from "$ART" --root "$REDROOT"
+assert_contains "CONTROL: and reports zero for an archive that carried none" "$OUT" "absolute paths redacted: 0"
+
 suite "archive-pipeline: it is a thin re-dispatch, not a second implementation"
 
 ROOT_A="$TEMP_PROJECT/root-a"

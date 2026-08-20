@@ -4,7 +4,7 @@
 
 import { readdirSync, readFileSync, writeFileSync, mkdirSync, existsSync, statSync } from "node:fs";
 import { isMain as isMainScript, assertPathSegment } from "./lib.mjs";
-import { join, resolve, basename } from "node:path";
+import { join, resolve, relative, basename, isAbsolute, sep } from "node:path";
 
 const COLLECTIONS = ["living-context", "issue-archive", "decisions"];
 // Pipeline artifacts folded into an issue archive, in phase order; each read only if present.
@@ -129,6 +129,59 @@ function cmdWrite(args) {
   console.log(`Wrote ${dest} [${doc.status}]`);
 }
 
+const REDACTED_ABSOLUTE = "<redacted-absolute-path>";
+// Whole-value absolute shapes: a POSIX root, and a Windows drive root in either slash. The
+// same two the AC34 walk in test-pipeline-telemetry.sh reddens on, so what this rewrites and
+// what that refuses are one predicate rather than two that can drift apart.
+const ABSOLUTE_VALUE = /^(?:\/|[A-Za-z]:[\\/])/;
+const DRIVE_VALUE = /^[A-Za-z]:[\\/]/;
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+// A path under the repo root becomes repo-relative; anything else absolute becomes the marker.
+// Never dropped: the reader can still see that a path was there and where it pointed.
+function redactPath(value, rootAbs) {
+  if (DRIVE_VALUE.test(value) && sep === "/") return REDACTED_ABSOLUTE; // foreign-platform absolute
+  const rel = relative(rootAbs, value);
+  if (rel === "") return ".";
+  if (rel === ".." || rel.startsWith(".." + sep) || isAbsolute(rel)) return REDACTED_ABSOLUTE;
+  return rel.split(sep).join("/");
+}
+
+// Redaction is BY VALUE SHAPE over the whole document, never by key name: `worktree_path` is
+// the key that leaked once, and the next one will be a key nobody thought to list. It happens
+// HERE because knowledge/issue-archive/<n>.json is committed, and on a contributor's machine
+// an absolute path is that contributor's home directory. status.schema.json's writer
+// prohibition covers status.json alone, while tasks.json and impl-report.json carry
+// worktree_path too and cross this same boundary; a rule stated on the writers has to be
+// restated for every future artifact, and a rule stated here does not.
+//
+// DELIBERATELY NOT COVERED. An absolute path embedded mid-string is rewritten only where the
+// run starts at the repo root or at a POSIX home prefix, so `cd /Users/x/repo && ...` is
+// caught and `/opt/vendor/bin` inside a sentence is not; UNC paths (\\server\share); `~/x`,
+// which is not absolute until a shell expands it; and a value spelled in different case than
+// the repo root on a case-insensitive filesystem, which redacts rather than relativizes.
+// Object KEYS are redacted on the same predicate, and two keys that redact to the same marker
+// collapse into one -- accepted, because losing a duplicate key beats shipping a home
+// directory, and no pipeline artifact schema keys on a path.
+function redactAbsolutePaths(value, rootAbs, counter) {
+  // A run starting at the repo root or at a home directory, stopping at whitespace or a quote.
+  const embedded = new RegExp(`(?:${escapeRe(rootAbs)}|/(?:Users|home)/[^/\\s"']+)[^\\s"']*`, "g");
+  const redactString = (s) => {
+    const out = ABSOLUTE_VALUE.test(s)
+      ? redactPath(s, rootAbs)
+      : s.replace(embedded, (m) => redactPath(m, rootAbs));
+    if (out !== s) counter.count++;
+    return out;
+  };
+  const walk = (v) => {
+    if (typeof v === "string") return redactString(v);
+    if (Array.isArray(v)) return v.map(walk);
+    if (v && typeof v === "object") return Object.fromEntries(Object.entries(v).map(([k, x]) => [redactString(k), walk(x)]));
+    return v;
+  };
+  return walk(value);
+}
+
 // Exported so archive-pipeline.mjs is a thin re-dispatch of this exact logic.
 export function archiveIssue({ root, issue, from }) {
   // The id lands in a filename below. Unchecked, `../../escaped` writes outside the archive
@@ -144,11 +197,14 @@ export function archiveIssue({ root, issue, from }) {
     if (doc !== null) { archive[name] = doc; found.push(name); }
   }
   if (found.length === 0) throw new Error(`no pipeline artifacts found in ${fromDir}`);
-  const outDir = join(resolve(root ?? process.cwd()), "knowledge", "issue-archive");
+  const rootAbs = resolve(root ?? process.cwd());
+  const counter = { count: 0 };
+  const redacted = redactAbsolutePaths(archive, rootAbs, counter);
+  const outDir = join(rootAbs, "knowledge", "issue-archive");
   mkdirSync(outDir, { recursive: true });
   const outPath = join(outDir, `${issue}.json`);
-  writeFileSync(outPath, JSON.stringify(archive, null, 2) + "\n"); // idempotent overwrite
-  return { outPath, found };
+  writeFileSync(outPath, JSON.stringify(redacted, null, 2) + "\n"); // idempotent overwrite
+  return { outPath, found, redactions: counter.count };
 }
 
 function cmdArchive(args) {
@@ -156,8 +212,8 @@ function cmdArchive(args) {
   if (issue === true || issue === undefined) fail("--archive-issue requires an issue number");
   if (typeof args.from !== "string") fail("--archive-issue requires --from <artifact-dir>");
   try {
-    const { outPath, found } = archiveIssue({ root: rootDir(args), issue, from: args.from });
-    console.log(`Archived issue #${issue} -> ${outPath}\n  artifacts: ${found.join(", ")}`);
+    const { outPath, found, redactions } = archiveIssue({ root: rootDir(args), issue, from: args.from });
+    console.log(`Archived issue #${issue} -> ${outPath}\n  artifacts: ${found.join(", ")}\n  absolute paths redacted: ${redactions}`);
   } catch (e) { fail(e.message); }
 }
 
