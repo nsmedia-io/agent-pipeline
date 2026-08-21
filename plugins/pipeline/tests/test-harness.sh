@@ -343,6 +343,96 @@ assert_contains "a FAIL inside a subshell is still PRINTED" "$OUT" "FAIL  a real
 assert_contains "  and still uncounted by the tally" "$OUT" "passed=0 failed=0"
 assert_eq "  but the suite no longer exits 0" "$RC" "1"
 
+suite "harness: a REPORTING line is counted, ledgered, and cannot claim anything (#47)"
+
+# `record` exists so that a measurement stops being spelled as an assertion that cannot fail.
+# The two properties that make it safe to have at all: it COUNTS (so the tally and the ledger
+# still agree, and the uncounted-assertion guard above keeps working), and it is a distinct
+# word, so "which lines here could never have gone red" is a grep rather than a reading.
+cat > "$SCRATCH/child-record.sh" <<CHILD
+. "$TESTS_DIR/harness.sh"
+suite "scratch"
+record "a measurement, not a claim"
+finish
+CHILD
+run_child "$SCRATCH/child-record.sh"
+assert_eq "a suite whose only line is a record() exits 0" "$RC" "0"
+assert_contains "  and the line is printed in the ok column, like any other" "$OUT" \
+  "  ok    a measurement, not a claim"
+assert_contains "  and it is COUNTED, so the tally still describes the transcript" "$OUT" "passed=1 failed=0"
+
+# THE CONTROL that makes "counted" mean counted: record() must reach the LEDGER too, or the
+# uncounted-assertion guard would stop being able to see a suite that reports from a subshell.
+# Same shape as the assert_eq case above, with the same expected diagnostic.
+cat > "$SCRATCH/child-record-subshell.sh" <<CHILD
+. "$TESTS_DIR/harness.sh"
+suite "scratch"
+record "counted normally"
+( record "reported where the counters do not survive" )
+finish
+CHILD
+run_child "$SCRATCH/child-record-subshell.sh"
+assert_eq "CONTROL: a record() in a subshell trips the same guard an assertion would" "$RC" "1"
+assert_contains "  and the guard names the reporting line, not the counted one" "$ERR" \
+  "reported where the counters do not survive"
+
+suite "harness: an OPTIONAL TOOL is declared, and CI refuses an absent one (#47)"
+
+# The defect being closed: `if command -v zsh` opened a whole column on one machine and closed
+# it with a self-equal assertion on another, so 32 assertions existed locally and did not exist
+# on ubuntu-latest, with failed=0 printed on both. The four cells below hold everything fixed
+# except the two variables that produced that -- whether the tool is there, and whether the run
+# is the one CI makes.
+mk_cap_child() {  # $1 = dest, $2 = PIPELINE_TESTS_REQUIRE_CAPABILITIES, $3 = tool
+  cat > "$1" <<CHILD
+export PIPELINE_TESTS_REQUIRE_CAPABILITIES=$2
+. "$TESTS_DIR/harness.sh"
+suite "scratch"
+if optional_tool "$3"; then printf 'COLUMN_OPENED\n'; else printf 'COLUMN_SKIPPED\n'; fi
+finish
+CHILD
+}
+ABSENT_TOOL="definitely-not-a-real-tool-9f3a"
+assert_eq "precondition: the absent-tool fixture really names a tool that is not installed" \
+  "$(command -v "$ABSENT_TOOL" >/dev/null 2>&1 && echo FOUND || echo absent)" "absent"
+
+mk_cap_child "$SCRATCH/child-cap-present-lax.sh" 0 bash
+run_child "$SCRATCH/child-cap-present-lax.sh"
+assert_eq "(a) present, ordinary run -> exits 0" "$RC" "0"
+assert_contains "  and the caller's column OPENS" "$OUT" "COLUMN_OPENED"
+assert_contains "  and the tool and its state are both in the transcript" "$OUT" "\`bash\` is present"
+
+mk_cap_child "$SCRATCH/child-cap-absent-lax.sh" 0 "$ABSENT_TOOL"
+run_child "$SCRATCH/child-cap-absent-lax.sh"
+assert_eq "(b) absent, ordinary run -> still exits 0: a laptop may lack the tool" "$RC" "0"
+assert_contains "  and the caller's column is SKIPPED" "$OUT" "COLUMN_SKIPPED"
+assert_contains "  but the skip is NAMED rather than silent" "$OUT" "\`$ABSENT_TOOL\` is absent"
+
+mk_cap_child "$SCRATCH/child-cap-absent-strict.sh" 1 "$ABSENT_TOOL"
+run_child "$SCRATCH/child-cap-absent-strict.sh"
+assert_eq "(c) absent, CI run -> the suite FAILS" "$RC" "1"
+assert_contains "  and the failure names the tool, not a count delta" "$OUT" \
+  "FAIL  CAPABILITY \`$ABSENT_TOOL\` is present"
+assert_contains "  and it is a COUNTED failure, so run.sh's exit reflects it" "$OUT" "passed=0 failed=1"
+
+# NON-ZERO CONTROL for (c): without it, the red above is equally satisfied by a strict mode that
+# fails every run. Same env, same harness, only the tool changes.
+mk_cap_child "$SCRATCH/child-cap-present-strict.sh" 1 bash
+run_child "$SCRATCH/child-cap-present-strict.sh"
+assert_eq "CONTROL: present, CI run -> exits 0, so strict mode refuses the ABSENCE and not the check" \
+  "$RC" "0"
+assert_contains "  and the column opens exactly as it does off-CI" "$OUT" "COLUMN_OPENED"
+
+# THE PROPERTY #47 IS ABOUT, asserted directly: the number of lines a declared capability
+# contributes does not depend on the answer. The COLUMN behind it may still be absent -- that is
+# what strict mode is for -- but the declaration itself can no longer be the thing that
+# disappears, which is how the shrink stayed invisible to both the tally and the count guard.
+cap_total() { printf '%s' "$1" | sed -n 's/.*passed=\([0-9]*\) failed=\([0-9]*\).*/\1+\2/p' | head -1; }
+OUT_PRESENT=$(bash "$SCRATCH/child-cap-present-lax.sh" 2>/dev/null)
+OUT_ABSENT=$(bash "$SCRATCH/child-cap-absent-lax.sh" 2>/dev/null)
+assert_eq "a declared capability contributes the same one line whether present or absent" \
+  "$(cap_total "$OUT_PRESENT")/$(cap_total "$OUT_ABSENT")" "1+0/1+0"
+
 suite "harness: node is REQUIRED, never skipped (AC3)"
 
 # Build a PATH with the few externals harness.sh itself needs and, pointedly, no node. This is
