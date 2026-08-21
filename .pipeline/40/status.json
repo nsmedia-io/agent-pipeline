@@ -1,8 +1,8 @@
 {
   "issue_number": 40,
-  "current_phase": "2.5-design",
+  "current_phase": "3-impl",
   "started_at": "2026-08-21T18:53:19Z",
-  "updated_at": "2026-08-21T20:13:52Z",
+  "updated_at": "2026-08-21T20:36:52Z",
   "branch": "claude/lane-4-a521bf",
   "ask_text": "#40: reviewers state properties, not implementations; only QA and Dev propose how. Typed required_property across agents/*.md, both review schemas, Phase 4 preamble.",
   "events": [
@@ -31,6 +31,11 @@
       "phase": "1-ba",
       "verdict": "SPEC_FINAL",
       "at": "2026-08-21T20:13:52Z"
+    },
+    {
+      "phase": "2.5-design",
+      "verdict": "DESIGN_LOCKED",
+      "at": "2026-08-21T20:36:52Z"
     }
   ],
   "flags": [
@@ -96,8 +101,16 @@
       "verdict": "SPEC_FINAL",
       "summary": "opened #66 for the inert validator; deployment-mode scoping replaces the false repo-scoped claim; 11 req/16 AC",
       "at": "2026-08-21T20:13:52Z"
+    },
+    {
+      "phase": "2.5-design",
+      "agent": "dev-judge",
+      "verdict": "DESIGN_LOCKED",
+      "summary": "Sketch A shape wins; idiom it relied on measured as already drifted 3 of 9; grafted B field pair must_satisfy+rationale_not_checked",
+      "at": "2026-08-21T20:36:52Z"
     }
   ],
   "risk_tier": "architectural",
-  "review_rounds_phase2": 2
+  "review_rounds_phase2": 2,
+  "phase3_shape": "3a-qa-battery-outside-tests-dir (tests/ frozen: owned by another session)"
 }
