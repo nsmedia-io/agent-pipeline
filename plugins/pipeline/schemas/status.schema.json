@@ -20,7 +20,7 @@
     "risk_tier": {
       "type": "string",
       "enum": ["trivial", "standard", "architectural"],
-      "description": "Copied from spec.json after Phase 1 (post orchestrator tier validation) so checkpoints and re-runs honor the same depth."
+      "description": "The depth the run executes at, carried here so every later checkpoint and re-run honors the same one. BA sets it in spec.json and the orchestrator validates it when BA returns, but do NOT read this field as evidence that Phase 1 has finished: commands/pipeline.md gates Phase 0.5's map depth by tier, so a record whose 0.5-map has run already carries a tier at its FIRST 1-ba checkpoint, before BA is dispatched. Absence here means no earlier phase set it, never that the tier is trivial."
     },
     "panel_roles": {
       "type": "array",
