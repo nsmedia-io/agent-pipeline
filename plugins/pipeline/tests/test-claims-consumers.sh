@@ -166,7 +166,7 @@ assert_contains "AC29: named as a per-line substitution, not a one-line edit" "$
 assert_contains "AC29: and states that the marker fix does not cover a \`#\`-written down BODY" \
   "$UPGRADE" "down BODY"
 
-suite "AC30: no commit subject on this branch collides with R17's frozen delimiters"
+suite "AC30: no commit subject anywhere in history collides with R17's frozen delimiters"
 
 # test-issue17-integration.sh resolves R17's frozen series anchors by exact-substring match on
 # commit SUBJECT, NEWEST MATCH FIRST, and its own header records that this delimiter has gone
@@ -195,37 +195,44 @@ DELIM_COUNT=$(printf '%s\n' "$DELIMS" | grep -c . | tr -d ' ')
 assert_eq "AC30 CONTROL: the delimiter set was actually extracted" \
   "$([[ "$DELIM_COUNT" -ge 10 ]] && echo ok || echo "found=$DELIM_COUNT")" "ok"
 
-BRANCH_SUBJECTS=$(cd "$REPO_ROOT" && git log --format=%s origin/main..HEAD 2>/dev/null)
-COLLISIONS=""
-while IFS= read -r d; do
-  [[ -n "$d" ]] || continue
-  while IFS= read -r s; do
-    [[ -n "$s" ]] || continue
-    [[ "$s" == *"$d"* ]] && COLLISIONS="$COLLISIONS[$s <- $d]"
-  done <<< "$BRANCH_SUBJECTS"
-done <<< "$DELIMS"
-# On the INTEGRATION BRANCH itself `origin/main..HEAD` is empty, and that is not a failure --
-# it is the same "population derived from a ref that moves" defect that broke the R17 series
-# delimiters once already, arriving in a newer assertion. An empty range here is not "nothing
-# to check": every delimiter IS a real commit subject, so over full history each one matches
-# its own commit, and the property "no OTHER commit contains a delimiter" is exactly what the
-# resolves-to-exactly-one assertion below already enforces over full history. So on the
-# integration branch this half is SUBSUMED, and says so, rather than asserting over an empty
-# set (which passes for the wrong reason) or demanding a population that cannot exist.
-assert_eq "AC30: no subject on this branch contains a frozen delimiter" "$COLLISIONS" ""
-assert_eq "AC30 CONTROL: the population was real, or is subsumed on the integration branch" \
-  "$(if [[ -n "$BRANCH_SUBJECTS" ]]; then echo ok; \
-     elif [[ -z "$(cd "$REPO_ROOT" && git log --format=%s origin/main..HEAD 2>/dev/null)" ]]; then echo ok; \
-     else echo "no subjects and not on the integration branch"; fi)" "ok"
+# THE POPULATION IS FULL HISTORY, NEVER A RANGE AGAINST A MOVING REF (#37).
+#
+# This block used to ask its question twice: once of `git log <moving-ref>..HEAD`, and once of
+# full history. The first half was the very defect #37 ratchets against -- it broke `main` at
+# #32's merge, was patched in #36 with a control that read "the population was real, OR is
+# subsumed on the integration branch", and that control could not fail: its `elif` re-ran the
+# identical command whose emptiness had already put it there, so an empty range answered `ok`
+# and a non-empty one answered `ok`. Both halves of a two-sided control cannot be the same side.
+#
+# What is left is the half that was always doing the work, and it is STRICTLY STRONGER. A
+# delimiter is a commit subject, so over full history it matches its own commit exactly once. If
+# a new commit's subject contained one as a substring -- the collision that would silently shift
+# which sha `head -1` returns for a frozen anchor -- that delimiter would resolve to 2. That
+# holds on a branch, on `main`, after a rebase merge, and on a pull_request build whose HEAD is a
+# merge commit this branch never authored. The range-based half could only ever see a branch it
+# had not landed yet.
+ALL_SUBJECTS=$(git -C "$REPO_ROOT" log --format=%s)
+assert_eq "AC30 CONTROL: full history was actually read (an empty log reaches nothing, forever)" \
+  "$([[ "$(printf '%s\n' "$ALL_SUBJECTS" | grep -c .)" -ge 10 ]] && echo ok || echo "read nothing")" "ok"
 
-# The other half: each delimiter must still resolve to EXACTLY ONE commit. A collision that
-# shifts `head -1` shows up here as a 2.
 AMBIGUOUS=""
 while IFS= read -r d; do
   [[ -n "$d" ]] || continue
-  n=$( (cd "$REPO_ROOT" && git log --format=%s) | grep -cF "$d" | tr -d ' ')
+  n=$(printf '%s\n' "$ALL_SUBJECTS" | grep -cF "$d" | tr -d ' ')
   [[ "$n" == "1" ]] || AMBIGUOUS="$AMBIGUOUS[$d => $n]"
 done <<< "$DELIMS"
-assert_eq "AC30: every frozen delimiter still resolves to exactly one commit" "$AMBIGUOUS" ""
+assert_eq "AC30: every frozen delimiter still resolves to exactly one commit, over FULL history" \
+  "$AMBIGUOUS" ""
+
+# NON-ZERO CONTROL for the resolver itself. Without it, the empty result above is equally
+# satisfied by a counter that answers 1 to everything -- and "every delimiter is unique" is a
+# claim about discrimination, so the discrimination is what has to be shown. `chore(` is a
+# conventional-commit prefix this repo writes constantly, so it resolves to many; a string no
+# subject carries resolves to none. Both are computed, neither is a pinned integer.
+assert_eq "CONTROL: the same resolver reports MANY for a substring many subjects carry" \
+  "$([[ "$(printf '%s\n' "$ALL_SUBJECTS" | grep -cF 'chore(' | tr -d ' ')" -gt 1 ]] && echo many || echo "not many")" \
+  "many"
+assert_eq "CONTROL: and NONE for a substring no subject carries" \
+  "$(printf '%s\n' "$ALL_SUBJECTS" | grep -cF 'zzz-no-commit-subject-contains-this' | tr -d ' ')" "0"
 
 finish
