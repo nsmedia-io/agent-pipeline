@@ -103,6 +103,52 @@ GUARDED_ROWS=(
   "4-review-complete|architectural|peer-review.json|{}"
 )
 
+# THE SECOND PREREQUISITE (#61 R9b), held in a COMPANION table rather than by widening the one
+# above. GUARDED_ROWS is `<phase>|<tier>|<filename>|<body>` -- ONE filename -- and #61 gives the
+# `2-review` row a SECOND required file. Widening the field would move all 15 entries, and three
+# count assertions plus #43-S1 are pinned to them, so the second file lives here keyed by phase
+# and every sweep that builds a SATISFIED fixture consults it.
+#
+# AN INDEXED ARRAY PLUS A LINEAR SCAN, NEVER `declare -A`. `/bin/bash` on macOS is 3.2.57, which
+# has no associative arrays, and run.sh invokes each suite as `bash "$t"` -- PATH bash, not the
+# shebang. ubuntu-latest ships bash 5, so a `declare -A` here would pass CI and fail every
+# contributor running the documented local check, in the one direction nobody catches. Re-derive
+# the interpreter with `/bin/bash --version`.
+#
+# <phase>|<filename>|<body>
+EXTRA_PREREQS=(
+  "2-review|map.json|{}"
+)
+
+# write_extra_prereqs <phase> <dir> -> writes every companion file for <phase> into <dir> and
+# echoes the filenames it wrote, space-joined (empty for a row with no second prerequisite).
+# Every caller asserts the echoed value against a LITERAL rather than against this table, so a
+# typo'd phase key here fails loudly instead of quietly handing a cell a one-file fixture.
+write_extra_prereqs() {
+  local phase="$1" dir="$2" e rest file body wrote=""
+  for e in "${EXTRA_PREREQS[@]}"; do
+    case "$e" in
+      "$phase|"*)
+        rest="${e#"$phase|"}"
+        file="${rest%%|*}"
+        body="${rest#*|}"
+        printf '%s' "$body" > "$dir/$file"
+        wrote="$wrote $file"
+        ;;
+    esac
+  done
+  printf '%s' "${wrote# }"
+}
+
+# The literal each sweep expects, stated INDEPENDENTLY of EXTRA_PREREQS. Deriving it from the
+# same table would make the probe a restatement of the table instead of an observation of it.
+expected_extra_61() {  # <phase> -> the filenames that phase's fixture must also carry
+  case "$1" in
+    2-review) printf 'map.json' ;;
+    *)        printf '' ;;
+  esac
+}
+
 # ---------------------------------------------------------------------------
 suite "AC1: every guarded row refuses an empty fixture, and says what is missing"
 # ---------------------------------------------------------------------------
@@ -137,6 +183,12 @@ for row in "${GUARDED_ROWS[@]}"; do
   AC2_ROWS=$((AC2_ROWS + 1))
   new_case 4242 "$(mk_status "$phase" "\"$tier\"" "$NO_EVENTS")"
   printf '%s' "$body" > "$CASE_DIR/$prereq"
+  # #61 R9(b): a row may require a SECOND file. Written before the gate runs, and the fixture's
+  # own shape asserted against a literal below, so a cell that silently stopped carrying its
+  # second prerequisite cannot go on granting for the wrong reason.
+  ac2_extra="$(write_extra_prereqs "$phase" "$CASE_DIR")"
+  assert_eq "  fixture shape: $phase carries every SECOND prerequisite its row requires" \
+    "$ac2_extra" "$(expected_extra_61 "$phase")"
   gate "$CASE_ROOT"
   assert_eq "$phase ($tier) with $prereq present is GRANTED" "$GATE_DEC" "granted"
   assert_eq "and it exits 0" "$GATE_RC" "0"
@@ -358,12 +410,22 @@ suite "R3 kind: content-conditioned rows test CONTENT on path (a), not mere pres
 # the whole-stderr form. The needle has to be searched where it is supposed to be.
 route1() { printf '%s' "$GATE_ERR" | sed -n 's/^  1\. //p'; }
 
-r3_row() {  # r3_row <phase> <tier> <file> <failing-body> <satisfying-body> <event-json> <lack> <repair>
+r3_row() {  # r3_row <phase> <tier> <file> <failing-body> <satisfying-body> <event-json> <lack> <repair> <expected-second-prereq>
   local phase="$1" tier="$2" file="$3" bad="$4" good="$5" ev="$6" lack="$7" repair="$8" r1
+  local want_extra="${9:-}" extra
+  # #61 R9(d): every cell of this matrix varies ONE thing -- the state of $file. A row that
+  # requires a SECOND file gets it in EVERY cell, so the variable stays $file and the grant cells
+  # below do not silently become tests of the other requirement. The event constant is left
+  # untouched for the same reason: swapping it for one that also satisfies the second half would
+  # vary two things at once.
+  r3_extra() { extra="$(write_extra_prereqs "$phase" "$CASE_DIR")"; }
 
   # 1. THE MISSING LEG: present-and-failing, WITH an event that would satisfy the row on its own.
   new_case 4242 "$(mk_status "$phase" "\"$tier\"" "$ev")"
   printf '%s' "$bad" > "$CASE_DIR/$file"
+  r3_extra
+  assert_eq "  fixture shape: $phase's cells carry its SECOND prerequisite, so $file stays the only variable" \
+    "$extra" "$want_extra"
   gate "$CASE_ROOT"
   assert_eq "$phase ($tier): a failing $file is NOT rescued by a satisfying events[] entry" \
     "$GATE_DEC" "refused"
@@ -386,12 +448,14 @@ r3_row() {  # r3_row <phase> <tier> <file> <failing-body> <satisfying-body> <eve
   #    be about the phase, the tier or the event rather than about the content.
   new_case 4242 "$(mk_status "$phase" "\"$tier\"" "$ev")"
   printf '%s' "$good" > "$CASE_DIR/$file"
+  r3_extra
   gate "$CASE_ROOT"
   assert_eq "  CONTROL: the same fixture with a SATISFYING $file is granted" "$GATE_DEC" "granted"
 
   # 3. The event alone, artifact absent: path (b) is weaker on purpose, and this is the cell that
   #    proves the event is live. If this ever refuses, cell 1 stops being about priority at all.
   new_case 4242 "$(mk_status "$phase" "\"$tier\"" "$ev")"
+  r3_extra
   gate "$CASE_ROOT"
   assert_eq "  CONTROL: with no $file at all, that same event GRANTS (path (b) attests dispatch)" \
     "$GATE_DEC" "granted"
@@ -399,6 +463,7 @@ r3_row() {  # r3_row <phase> <tier> <file> <failing-body> <satisfying-body> <eve
   # 4. Present-and-failing with NO events: the original cell, kept as a cell of the matrix.
   new_case 4242 "$(mk_status "$phase" "\"$tier\"" "$NO_EVENTS")"
   printf '%s' "$bad" > "$CASE_DIR/$file"
+  r3_extra
   gate "$CASE_ROOT"
   assert_eq "  and a failing $file with no events at all is refused too" "$GATE_DEC" "refused"
 }
@@ -407,11 +472,11 @@ BA_EVENT='[{"phase":"1-ba","verdict":"complete","at":"2026-01-01T00:00:00Z"}]'
 P2_EVENT='[{"phase":"2-constraints","verdict":"complete","at":"2026-01-01T00:00:00Z"}]'
 
 r3_row 2-review      architectural spec.json '{"issue_number":4242}' "$SPEC_APPROVED" "$BA_EVENT" \
-  'carries no `ba_approved_at`' 'set `ba_approved_at` in .pipeline/4242/spec.json'
+  'carries no `ba_approved_at`' 'set `ba_approved_at` in .pipeline/4242/spec.json' 'map.json'
 r3_row 2-constraints standard      spec.json '{"issue_number":4242}' "$SPEC_APPROVED" "$BA_EVENT" \
-  'carries no `ba_approved_at`' 'set `ba_approved_at` in .pipeline/4242/spec.json'
+  'carries no `ba_approved_at`' 'set `ba_approved_at` in .pipeline/4242/spec.json' ''
 r3_row 3-impl standard constraints.md '' '# real content' "$P2_EVENT" \
-  'it is empty' 'into .pipeline/4242/constraints.md'
+  'it is empty' 'into .pipeline/4242/constraints.md' ''
 
 # NON-ZERO CONTROL for the four message assertions above: the ABSENT case must still say the two
 # things the present case must not. Without it, "does not claim the file is missing" is satisfied
@@ -450,6 +515,10 @@ assert_not_contains "  and does not offer it unqualified, over whatever run got 
 # here on purpose: cell 3 above already covers the ordinary case.
 new_case 4242 "$(mk_status "2-review" '"architectural"' \
   '[{"phase":"1-ba","verdict":"REWORK_REQUIRED","at":"2026-01-01T00:00:00Z"}]')"
+# #61 R9(d): re-sited by giving the fixture the row's SECOND prerequisite, so the variable this
+# cell is about -- a REJECTING verdict on the 1-ba event -- stays the only one.
+assert_eq "  fixture shape: and it carries the 2-review row's second prerequisite" \
+  "$(write_extra_prereqs "2-review" "$CASE_DIR")" "map.json"
 gate "$CASE_ROOT"
 assert_eq "with no spec.json at all, a 1-ba event grants entry to 2-review (path (b) is weaker)" \
   "$GATE_DEC" "granted"
@@ -690,6 +759,10 @@ suite "AC29: a /phase re-run that did real work can clear the guard"
 # token-prefixed label resolves through the shared resolver with no new vocabulary.
 new_case 4242 "$(mk_status "2-review" '"architectural"' \
   '[{"phase":"1-ba-rerun","verdict":"complete","at":"2026-01-01T00:00:00Z"}]')"
+# #61 R9(d): re-sited by giving the fixture the row's second prerequisite. The variable this cell
+# is about is the LABEL SHAPE (`1-ba-rerun` vs the bare `phase-rerun` twin below), not the map.
+assert_eq "  fixture shape: and it carries the 2-review row's second prerequisite" \
+  "$(write_extra_prereqs "2-review" "$CASE_DIR")" "map.json"
 gate "$CASE_ROOT"
 assert_eq "a 1-ba-rerun event resolves to token 1 and satisfies the 2-review row" "$GATE_DEC" "granted"
 
@@ -1299,9 +1372,25 @@ assert_eq "#43-K1 commands/pipeline.md carries the shared anchor clause: \"$ANCH
 reg43 "#43-K2"
 assert_contains "#43-K2 and the guard states THE SAME clause, in the comment block that holds the strictest-default sentence" \
   "$GUARD_BLOCK_43" "$ANCHOR_43"
+# THE THREE PROSE LITERALS #61 ADDS TO THIS CONTRACT, stated together where an implementer will
+# read them, because they are the parts of this change no measurement can derive.
+#
+# NEEDLE SELECTION IS THE TRAP HERE, and it was measured before these were chosen: the block this
+# family extracts contains the bare string `1-ba` TEN times, one of them inside ANCHOR_43, which
+# is pinned byte-identical. So the paired NEGATIVE cannot be the bare token -- it would be
+# unsatisfiable by construction and this file would contradict itself. It is a full distinct
+# CLAUSE instead, and the POSITIVE does not contain the negative as a substring, so neither
+# control can blind the other.
+SITING_61='the map.json requirement now lives on the 2-review row'
+STALE_SITING_61='first-visit enforcement lives on the 1-ba row'
+RETIRED_61='RETIRED AT EVERY TIER'
+
+# #43-K3 RE-ANCHORED, not deleted, which is what its own previous label instructed. It used to
+# assert the block cites `#61` as where the requirement WOULD be re-sited; #61 has now landed, so
+# the citation of a future issue is replaced by a statement of the shipped siting.
 reg43 "#43-K3"
-assert_contains "#43-K3 and the guard cites #61 as where the retired map requirement is re-sited -- IF THIS FAILS, #61 landed or the citation moved: re-anchor this assertion to the new siting, do NOT delete it" \
-  "$GUARD_BLOCK_43" "#61"
+assert_contains "#43-K3 and the guard states where the map requirement now lives: \"$SITING_61\" -- IF THIS FAILS the siting moved again or the sentence was reworded: re-anchor this assertion AND its paired negative #61-P1 to the new siting, do NOT delete either" \
+  "$GUARD_BLOCK_43" "$SITING_61"
 
 # ---------------------------------------------------------------------------
 suite "#43 the label namespace itself: unique, and every id that exists actually RAN"
@@ -1319,5 +1408,588 @@ assert_eq "#43-Z1 no #43 assertion id is used twice (a colliding label makes the
 assert_eq "#43-Z2 every #43 id written in this file was REGISTERED by a cell that ran" \
   "$(printf '%s\n' "$AC43_UNIQ" | grep -c . | tr -d ' ')" \
   "$(grep -o '#43-[A-Za-z0-9][A-Za-z0-9]*' "${BASH_SOURCE[0]}" | sort -u | grep -c . | tr -d ' ')"
+
+# ===========================================================================================
+# #61 -- the map.json requirement, RE-SITED from the `1-ba` row to `2-review`.
+#
+# THE DEFECT, reproduced at the merge-base before this family was written: an architectural run
+# that never ran Phase 0.5 -- no map.json on disk, no `0.5` token in events[] -- and is parked at
+# `2-review` is GRANTED, rc 0. The requirement that exists to catch that skip sits on the `1-ba`
+# row behind `tiers: ["architectural"]`, and `1-ba` is checkpointed BEFORE BA returns the tier,
+# so since #43 the row abstains on the mandated path at every tier. The row looks live and is
+# dead. The siting is what is wrong, not the abstention.
+#
+# WHY THE `#61-` PREFIX. This suite already owns `suite "AC1: ..."` through `suite "AC30: ..."`,
+# which are DIFFERENT criteria wearing the numbers #61's spec gave its own. A mutation battery
+# discharges itself by naming a label a reader can grep for, and a colliding label makes that
+# grep return two unrelated sites and prove nothing. Same reason the `#43-` family exists.
+#
+# WHAT IS RED HERE BEFORE THE IMPLEMENTATION EXISTS, AND WHAT IS NOT -- stated because a reader
+# who expects a Phase-3a contract to be uniformly red will otherwise mistrust the green half.
+#   RED at the merge-base, and these ARE the behaviour change:
+#     #61-C1..C6   the six tier spellings with map.json absent: granted today, must refuse.
+#     #61-F1..F5   the five non-architectural delta sets: {0.5-map-complete} today, and exactly
+#                  `2-review` -- that row and no other -- must join them.
+#     #61-T1       the exported satisfying set does not cover what actually satisfies the row.
+#     #43-K3 / #61-P1 / #61-P2   the guard's own prose still says the requirement is retired.
+#   GREEN at the merge-base BY DESIGN, and these are what the change must NOT break:
+#     #61-A1..A3  routing evidence        #61-B1..B6  the grant column
+#     #61-D1..D5  the events path and its deviation hatch, on the SECOND requirement
+#     #61-E1..E8  the ba-approved gate, which a swap would have deleted from the whole route
+#     #61-G1/G2   the command pipeline.md publishes    #61-H1..H3  3-impl is not disarmed
+#     #61-N1/N2   the undetermined-tier abstention set
+#     #61-Q1..Q7  the determination pair, presence-not-content, and replay
+#     #61-T2..T5  the token-visibility probe's own controls
+#
+#   A BARE FAMILY PREFIX IS NOT WRITEABLE HERE, and the first draft of THIS VERY PARAGRAPH proved
+#   it twice: the id prefix followed by a wildcard IS an id to the ledger's own grep, and it is
+#   one no cell registers, so the checks at the bottom of this family reported nine phantom ids --
+#   and then a tenth, from the sentence warning about the other nine. Write the ENDPOINTS.
+#   A preservation pin cannot be red before the thing it preserves is broken. Its bite is proved
+#   by mutation, never by colour -- which is what #61-M1 is for.
+# ===========================================================================================
+
+TESTS61_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# The id ledger, same shape as the #43 family's: every id registers as its cell RUNS, and the two
+# checks at the bottom compare what ran against every id this file's own source mentions.
+AC61_IDS=""
+reg61() { AC61_IDS="$AC61_IDS$1
+"; }
+
+# mk61 <phase> <tier-json-or-OMIT> <events> -- mk_status always writes the risk_tier key, and the
+# ABSENT spelling is one of the six this family asserts invariance over.
+mk61() {
+  if [[ "$2" == "OMIT" ]]; then
+    printf '{"issue_number":4242,"current_phase":"%s","updated_at":"%s","events":%s}' \
+      "$1" "$FRESH_ISO" "$3"
+  else
+    mk_status "$1" "$2" "$3"
+  fi
+}
+
+# Built in variables, never inline inside a "$(...)": inside a command substitution the escaped
+# quotes collapse, the braces end up unquoted and bash brace-expands them, so what reaches disk is
+# not valid JSON and the case tests SILENCE instead of the behaviour it names. See AC4's note.
+EV_1='[{"phase":"1-ba","verdict":"complete","at":"2026-01-01T00:00:00Z"}]'
+EV_05='[{"phase":"0.5-map","verdict":"complete","at":"2026-01-01T00:00:00Z"}]'
+EV_1_05='[{"phase":"1-ba","verdict":"complete","at":"2026-01-01T00:00:00Z"},{"phase":"0.5-map","verdict":"complete","at":"2026-01-01T00:00:00Z"}]'
+EV_05_SKIPPED_NOTED='[{"phase":"0.5-map","verdict":"SKIPPED","note":"trivial surface, no blast radius to map","at":"2026-01-01T00:00:00Z"}]'
+EV_05_SKIPPED_BARE='[{"phase":"0.5-map","verdict":"SKIPPED","at":"2026-01-01T00:00:00Z"}]'
+EV_05_RERUN='[{"phase":"0.5-map-rerun","verdict":"complete","at":"2026-01-01T00:00:00Z"}]'
+EV_FULL='[{"phase":"1-ba","verdict":"complete","at":"2026-01-01T00:00:00Z"},{"phase":"2-review","verdict":"complete","at":"2026-01-01T00:00:00Z"},{"phase":"2.5-design","verdict":"complete","at":"2026-01-01T00:00:00Z"},{"phase":"3-impl","verdict":"complete","at":"2026-01-01T00:00:00Z"},{"phase":"4-review","verdict":"complete","at":"2026-01-01T00:00:00Z"}]'
+
+SPEC_UNAPPROVED='{"issue_number":4242}'
+MISCASED_TIER="Standard"     # unrecognised by KNOWN_TIERS: a real record's mis-cased spelling
+
+# ---------------------------------------------------------------------------
+suite "#61 AC1 (routing half): the siting is a CHECKPOINTED entry phase, not a pass-through literal"
+# ---------------------------------------------------------------------------
+# `grep -o | wc -l`, never `grep -c`, which counts LINES and would silently lower a count if two
+# occurrences shared one. This is the ONE property of the siting that ships to an adopting project
+# with no `.pipeline` history: the OCCUPANCY half of R1 is a census over committed records and is
+# deliberately not asserted anywhere, because it would fail in every downstream clone.
+md61() { grep -o "$1" "$PIPELINE_MD" | wc -l | tr -d ' '; }
+
+reg61 "#61-A1"
+assert_eq "#61-A1 pipeline.md mandates a checkpoint INTO \`2-review\`, exactly once -- EXPIRY: if this stops being 1, the routing evidence for this siting has moved and R1's routing half must be re-derived before the row is trusted again" \
+  "$(md61 'Checkpoint first.*current_phase: "2-review"')" "1"
+reg61 "#61-A2"
+assert_eq "#61-A2 PAIRED NEGATIVE: and it mandates no checkpoint into a \`-complete\` literal, which is what makes A1's term DISCRIMINATE -- EXPIRY: if this returns non-zero, pipeline.md has begun checkpointing a pass-through literal, this term has stopped discriminating, and the partition must be re-measured before either half is trusted" \
+  "$(md61 'Checkpoint first.*current_phase: "1-ba-complete"')" "0"
+reg61 "#61-A3"
+assert_eq "#61-A3 DOCUMENTED NON-ZERO CONTROL: the NAIVE term gives the identical answer for the chosen row and for the row rejected for never being occupied, which is why the refined term above is the one doing the work" \
+  "$(md61 'current_phase: "2-review"')/$(md61 'current_phase: "1-ba-complete"')" "1/1"
+
+# ---------------------------------------------------------------------------
+suite "#61 AC1/AC2/AC3: the decision at 2-review is INVARIANT across all six tier spellings"
+# ---------------------------------------------------------------------------
+# THE FIXTURE IS PINNED ON EVERY AXIS BUT ONE. spec.json present WITH `ba_approved_at`, events[]
+# carrying a `1` token and NO `0.5` token; map.json is the only thing that varies. Measured why
+# that matters: with map.json present but no spec.json and events[] empty, all six spellings are
+# REFUSED naming spec.json, so the unpinned form of this criterion would have been false of the
+# very build it governs -- green for a reason that has nothing to do with the map.
+#
+# ASSERTED OVER THE SIX, NOT A REPRESENTATIVE. An invariance claim is meaningless from one cell,
+# and the map-PRESENT column is what stops the whole family passing on a row that refuses
+# everything. The re-sited row carries no `tiers` key and no `byTier` key, so the phase NAME is
+# the tier evidence: pipeline.md routes standard runs to `2-constraints` and trivial runs straight
+# to `3-impl`, and a run that is AT `2-review` is on the architectural route whatever its
+# risk_tier field says. That is a strictly better signal than the field, which is optional in
+# status.schema.json and which no script writes.
+#
+# grant-id | refuse-id | label | risk_tier as written (OMIT = no key at all) | short key
+AC61_TIER_ROWS=(
+  '#61-B1|#61-C1|architectural|"architectural"|architectural'
+  '#61-B2|#61-C2|standard|"standard"|standard'
+  '#61-B3|#61-C3|trivial|"trivial"|trivial'
+  '#61-B4|#61-C4|absent|OMIT|absent'
+  '#61-B5|#61-C5|null|null|null'
+  "#61-B6|#61-C6|an unrecognised string|\"$GARBAGE_TIER\"|unrecognised"
+)
+AC61_SPELLINGS=""
+for row in "${AC61_TIER_ROWS[@]}"; do
+  IFS='|' read -r gid rid tlabel tierjson tkey <<< "$row"
+  AC61_SPELLINGS="$AC61_SPELLINGS $tkey"
+
+  # (a) map.json PRESENT -> GRANTED. Also AC3's first control half.
+  new_case 4242 "$(mk61 "2-review" "$tierjson" "$EV_1")"
+  printf '%s' "$SPEC_APPROVED" > "$CASE_DIR/spec.json"
+  printf '{}' > "$CASE_DIR/map.json"
+  gate "$CASE_ROOT"
+  reg61 "$gid"
+  assert_eq "$gid 2-review at risk_tier $tlabel, spec approved and map.json PRESENT -> granted" \
+    "$GATE_DEC" "granted"
+  assert_eq "  and it exits 0" "$GATE_RC" "0"
+
+  # (b) map.json ABSENT, and no `0.5` token to stand in for it -> REFUSED, naming map.json.
+  new_case 4242 "$(mk61 "2-review" "$tierjson" "$EV_1")"
+  printf '%s' "$SPEC_APPROVED" > "$CASE_DIR/spec.json"
+  gate "$CASE_ROOT"
+  reg61 "$rid"
+  assert_eq "$rid 2-review at risk_tier $tlabel, spec approved and NO map.json and no 0.5 token -> refused" \
+    "$GATE_DEC" "refused"
+  assert_eq "  and it exits 2" "$GATE_RC" "2"
+  assert_contains "  and the reason names the missing map.json" "$GATE_OUT" "map.json"
+  # The near-miss half: naming spec.json here would send the operator after the file that is
+  # sitting in front of them, satisfied. A refusal that names the wrong file is a refusal that
+  # teaches its reader to reach for this guard's widest disarm.
+  assert_not_contains "  and does NOT name spec.json, which this fixture satisfies" \
+    "$GATE_OUT" "spec.json"
+done
+reg61 "#61-B0"
+assert_eq "#61-B0 the family drove every KNOWN_TIER plus every undetermined spelling, in order" \
+  "${AC61_SPELLINGS# }" "architectural standard trivial absent null unrecognised"
+
+# THE OPERATOR-FACING HALF of the AC2 cell. `  1. ` alone, never the whole of stderr: measured on
+# this file's own earlier form, the diagnosis line names the same file the repair does, so a
+# whole-stderr assertion passed while route 1 said something else entirely and a wrong-repair
+# mutation SURVIVED. The needle has to be searched where it is supposed to be.
+new_case 4242 "$(mk61 "2-review" '"architectural"' "$EV_1")"
+printf '%s' "$SPEC_APPROVED" > "$CASE_DIR/spec.json"
+gate "$CASE_ROOT"
+AC61_R1="$(route1)"
+reg61 "#61-C7"
+assert_eq "#61-C7 CONTROL: a route 1 line was extracted at all, so the next assertion has a haystack" \
+  "$([[ -n "$AC61_R1" ]] && echo found || echo "NO ROUTE 1 LINE")" "found"
+reg61 "#61-C8"
+assert_contains "#61-C8 and ROUTE 1 ITSELF sends the operator to the phase that produces map.json" \
+  "$AC61_R1" "Run the phase that produces \`map.json\`"
+reg61 "#61-C9"
+assert_contains "#61-C9 and stderr says map.json is NOT PRESENT, which is the true diagnosis here" \
+  "$GATE_ERR" "\`map.json\` is not present"
+
+# ---------------------------------------------------------------------------
+suite "#61 AC3: the NON-ZERO CONTROL has two halves, so it cannot pass by always granting"
+# ---------------------------------------------------------------------------
+# Half one is #61-B1 above (the same record with map.json on disk). Half two is the events path:
+# the second requirement must be satisfiable by a recorded `0.5` the same way every other row's
+# is, or the fresh-checkout route this guard's own header exists for is closed for `2-review` --
+# and R11(b)'s adopting-project population is exactly the one that meets it.
+ac61_2review() {  # ac61_2review <events> -> a case at 2-review, spec approved, map.json ABSENT
+  new_case 4242 "$(mk61 "2-review" '"architectural"' "$1")"
+  printf '%s' "$SPEC_APPROVED" > "$CASE_DIR/spec.json"
+  gate "$CASE_ROOT"
+}
+ac61_2review "$EV_05"
+reg61 "#61-D1"
+assert_eq "#61-D1 no map.json on disk, but a 0.5-map entry in events[] -> granted (path (b), the fresh-checkout route)" \
+  "$GATE_DEC" "granted"
+assert_eq "  and it exits 0" "$GATE_RC" "0"
+
+# THE DEVIATION HATCH, on the NEW requirement. A recorded SKIP is the only thing that clears a
+# row without doing the work, and it costs a written reason -- without the note the hatch is free,
+# and a free hatch is not a hatch. Both halves, because the noteless twin is what makes the first
+# a discrimination rather than a restatement of #61-D1.
+ac61_2review "$EV_05_SKIPPED_NOTED"
+reg61 "#61-D2"
+assert_eq "#61-D2 a 0.5-map SKIPPED entry WITH a written note clears the map requirement" \
+  "$GATE_DEC" "granted"
+ac61_2review "$EV_05_SKIPPED_BARE"
+reg61 "#61-D3"
+assert_eq "#61-D3 and the same entry with NO note does not: the hatch costs a reason" \
+  "$GATE_DEC" "refused"
+assert_contains "  and that refusal still names map.json" "$GATE_OUT" "map.json"
+ac61_2review "$EV_05_RERUN"
+reg61 "#61-D4"
+assert_eq "#61-D4 a 0.5-map-rerun label resolves through the shared resolver to token 0.5 and clears it" \
+  "$GATE_DEC" "granted"
+ac61_2review "$EV_1"
+reg61 "#61-D5"
+assert_eq "#61-D5 NEGATIVE: a 1-ba entry satisfies the spec half and does NOT stand in for the map half" \
+  "$GATE_DEC" "refused"
+
+# ---------------------------------------------------------------------------
+suite "#61 AC4: the ba-approved gate SURVIVES at the same row -- this is the criterion that forbids a swap"
+# ---------------------------------------------------------------------------
+# `2-review` is the ONLY row on the architectural route that both is occupied and carries the
+# ba-approved content check: `2-constraints` carries it but is standard-only by routing, and
+# `1-ba-complete` carries a weaker presence check and has never been a persisted current_phase.
+# Swapping map.json IN FOR spec.json here therefore deletes that gate from the entire
+# architectural route. Measured under a swap prototype: this cell goes rc 2 -> rc 0.
+new_case 4242 "$(mk61 "2-review" '"architectural"' "$EV_1_05")"
+printf '%s' "$SPEC_UNAPPROVED" > "$CASE_DIR/spec.json"
+printf '{}' > "$CASE_DIR/map.json"
+gate "$CASE_ROOT"
+reg61 "#61-E1"
+assert_eq "#61-E1 map.json present, spec.json present but carrying no ba_approved_at -> still refused" \
+  "$GATE_DEC" "refused"
+assert_eq "  and it exits 2" "$GATE_RC" "2"
+reg61 "#61-E2"
+assert_contains "#61-E2 and the refusal names spec.json, not the requirement this issue added" \
+  "$GATE_OUT" "spec.json"
+reg61 "#61-E3"
+assert_not_contains "#61-E3 and does NOT name map.json, which this fixture satisfies" "$GATE_OUT" "map.json"
+reg61 "#61-E4"
+assert_contains "#61-E4 and stderr says the file IS present rather than sending them after a missing one" \
+  "$GATE_ERR" "\`spec.json\` IS present"
+reg61 "#61-E5"
+assert_contains "#61-E5 and diagnoses what it lacks" "$GATE_ERR" 'carries no `ba_approved_at`'
+reg61 "#61-E6"
+assert_contains "#61-E6 and route 1 is the CONTENT repair, not a re-run of the phase that produced it" \
+  "$(route1)" 'set `ba_approved_at` in .pipeline/4242/spec.json'
+
+# BOTH obligations failing at once. The refusal names ONE file, which keeps the single-route `1. `
+# address that route1() depends on -- an address bought by a wrong-repair mutation that SURVIVED a
+# whole-stderr assertion. EXPIRY: if this fails, the row's two halves are no longer evaluated
+# primary-first, and the panel must re-check that route1()'s needle still has one address before
+# accepting the change.
+new_case 4242 "$(mk61 "2-review" '"architectural"' "$NO_EVENTS")"
+printf '%s' "$SPEC_UNAPPROVED" > "$CASE_DIR/spec.json"
+gate "$CASE_ROOT"
+reg61 "#61-E7"
+assert_eq "#61-E7 with BOTH obligations failing the turn is refused" "$GATE_DEC" "refused"
+reg61 "#61-E8"
+assert_eq "#61-E8 and the refusal names exactly ONE prerequisite file, so the single-route message shape holds" \
+  "$(route1 | grep -o 'spec\.json\|map\.json' | sort -u | tr '\n' ' ' | sed 's/ $//')" "spec.json"
+
+# ---------------------------------------------------------------------------
+suite "#61 AC5: DELTA PRESERVATION -- exactly one row joins the refusing set, at every non-architectural spelling"
+# ---------------------------------------------------------------------------
+# THE FIXTURE, stated in full because silence on this axis makes the criterion false of today's
+# guard: with NOTHING present and events[] empty the same tiers refuse at 13 of 15 rows, so an
+# unpinned fixture measures the wrong thing. Here: spec.json WITH ba_approved_at, constraints.md
+# non-empty, review.json / design.json / impl-report.json / peer-review.json present, map.json
+# ABSENT, events[] = [1, 2, 2.5, 3, 4], updated_at 1h ago.
+#
+# SETS, NEVER COUNTS. Comparing counts would let a lost refusal and a gained refusal cancel.
+# Measured baseline at the merge-base, for all five spellings: exactly {0.5-map-complete}. The
+# expected value below is that baseline plus `2-review` -- that row and NO OTHER. The clause is
+# NAMED rather than described: a description like "a row pipeline.md routes only at the
+# architectural tier" also admits `2.5-design` and two `-complete` literals, so a belt-and-braces
+# SECOND siting would satisfy the descriptive form while the spec's own out_of_scope forbids one.
+AC61_SWEEP=""
+ac61_sweep_refusing() {  # <tier-json-or-OMIT> -> AC61_SWEEP, the phases returning rc 2, in walk order
+  local tierjson="$1" row phase out=""
+  for row in "${GUARDED_ROWS[@]}"; do
+    IFS='|' read -r phase _t _p _b <<< "$row"
+    new_case 4242 "$(mk61 "$phase" "$tierjson" "$EV_FULL")"
+    printf '%s' "$SPEC_APPROVED"  > "$CASE_DIR/spec.json"
+    printf '{}'                   > "$CASE_DIR/review.json"
+    printf '{}'                   > "$CASE_DIR/design.json"
+    printf '{}'                   > "$CASE_DIR/impl-report.json"
+    printf '{}'                   > "$CASE_DIR/peer-review.json"
+    printf '# constraints'        > "$CASE_DIR/constraints.md"
+    gate "$CASE_ROOT"
+    if [[ "$GATE_RC" == "2" ]]; then out="$out $phase"; fi
+  done
+  AC61_SWEEP="${out# }"
+}
+
+# id | label | risk_tier as written (OMIT = no key at all)
+AC61_DELTA_ROWS=(
+  '#61-F1|standard|"standard"'
+  '#61-F2|trivial|"trivial"'
+  '#61-F3|absent|OMIT'
+  '#61-F4|null|null'
+  "#61-F5|the mis-cased spelling \"$MISCASED_TIER\"|\"$MISCASED_TIER\""
+)
+for row in "${AC61_DELTA_ROWS[@]}"; do
+  IFS='|' read -r id dlabel tierjson <<< "$row"
+  ac61_sweep_refusing "$tierjson"
+  reg61 "$id"
+  assert_eq "$id at risk_tier $dlabel the never-mapped run is refused at the baseline row and at 2-review, and at NO other row" \
+    "$AC61_SWEEP" "2-review 0.5-map-complete"
+done
+
+# ---------------------------------------------------------------------------
+suite "#61 AC6: the undetermined-tier ABSTENTION SET is unchanged, asserted on the OUTCOME"
+# ---------------------------------------------------------------------------
+# On the outcome rather than on a keyword, and that is the whole point: PREREQUISITES is `const`
+# and not exported, so a source regex over the spelling `tiers:` is the only table-shaped
+# assertion available and it is a blocklist over a spelling. Verified to discriminate: a second
+# restriction spelled `onlyTiers` on `2-review` keeps the published `tiers: \[` grep at exactly 1
+# -- so #61-G1 below still passes -- and turns this set into {1-ba, 2-review}.
+AC61_NA=""
+for row in "${GUARDED_ROWS[@]}"; do
+  IFS='|' read -r phase _t _p _b <<< "$row"
+  new_case 4242 "$(mk61 "$phase" "OMIT" "$NO_EVENTS")"
+  gate "$CASE_ROOT"
+  if [[ "$GATE_DEC" == "not-applicable" ]]; then AC61_NA="$AC61_NA $phase"; fi
+done
+reg61 "#61-N1"
+assert_eq "#61-N1 with an undetermined tier and no artifacts at all, exactly ONE guarded row abstains, and it is still the 1-ba row" \
+  "${AC61_NA# }" "1-ba"
+reg61 "#61-N2"
+assert_eq "#61-N2 VACUITY CONTROL: that walk really visited all 15 guarded rows" \
+  "${#GUARDED_ROWS[@]}" "15"
+
+# ---------------------------------------------------------------------------
+suite "#61 AC7: the re-derivation command commands/pipeline.md publishes stays TRUE"
+# ---------------------------------------------------------------------------
+# A two-file agreement with prose this lane may not edit: pipeline.md publishes this command and
+# asserts it returns exactly one hit, on the `1-ba` row. An exact equality pinned to an identity,
+# not a decaying floor. The second-key evasion a grep cannot catch is #61-N1's job, deliberately.
+reg61 "#61-G1"
+assert_eq "#61-G1 \`tiers: [\` appears exactly once in the guard" \
+  "$(grep -o 'tiers: \[' "$GUARD" | wc -l | tr -d ' ')" "1"
+reg61 "#61-G2"
+assert_contains "#61-G2 and the one hit is on the 1-ba row" "$(grep 'tiers: \[' "$GUARD")" '"1-ba"'
+
+# ---------------------------------------------------------------------------
+suite "#61 AC8: 3-impl is NOT disarmed at any undetermined spelling"
+# ---------------------------------------------------------------------------
+# This suite exists because the obvious discharge of the previous draft's blocker -- gating every
+# byTier row on `tierDetermined` -- silently flips these three from rc 2 to rc 0 while satisfying
+# every other criterion in #61's list. The fixture is the one measured for that flip: spec.json
+# approved, map.json present, constraints.md non-empty, design.json ABSENT, events[] empty.
+AC61_H_ROWS=(
+  '#61-H1|absent|OMIT'
+  '#61-H2|null|null'
+  "#61-H3|an unrecognised string|\"$GARBAGE_TIER\""
+)
+for row in "${AC61_H_ROWS[@]}"; do
+  IFS='|' read -r id hlabel tierjson <<< "$row"
+  new_case 4242 "$(mk61 "3-impl" "$tierjson" "$NO_EVENTS")"
+  printf '%s' "$SPEC_APPROVED" > "$CASE_DIR/spec.json"
+  printf '{}'                  > "$CASE_DIR/map.json"
+  printf '# constraints'       > "$CASE_DIR/constraints.md"
+  gate "$CASE_ROOT"
+  reg61 "$id"
+  assert_eq "$id 3-impl at risk_tier $hlabel with no design.json and no 2.5 token -> still refused" \
+    "$GATE_DEC" "refused"
+  assert_eq "  and it exits 2" "$GATE_RC" "2"
+  assert_contains "  and the reason still names design.json" "$GATE_OUT" "design.json"
+done
+
+# ---------------------------------------------------------------------------
+suite "#61 AC9/AC10: the guard's own prose, POSITIVE and NEGATIVE, in the block that holds the strictest-default sentence"
+# ---------------------------------------------------------------------------
+# Co-location, not a fixed address -- block43() finds the ONE comment block holding the marker, so
+# a whole-file grep passing with the sentence pasted anywhere is not enough. The extractor's own
+# two controls (#43-K4 finds a known-present string, #43-K5 reports absence for a known-absent
+# one) run above and must both stay, or an extractor returning `<no-block>` makes every negative
+# below pass VACUOUSLY. The positive half is #43-K3, re-anchored above.
+reg61 "#61-P1"
+assert_not_contains "#61-P1 PAIRED NEGATIVE: and the block does not also claim \"$STALE_SITING_61\" -- both halves are exercised, so a block naming BOTH rows as current fails instead of passing on the positive alone. EXPIRY: if this fails, the prose has re-acquired the stale siting and #43-K3 alone can no longer tell a correct block from a contradictory one" \
+  "$GUARD_BLOCK_43" "$STALE_SITING_61"
+reg61 "#61-P2"
+assert_not_contains "#61-P2 and no surviving sentence says the map requirement is $RETIRED_61 -- that sentence was TRUE of the 1-ba siting and is false of this one" \
+  "$GUARD_BLOCK_43" "$RETIRED_61"
+reg61 "#61-P3"
+assert_contains "#61-P3 CONTROL: the ANCHOR_43 clause is still in that same block, byte-identical, so the rewrite edited the block rather than replacing it" \
+  "$GUARD_BLOCK_43" "$ANCHOR_43"
+reg61 "#61-P4"
+assert_eq "#61-P4 CONTROL: and the extractor returned a real block, not the <no-block> sentinel that would make P1 and P2 vacuous" \
+  "$([[ "$GUARD_BLOCK_43" == "<no-block>" || -z "$GUARD_BLOCK_43" ]] && echo "NO BLOCK EXTRACTED" || echo extracted)" \
+  "extracted"
+
+# ---------------------------------------------------------------------------
+suite "#61 AC11: the deletion battery's named label, and the harness that lets it discharge itself"
+# ---------------------------------------------------------------------------
+# AC11 IS a mutation, so what ships is the harness half: the label the battery names must be
+# UNIQUE across tests/, or the grep a reader runs to check the discharge returns two unrelated
+# sites and proves nothing. ASSEMBLED FROM TWO PIECES so this assertion is not itself an
+# occurrence -- the self-counting trap, which this repo has hit twice.
+AC61_BATTERY_LABEL="#61-""C1"
+# CODE lines only. A prose mention of the id in a comment is not an assertion SITE, and refusing
+# them would make the rule un-followable in the one place the id most needs explaining -- the same
+# discrimination the moving-ref ratchet draws between describing a construct and using it. What
+# must be unique is the site a reader lands on when the battery says "this label went red".
+ac61_label_sites() {  # <needle> -> occurrences on non-comment lines across tests/
+  grep -h -- "$1" "$TESTS61_DIR"/*.sh 2>/dev/null | grep -v '^[[:space:]]*#' | grep -c . | tr -d ' '
+}
+reg61 "#61-M1"
+assert_eq "#61-M1 the label the map.json-deletion battery discharges itself by naming has EXACTLY ONE assertion site across tests/" \
+  "$(ac61_label_sites "$AC61_BATTERY_LABEL")" "1"
+reg61 "#61-M2"
+assert_eq "#61-M2 CONTROL: the same counter CAN return more than one, so the 1 above is a measurement and not a search that finds nothing" \
+  "$(ac61_label_sites "reg61" | awk '{print ($1 > 1 ? "can-see-more" : "SEES-ONLY-ONE")}')" \
+  "can-see-more"
+# ASSEMBLED for the same reason as the battery label above: written whole, the absent needle would
+# be PRESENT on this very line and the zero control would report 1.
+AC61_ABSENT_LABEL="ZZQ-NO-SUCH""-LABEL-61"
+reg61 "#61-M3"
+assert_eq "#61-M3 CONTROL: and it returns ZERO for a label that is nowhere, so #61-M1 is not counting a pattern that matches everything" \
+  "$(ac61_label_sites "$AC61_ABSENT_LABEL")" "0"
+
+# ---------------------------------------------------------------------------
+suite "#61 AC12: the tier-determination PAIR, which is stated in two places and stays in sync on only one axis"
+# ---------------------------------------------------------------------------
+# `normalizeTier` and the raw-field determination check at the call site both read KNOWN_TIERS, so
+# adding a TIER stays in sync automatically. A change to the MATCHING RULE -- a `.trim()`, a
+# `.toLowerCase()` -- diverges silently, and nothing pinned it.
+#
+# THE DISCRIMINATING SPELLING IS ` trivial`, NOT ` architectural`, and this was measured rather
+# than reasoned: under a `.trim()` added to normalizeTier alone, ` architectural` still resolves
+# to the architectural row (it already did, via the strictest-row default) and tierDetermined is
+# still false, so EVERY assertion about it is unchanged and the mutation is a no-op there. Only a
+# spelling whose trimmed form is a DIFFERENT tier than the strictest default can see the change.
+new_case 4242 "$(mk_status "1-ba" '" architectural"' "$NO_EVENTS")"
+gate "$CASE_ROOT"
+reg61 "#61-Q1"
+assert_eq "#61-Q1 a leading-space risk_tier is UNDETERMINED at the call site, so a tiers-restricted row does not apply" \
+  "$GATE_DEC" "not-applicable"
+reg61 "#61-Q2"
+assert_contains "#61-Q2 and the guard says so in its own words rather than claiming a tier it does not have" \
+  "$GATE_OUT" "carries no determined risk_tier"
+
+# The leg that BITES. spec.json present (the trivial row's prerequisite) and design.json absent
+# (the architectural row's) is the one presence combination where the two byTier cells disagree.
+new_case 4242 "$(mk_status "3-impl" '" trivial"' "$NO_EVENTS")"
+printf '{}' > "$CASE_DIR/spec.json"
+gate "$CASE_ROOT"
+reg61 "#61-Q3"
+assert_eq "#61-Q3 and a leading-space \` trivial\` still resolves to the STRICTEST row -- this is the leg that reddens if normalizeTier alone gains a normalising transform the determination check does not" \
+  "$GATE_DEC" "refused"
+reg61 "#61-Q4"
+assert_contains "#61-Q4 and it names design.json, the architectural cell's prerequisite, not spec.json" \
+  "$GATE_OUT" "design.json"
+
+# ---------------------------------------------------------------------------
+suite "#61 AC13: every token that can satisfy the re-sited row is visible on the EXPORTED surface"
+# ---------------------------------------------------------------------------
+# THE PROPERTY, asserted as an OUTCOME and not as a mechanism, because it CONSTRAINS the
+# mechanism: the drift suite's registry-conformance walk enumerates tokens ONLY through
+# `satisfyingTokens` over ENTRY+EXIT, so a token the guard will ACCEPT for a row but which that
+# function does not return is invisible to the one check that exists to catch strays. Measured
+# under a prototype that held the second requirement's tokens outside the returned set: a stray
+# planted there left the drift suite 37 passed / 0 failed -- BLIND -- while the identical stray in
+# the primary tokens went 36/1.
+#
+# So this does not read the table. It DERIVES the accepted set by driving the real CLI once per
+# token in the imported registry, on each half of the row in turn, and compares that observation
+# against what the module reports. Equality in both directions: a token that satisfies and is not
+# reported is the blindness; a token reported but not honoured is a set that has stopped
+# describing the row.
+# The registry is passed as argv[2], NEVER argv[1]: dispatch-model.mjs self-runs as a CLI when
+# its own path is argv[1], and it then prints its unknown-role diagnostic and exits 2. Read as a
+# token list that would be a fixture of English words, silently, which is how the first spelling
+# of this probe reported a 29-token registry. The drift suite passes it in the same position for
+# the same reason.
+KNOWN_PHASES_61="$(node --input-type=module -e '
+  const { KNOWN_PHASES } = await import(process.argv[2]);
+  process.stdout.write(KNOWN_PHASES.join(" "));
+' "$GUARD" "$SCRIPTS_DIR/dispatch-model.mjs" 2>/dev/null)"
+
+AC61_GRANTING=""
+ac61_granting_tokens() {  # <phase> [<file>=<body>]... -> AC61_GRANTING, sorted and space-joined
+  local phase="$1"; shift
+  local t f events out=""
+  for t in $KNOWN_PHASES_61; do
+    events='[{"phase":"'"$t"'","verdict":"complete","at":"2026-01-01T00:00:00Z"}]'
+    new_case 4242 "$(mk_status "$phase" '"architectural"' "$events")"
+    if [[ "$#" -gt 0 ]]; then
+      for f in "$@"; do printf '%s' "${f#*=}" > "$CASE_DIR/${f%%=*}"; done
+    fi
+    gate "$CASE_ROOT"
+    if [[ "$GATE_DEC" == "granted" ]]; then out="$out
+$t"; fi
+  done
+  AC61_GRANTING="$(printf '%s' "$out" | grep . | sort -u | tr '\n' ' ' | sed 's/ $//')"
+}
+
+ac61_reported() {  # <phase> [<tier>|ABSENT] -> the exported satisfying set, sorted, space-joined
+  node --input-type=module -e '
+    const m = await import(process.argv[1]);
+    const t = process.argv[3] === "ABSENT" ? undefined : process.argv[3];
+    process.stdout.write([...m.satisfyingTokens(process.argv[2], t)].sort().join(" "));
+  ' "$GUARD" "$1" "${2:-architectural}" 2>&1
+}
+
+# HALF ONE: map.json on disk, spec.json ABSENT -- only events[] can satisfy the ba-approved half.
+ac61_granting_tokens 2-review "map.json={}"
+AC61_TOK_PRIMARY="$AC61_GRANTING"
+# HALF TWO: spec.json present AND approved, map.json ABSENT -- only events[] can satisfy the map
+# half. At the merge-base this half grants for EVERY token, because there is no second
+# requirement to satisfy: that is the shape of the defect, seen from the token side.
+ac61_granting_tokens 2-review "spec.json=$SPEC_APPROVED"
+AC61_TOK_SECONDARY="$AC61_GRANTING"
+
+reg61 "#61-T1"
+assert_eq "#61-T1 every token the 2-review row ACCEPTS -- on either half -- is reachable from the exported satisfyingTokens, which is what makes the drift suite's registry walk total over this row" \
+  "$(printf '%s\n%s\n' "$AC61_TOK_PRIMARY" "$AC61_TOK_SECONDARY" | tr ' ' '\n' | grep . | sort -u | tr '\n' ' ' | sed 's/ $//')" \
+  "$(ac61_reported 2-review architectural)"
+
+# THE NON-ZERO CONTROL, in the same run: the identical probe over a row this change does not
+# touch. Without it, agreement above is indistinguishable from a probe that grants nothing and a
+# report that returns nothing.
+ac61_granting_tokens 4-review
+reg61 "#61-T2"
+assert_eq "#61-T2 NON-ZERO CONTROL: the same probe over an UNCHANGED row reproduces that row's exported set exactly" \
+  "$AC61_GRANTING" "$(ac61_reported 4-review architectural)"
+reg61 "#61-T3"
+assert_eq "#61-T3 and that control set is NON-EMPTY, so #61-T2 is an observation rather than two absences agreeing" \
+  "$([[ -n "$AC61_GRANTING" ]] && echo "$AC61_GRANTING" || echo "EMPTY: the probe granted for no token at all")" \
+  "3 3b"
+reg61 "#61-T4"
+assert_eq "#61-T4 VACUITY CONTROL: the probe drove the whole imported phase registry, not a subset it happened to remember" \
+  "$(printf '%s' "$KNOWN_PHASES_61" | tr ' ' '\n' | grep -c . | tr -d ' ')" "10"
+
+# THE TIER AXIS. The row carries no `tiers` and no `byTier` key, so its exported set must be
+# byte-identical at every spelling -- the same invariance #61-B1..B6 and #61-C1..C6 assert on the
+# decision, asserted here on the surface the drift walk actually reads.
+reg61 "#61-T5"
+assert_eq "#61-T5 and the exported set for 2-review is identical at all six tier spellings" \
+  "$(ac61_reported 2-review trivial)/$(ac61_reported 2-review standard)/$(ac61_reported 2-review architectural)/$(ac61_reported 2-review "$GARBAGE_TIER")/$(ac61_reported 2-review ABSENT)" \
+  "$(ac61_reported 2-review architectural)/$(ac61_reported 2-review architectural)/$(ac61_reported 2-review architectural)/$(ac61_reported 2-review architectural)/$(ac61_reported 2-review architectural)"
+
+# ---------------------------------------------------------------------------
+suite "#61 edge cases: the map half is a PRESENCE check, and the decision is replayable"
+# ---------------------------------------------------------------------------
+# PRESENCE, NOT CONTENT. Every other map.json obligation in the table is plain presence, and
+# giving this one a content condition would be a second behavioural change smuggled in beside the
+# re-siting. These two cells pass at the merge-base for a reason that has nothing to do with the
+# map -- today the row does not read it at all -- so they are only a discrimination alongside
+# #61-C1, which is what proves the file is consulted.
+new_case 4242 "$(mk61 "2-review" '"architectural"' "$EV_1")"
+printf '%s' "$SPEC_APPROVED" > "$CASE_DIR/spec.json"
+: > "$CASE_DIR/map.json"                       # zero bytes
+gate "$CASE_ROOT"
+reg61 "#61-Q5"
+assert_eq "#61-Q5 an EMPTY map.json still satisfies the row: presence, not content" "$GATE_DEC" "granted"
+
+new_case 4242 "$(mk61 "2-review" '"architectural"' "$EV_1")"
+printf '%s' "$SPEC_APPROVED" > "$CASE_DIR/spec.json"
+printf 'not json at all {[' > "$CASE_DIR/map.json"
+gate "$CASE_ROOT"
+reg61 "#61-Q6"
+assert_eq "#61-Q6 and so does an unparseable one -- a parse here would be a second behaviour change" \
+  "$GATE_DEC" "granted"
+
+# REPLAY. The Stop hook fires at every turn boundary, so the same record is judged over and over;
+# a decision that changed on the second look would mean the guard writes state it does not declare.
+new_case 4242 "$(mk61 "2-review" '"architectural"' "$EV_1")"
+printf '%s' "$SPEC_APPROVED" > "$CASE_DIR/spec.json"
+gate "$CASE_ROOT"; AC61_FIRST="$GATE_DEC/$GATE_RC"
+gate "$CASE_ROOT"; AC61_SECOND="$GATE_DEC/$GATE_RC"
+reg61 "#61-Q7"
+assert_eq "#61-Q7 judging the identical record twice returns the identical decision and exit code" \
+  "$AC61_SECOND" "$AC61_FIRST"
+reg61 "#61-Q8"
+assert_eq "#61-Q8 and that repeated decision is the refusal, so the replay cell is not two grants agreeing" \
+  "$AC61_FIRST" "refused/2"
+
+# ---------------------------------------------------------------------------
+suite "#61 the label namespace: unique, and every id that exists actually RAN"
+# ---------------------------------------------------------------------------
+reg61 "#61-Z1"
+reg61 "#61-Z2"
+AC61_UNIQ="$(printf '%s' "$AC61_IDS" | grep . | sort -u)"
+assert_eq "#61-Z1 no #61 assertion id is used twice (a colliding label makes the battery's grep return two unrelated sites)" \
+  "$(printf '%s\n' "$AC61_IDS" | grep -c . | tr -d ' ')" "$(printf '%s\n' "$AC61_UNIQ" | grep -c . | tr -d ' ')"
+assert_eq "#61-Z2 every #61 id written in this file was REGISTERED by a cell that ran" \
+  "$(printf '%s\n' "$AC61_UNIQ" | grep -c . | tr -d ' ')" \
+  "$(grep -o '#61-[A-Za-z0-9][A-Za-z0-9]*' "${BASH_SOURCE[0]}" | sort -u | grep -c . | tr -d ' ')"
 
 finish
