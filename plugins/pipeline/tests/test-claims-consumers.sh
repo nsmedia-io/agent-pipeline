@@ -63,63 +63,103 @@ assert_contains "AC6: the #16 title resolution survives as a live check" "$R17_T
 # integration.sh takes about four minutes and is run by run.sh and by CI. Running it inside
 # another suite would double that on every checkCommand invocation for no new information.
 
-suite "AC19: both suites are green, and neither lost an assertion"
+suite "AC19: both suites are green, and the assertion SET is pinned BY NAME (#33)"
 
-# The floors are the TRUE current values, not one below. A floor one below the current value
-# lets exactly one assertion be deleted through the guard that exists to stop assertions being
-# deleted -- which is precisely how requirement C could be "satisfied" by removing the ten
-# assertions that defend the wrong convention.
+# WHAT A COUNT COULD NOT DO, MEASURED TWICE BEFORE THIS WAS WRITTEN.
 #
-# A BARE FLOOR DRIFTS, AND IT HAS DRIFTED TWICE. r1 set telemetry at 95 against a true 96; r3
-# raised it to 96, and commits C6/C7 then took the suite to 99 without deleting anything, so
-# three assertions could again be deleted in silence. Nothing about a legitimate addition makes
-# a `>=` literal move: the guard degrades every time the thing it guards grows, and it degrades
-# QUIETLY, which is the same claim-more-than-you-measured defect this issue is about.
+# AC19 asks that neither guarded suite lose an assertion. That was a `>=` floor against a
+# literal, and a bare floor DECAYS every time the suite it guards legitimately grows -- quietly,
+# because nothing forces the literal up. It happened at 95 against a true 96, and again at 96
+# against a true 99, at which point three assertions could have been deleted in silence: exactly
+# the defect the floor exists to prevent, arriving through the floor. #30 landed a two-sided pin
+# as an interim patch -- the `>=` half caught deletion, a `<=` DRIFT ALARM caught growth -- and
+# QA's position on it was that the alarm is "a patch on the symptom, not the cause" and must not
+# be removed until the real fix exists. This is the real fix, so the four literals are gone.
 #
-# So each floor is pinned from BOTH sides. The `>=` half is the deletion guard and is what
-# AC19 asks for. The `<=` half carries no safety claim at all -- it exists so that the next
-# legitimate addition FAILS HERE, loudly, with the new number in the message, instead of
-# silently opening a deletion window. Its failure is a two-character edit and a re-read of what
-# was added; that is the price of a floor that tracks reality rather than the last person who
-# remembered it. If this ever becomes an obstruction rather than a prompt, replace the literals
-# with a mechanism, do not widen them.
-# 56 -> 95 closing #31 (the up section is classified, not line-prefix matched) and #48 (an AC
-# label is authoritative, and the token floor is proportional). Nothing was deleted: three
-# suites were added, 22 + 11 + 6, each rule pinned in both directions with its own non-zero
-# control. The alarm below is what forced this line to be re-read rather than the deletion
-# window being opened by thirty-nine.
-GATE_FLOOR=95
-# 99 -> 106 in the Phase 4 fix round: one `unreadable == 0` pin over the LIVE corpus was
-# REPLACED (a concurrent phase-transition write makes it a transient, not a defect) by five
-# crafted cells that construct the half-written record on demand, plus two accounting
-# assertions on the absolute-path walk. Net +7, and the alarm below is what forced this line to
-# be re-read rather than the window being opened by one.
+# THE SET, NOT THE COUNT. An integer says something changed. A label set says WHAT: a deletion is
+# reported by the name of the assertion that vanished, and an addition is a diff a reviewer
+# reads. Nothing here is a number a future author has to remember to raise.
 #
-# 106 -> 107 for the archive redaction fix: the `the archive corpus is ... empty today` pin,
-# a deliberate one-shot tripwire, fired when the first archive landed and was re-founded on the
-# derived relation (every archive record enumerated is one the walk read), which is one cell
-# for one cell -- plus a non-zero control, because that relation reads 0-of-0 while the archive
-# directory is empty and a vacuous pass is what the pin was there to prevent. Net +1.
-TELEM_FLOOR=107
-run_suite() { bash "$1" 2>&1 | tail -1; }
+# TO REFRESH A PIN after adding or renaming assertions -- and READ THE DIFF, that is the point:
+#   bash tests/test-gate-pre-phase4.sh 2>/dev/null \
+#     | sed -n -e 's/^  ok    //p' -e 's/^  FAIL  //p' | LC_ALL=C sort \
+#     > tests/fixtures/labels/test-gate-pre-phase4.labels
+#
+# WHY fixtures/ AND NOT A HERE-DOC. The pins are read by this suite in a FRESH CHECKOUT too
+# (AC41(c) clones the repo and runs run.sh inside it), so they have to be tracked files. Nothing
+# under fixtures/ is reachable by run.sh's `test-*.sh` glob, which test-issue17-integration.sh
+# asserts in both directions, so a pin is never mistaken for a suite.
+#
+# LC_ALL=C IS LOAD-BEARING. macOS and ubuntu-latest disagree about collation for anything but the
+# C locale, and a pin sorted one way and compared the other reports every line as both missing
+# and extra. Both sides of every comparison below are C-sorted.
 
-GATE_LINE=$(run_suite "$GATE_SUITE")
-GATE_PASSED=$(printf '%s' "$GATE_LINE" | sed -n 's/.*passed=\([0-9]*\).*/\1/p')
-GATE_FAILED=$(printf '%s' "$GATE_LINE" | sed -n 's/.*failed=\([0-9]*\).*/\1/p')
-assert_eq "AC19: the gate suite reports failed=0" "$GATE_FAILED" "0"
-assert_eq "AC19: and its assertion count has not decreased from $GATE_FLOOR" \
-  "$([[ "${GATE_PASSED:-0}" -ge "$GATE_FLOOR" ]] && echo ok || echo "passed=$GATE_PASSED")" "ok"
-assert_eq "AC19 DRIFT ALARM: the gate suite still measures $GATE_FLOOR -- raise GATE_FLOOR here if it grew" \
-  "$([[ "${GATE_PASSED:-0}" -le "$GATE_FLOOR" ]] && echo ok || echo "grew to $GATE_PASSED, floor is $GATE_FLOOR")" "ok"
+new_tmpdir || exit 90
+SCRATCH="$NEW_TMPDIR"
+LABELS_DIR="$TESTS_DIR/fixtures/labels"
 
-TELEM_LINE=$(run_suite "$TELEM_SUITE")
-TELEM_PASSED=$(printf '%s' "$TELEM_LINE" | sed -n 's/.*passed=\([0-9]*\).*/\1/p')
-TELEM_FAILED=$(printf '%s' "$TELEM_LINE" | sed -n 's/.*failed=\([0-9]*\).*/\1/p')
-assert_eq "AC19: the telemetry suite reports failed=0" "$TELEM_FAILED" "0"
-assert_eq "AC19: and its assertion count has not decreased from $TELEM_FLOOR" \
-  "$([[ "${TELEM_PASSED:-0}" -ge "$TELEM_FLOOR" ]] && echo ok || echo "passed=$TELEM_PASSED")" "ok"
-assert_eq "AC19 DRIFT ALARM: the telemetry suite still measures $TELEM_FLOOR -- raise TELEM_FLOOR here if it grew" \
-  "$([[ "${TELEM_PASSED:-0}" -le "$TELEM_FLOOR" ]] && echo ok || echo "grew to $TELEM_PASSED, floor is $TELEM_FLOOR")" "ok"
+# The extraction is only possible because the harness prints one assertion per line in a fixed
+# shape, so that shape is pinned HERE. Change it and this whole check would extract nothing and
+# pass over an empty set -- a guard that reports success because it can no longer see anything.
+HARNESS_SRC="$(cat "$TESTS_DIR/harness.sh")"
+assert_contains "AC19: the harness still prints a passing assertion as '  ok    <label>'" \
+  "$HARNESS_SRC" "'  ok    %s\n'"
+assert_contains "AC19: and a failing one as '  FAIL  <label>'" \
+  "$HARNESS_SRC" "'  FAIL  %s\n"
+
+extract_labels() { sed -n -e 's/^  ok    //p' -e 's/^  FAIL  //p' "$1" | LC_ALL=C sort; }
+
+pin_labels() {  # $1 = suite path
+  local name out pin got missing extra
+  name="$(basename "$1")"
+  out="$SCRATCH/$name.out"
+  got="$SCRATCH/$name.labels"
+  pin="$LABELS_DIR/${name%.sh}.labels"
+  bash "$1" > "$out" 2>/dev/null
+  extract_labels "$out" > "$got"
+
+  # Two vacuity controls, because every claim below is an EMPTY-difference claim and an empty
+  # difference between two empty files is the easiest pass in the world to write by accident.
+  assert_eq "AC19 CONTROL [$name]: the run produced labels (an empty extraction pins nothing)" \
+    "$([[ -s "$got" ]] && echo ok || echo "extracted nothing from $out")" "ok"
+  assert_eq "AC19 CONTROL [$name]: the pinned set exists and is non-empty" \
+    "$([[ -s "$pin" ]] && echo ok || echo "MISSING: ${pin#"$TESTS_DIR/"}")" "ok"
+  assert_eq "AC19 [$name]: the suite reports failed=0" \
+    "$(sed -n 's/^passed=[0-9]* failed=\([0-9]*\)$/\1/p' "$out" | tail -1)" "0"
+
+  # THE DELETION GUARD, which is what AC19 actually asks for -- and it now answers with a NAME.
+  missing="$(LC_ALL=C comm -23 "$pin" "$got" | tr '\n' '|')"
+  assert_eq "AC19 [$name]: no pinned assertion was DELETED" "$missing" ""
+  # THE OTHER SIDE, which is what the DRIFT ALARM was standing in for: an addition is not a
+  # failure of the suite, it is a prompt to read what was added and re-pin. The refresh command
+  # is in the comment above this block.
+  extra="$(LC_ALL=C comm -13 "$pin" "$got" | tr '\n' '|')"
+  assert_eq "AC19 [$name]: and nothing was ADDED without the pin being re-read" "$extra" ""
+}
+
+pin_labels "$GATE_SUITE"
+pin_labels "$TELEM_SUITE"
+
+# NON-ZERO CONTROLS, IN BOTH DIRECTIONS, on a copy of a real pin. Without them the two empty
+# differences above are equally satisfied by a comparison that cannot tell any two sets apart --
+# which is the failure mode the count had, restated in a different instrument.
+REAL_PIN="$LABELS_DIR/test-gate-pre-phase4.labels"
+REAL_GOT="$SCRATCH/test-gate-pre-phase4.sh.labels"
+DELETED_ONE="$SCRATCH/pin-minus-one.txt"
+LC_ALL=C sort "$REAL_PIN" | tail -n +2 > "$DELETED_ONE"
+FIRST_LABEL="$(head -1 "$REAL_PIN")"
+assert_eq "CONTROL: the mutated pin really lost exactly one line" \
+  "$(( $(grep -c . "$REAL_PIN") - $(grep -c . "$DELETED_ONE") ))" "1"
+assert_contains "CONTROL: an ADDED assertion is reported by name, not as a delta" \
+  "$(LC_ALL=C comm -13 "$DELETED_ONE" "$REAL_GOT")" "$FIRST_LABEL"
+ADDED_ONE="$SCRATCH/pin-plus-one.txt"
+{ cat "$REAL_PIN"; printf 'zzz an assertion the suite no longer emits\n'; } | LC_ALL=C sort > "$ADDED_ONE"
+assert_contains "CONTROL: and a DELETED assertion is reported by name too" \
+  "$(LC_ALL=C comm -23 "$ADDED_ONE" "$REAL_GOT")" "zzz an assertion the suite no longer emits"
+# ...and the same comparison is SILENT on the unmutated pair, so the two controls above are
+# discriminations rather than a comparison that reports everything.
+assert_eq "CONTROL: and it reports nothing at all when the two sets agree" \
+  "$(LC_ALL=C comm -3 "$REAL_PIN" "$REAL_GOT")" ""
 
 suite "AC23: the halt-cause enumeration is complete after A and B"
 

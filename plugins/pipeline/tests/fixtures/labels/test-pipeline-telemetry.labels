@@ -1,0 +1,107 @@
+'status' is still an ARCHIVE_ARTIFACTS entry, on the line that defines the list
+3a and 3b are declared, which is what makes them attributable rather than a special case
+3a is a key in its own right, at the elapsed its own event closed
+3b is its own key too, carrying the 4,088,488 ms that used to land on 3a
+AC16(b) CRAFTED CONTROL: finish that write and the same walk reports 0 unreadable, 2 scanned
+AC16(b) CRAFTED: a half-written record is counted as unreadable, not thrown on
+AC16(b) CRAFTED: and the other three land in their own counters
+AC16(b) CRAFTED: and the partition still balances on the record that could be read
+AC16(b) CRAFTED: so all four are accounted for, none fell through
+CONTROL: README.md is not in the trigger list
+CONTROL: a field that IS required reads as required, so the check discriminates
+CONTROL: a label NOT in KNOWN_PHASES is not attributable, so the check above discriminates
+CONTROL: a record with no dropped events reports untimed_events 0
+CONTROL: a sibling object in the same schema is NOT closed, so 'false' means something
+CONTROL: a truncated record is COUNTED unreadable rather than silently exempted
+CONTROL: an invented role is still rejected by the enum
+CONTROL: an ordinary glob is recorded verbatim
+CONTROL: and PASSES a well-formed repo-relative path, so it is not refusing everything
+CONTROL: and on /var/folders/... at depth, inside an array
+CONTROL: and on the English sentence that was actually written into it
+CONTROL: commands/pipeline.md really does append it (the fact the description now states)
+CONTROL: finish that same write and the leak IS reported
+CONTROL: free text in `attribution` still leaks, so the enum widening is closed
+CONTROL: the declared label in the SAME fixture is still attributed normally
+CONTROL: the same accounting reports a shortfall on an archive record it cannot read
+CONTROL: the same check reports 4 on an object carrying a note and a path (two keys, two values)
+CONTROL: the same grep DOES find the field being read somewhere, so the zero is not vacuous
+CONTROL: the same grep reports 0 for an artifact that is NOT archived
+CONTROL: the same walk reddens on /Users/...
+CONTROL: the same walk reddens on an absolute path
+a present shard merges (exit 0), so the halt below is not the script refusing everything
+a shard that exists nowhere HALTS with exit 2
+an UNDECLARED phase label still balances the partition
+an empty status yields a null lead time, not a fabricated zero
+an event with a NON-STRING phase is counted as dropped too, not only a bad timestamp
+and .pipeline/exp-script-test-coverage/status.json is the record that carries it
+and events_counted says how many survived, so the two numbers can be compared
+and it falls back to that directory before declaring a shard missing
+and it saw the field there, so that 0 is a verdict rather than an absence
+and its model values are allowlisted, so the audit record cannot carry a full model ID
+and its time is REPORTED as unattributed rather than dropped
+and nothing it emits is a free-text note, a path, or a command string
+and nothing shipped claims a redaction step exists in code
+and nothing there is unattributed
+and reports zero unattributed time, because the dropped event carried no duration
+and so does the shipped example
+and the corpus is more than one file, so it is a population rather than an example
+and the description says design_review is APPENDED to this array
+and the gate's set is the narrowed one
+and the orchestrator states the rule where the tier is decided
+and the rejection is counted, so it is reportable rather than silent
+and told the only legal alternative is a repo-relative path
+at least one real record carries a suffixed phase key (3a/3b), the shape that used to vanish
+at least one record has no parseable timestamps, so the counter is a verdict
+both keys exist by name
+effective_config is closed (additionalProperties false)
+events with no timestamps yield a null lead time
+every archive record the corpus enumerates is one this walk read
+every corpus file is accounted for by one of the counters: none fell through
+every corpus record is accounted for: scanned + unreadable equals the corpus size
+every key telemetry() returns is declared in the schema
+every role the panel can carry is in the enum
+including on the suffixed 3a/3b shape, whose keys are declared phases and not free text
+it carries a writer prohibition instead
+it is replaced by the rejection token
+it names a distinct subdirectory instead
+no absolute-path string appears in any corpus record this walk could read
+no declared phase label falls through to unattributed
+no phase is credited a negative duration
+no real status.json carries a malformed worktree_path (absolute, or containing spaces)
+no real status.json has unaccounted-for time
+no shipped script reads worktree_path out of a status file
+no time is missing between the phase sum and the lead time
+nothing is unattributed on a run whose every label is declared
+phase 2 elapsed is exactly one hour
+phase 3 elapsed is exactly two and a half hours
+phase 4 absorbs both its boundaries: half an hour plus an hour
+review_rounds is the recorded counter, not a guess
+telemetry is closed (additionalProperties false), so a new field must be declared
+the 'tracked via its own shard' claim is gone
+the absolute glob string does not reach effective_config
+the all-untimed record reports its drops as well
+the backwards boundary is carried as a NEGATIVE unattributed value, which is the signal
+the dropped event is COUNTED, so the balance above is read against what it covered
+the fallback is consulted BEFORE the missing-shard branch
+the first phase gets no key, because nothing recorded when it started
+the keys are exactly the phases the events CLOSED
+the merge block was extracted (without this, the next assertion measures an empty file)
+the mixed record still balances -- which is exactly why the balance alone proves nothing
+the orchestrator is told to omit it
+the partition balances even when events[] runs backwards
+the partition balances on the real 3a/3b shape
+the partition balances on well-formed N- labels too
+the preamble no longer names the worktree .pipeline dir as the fallback
+the real corpus is non-empty (a zero over an empty corpus proves nothing)
+the real corpus is non-empty (a zero over an empty corpus proves nothing)
+the records with no parseable timestamps are counted, not silently dropped from the pass
+the schema declares untimed_events as a bounded integer
+the schema no longer claims worktree_path should be redacted
+the schema says the field is preferably omitted and names where the path really lives
+this repo's own config lists it
+total lead time is exactly five hours
+under a narrowing config the two entries DIFFER
+under no config at all they are equal
+with no counter recorded, the phase-4 entries are counted instead
+with the boundary count that says how many labels it could not read
+worktree_path is not required, so omitting it is legal
