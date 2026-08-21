@@ -1,0 +1,278 @@
+{
+  "issue_number": 43,
+  "current_phase": "5-archive",
+  "risk_tier": "architectural",
+  "started_at": "2026-08-20T20:02:50Z",
+  "updated_at": "2026-08-21T12:35:02Z",
+  "branch": "claude/mechanical-group-impl-bfb9ce",
+  "ask_text": "Add the missing phase-entry guard test cells: undatable status.json records (#43) and the tiers column plus the tier-less record (#45). Both are test-only additions to the gate-phase-entry suite.",
+  "events": [
+    {
+      "phase": "0.5-map",
+      "verdict": "SKIPPED",
+      "at": "2026-08-20T20:02:50Z",
+      "note": "Standard tier folds the map into the BA Phase 1 dispatch; BA writes map.json alongside spec.json. risk_tier is pre-seeded here as standard so the tier-less refusal that issue #45 documents does not fire on our own first turn."
+    },
+    {
+      "phase": "1-ba",
+      "verdict": "complete",
+      "at": "2026-08-20T21:10:42Z",
+      "note": "Tier PROMOTED to architectural by BA and accepted by the owner. No mandatory trigger fired (domains do not intersect data/security/compliance, no migration); this is a judgment promotion on the grounds that a halting control gains a behavioural change."
+    },
+    {
+      "phase": "2-review",
+      "verdict": "REQUEST_CHANGES",
+      "at": "2026-08-20T21:26:48Z",
+      "note": "Round 1. SecOps blocks on spec grounds, not security: gating the 1-ba row on a resolved tier makes it unreachable at the only visit where map.json can still be missing. Looping back to BA."
+    },
+    {
+      "phase": "1-ba",
+      "verdict": "reworked",
+      "at": "2026-08-20T21:39:40Z",
+      "note": "Six blockers cleared, #61 filed with AC11 asserting the guard header cites it so the deferral is greppable. BA found a third stale figure nobody named (test-voice-lint asserted 41, is 48). ACs 11 -> 12, at the ceiling."
+    },
+    {
+      "phase": "2-review",
+      "verdict": "APPROVE_WITH_NOTES",
+      "at": "2026-08-20T21:51:36Z",
+      "note": "Round 2 clear, no REQUEST_CHANGES, so the convergence budget's split/defer/proceed decision was not triggered. Two reviewers independently found AC11 vacuous; a targeted BA criterion fix runs before Phase 2.5 so the falsifiability gate does not bounce it at Phase 3 entry."
+    },
+    {
+      "phase": "1-ba",
+      "verdict": "complete",
+      "at": "2026-08-20T22:01:31Z",
+      "note": "Round-2 notes folded. AC11 rewritten with four clauses plus what the fix itself fails to bind; AC8/AC10 namespaced to end the label collision; every permanent-comment citation now quoted text or symbol plus a DISCRIMINATING re-derivation command."
+    },
+    {
+      "phase": "2.5-design",
+      "verdict": "complete",
+      "at": "2026-08-20T22:19:34Z",
+      "note": "owner_decision.required=false, no material divergence: both sketches agreed on mechanism, crux, state count and prohibition. Judge caught two false passes in its OWN method, including a walk reporting IDENTICAL while comparing three empty files."
+    },
+    {
+      "phase": "3-impl",
+      "verdict": "complete",
+      "at": "2026-08-21T00:04:13Z"
+    },
+    {
+      "phase": "4-review",
+      "verdict": "REQUEST_CHANGES",
+      "at": "2026-08-21T00:22:31Z",
+      "note": "Panel round 1. Two REQUEST_CHANGES; BA's blocker dismissed by the orchestrator against this run's own committed history, QA's upheld. No veto. Fix round is prose plus one assertion tightening, then a delta re-review of QA and SecOps."
+    },
+    {
+      "phase": "4-review",
+      "verdict": "delta-dispatched",
+      "at": "2026-08-21T01:06:34Z",
+      "note": "delta re-review: qa secops ba dba. devops and the dev lens carry forward, neither objected and both had their notes marked resolved. panel_roles unchanged."
+    },
+    {
+      "phase": "4-review",
+      "verdict": "APPROVE_WITH_NOTES",
+      "at": "2026-08-21T01:27:17Z",
+      "note": "Delta round clear. Merge conditions outstanding: DBA's anchor major (third wrong wording of one sentence), 4 unwritten deferrals, the staleness-ceiling issue, and one-line nits from QA/BA/SecOps/DBA."
+    },
+    {
+      "phase": "4-review",
+      "verdict": "merged",
+      "at": "2026-08-21T12:35:02Z",
+      "note": "PR #62 rebase-merged as bc67abe; #43 and #45 closed. Suite green on main at 2216. The final nit round rejected the reviewer's proposed wording as false for the re-entry shape and shipped a corrected version."
+    }
+  ],
+  "flags": [
+    {
+      "phase": "1-ba",
+      "agent": "ba",
+      "verdict": "complete",
+      "summary": "tier promoted to architectural; the guard needs a real fix, not just test cells: route 1 of its own refusal message is unfollowable at 2 of ",
+      "at": "2026-08-20T21:10:42Z"
+    },
+    {
+      "phase": "2-review",
+      "agent": "dba",
+      "verdict": "APPROVE_WITH_NOTES",
+      "summary": "no data layer, so scoped to status.json as the stored record; 4 majors, incl. AC7 enumerates examples not classes",
+      "at": "2026-08-20T21:23:42Z"
+    },
+    {
+      "phase": "2-review",
+      "agent": "devops",
+      "verdict": "APPROVE",
+      "summary": "fail-direction split holds; the fix removes the trigger that trains operators toward the widest disarm",
+      "at": "2026-08-20T21:23:42Z"
+    },
+    {
+      "phase": "2-review",
+      "agent": "orchestrator",
+      "verdict": "NOTE",
+      "summary": "CONTAMINATION: devops mutated gate-phase-entry.mjs in the shared worktree while dba read it. My error: no isolation given.",
+      "at": "2026-08-20T21:23:42Z"
+    },
+    {
+      "phase": "2-review",
+      "agent": "orchestrator",
+      "verdict": "NOTE",
+      "summary": "BASE MOVED mid-review: #27 (8588f00) edited the guard and its suite. Baselines 246/342 are stale; re-measured 249/345.",
+      "at": "2026-08-20T21:23:42Z"
+    },
+    {
+      "phase": "2-review",
+      "agent": "secops",
+      "verdict": "REQUEST_CHANGES",
+      "summary": "REQUEST_CHANGES: the fix retires the map check at ALL tiers, not narrows it. 1 of 15 rows catches a mapless architectural run today, 0 after",
+      "at": "2026-08-20T21:26:48Z"
+    },
+    {
+      "phase": "2-review",
+      "agent": "dba",
+      "verdict": "APPROVE_WITH_NOTES",
+      "summary": "round 2: all 4 majors disposed; found AC11 satisfiable by an EMPTY diff, and the growing-corpus premise is false (archival can shrink it)",
+      "at": "2026-08-20T21:51:36Z"
+    },
+    {
+      "phase": "2-review",
+      "agent": "secops",
+      "verdict": "APPROVE_WITH_NOTES",
+      "summary": "round 2: all 6 blockers cleared against the live artifact; found the same AC11 vacuity independently, plus a label collision with the suite",
+      "at": "2026-08-20T21:51:36Z"
+    },
+    {
+      "phase": "2-review",
+      "agent": "devops",
+      "verdict": "APPROVE",
+      "summary": "round 1 verdict CARRIED FORWARD, not re-run: the rework moved spec prose and criteria, none of which touch its fail-direction or blast-radi…",
+      "at": "2026-08-20T21:51:36Z"
+    },
+    {
+      "phase": "1-ba",
+      "agent": "ba",
+      "verdict": "complete",
+      "summary": "criterion fixes landed; told to check the neighbour, BA found AC10 degraded by the same vacuity class. 8 reqs / 12 ACs, no split.",
+      "at": "2026-08-20T22:01:31Z"
+    },
+    {
+      "phase": "2.5-design",
+      "agent": "dev",
+      "verdict": "complete",
+      "summary": "Sketch A wins on measurement: B's no-line-to-plant claim was false, and its natural mutation site fails vacuously on empty output",
+      "at": "2026-08-20T22:19:34Z"
+    },
+    {
+      "phase": "3-impl",
+      "agent": "qa",
+      "verdict": "complete",
+      "summary": "failing contract committed: 314/15 red at merge-base, tests only. Found and fixed 3 defects in its own instrument before committing.",
+      "at": "2026-08-20T22:51:56Z"
+    },
+    {
+      "phase": "3-impl",
+      "agent": "dev",
+      "verdict": "complete",
+      "summary": "PR #62, one commit, QA's contract green with zero test edits. Suite 2177/33/0. Crux mutation re-planted by the orchestrator and it reddens.",
+      "at": "2026-08-21T00:04:13Z"
+    },
+    {
+      "phase": "4-review",
+      "agent": "ba",
+      "verdict": "REQUEST_CHANGES",
+      "summary": "blocker DISMISSED by the orchestrator on the facts: a 1-ba re-entry with a determined tier does happen; this run's own b15f941 is the witne…",
+      "at": "2026-08-21T00:22:31Z"
+    },
+    {
+      "phase": "4-review",
+      "agent": "dba",
+      "verdict": "APPROVE_WITH_NOTES",
+      "summary": "major: test comments cite status.schema.json as PERMITTING the three malformed shapes. It permits none; updated_at is a required date-time …",
+      "at": "2026-08-21T00:22:31Z"
+    },
+    {
+      "phase": "4-review",
+      "agent": "devops",
+      "verdict": "APPROVE_WITH_NOTES",
+      "summary": "no conflict vs Lane 1's merge commits, verified two ways. nit: the comment claims the route names itself in output, but stop.sh discards st…",
+      "at": "2026-08-21T00:22:31Z"
+    },
+    {
+      "phase": "4-review",
+      "agent": "secops",
+      "verdict": "APPROVE_WITH_NOTES",
+      "summary": "A/B matrix: exactly 2 of 75 cells changed, matching the Phase 2 measurement. The line-number exhibit is already wrong in its own commit",
+      "at": "2026-08-21T00:22:31Z"
+    },
+    {
+      "phase": "4-review",
+      "agent": "dev",
+      "verdict": "APPROVE_WITH_NOTES",
+      "summary": "pipeline.md publishes a re-derivation command keyed to a PRIVATE symbol: renaming it leaves everything green while the command returns zero…",
+      "at": "2026-08-21T00:22:31Z"
+    },
+    {
+      "phase": "4-review",
+      "agent": "qa",
+      "verdict": "REQUEST_CHANGES",
+      "summary": "BINDING. anchor clause false on re-entry, pinned in 2 files. And a polarity inversion passes 329/0: determined is a substring of undetermin…",
+      "at": "2026-08-21T00:22:31Z"
+    },
+    {
+      "phase": "4-review",
+      "agent": "dev",
+      "verdict": "complete",
+      "summary": "fix round 23a6c04: anchor scoped to the first visit in all 3 pinned sites, polarity inversion now reddens 326/3, survivor still survives",
+      "at": "2026-08-21T01:06:34Z"
+    },
+    {
+      "phase": "4-review",
+      "agent": "ba",
+      "verdict": "APPROVE_WITH_NOTES",
+      "summary": "blocker WITHDRAWN after checking the objects. Found 4 deferrals marked routed to #61 and written nowhere: a pre-merge gate",
+      "at": "2026-08-21T01:27:17Z"
+    },
+    {
+      "phase": "4-review",
+      "agent": "dba",
+      "verdict": "APPROVE_WITH_NOTES",
+      "summary": "MAJOR: the anchor is still false. 0.5-map precedes Phase 1 and is tier-gated, so 2 independent records carry a tier at their FIRST 1-ba vis…",
+      "at": "2026-08-21T01:27:17Z"
+    },
+    {
+      "phase": "4-review",
+      "agent": "secops",
+      "verdict": "APPROVE",
+      "summary": "0 of 90 cells moved R1->HEAD with a non-zero control; posture unchanged. Settled the AC14 dispute: it is AC16, pre-existing, not a blocker",
+      "at": "2026-08-21T01:27:17Z"
+    },
+    {
+      "phase": "4-review",
+      "agent": "qa",
+      "verdict": "APPROVE_WITH_NOTES",
+      "summary": "both majors closed over 11 mutations. Proved the new check is a strict SUBSET of the old, so it cannot admit anything the old rejected",
+      "at": "2026-08-21T01:27:17Z"
+    },
+    {
+      "phase": "4-review",
+      "agent": "orchestrator",
+      "verdict": "NOTE",
+      "summary": "this record was destroyed by my own git reset and recovered from the reflog at d80c37a; it now lands on main rather than living on a branch",
+      "at": "2026-08-21T12:35:02Z"
+    }
+  ],
+  "review_rounds": 4,
+  "phase3_qa_test_commit": "5038899a5a486e3c3d6718d1b6b242bcf885aec3",
+  "pr_url": "https://github.com/nsmedia-io/agent-pipeline/pull/62",
+  "panel_roles": [
+    "ba",
+    "dba",
+    "devops",
+    "secops",
+    "dev",
+    "qa"
+  ],
+  "final_verdict": "APPROVE_WITH_NOTES",
+  "peer_review_verdict_counts": {
+    "approve": 1,
+    "approve_with_notes": 5,
+    "request_changes": 0,
+    "request_refactor": 0,
+    "veto": 0
+  }
+}
