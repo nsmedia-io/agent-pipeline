@@ -1,8 +1,8 @@
 {
   "issue_number": 40,
-  "current_phase": "2-review",
+  "current_phase": "1-ba",
   "started_at": "2026-08-21T18:53:19Z",
-  "updated_at": "2026-08-21T19:42:56Z",
+  "updated_at": "2026-08-21T19:56:42Z",
   "branch": "claude/lane-4-a521bf",
   "ask_text": "#40: reviewers state properties, not implementations; only QA and Dev propose how. Typed required_property across agents/*.md, both review schemas, Phase 4 preamble.",
   "events": [
@@ -20,6 +20,12 @@
       "phase": "1-ba",
       "verdict": "SPEC_REWORKED",
       "at": "2026-08-21T19:42:56Z"
+    },
+    {
+      "phase": "2-review",
+      "verdict": "REQUEST_CHANGES",
+      "at": "2026-08-21T19:56:42Z",
+      "note": "round 2"
     }
   ],
   "flags": [
@@ -57,8 +63,29 @@
       "verdict": "SPEC_REWORKED",
       "summary": "B1 closed with a real gate (vulnerabilities.remediation required, 68/0); 56 blocks in adopting projects vs 0 here",
       "at": "2026-08-21T19:42:56Z"
+    },
+    {
+      "phase": "2-dba-r2",
+      "agent": "dba",
+      "verdict": "REQUEST_CHANGES",
+      "summary": "cause found: AGENT_RULES keyed bare; namespaced agent_type returns zero failures. 622 namespaced dispatches, 0 blocks",
+      "at": "2026-08-21T19:56:42Z"
+    },
+    {
+      "phase": "2-secops-r2",
+      "agent": "secops",
+      "verdict": "REQUEST_CHANGES",
+      "summary": "compliance_flags is a third blocking location with no required list; provenance rule over-refuses judgement-set bounds",
+      "at": "2026-08-21T19:56:42Z"
+    },
+    {
+      "phase": "2-devops-r2",
+      "agent": "devops",
+      "verdict": "APPROVE_WITH_NOTES",
+      "summary": "lane-2 branch already narrows #59 redaction; whichever merges second falsifies the others shipped claim",
+      "at": "2026-08-21T19:56:42Z"
     }
   ],
   "risk_tier": "architectural",
-  "review_rounds_phase2": 1
+  "review_rounds_phase2": 2
 }
