@@ -2032,5 +2032,10 @@
       "veto": 0
     },
     "completed_at": "2026-08-20T18:35:20Z"
+  },
+  "superseded_by_note": {
+    "added_at": "2026-08-21T12:43:38Z",
+    "added_by_issue": 43,
+    "note": "This archive is a dated record of #34's PR #51 review and is NOT rewritten (the coordinate gate-phase-entry.mjs:241 it cites at spec.problem/R3/AC6 and elsewhere was true when written). That coordinate has since moved twice more (241 -> 251 -> 312 -> 337 across #42-era work and #43) and the two LIVING living-context files this run seeded, knowledge/living-context/architecture--status-schema-json-consumers.json and knowledge/living-context/testing--status-schema-verdict-cap-enforcement.json, have been corrected durably to cite the symbol plus a re-derivation command, git grep -n 'phase === \"halted-error\"' -- plugins/pipeline/scripts/gate-phase-entry.mjs, instead of a line number. Also as of #43: the 1-ba map-requirement discussion in this archive (e.g. ba_notes' 'gate-phase-entry.mjs:133 normalizes the absent tier to architectural and switches on the architectural-only 1-ba row', and the note at map.json 'No separate 0.5-map dispatch ... issue #45 reproduced live') describes PRE-#43 guard behaviour: #43 changed the guard to ABSTAIN on a tier-restricted row when the tier is undetermined, rather than resolving the absence to the strictest row, and retired the 1-ba map requirement on the mandated path at every tier (re-siting it is #61). Read this file as history; for live behaviour see knowledge/issue-archive/43.json and the living-context entries it seeded."
   }
 }
