@@ -1,8 +1,8 @@
 {
   "issue_number": 40,
-  "current_phase": "4-review",
+  "current_phase": "3-impl",
   "started_at": "2026-08-21T18:53:19Z",
-  "updated_at": "2026-08-21T23:23:01Z",
+  "updated_at": "2026-08-21T23:56:40Z",
   "branch": "claude/lane-4-a521bf",
   "ask_text": "#40: reviewers state properties, not implementations; only QA and Dev propose how. Typed required_property across agents/*.md, both review schemas, Phase 4 preamble.",
   "events": [
@@ -41,6 +41,12 @@
       "phase": "3-impl",
       "verdict": "IMPL_COMPLETE",
       "at": "2026-08-21T23:23:01Z"
+    },
+    {
+      "phase": "4-review",
+      "verdict": "REQUEST_CHANGES",
+      "at": "2026-08-21T23:56:40Z",
+      "note": "round 1, full six-role panel; 3 REQUEST_CHANGES / 3 APPROVE_WITH_NOTES"
     }
   ],
   "flags": [
@@ -120,6 +126,48 @@
       "verdict": "IMPL_COMPLETE",
       "summary": "78/78 battery cells, 18 controls OK; 9 fold-ins; AC13 unobservable (loader reads the stale plugin cache)",
       "at": "2026-08-21T23:23:01Z"
+    },
+    {
+      "phase": "4-secops",
+      "agent": "secops",
+      "verdict": "REQUEST_CHANGES",
+      "summary": "replicated block asserts refusal that is false for design.md; AGENT_RULES has no design key; independent of #66",
+      "at": "2026-08-21T23:56:40Z"
+    },
+    {
+      "phase": "4-dba",
+      "agent": "dba",
+      "verdict": "REQUEST_CHANGES",
+      "summary": "sentence true in 3 of 10 files; record enumerates by location, gate keys by agent identity; recipe says Task, corpus has Agent",
+      "at": "2026-08-21T23:56:40Z"
+    },
+    {
+      "phase": "4-qa",
+      "agent": "qa",
+      "verdict": "REQUEST_CHANGES",
+      "summary": "byte-identity pin blocks per-file fix; AC4 quantified over locations not role x location conjunction",
+      "at": "2026-08-21T23:56:40Z"
+    },
+    {
+      "phase": "4-ba",
+      "agent": "ba",
+      "verdict": "APPROVE_WITH_NOTES",
+      "summary": "deferral ledger verified by opening issues; AC3 ask 4 undecidable from shipped text",
+      "at": "2026-08-21T23:56:40Z"
+    },
+    {
+      "phase": "4-dev",
+      "agent": "dev",
+      "verdict": "APPROVE_WITH_NOTES",
+      "summary": "brace fix invisible as a fix; a revert of both copies passes every shipped test",
+      "at": "2026-08-21T23:56:40Z"
+    },
+    {
+      "phase": "4-devops",
+      "agent": "devops",
+      "verdict": "APPROVE_WITH_NOTES",
+      "summary": "README Upgrading list is the repo convention for this and was not updated; cache runs the old form post-merge",
+      "at": "2026-08-21T23:56:40Z"
     }
   ],
   "risk_tier": "architectural",
@@ -134,5 +182,13 @@
     "qa"
   ],
   "review_rounds": 1,
-  "reviewed_head": "2ef09a523f7b9143eeed6f9a3d1d3728a478bc1d"
+  "reviewed_head": "2ef09a523f7b9143eeed6f9a3d1d3728a478bc1d",
+  "final_verdict": "REQUEST_CHANGES",
+  "peer_review_verdict_counts": {
+    "approve": 0,
+    "approve_with_notes": 3,
+    "request_changes": 3,
+    "request_refactor": 0,
+    "veto": 0
+  }
 }
