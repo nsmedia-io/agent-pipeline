@@ -148,7 +148,8 @@ Write this exact shape (top-level `verdict`, no `dba` wrapper):
   "concerns": [
     {
       "severity": "blocker | major | nit",
-      "description": "Migration ships an executable down script; the deploy path runs the file inline and it will self-destruct. Comment the down region out.",
+      "description": "Migration ships an executable down script and the deploy path runs the file inline, so applying it drops the table it just created.",
+      "must_satisfy": "The deploy path must not execute any statement from the down region, checked by running the migration file through the deploy path and asserting the down statements produce no effect.",
       "location": "migrations/104_add_foo.sql:42"
     }
   ],

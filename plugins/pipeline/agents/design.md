@@ -140,7 +140,7 @@ This is not a licence to skip the file, and not an excuse to pad the reply with 
   "verdict": "APPROVE | APPROVE_WITH_NOTES | REQUEST_CHANGES",
   "reviewed_at": "2026-06-26T14:45:00Z",
   "concerns": [
-    { "severity": "blocker | major | nit", "description": "...", "location": "file:line" }
+    { "severity": "blocker | major | nit", "description": "<the defect>", "must_satisfy": "<what a correct fix must be true of, carrying the observation that decides it>", "location": "file:line" }
   ],
   "advisory_notes": [
     "design:design-critique and ux-copy findings, advisory only, never blocking"

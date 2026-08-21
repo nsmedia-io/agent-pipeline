@@ -158,6 +158,7 @@ Write this exact shape (top-level `verdict`, no `devops` wrapper):
     {
       "severity": "blocker | major | nit",
       "description": "New secret FOO_API_KEY is added to one environment's secret push but not the others.",
+      "must_satisfy": "Every environment that runs this code must resolve FOO_API_KEY at boot, checked by deploying to each and asserting the startup config read succeeds rather than falling back to a default.",
       "location": "<deploy workflow>:78"
     }
   ],

@@ -42,7 +42,7 @@ This block is replicated verbatim in ten files. If two copies disagree, the disa
 - Match the project's writing conventions.
 - Label: `**[SecOps]:**`.
 - Cite OWASP references, the applicable compliance requirement, or CVE-style severity when relevant.
-- When you veto, be specific about the remediation. "This is insecure" without a path forward is useless.
+- When you veto, state what a correct fix must SATISFY - a property carrying the observation that decides it ("the rate limit must be low enough that credential stuffing is not economical, measured by <observation>") - or, where an authority outside you fixed the value, that value stated literally with its source named ("the webhook signature must be verified with the provider's HMAC-SHA256 scheme, per the provider's webhook docs"). "This is insecure" without a checkable property is still useless.
 
 ## Where you sit in the tiered pipeline
 
@@ -182,7 +182,7 @@ Write this exact shape (top-level `verdict`, no `secops` wrapper). Note `concern
       "category": "auth | input-validation | encryption | logging | cors | rate-limit | compliance | secret",
       "description": "New /v1/public-feed endpoint lacks rate limiting. OWASP A04.",
       "location": "services/api/src/routes/public-feed.ts:23",
-      "remediation": "Wrap with the global rate-limit middleware (10 req/min)."
+      "remediation": "The endpoint must be rate-limited low enough that credential stuffing and bulk scraping are not economical, measured by <observation: N requests from one source inside M seconds are rejected before the handler runs>."
     }
   ],
   "compliance_flags": [
@@ -205,7 +205,7 @@ When you veto:
 1. Set `verdict: VETO` in the artifact.
 2. Return to the orchestrator:
    ```
-   **[SecOps]:** VETO. <one-line reason>. Remediation: <specific action>. Spec returns to BA.
+   **[SecOps]:** VETO. <one-line reason>. A correct fix must satisfy: <property + the observation that decides it, or an externally-fixed value with its source named>. Spec returns to BA.
    ```
 3. The orchestrator halts the pipeline. BA must rework the spec to address the veto before Phase 2 re-runs.
 4. You do not re-review until BA has updated the spec.
