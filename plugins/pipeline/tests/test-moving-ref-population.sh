@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# THE RATCHET (#37): no test population may be derived from a range against a MOVING REF.
+# THE RATCHET: no test population may be pinned to something that moves independently of the
+# property under test. Two shapes so far, one per section: a git range against a MOVING REF
+# (#37), and an ABSOLUTE LINE RANGE into a shipped document (#68).
 #
 # THREE OCCURRENCES OF ONE SHAPE, TWICE BREAKING `main` AT MERGE.
 #
@@ -212,5 +214,92 @@ assert_eq "this suite is inside the population it walks" \
 # does not apply, which is where the next author would put the next occurrence.
 assert_eq "CONTROL: and every occurrence of the ref in THIS file is a comment, never a pattern" \
   "$(grep -n "$OREF/" "${BASH_SOURCE[0]}" | grep -cv ':[[:space:]]*#' | tr -d ' ')" "0"
+
+# =============================================================================
+# SHAPE TWO: AN ABSOLUTE LINE RANGE INTO A SHIPPED DOCUMENT (#68).
+# =============================================================================
+#
+# Same family, different moving thing. `sed -n '55,80p' "$PIPELINE_MD"` reads a 1100-line file
+# that five lanes edit concurrently, so the population is decided by everyone else's edits
+# rather than by the property under test. Measured: thirteen lines added to a section well ABOVE
+# the region pushed the paragraph one line past the window and reddened two assertions while
+# nothing about the property changed. And the failure invites the wrong remedy, which is to nudge
+# the numbers. It is over-falsifiable upward and under-falsifiable downward at the same time:
+# moving the sentences anywhere else INSIDE the window kept them green while the claim went false.
+#
+# THE DISCRIMINATOR IS THE OPERAND, and it is exact rather than heuristic. `sed -n 'N,Mp'` applied
+# to a FILE is an offset into a document somebody else owns. The same script reading STDIN is an
+# offset into a population this suite already derived for itself, which is a different statement
+# and a correct one: test-claims-consumers.sh takes the lead paragraph of a section it extracted
+# by heading, and that must not be refused.
+#
+# Written as case globs rather than as literals, for the same reason as $OREF above: this file is
+# inside the population it walks. The globs require a DIGIT after `sed -n '`, and every occurrence
+# in this file has a `[` or a `%` there instead.
+RANGE_TO_FILE_QUOTED="*sed -n '[0-9]*,[0-9]*p' \"*"
+RANGE_TO_FILE_BARE="*sed -n '[0-9]*,[0-9]*p' \$*"
+
+# line_range_offenders <file>... -> one "<basename>:<lineno>" per offending line.
+line_range_offenders() {
+  local f line trimmed n hits=""
+  for f in "$@"; do
+    [[ -f "$f" ]] || continue
+    n=0
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      n=$((n + 1))
+      trimmed="${line#"${line%%[![:space:]]*}"}"
+      case "$trimmed" in '#'*) continue ;; esac
+      case "$line" in
+        $RANGE_TO_FILE_QUOTED|$RANGE_TO_FILE_BARE) hits="$hits $(basename "$f"):$n" ;;
+      esac
+    done < "$f"
+  done
+  printf '%s' "${hits# }"
+}
+
+# ---------------------------------------------------------------------------
+suite "the ratchet: no test reads a shipped document through an absolute line range"
+# ---------------------------------------------------------------------------
+
+assert_eq "no test file pins a line range into a file it does not own" \
+  "$(line_range_offenders "${POPULATION[@]}")" ""
+
+# ---------------------------------------------------------------------------
+suite "GATE BITES: #68's exact line, and the derived-population read beside it"
+# ---------------------------------------------------------------------------
+
+LR_BAD="$SCRATCH/planted-line-range.sh"
+printf 'EVENTS_REGION=$(sed -n %s55,80p%s "$PIPELINE_MD")\n' "'" "'" > "$LR_BAD"
+assert_contains "the planted probe really carries #68's line" "$(cat "$LR_BAD")" "PIPELINE_MD"
+assert_eq "CONTROL: the ratchet CATCHES it, named by file and line" \
+  "$(line_range_offenders "$LR_BAD")" "planted-line-range.sh:1"
+
+# The legitimate shape, which is live in this repo today and must not be refused: an offset into
+# a population the suite derived for itself, arriving on STDIN rather than as a file operand.
+LR_GOOD="$SCRATCH/planted-derived-offset.sh"
+printf 'WORDS=$(printf %s%%s\\n%s "$UPGRADE" | sed -n %s1,4p%s | grep -oE x)\n' "'" "'" "'" "'" > "$LR_GOOD"
+assert_contains "the legitimate probe really carries the same sed script" "$(cat "$LR_GOOD")" "sed -n"
+assert_eq "CONTROL: and PASSES the identical range applied to a derived population on stdin" \
+  "$(line_range_offenders "$LR_GOOD")" ""
+
+# The unquoted operand, so the rule is about the OPERAND and not about a quoting habit.
+LR_BARE="$SCRATCH/planted-bare-operand.sh"
+printf 'R=$(sed -n %s10,20p%s $PIPELINE_MD)\n' "'" "'" > "$LR_BARE"
+assert_eq "an unquoted file operand is caught too" \
+  "$(line_range_offenders "$LR_BARE")" "planted-bare-operand.sh:1"
+
+# Prose, and its uncommented twin, exactly as for the moving-ref half.
+LR_COMMENT="$SCRATCH/planted-line-range-comment.sh"
+printf '# it used to read sed -n %s55,80p%s "$PIPELINE_MD", which broke whenever anyone edited above it\n' "'" "'" > "$LR_COMMENT"
+assert_eq "a full-line comment describing the defect is prose, not the defect" \
+  "$(line_range_offenders "$LR_COMMENT")" ""
+LR_UNCOMMENT="$SCRATCH/planted-line-range-uncommented.sh"
+sed 's/^# it used to read //; s/, which broke.*$//' "$LR_COMMENT" > "$LR_UNCOMMENT"
+assert_contains "the uncommented twin really lost its comment marker" "$(cat "$LR_UNCOMMENT")" "sed -n"
+assert_eq "CONTROL: uncommented, the identical text IS caught" \
+  "$(line_range_offenders "$LR_UNCOMMENT")" "planted-line-range-uncommented.sh:1"
+
+assert_eq "this suite is inside the population this half walks too" \
+  "$(line_range_offenders "$TESTS_DIR/$(basename "${BASH_SOURCE[0]}")")" ""
 
 finish

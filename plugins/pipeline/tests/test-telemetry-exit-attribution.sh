@@ -256,12 +256,80 @@ assert_eq "AC12: and names KNOWN_PHASES as the key source" \
   "$([[ "$(grep -c 'KNOWN_PHASES' "$SCHEMA" | tr -d ' ')" -ge 1 ]] && echo ok || echo no)" "ok"
 
 # AC13. Two fields with OPPOSITE conventions five lines apart is the trap that produced this
-# defect. The sentence must sit inside that region, where a reader of either field meets it.
-EVENTS_REGION=$(sed -n '55,80p' "$PIPELINE_MD")
+# defect. The sentence must sit where a reader of EITHER field meets it.
+#
+# THE POPULATION IS DERIVED, NEVER A LINE RANGE (#68). This read was `sed -n '55,80p'` into an
+# 1100-line file that five lanes edit concurrently, which is #37's family exactly: a population
+# fixed to something that moves independently of the property under test. It was not
+# hypothetical. Adding thirteen lines to the Phase 0 secret rule, well ABOVE the region, pushed
+# the paragraph from line 69 to line 81, one past the window, and reddened both cells while
+# nothing about the siting changed; the remedy that failure invited was to shrink the edit or
+# nudge the numbers. It was worse in the other direction: move the sentences anywhere else
+# inside 55-80, away from the fields entirely, and both cells stay green while the claim AC13
+# makes becomes false.
+#
+# The region is now THE SECTION THE TWO FIELDS LIVE IN. It opens at the status.json template
+# that declares them and closes at the next `###` heading. That is what AC13 actually claims,
+# that a reader who meets either field meets the convention before leaving the section, and no
+# absolute line range can express it. Both anchors are unique in the file.
+md_events_region() { sed -n '/^  "current_phase": "0-setup",$/,/^### /p' "$1"; }
+EVENTS_REGION=$(md_events_region "$PIPELINE_MD")
+
+# SCOPING CONTROLS, before the claims. A range that silently swallowed the whole file would
+# satisfy every assert_contains below, so the extraction's two edges are pinned first: it must
+# reach both field definitions, and it must stop at the heading rather than running on.
+# (Precedent: the same shape at test-status-schema-contract.sh's extraction control.)
+assert_contains "AC13 SCOPE: the region opens at the status.json template that declares the fields" \
+  "$EVENTS_REGION" '"current_phase": "0-setup"'
+assert_contains "AC13 SCOPE: and reaches the other field's definition, so a reader of either is inside it" \
+  "$EVENTS_REGION" '"events": []'
+assert_contains "AC13 SCOPE: and closes on the next heading" \
+  "$EVENTS_REGION" "### Durable checkpoint convention"
+assert_not_contains "AC13 SCOPE: it does not run on into that section's body" \
+  "$EVENTS_REGION" "post-hoc log"
+assert_not_contains "AC13 SCOPE: nor back above the template" \
+  "$EVENTS_REGION" "Resolve the absolute pipeline base"
+assert_not_contains "AC13 SCOPE: nor forward past the section after it" \
+  "$EVENTS_REGION" "Risk-tiered orchestration depth"
+
 assert_contains "AC13: the events[]/current_phase region names events[] as EXIT markers" \
   "$EVENTS_REGION" "EXIT marker"
 assert_contains "AC13: and current_phase as an ENTRY marker" \
   "$EVENTS_REGION" "ENTRY marker"
+
+# GATE BITES, both directions, on copies of the real document.
+#
+# (a) THE REGRESSION #68 MEASURED, which must now pass. Thirteen lines are inserted above the
+#     region, the same shape as the secret-rule edit that broke this. The paragraph's absolute
+#     line number is asserted to have MOVED, computed rather than pinned, so this control cannot
+#     pass by the padding having silently landed somewhere harmless.
+SHIFTED="$TEMP_PROJECT/pipeline-shifted.md"
+awk '{ print } /^3\. \*\*Fetch fresh integration branch/ { for (i = 0; i < 13; i++) print "<!-- padding -->" }' \
+  "$PIPELINE_MD" > "$SHIFTED"
+md_exit_line() { grep -n 'entries are EXIT markers' "$1" | head -1 | cut -d: -f1; }
+assert_eq "CONTROL: the padded copy really moved the paragraph 13 lines down" \
+  "$(( $(md_exit_line "$SHIFTED") - $(md_exit_line "$PIPELINE_MD") ))" "13"
+assert_contains "CONTROL: and the derived region still finds it" \
+  "$(md_events_region "$SHIFTED")" "EXIT marker"
+# ...where an ABSOLUTE offset does not, which is the comparison that makes the change worth
+# making. The offset is READ OUT of the unpadded file rather than written down, so this cell
+# cannot rot into a statement about two numbers somebody typed in 2026.
+assert_not_contains "CONTROL: while the paragraph's own former line number now holds something else entirely" \
+  "$(sed -n "$(md_exit_line "$PIPELINE_MD")p" "$SHIFTED")" "EXIT marker"
+
+# (b) THE ESCAPE THE LINE RANGE COULD NOT SEE, which must now fail. The paragraph is MOVED out
+#     of the section, below the heading, and left otherwise untouched: same words, same file,
+#     wrong place. That is the whole of AC13's claim, and the old pin was blind to it.
+MOVED="$TEMP_PROJECT/pipeline-moved.md"
+awk '
+  /^\*\*`events\[\]` entries are EXIT markers/ { held = $0; next }
+  /^### Durable checkpoint convention/ { print; print ""; print held; next }
+  { print }
+' "$PIPELINE_MD" > "$MOVED"
+assert_contains "CONTROL: the mutated copy still CONTAINS the paragraph (this is a move, not a deletion)" \
+  "$(cat "$MOVED")" "entries are EXIT markers"
+assert_not_contains "CONTROL: but it is outside the section, and the derived region no longer finds it" \
+  "$(md_events_region "$MOVED")" "EXIT marker"
 
 suite "AC25: the schema stops forbidding a value its own corpus produces"
 
