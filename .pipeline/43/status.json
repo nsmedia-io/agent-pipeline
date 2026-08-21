@@ -1,9 +1,9 @@
 {
   "issue_number": 43,
-  "current_phase": "5-archive",
+  "current_phase": "5-archived",
   "risk_tier": "architectural",
   "started_at": "2026-08-20T20:02:50Z",
-  "updated_at": "2026-08-21T12:35:02Z",
+  "updated_at": "2026-08-21T12:43:38Z",
   "branch": "claude/mechanical-group-impl-bfb9ce",
   "ask_text": "Add the missing phase-entry guard test cells: undatable status.json records (#43) and the tiers column plus the tier-less record (#45). Both are test-only additions to the gate-phase-entry suite.",
   "events": [
@@ -77,6 +77,12 @@
       "verdict": "merged",
       "at": "2026-08-21T12:35:02Z",
       "note": "PR #62 rebase-merged as bc67abe; #43 and #45 closed. Suite green on main at 2216. The final nit round rejected the reviewer's proposed wording as false for the re-entry shape and shipped a corrected version."
+    },
+    {
+      "phase": "5-archive",
+      "verdict": "dispatched",
+      "at": "2026-08-21T12:43:38Z",
+      "note": "Librarian dispatched non-blocking; the run is terminal at dispatch time, not on its return."
     }
   ],
   "flags": [
@@ -274,5 +280,6 @@
     "request_changes": 0,
     "request_refactor": 0,
     "veto": 0
-  }
+  },
+  "completed_at": "2026-08-21T12:43:38Z"
 }
