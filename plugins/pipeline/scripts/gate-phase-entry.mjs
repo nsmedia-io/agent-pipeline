@@ -38,7 +38,10 @@
  *     than of the tree. Abstaining is the accepted trade: this guard would rather judge nothing
  *     than judge a run the session does not own. It lands on the fail-open tooling branch R11
  *     already declares ("no resolvable active issue"), so the fail-direction split is unchanged.
- *     Pinned by AC14 cell (c) in tests/test-gate-phase-entry.sh, with a control.
+ *     Pinned in tests/test-gate-phase-entry.sh with a tie-breaking control (re-derive with
+ *     `git grep -n 'an mtime tie is DETERMINISTIC' plugins/pipeline/tests/`, one hit). Cited by
+ *     the cell's own text, not by an AC number: this said "AC14 cell (c)" and no cell of that
+ *     letter exists anywhere in the AC12-AC14 range, so the label named nothing.
  *
  * FAIL-DIRECTION SPLIT (R11), which is a contract change to a hook that declares itself
  * fail-open, so it is stated in both places. The DECISION is fail-CLOSED: a recognised phase
@@ -140,15 +143,25 @@ const IN_FLIGHT_MS = 24 * 60 * 60 * 1000;
 
 /**
  * An unusable risk_tier resolves to the STRICTEST row, never the loosest. That default is right
- * for a `byTier` row, which is only reached after Phase 1 has copied the tier into the record,
+ * for a `byTier` row, which is only reached at a phase where BA has already returned a tier,
  * and it is WRONG for a row that exists at one tier BECAUSE its prerequisite is not producible
- * at the others: the 1-ba checkpoint is written before BA runs, so on the first visit to 1-ba
- * the risk_tier is necessarily absent, and resolving that absence to the strictest row demands
- * an artifact the other two tiers are told not to produce. SCOPED TO THE FIRST VISIT on
- * purpose, because `necessarily` is a universal and a later visit falsifies it: the
- * durable-checkpoint convention re-writes the phase before EACH BA dispatch, so a re-dispatch
- * after a rework loop-back sits at `1-ba` with the tier ALREADY determined, and there the row
- * applies normally -- which is what the architectural cell of this family asserts. So the
+ * at the others: the 1-ba checkpoint is written before BA runs, so the risk_tier at 1-ba is
+ * whatever an EARLIER write left there, never the output of the BA dispatch this checkpoint
+ * precedes -- and when no earlier write set it, resolving that ABSENCE to the strictest row
+ * demands an artifact the other two tiers are told not to produce. STATED WITHOUT A UNIVERSAL
+ * on purpose. Two earlier versions of this sentence each asserted one -- "at 1-ba the risk_tier
+ * is necessarily absent", then the same claim scoped "on the first visit" -- and the committed
+ * corpus falsified both, because ABSENCE is one shape here and not the shape. Phase 0.5 is
+ * itself GATED BY TIER (re-derive with `git grep -n 'Gate by risk tier'
+ * plugins/pipeline/commands/pipeline.md`, one hit, whose map dispatch interpolates the tier), so
+ * a record whose 0.5-map has run reaches its FIRST 1-ba checkpoint with a tier already in the
+ * field; a rework re-entry is a second and rarer route to the same shape, since the
+ * durable-checkpoint convention re-writes the phase before EACH BA dispatch. Read the earliest
+ * 1-ba state of each committed record with `git log --reverse --format=%h --
+ * .pipeline/<n>/status.json`: .pipeline/34 arrives with no tier and an empty events[], while
+ * .pipeline/exp-airlock and .pipeline/exp-claims both arrive carrying `architectural` with
+ * 0.5-map already recorded. Whichever shape it is, a tier that IS present is read normally and
+ * the row applies -- which is what the architectural cell of this family asserts. So the
  * tiers-restricted path -- and only that path -- takes a separate DETERMINATION signal,
  * computed from the RAW field at the call site and passed to `appliesAtTier`; a row carrying a
  * `tiers` key does not apply when the tier is undetermined. Re-derive the ordering claim with
@@ -156,16 +169,19 @@ const IN_FLIGHT_MS = 24 * 60 * 60 * 1000;
  * exactly one hit, the Phase 1 mandate -- NOT `git grep -n 'Checkpoint first'`, which returns
  * one hit per phase and so cannot answer the question it is being asked. That one hit is one
  * MANDATE, not one VISIT: it is obeyed before every BA dispatch, so counting the hits does not
- * count the times the record sits at this phase. Reading it the other way is what makes the
- * unscoped `necessarily` above look true.
+ * count the times the record sits at this phase. Reading it the other way is what made both of
+ * the since-deleted `necessarily` versions named above look true.
  *
  * WHAT THIS COSTS, stated accurately because the comfortable version of the sentence is false
  * the moment it is written: `1-ba` is the only row carrying a `tiers` key (re-derive with
  * `git grep -n 'tiers: \[' plugins/pipeline/scripts/gate-phase-entry.mjs`), and on the path
  * pipeline.md mandates, its map.json requirement is RETIRED AT EVERY TIER -- not narrowed to
- * the architectural one. A row gated on a resolved tier cannot fire at the only visit where
- * map.json can still be missing; it survives only for a re-entry visit to `1-ba`, by which time
- * map.json necessarily exists. What is traded away is an UNDISCRIMINATING refusal (today the
+ * the architectural one. A row gated on a resolved tier cannot fire while the tier is still
+ * absent, and where a tier IS in the field this early it is there BECAUSE 0.5 ran -- the same
+ * run whose `0.5` event satisfies this row. So on the mandated path the row either does not
+ * apply or is already satisfied when it does, at every tier and on the first visit as much as
+ * on a re-entry. (The corpus above is the evidence: the two records that arrive at `1-ba`
+ * carrying `architectural` carry `0.5-map` in events[] as well.) What is traded away is an UNDISCRIMINATING refusal (today the
  * row refuses trivial, standard and architectural alike at `1-ba`), and what is bought is the
  * removal of a first-turn refusal that teaches its operator to reach for this guard's widest
  * disarm. Re-siting the requirement at a phase where the tier IS resolved is #61, which must
@@ -203,7 +219,9 @@ const IN_FLIGHT_MS = 24 * 60 * 60 * 1000;
  * And "its own output" means stdout, which is not the operator's experience: hooks/stop.sh runs
  * this guard with stdout discarded and branches only on rc 2, so NO not-applicable route --
  * including (3) -- is visible through the Stop hook (re-derive with
- * `git grep -n '2>&1 >/dev/null' plugins/pipeline/hooks/stop.sh`). Add the next abstention to
+ * `git grep -n 'GATE_ERR=' plugins/pipeline/hooks/stop.sh`, one hit, which is the invocation
+ * itself; `2>&1 >/dev/null` also matches the voice-lint call and so does not discriminate).
+ * Add the next abstention to
  * this list on the day it is written, not after it has hidden something.
  *
  * EVERY CITATION ABOVE IS BY QUOTED TEXT OR SYMBOL PLUS A COMMAND THAT RE-DERIVES IT, never by

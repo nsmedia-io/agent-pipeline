@@ -1052,8 +1052,8 @@ done
 # vocabulary (dispatch-model.mjs's KNOWN_TIERS, which gate-phase-entry.mjs imports) and the
 # undetermined half is the three spellings a writer can put in the field: ABSENT, which the
 # schema allows (risk_tier is not in `required`), plus null and an unknown string, which it does
-# not and which nothing validates this record against anyway. A
-# fourth tier added to KNOWN_TIERS reddens this until the table covers it.
+# not and which nothing validates this record against anyway. A fourth tier added to KNOWN_TIERS
+# reddens this until the table covers it.
 reg43 "#43-T0"
 assert_eq "#43-T0 the family drove every KNOWN_TIER plus every undetermined spelling, in order" \
   "${AC43_T_COVERED# }" \
@@ -1178,10 +1178,13 @@ for row in "${AC43_D_ROWS[@]}"; do
   assert_eq "$id: and it exits $exprc" "$GATE_RC" "$exprc"
   assert_contains "$id: and the decision came from THIS fixture (names the issue dir)" "$GATE_OUT" "4243"
 done
-# A COVERAGE CONTRACT, not a count: these are the three undatable shapes a WRITER can produce in
+# A COVERAGE CONTRACT, not a count: these are the three undatable CLASSES a WRITER can produce in
 # violation of status.schema.json -- which requires updated_at as a date-time string and so
 # permits none of them, and which nothing validates this record against -- plus the datable
-# control that makes them results. The authority is the writer, not the schema. No code-side
+# control that makes them results. CLASSES and not shapes: `true`, `[]` and `{}` are further
+# undatable SHAPES, and each collapses into the unparseable class already driven here, so the
+# set is complete at this grain and would not be at the literal one. The authority is the writer,
+# not the schema. No code-side
 # vocabulary enumerates them (which is itself why this branch went unexercised), so the set is
 # written out -- and because it is written out, deleting a row reddens this instead of shrinking
 # the family in silence, which is what an `executed == table length` counter does.
@@ -1193,8 +1196,13 @@ assert_eq "#43-D0 the family drove the datable control and every undatable shape
 suite "#43 the tier distinction must not LEAK into the exported satisfyingTokens"
 # ---------------------------------------------------------------------------
 # satisfyingTokens is the guard's exported surface. It has ONE consumer outside this file
-# (test-gate-phase-entry-drift.sh); four is the count of consumers of the guard MODULE, which is
-# a different population. Re-derive with `git grep -rn satisfyingTokens .`.
+# (test-gate-phase-entry-drift.sh). Re-derive with `git grep -rn satisfyingTokens .`, which
+# returns the export, that one consumer, and this file's own uses. An earlier version of this
+# note added "four consumers of the guard MODULE" -- dropped, not re-guessed: it carried no
+# membership rule and no command of its own, and reviewers reading it got 4, 5 or 6 depending on
+# whether a file that only greps the module as TEXT, or one that DELETES it to exercise the
+# disarm, counts as a consumer. An uncommanded count beside a commanded one is the defect this
+# note exists to prevent.
 # The new distinction belongs to the tiers-restricted ROW, not to the token sets, so every
 # undetermined spelling must still resolve through the strictest-row default and return exactly
 # what the architectural tier returns.
@@ -1244,7 +1252,7 @@ suite "#43 the guard and pipeline.md must AGREE, in writing, about the 1-ba orde
 # not a false failure.
 #
 # THIS STRING IS THE CONTRACT. Reword it here and in BOTH files, or not at all.
-ANCHOR_43='the 1-ba checkpoint is written before BA runs, so on the first visit to 1-ba the risk_tier is necessarily absent'
+ANCHOR_43='the 1-ba checkpoint is written before BA runs, so the risk_tier at 1-ba is whatever an EARLIER write left there, never the output of the BA dispatch this checkpoint precedes'
 PIPELINE_MD="$PLUGIN_ROOT/commands/pipeline.md"
 
 # block43 <file> <marker> -> the ONE comment block containing <marker>, comment leaders
