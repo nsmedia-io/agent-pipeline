@@ -1,0 +1,10 @@
+{
+  "issue_number": 40,
+  "current_phase": "1-ba",
+  "started_at": "2026-08-21T18:53:19Z",
+  "updated_at": "2026-08-21T18:53:19Z",
+  "branch": "claude/lane-4-a521bf",
+  "ask_text": "#40: reviewers state properties, not implementations; only QA and Dev propose how. Typed required_property across agents/*.md, both review schemas, Phase 4 preamble.",
+  "events": [],
+  "flags": []
+}
