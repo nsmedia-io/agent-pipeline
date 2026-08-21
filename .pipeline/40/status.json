@@ -1,8 +1,8 @@
 {
   "issue_number": 40,
-  "current_phase": "1-ba",
+  "current_phase": "2-review",
   "started_at": "2026-08-21T18:53:19Z",
-  "updated_at": "2026-08-21T19:25:16Z",
+  "updated_at": "2026-08-21T19:42:56Z",
   "branch": "claude/lane-4-a521bf",
   "ask_text": "#40: reviewers state properties, not implementations; only QA and Dev propose how. Typed required_property across agents/*.md, both review schemas, Phase 4 preamble.",
   "events": [
@@ -15,6 +15,11 @@
       "phase": "2-review",
       "verdict": "REQUEST_CHANGES",
       "at": "2026-08-21T19:25:16Z"
+    },
+    {
+      "phase": "1-ba",
+      "verdict": "SPEC_REWORKED",
+      "at": "2026-08-21T19:42:56Z"
     }
   ],
   "flags": [
@@ -45,6 +50,13 @@
       "verdict": "REQUEST_CHANGES",
       "summary": "required field misses vulnerabilities[] where SecOps files; rule drops MEASURABLE; provenance-fixed bounds refused",
       "at": "2026-08-21T19:25:16Z"
+    },
+    {
+      "phase": "1-ba-rework",
+      "agent": "ba",
+      "verdict": "SPEC_REWORKED",
+      "summary": "B1 closed with a real gate (vulnerabilities.remediation required, 68/0); 56 blocks in adopting projects vs 0 here",
+      "at": "2026-08-21T19:42:56Z"
     }
   ],
   "risk_tier": "architectural",
