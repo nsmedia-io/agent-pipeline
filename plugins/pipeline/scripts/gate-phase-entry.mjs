@@ -142,15 +142,22 @@ const IN_FLIGHT_MS = 24 * 60 * 60 * 1000;
  * An unusable risk_tier resolves to the STRICTEST row, never the loosest. That default is right
  * for a `byTier` row, which is only reached after Phase 1 has copied the tier into the record,
  * and it is WRONG for a row that exists at one tier BECAUSE its prerequisite is not producible
- * at the others: the 1-ba checkpoint is written before BA runs, so at 1-ba the risk_tier is
- * necessarily absent, and resolving that absence to the strictest row demands an artifact the
- * other two tiers are told not to produce. So the tiers-restricted path -- and only that path
- * -- takes a separate DETERMINATION signal, computed from the RAW field at the call site and
- * passed to `appliesAtTier`; a row carrying a `tiers` key does not apply when the tier is
- * undetermined. Re-derive the ordering claim with
+ * at the others: the 1-ba checkpoint is written before BA runs, so on the first visit to 1-ba
+ * the risk_tier is necessarily absent, and resolving that absence to the strictest row demands
+ * an artifact the other two tiers are told not to produce. SCOPED TO THE FIRST VISIT on
+ * purpose, because `necessarily` is a universal and a later visit falsifies it: the
+ * durable-checkpoint convention re-writes the phase before EACH BA dispatch, so a re-dispatch
+ * after a rework loop-back sits at `1-ba` with the tier ALREADY determined, and there the row
+ * applies normally -- which is what the architectural cell of this family asserts. So the
+ * tiers-restricted path -- and only that path -- takes a separate DETERMINATION signal,
+ * computed from the RAW field at the call site and passed to `appliesAtTier`; a row carrying a
+ * `tiers` key does not apply when the tier is undetermined. Re-derive the ordering claim with
  * `git grep -n 'current_phase: "1-ba"' -- plugins/pipeline/commands/pipeline.md`, which returns
  * exactly one hit, the Phase 1 mandate -- NOT `git grep -n 'Checkpoint first'`, which returns
- * one hit per phase and so cannot answer the question it is being asked.
+ * one hit per phase and so cannot answer the question it is being asked. That one hit is one
+ * MANDATE, not one VISIT: it is obeyed before every BA dispatch, so counting the hits does not
+ * count the times the record sits at this phase. Reading it the other way is what makes the
+ * unscoped `necessarily` above look true.
  *
  * WHAT THIS COSTS, stated accurately because the comfortable version of the sentence is false
  * the moment it is written: `1-ba` is the only row carrying a `tiers` key (re-derive with
@@ -173,25 +180,43 @@ const IN_FLIGHT_MS = 24 * 60 * 60 * 1000;
  * so it supports the absent half of this rule only. Treating a typo as undetermined is a new
  * judgement, and it rests on the trade above rather than on a borrowed precedent.
  *
- * A THIRD instance of the same fail-open DIRECTION, deliberate rather than overlooked: a record
- * this guard cannot VALIDATE as concluded is taken at its word. `completed_at` is never parsed,
- * so `"TBD"` reads as finished, and `final_verdict` is tested for truthiness rather than against
+ * A THIRD instance of the same fail-open DIRECTION -- third in THIS header's sequence of costs,
+ * which is not the numbering of the inventory below -- deliberate rather than overlooked: a
+ * record this guard cannot VALIDATE as concluded is taken at its word. `completed_at` is never
+ * parsed, so `"TBD"` reads as finished, and `final_verdict` is truthy-tested rather than against
  * status.schema.json's closed enum, so `"pending"` reads as concluded.
  *
- * THE ABSTENTION INVENTORY, so whoever adds a FOURTH way for this guard to say nothing sees the
- * first three together. (1) Tooling fail-open: an unreadable or non-object record returns null
- * and the caller renders silence -- rc 0 and empty stdout, which an rc-only reader cannot tell
- * from a pass. (2) An mtime tie resolves to NO active issue rather than to readdir order
- * (re-derive with `git log --oneline --grep 'mtime tie'`). (3) This undetermined-tier row-off.
- * Only (3) names itself in its own output and is pinned by a test. Add the fourth to this list
- * on the day it is written, not after it has hidden something.
+ * THE ABSTENTION INVENTORY, so whoever adds the NEXT way for this guard to say nothing sees the
+ * existing ones together. MEMBERSHIP, stated because an inventory with no membership rule
+ * cannot be checked for completeness: abstentions that are SILENT, or that skip a row this
+ * guard RECOGNISES. The terminal, not-in-flight and UNGUARDED declines are scope rules -- this
+ * guard deciding a record is not its subject -- and are documented at their own sites, not
+ * here; so is the paragraph directly above, which takes a record at its word about being
+ * concluded. (1) Tooling fail-open: an unreadable or non-object record returns null and the
+ * caller renders silence -- rc 0 and empty stdout, which an rc-only reader cannot tell from a
+ * pass. (2) An mtime tie resolves to NO active issue rather than to readdir order (re-derive
+ * with `git log --oneline --grep 'mtime tie'`). (3) This undetermined-tier row-off.
+ *
+ * Split, because the conjunction claimed the wrong thing: (3) is the only one that names itself
+ * in its own OUTPUT. (2) is silent, but it IS pinned, with a tie-breaking control (re-derive
+ * with `git grep -n 'an mtime tie is DETERMINISTIC' plugins/pipeline/tests/`). (1) is neither.
+ * And "its own output" means stdout, which is not the operator's experience: hooks/stop.sh runs
+ * this guard with stdout discarded and branches only on rc 2, so NO not-applicable route --
+ * including (3) -- is visible through the Stop hook (re-derive with
+ * `git grep -n '2>&1 >/dev/null' plugins/pipeline/hooks/stop.sh`). Add the next abstention to
+ * this list on the day it is written, not after it has hidden something.
  *
  * EVERY CITATION ABOVE IS BY QUOTED TEXT OR SYMBOL PLUS A COMMAND THAT RE-DERIVES IT, never by
  * line number, and each command must DISCRIMINATE -- one that returns eight hits answers
  * nothing. This is not house style: three line citations drifted inside this one issue's own
- * record (a mandate cited at :103 that lives at :133, a knowledge-store citation that moved
- * 241 -> 251, a token cited at :478 that sits at :477), and this comment is permanent and
- * defended by a test, so a stale coordinate would rot inside a defended artifact.
+ * record -- pipeline.md's `1-ba` checkpoint mandate, which was cited 30 lines above where it
+ * then sat; the knowledge store's citation of this file's `halted-error` line, which had
+ * already moved once and which THIS VERY COMMENT then moved again; and a test token cited one
+ * line off. All three measured at 2ec6dd7, and NO destination is restated here, because the
+ * destination is the part that rots: publishing a fresh coordinate in the sentence that warns
+ * about coordinates is how the second of those three got its third wrong value. This comment
+ * is permanent and defended by a test, so a stale coordinate would rot inside a defended
+ * artifact.
  */
 function normalizeTier(tier) {
   return KNOWN_TIERS.includes(tier) ? tier : "architectural";

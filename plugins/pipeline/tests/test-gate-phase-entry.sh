@@ -1005,10 +1005,26 @@ for row in "${AC43_T_ROWS[@]}"; do
       ;;
     undetermined)
       # R3's distinct wording, asserted so that reusing the resolved-tier string reddens here
-      # and nowhere else. The wording itself stays Dev's: this matches the word the criterion
-      # uses ("undetermined" / "no determined risk_tier"), case-folded, not a fixed sentence.
-      assert_contains "$id: and the reason says the tier is not DETERMINED" \
-        "$(printf '%s' "$GATE_OUT" | tr 'A-Z' 'a-z')" "determined"
+      # and nowhere else. The wording itself stays Dev's: this matches the NEGATED POLARITY the
+      # criterion uses ("undetermined" / "no determined risk_tier"), case-folded, not a fixed
+      # sentence.
+      #
+      # THE POLARITY IS THE POINT, and the obvious spelling of this assertion does not carry it:
+      # a bare `contains "determined"` passed 329/0 against a reason string stating the exact
+      # INVERSE of what the guard did ("has a determined risk_tier, so the tier-restricted row
+      # APPLIES and the turn is refused"), because `determined` is a substring of `undetermined`
+      # and the three negatives below are all absent from that inverse too. Non-zero control for
+      # that zero: a reason of bare `determined` reddens three cells here, so the harness can see
+      # reason-string changes at exactly these assertions. Hence a set of NEGATED spellings, wide
+      # enough to leave the wording Dev's and narrow enough that the inverse cannot satisfy it.
+      # `undetermined` alone is NOT the needle: the shipped sentence says "no determined".
+      folded43="$(printf '%s' "$GATE_OUT" | tr 'A-Z' 'a-z')"
+      polarity43="NOT-NEGATED"
+      case "$folded43" in
+        *undetermined*|*"no determined"*|*"not determined"*|*"never determined"*) polarity43="negated" ;;
+      esac
+      assert_eq "$id: and the reason says the tier is NOT determined, in a negated polarity (an inverted reason must not satisfy this)" \
+        "$polarity43" "negated"
       assert_not_contains "$id: and NOT the resolved-tier wording, which names a tier the record does not carry" \
         "$GATE_OUT" "is not a guarded phase at the"
       # The normalized value must never reach stdout on this branch: `architectural` is what
@@ -1034,7 +1050,9 @@ done
 # family silently covered five tiers instead of six. The coverage has to be compared against
 # something the table cannot shrink, so the resolved half is derived from the guard's OWN tier
 # vocabulary (dispatch-model.mjs's KNOWN_TIERS, which gate-phase-entry.mjs imports) and the
-# undetermined half is the three spellings status.schema.json and the workflow can produce. A
+# undetermined half is the three spellings a writer can put in the field: ABSENT, which the
+# schema allows (risk_tier is not in `required`), plus null and an unknown string, which it does
+# not and which nothing validates this record against anyway. A
 # fourth tier added to KNOWN_TIERS reddens this until the table covers it.
 reg43 "#43-T0"
 assert_eq "#43-T0 the family drove every KNOWN_TIER plus every undetermined spelling, in order" \
@@ -1138,8 +1156,13 @@ for row in "${AC43_D_ROWS[@]}"; do
       ;;
     hand-written)
       # ROUTE: a hand-written body. capture()'s patch cannot SET null -- null is its delete
-      # sentinel -- and status.schema.json permits the field present and null, which is a shape
-      # the workflow can actually write. Kept as a schema-shape witness: no mutation of the
+      # sentinel -- and a writer can put the field present and null IN VIOLATION of
+      # status.schema.json, which requires updated_at and types it as a date-time string but is
+      # enforced against this record by nothing at runtime. Kept as a writer-shape witness, not
+      # a schema-permitted one (re-derive with
+      # `grep -n -A4 '"updated_at"' plugins/pipeline/schemas/status.schema.json`, and note the
+      # nullable spelling this same file uses for issue_number a few lines above, which is what
+      # updated_at would look like if the shape WERE permitted): no mutation of the
       # guard distinguishes JSON null from an absent key (`Date.parse(null)` is NaN exactly as
       # `Date.parse(undefined)` is), so every mutation that reddens this cell has already
       # reddened #43-D2. If a future reviewer finds one that reddens this and NOT #43-D2, that
@@ -1155,8 +1178,10 @@ for row in "${AC43_D_ROWS[@]}"; do
   assert_eq "$id: and it exits $exprc" "$GATE_RC" "$exprc"
   assert_contains "$id: and the decision came from THIS fixture (names the issue dir)" "$GATE_OUT" "4243"
 done
-# A COVERAGE CONTRACT, not a count: these are the three undatable shapes status.schema.json
-# permits a writer to produce, plus the datable control that makes them results. No code-side
+# A COVERAGE CONTRACT, not a count: these are the three undatable shapes a WRITER can produce in
+# violation of status.schema.json -- which requires updated_at as a date-time string and so
+# permits none of them, and which nothing validates this record against -- plus the datable
+# control that makes them results. The authority is the writer, not the schema. No code-side
 # vocabulary enumerates them (which is itself why this branch went unexercised), so the set is
 # written out -- and because it is written out, deleting a row reddens this instead of shrinking
 # the family in silence, which is what an `executed == table length` counter does.
@@ -1167,7 +1192,9 @@ assert_eq "#43-D0 the family drove the datable control and every undatable shape
 # ---------------------------------------------------------------------------
 suite "#43 the tier distinction must not LEAK into the exported satisfyingTokens"
 # ---------------------------------------------------------------------------
-# satisfyingTokens is the guard's exported surface and has four consumers outside this file.
+# satisfyingTokens is the guard's exported surface. It has ONE consumer outside this file
+# (test-gate-phase-entry-drift.sh); four is the count of consumers of the guard MODULE, which is
+# a different population. Re-derive with `git grep -rn satisfyingTokens .`.
 # The new distinction belongs to the tiers-restricted ROW, not to the token sets, so every
 # undetermined spelling must still resolve through the strictest-row default and return exactly
 # what the architectural tier returns.
@@ -1217,7 +1244,7 @@ suite "#43 the guard and pipeline.md must AGREE, in writing, about the 1-ba orde
 # not a false failure.
 #
 # THIS STRING IS THE CONTRACT. Reword it here and in BOTH files, or not at all.
-ANCHOR_43='the 1-ba checkpoint is written before BA runs, so at 1-ba the risk_tier is necessarily absent'
+ANCHOR_43='the 1-ba checkpoint is written before BA runs, so on the first visit to 1-ba the risk_tier is necessarily absent'
 PIPELINE_MD="$PLUGIN_ROOT/commands/pipeline.md"
 
 # block43 <file> <marker> -> the ONE comment block containing <marker>, comment leaders
