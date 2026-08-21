@@ -1,8 +1,8 @@
 {
   "issue_number": 40,
-  "current_phase": "2-review",
+  "current_phase": "1-ba",
   "started_at": "2026-08-21T18:53:19Z",
-  "updated_at": "2026-08-21T19:08:38Z",
+  "updated_at": "2026-08-21T19:25:16Z",
   "branch": "claude/lane-4-a521bf",
   "ask_text": "#40: reviewers state properties, not implementations; only QA and Dev propose how. Typed required_property across agents/*.md, both review schemas, Phase 4 preamble.",
   "events": [
@@ -10,6 +10,11 @@
       "phase": "1-ba",
       "verdict": "SPEC_WRITTEN",
       "at": "2026-08-21T19:08:38Z"
+    },
+    {
+      "phase": "2-review",
+      "verdict": "REQUEST_CHANGES",
+      "at": "2026-08-21T19:25:16Z"
     }
   ],
   "flags": [
@@ -19,7 +24,29 @@
       "verdict": "SPEC_WRITTEN",
       "summary": "architectural; 10 req/16 AC; enforcement lands on review.schema only, peer-review half deferred to #38; $1 probe defect folded in",
       "at": "2026-08-21T19:08:38Z"
+    },
+    {
+      "phase": "2-dba",
+      "agent": "dba",
+      "verdict": "REQUEST_CHANGES",
+      "summary": "validator detects but never refused: 17 violations across 13 archived blocks, 0 refusals; archive rows uncounted",
+      "at": "2026-08-21T19:25:16Z"
+    },
+    {
+      "phase": "2-devops",
+      "agent": "devops",
+      "verdict": "APPROVE_WITH_NOTES",
+      "summary": "re-derived 68/0 and 65/3; probe defect reproduced incl. naive-escape failure; no lane collisions on edit surface",
+      "at": "2026-08-21T19:25:16Z"
+    },
+    {
+      "phase": "2-secops",
+      "agent": "secops",
+      "verdict": "REQUEST_CHANGES",
+      "summary": "required field misses vulnerabilities[] where SecOps files; rule drops MEASURABLE; provenance-fixed bounds refused",
+      "at": "2026-08-21T19:25:16Z"
     }
   ],
-  "risk_tier": "architectural"
+  "risk_tier": "architectural",
+  "review_rounds_phase2": 1
 }
