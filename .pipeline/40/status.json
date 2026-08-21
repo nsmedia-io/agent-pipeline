@@ -1,8 +1,8 @@
 {
   "issue_number": 40,
-  "current_phase": "3-impl",
+  "current_phase": "4-review",
   "started_at": "2026-08-21T18:53:19Z",
-  "updated_at": "2026-08-21T20:36:52Z",
+  "updated_at": "2026-08-21T23:23:01Z",
   "branch": "claude/lane-4-a521bf",
   "ask_text": "#40: reviewers state properties, not implementations; only QA and Dev propose how. Typed required_property across agents/*.md, both review schemas, Phase 4 preamble.",
   "events": [
@@ -36,6 +36,11 @@
       "phase": "2.5-design",
       "verdict": "DESIGN_LOCKED",
       "at": "2026-08-21T20:36:52Z"
+    },
+    {
+      "phase": "3-impl",
+      "verdict": "IMPL_COMPLETE",
+      "at": "2026-08-21T23:23:01Z"
     }
   ],
   "flags": [
@@ -108,9 +113,26 @@
       "verdict": "DESIGN_LOCKED",
       "summary": "Sketch A shape wins; idiom it relied on measured as already drifted 3 of 9; grafted B field pair must_satisfy+rationale_not_checked",
       "at": "2026-08-21T20:36:52Z"
+    },
+    {
+      "phase": "3b-dev",
+      "agent": "dev",
+      "verdict": "IMPL_COMPLETE",
+      "summary": "78/78 battery cells, 18 controls OK; 9 fold-ins; AC13 unobservable (loader reads the stale plugin cache)",
+      "at": "2026-08-21T23:23:01Z"
     }
   ],
   "risk_tier": "architectural",
   "review_rounds_phase2": 2,
-  "phase3_shape": "3a-qa-battery-outside-tests-dir (tests/ frozen: owned by another session)"
+  "phase3_shape": "3a-qa-battery-outside-tests-dir (tests/ frozen: owned by another session)",
+  "panel_roles": [
+    "ba",
+    "dba",
+    "devops",
+    "secops",
+    "dev",
+    "qa"
+  ],
+  "review_rounds": 1,
+  "reviewed_head": "2ef09a523f7b9143eeed6f9a3d1d3728a478bc1d"
 }
