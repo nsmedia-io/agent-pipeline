@@ -191,6 +191,93 @@ assert_contains "the run reports how many absolute paths it redacted" "$OUT" "ab
 ap --issue 88 --from "$ART" --root "$REDROOT"
 assert_contains "CONTROL: and reports zero for an archive that carried none" "$OUT" "absolute paths redacted: 0"
 
+suite "archive-pipeline: redaction takes the PATH SPAN, not the whole value (#59)"
+
+# THE FALSE POSITIVES THIS EXISTS FOR. The predicate PR #57 shipped replaced the ENTIRE value of
+# any string merely BEGINNING with a slash, so two pieces of environment evidence in #34's
+# archive were destroyed along with the paths they opened with -- neither of them a leak:
+#
+#   .peer-review.qa.isolation.mutation_worktree  "/tmp/qa-34-mutate (detached HEAD at d8686bc...)"
+#   .peer-review.qa.environment.shell            "/bin/bash (system bash 3.2)..."
+#
+# That is exactly the class of evidence the Phase 4 preamble requires a reviewer to produce
+# ("name the event, name the environment where it occurs"). QA complied and archival deleted the
+# compliance. `/bin/bash` is also not a path anyone needs redacted, so the old predicate refused
+# correct work in two directions -- the test this repo applies before adopting any guardrail.
+#
+# The fix narrows WHAT IS REPLACED, never WHAT IS MATCHED: the span still stops at the same
+# whitespace-or-quote boundary the mid-string pass has always used, still fires by SHAPE and not
+# by key name, and adds no system root to any blocklist. The planted-leak battery above is
+# UNCHANGED and runs on its own tree, which is what makes "the guard was not weakened" checkable
+# rather than asserted.
+RED2="$TEMP_PROJECT/redact-span"
+mkdir -p "$RED2"
+REDROOT2="$TEMP_PROJECT/redroot-span"
+mkdir -p "$REDROOT2"
+cat > "$RED2/peer-review.json" <<EOF
+{"issue_number":59,
+ "mutation_worktree":"/tmp/qa-34-mutate (detached HEAD at d8686bc)",
+ "shell":"/bin/bash (system bash 3.2)",
+ "under_root_with_prose":"$REDROOT2/plugins/pipeline/scripts/x.mjs (line 42, after the fix)",
+ "home_leading_prose":"/Users/someone/checkout ran the battery",
+ "windows_with_prose":"C:\\\\Users\\\\someone\\\\repo (the CI box)",
+ "bare_home":"/Users/someone/secret/home",
+ "already_relative":"plugins/pipeline/scripts/x.mjs (line 42)"}
+EOF
+ap --issue 59 --from "$RED2" --root "$REDROOT2"
+assert_eq "the archive exits 0" "$RC" "0"
+ARC2="$REDROOT2/knowledge/issue-archive/59.json"
+
+# THE TWO MEASURED FALSE POSITIVES, one cell each, quoting the values as they were recorded on
+# #34. Both must keep the marker AND keep the sentence.
+assert_eq "#59: a /tmp worktree keeps the prose that made it evidence" \
+  "$(jget "$ARC2" peer-review.mutation_worktree)" "<redacted-absolute-path> (detached HEAD at d8686bc)"
+assert_eq "#59: and a system binary keeps its version note" \
+  "$(jget "$ARC2" peer-review.shell)" "<redacted-absolute-path> (system bash 3.2)"
+# The RELATIVIZE arm of the same rule: under the repo root the path is not merely marked, it is
+# rewritten -- and the prose after it still survives.
+#
+# NAMED SURVIVING MUTATION, so this battery is not read as a rubber stamp. Reverting the fix to
+# the whole-value predicate reddens four cells here and leaves THIS one green, because
+# path.relative() treats the trailing prose as more path segments and returns the same bytes by
+# accident. The cell is kept because it is the only one asserting the relativize arm at all, and
+# disclosed because it discriminates nothing on its own: the four cells around it are what prove
+# the span rule, and this one proves the arm still exists.
+assert_eq "#59: a leading path UNDER the repo root relativizes and keeps its trailing prose" \
+  "$(jget "$ARC2" peer-review.under_root_with_prose)" "plugins/pipeline/scripts/x.mjs (line 42, after the fix)"
+# THE LEAK ARM, in the shape that matters most: a home directory OPENING the value. The span is
+# gone; the sentence is not. This is the cell that would redden if the fix had been "stop
+# redacting values that carry prose".
+assert_eq "#59: a home directory opening a sentence loses the path and only the path" \
+  "$(jget "$ARC2" peer-review.home_leading_prose)" "<redacted-absolute-path> ran the battery"
+assert_eq "#59: and the Windows drive arm behaves the same way" \
+  "$(jget "$ARC2" peer-review.windows_with_prose)" "<redacted-absolute-path> (the CI box)"
+# CONTROL: the span IS the whole value when the whole value is a path. Without this cell, "the
+# span is narrower" is equally consistent with a redactor that stopped firing on bare paths.
+assert_eq "CONTROL: a bare absolute path with no prose is still replaced in its entirety" \
+  "$(jget "$ARC2" peer-review.bare_home)" "<redacted-absolute-path>"
+assert_eq "CONTROL: a string that was never absolute is copied through untouched" \
+  "$(jget "$ARC2" peer-review.already_relative)" "plugins/pipeline/scripts/x.mjs (line 42)"
+# THE GUARD IS NOT WEAKENED, asserted over the whole file rather than the fields named above:
+# no home directory survives anywhere, and no string still opens with a POSIX root.
+assert_not_contains "#59: no home directory survives anywhere in the written archive" \
+  "$(cat "$ARC2")" "/Users/someone"
+assert_eq "#59: and no string anywhere in it still starts with a POSIX root" \
+  "$(node --input-type=module -e '
+     import { readFileSync } from "node:fs";
+     const hits = [];
+     (function walk(v, p) {
+       if (typeof v === "string") { if (/^\//.test(v)) hits.push(p + "=" + v); return; }
+       if (Array.isArray(v)) return v.forEach((x, i) => walk(x, p + "[" + i + "]"));
+       if (v && typeof v === "object") return Object.entries(v).forEach(([k, x]) => { walk(k, p + ".<key>"); walk(x, p + "." + k); });
+     })(JSON.parse(readFileSync(process.argv[1], "utf8")), "");
+     console.log(hits.join(" "));
+   ' "$ARC2")" ""
+# The count stays VISIBLE and stays EARNED: six strings changed, one per redacting cell above,
+# and the untouched relative value is not among them. A span fix that quietly stopped rewriting
+# one of the six would show up here even if its own cell were deleted.
+assert_contains "#59: and the run still reports what it redacted" "$OUT" "absolute paths redacted: 6"
+
 suite "archive-pipeline: it is a thin re-dispatch, not a second implementation"
 
 ROOT_A="$TEMP_PROJECT/root-a"

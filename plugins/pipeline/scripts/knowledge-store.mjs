@@ -130,10 +130,11 @@ function cmdWrite(args) {
 }
 
 const REDACTED_ABSOLUTE = "<redacted-absolute-path>";
-// Whole-value absolute shapes: a POSIX root, and a Windows drive root in either slash. The
-// same two the AC34 walk in test-pipeline-telemetry.sh reddens on, so what this rewrites and
-// what that refuses are one predicate rather than two that can drift apart.
-const ABSOLUTE_VALUE = /^(?:\/|[A-Za-z]:[\\/])/;
+// The absolute shapes a value may OPEN with: a POSIX root, and a Windows drive root in either
+// slash. The same two the AC34 walk in test-pipeline-telemetry.sh reddens on, so what this
+// rewrites and what that refuses are one predicate rather than two that can drift apart.
+// The trailing run is the SPAN, not the whole value -- see LEADING_SPAN's comment below.
+const LEADING_SPAN = /^(?:\/|[A-Za-z]:[\\/])[^\s"']*/;
 const DRIVE_VALUE = /^[A-Za-z]:[\\/]/;
 const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -155,6 +156,16 @@ function redactPath(value, rootAbs) {
 // worktree_path too and cross this same boundary; a rule stated on the writers has to be
 // restated for every future artifact, and a rule stated here does not.
 //
+// THE SPAN, NOT THE VALUE (#59). A value that opens with an absolute path has only that PATH
+// rewritten; whatever followed it survives, so `/tmp/qa-34-mutate (detached HEAD at abc123)`
+// archives as `<redacted-absolute-path> (detached HEAD at abc123)` rather than losing the
+// prose too. The earlier rule replaced the whole value and destroyed two pieces of environment
+// evidence in #34's archive that were never leaks -- a mutation worktree under /tmp and
+// `/bin/bash (system bash 3.2)`. A predicate that cannot tell a home directory from a system
+// binary is refusing correct work, and this repo's test for a guardrail is whether you can
+// name the correct work it refuses. The leak guard itself is UNCHANGED and deliberately so:
+// the span is still redacted by SHAPE, not by key name, and no root was added to a blocklist.
+//
 // DELIBERATELY NOT COVERED. An absolute path embedded mid-string is rewritten only where the
 // run starts at the repo root or at a POSIX home prefix, so `cd /Users/x/repo && ...` is
 // caught and `/opt/vendor/bin` inside a sentence is not; UNC paths (\\server\share); `~/x`,
@@ -167,9 +178,13 @@ function redactAbsolutePaths(value, rootAbs, counter) {
   // A run starting at the repo root or at a home directory, stopping at whitespace or a quote.
   const embedded = new RegExp(`(?:${escapeRe(rootAbs)}|/(?:Users|home)/[^/\\s"']+)[^\\s"']*`, "g");
   const redactString = (s) => {
-    const out = ABSOLUTE_VALUE.test(s)
-      ? redactPath(s, rootAbs)
-      : s.replace(embedded, (m) => redactPath(m, rootAbs));
+    // Leading span first, then the mid-string pass over what is left. Both stop at the same
+    // whitespace-or-quote boundary, so a value that IS a bare path is still rewritten whole --
+    // the span simply happens to be the entire string in that case.
+    let out = s;
+    const lead = LEADING_SPAN.exec(out);
+    if (lead) out = redactPath(lead[0], rootAbs) + out.slice(lead[0].length);
+    out = out.replace(embedded, (m) => redactPath(m, rootAbs));
     if (out !== s) counter.count++;
     return out;
   };
