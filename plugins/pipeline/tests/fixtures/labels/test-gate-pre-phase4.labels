@@ -1,0 +1,95 @@
+BOUNDARY: a MySQL conditional-execution opener counts as an up section
+CONTROL: a real paraphrase of the same long criterion still covers it
+CONTROL: the same criterion passes once one check names AC23
+CONTROL: the same statements unwrapped ARE an up section
+GUARANTEE: an executable (uncommented) down region now halts
+NOT as commented-out: a `*/` past the marker must not vouch for the region
+a block that opens before the marker and closes after it halts
+a block-comment PREAMBLE above live statements is still an up section
+a block-commented up region is NOT an up section
+a custom glob matches ONLY what it names
+a custom glob matches what it names
+a file using only the configured custom marker passes
+a labelled criterion no check names is uncovered, despite heavy token overlap
+a labelled criterion still matches on wording when NO check carries a label
+a migration recorded in top-level files_removed is exempt
+a migration with no down section halts
+a migration with no up section halts
+a non-array migrationGlobs falls back to the defaults
+a non-string glob element falls back to the defaults
+a non-string marker falls back to the default
+a passing gate says so
+a per-commit exemption does not leak to a later commit
+a per-commit files_removed exempts that commit
+a schema violation halts
+a short criterion still matches on three tokens, exactly as before
+a token-overlap match covers the criterion
+a whitespace-only marker falls back to the default
+an AC-label match covers the criterion
+an absent config applies the default globs
+an absent impl-report.json halts
+an absent spec.json halts
+an all-comment head is not an up section
+an empty marker still halts a down-less migration
+an empty requirement_checks halts (minItems)
+an uncovered criterion halts the panel
+an unparseable config does not crash the gate: defaults still apply
+an unparseable impl-report.json halts
+an unterminated block comment before the marker is NOT an up section
+an up section plus a -- DOWN marker passes
+and does not claim the down section is missing
+and is reported by name
+and it reports the up-section failure
+and it reports the up-section failure
+and it reports the up-section failure
+and its own remedy, which is not the commented-out one
+and names the correct work it refuses
+and names the label that went unanswered
+and names the remedy for the block form specifically
+and names the remedy in the convention the report already uses
+and reports that file
+and says token overlap was deliberately not consulted
+and the clean down region is not reported
+and the halt quotes the criterion
+and the message quotes the DEFAULT marker
+and the up region is reported
+as UNTERMINATED, because the closing delimiter is outside the region
+migrationGlobs: [] disarms the INFERENCE path
+migrationGlobs: [] does NOT disarm an explicitly-named migration
+naming the unanswered label
+naming the unterminated block and where it opened
+neither marker present still halts
+nor an incidental schema error
+one labelled check out of three does NOT arm the strict rule
+the builtin -- DOWN still passes while a custom marker is configured
+the coverage halt is not an incidental schema error
+the default globs still find the migration
+the down region of this file is clean and is not reported
+the explicit path is still checked for a down section
+the explicit-path halt is not an incidental schema error
+the gate announces it blocked
+the halt is attributed to the schema
+the halt is the migration rule, not an incidental schema error
+the halt names the minItems rule
+the halt names the missing artifact
+the halt names the missing field
+the halt names the missing spec
+the halt quotes the exact down-section message
+the halt quotes the exact up-section message
+the halt quotes the uncovered criterion
+the halt says it is not valid JSON
+the halt says which rule fired
+the halt says which rule fired
+the indeterminate message is NOT the commented-out message
+the message quotes the CONFIGURED marker
+the message says what the region actually is
+the re-added migration is reported
+the same migration NOT recorded as removed still halts
+the shared fixture is schema-valid and passes on its own
+the token-floor halt is not the label rule wearing its message
+the up-section failure does not claim a missing down section
+the up-section halt is not an incidental schema error
+the up-section halt is not an incidental schema error
+the up-section halt is not an incidental schema error
+three incidental words do not cover a 19-token criterion
+two labelled checks out of three DO arm it, and AC9 goes unanswered
