@@ -913,15 +913,40 @@ Verdict-name normalization: `APPROVE_WITH_NOTES` is the canonical term (matches 
 
 Before any worktree cleanup, copy the Phase 3 and Phase 4 artifacts that QA, Dev, and the panel wrote into the worktree's `ARTIFACT_DIR` back to the canonical `$PIPELINE_BASE/<issue>/`. Phase 3 worktrees are removed by the post-merge cleanup mechanism, which would otherwise delete `tasks.json`, `impl-report.json`, and `peer-review.json` before Phase 5 archival reads them.
 
+**RUN THIS STEP TWICE: here, and AGAIN immediately before the Phase 5 Librarian dispatch.** Under the final-verdict rubric an `APPROVE_WITH_NOTES` panel means nits are fixed in place with no panel re-run, so Dev legitimately keeps writing to `impl-report.json`, `map.json` and `peer-review.json` *after* this point. A sync that runs only at the Phase 3 to 4 transition cannot capture work that happens after it, however the copy is flagged. This is not a belt-and-braces suggestion; a single sync is half a fix.
+
 ```bash
 SRC="$ARTIFACT_DIR"                       # = $WORKTREE_PATH/.pipeline/<issue>
 DST="$PIPELINE_BASE/<issue>"
 if [ -d "$SRC" ] && [ "$SRC" != "$DST" ]; then
-  cp -n "$SRC"/*.json "$DST/" 2>/dev/null || true
+  mkdir -p "$DST"
+  for f in "$SRC"/*; do
+    [ -f "$f" ] || continue
+    b="$(basename "$f")"
+    case "$b" in
+      # SEEDED IN. The orchestrator wrote these and copied them into the worktree, so the
+      # canonical copy is authoritative and the worktree's is the stale seed.
+      spec.json|review.json|review.*.json|constraints.md|status.json)
+        cp -n "$f" "$DST/" 2>/dev/null || true ;;
+      # PRODUCED THERE. Written IN the worktree by Dev, QA and the Phase 4 panel, so the
+      # worktree copy is the newer one and no-clobber freezes the wrong side.
+      map.json|tasks.json|impl-report.json|peer-review.json|peer-review.*.json)
+        cp -f "$f" "$DST/" 2>/dev/null || true ;;
+      # UNCLASSIFIED. Copy on the safe side and SAY SO, so a new artifact type surfaces as a
+      # line to classify rather than being silently frozen or silently clobbered.
+      *)
+        cp -n "$f" "$DST/" 2>/dev/null || true
+        printf 'sync: %s matches no ownership rule; copied no-clobber. Classify it above.\n' "$b" ;;
+    esac
+  done
 fi
 ```
 
-`cp -n` (no-clobber) is intentional: artifacts already present in the canonical dir (`spec.json`, `review.json`, `status.json`) are authoritative and must not be overwritten by the seeded/stale copies from the worktree. Do not remove the `-n` flag thinking it is unnecessary. The `"$SRC" != "$DST"` guard is a no-op safety for the case where a future change runs Phases 3-4 in the same checkout as the orchestrator.
+**The split is by OWNERSHIP, not by first arrival.** The old form was a single `cp -n "$SRC"/*.json`, and its stated rationale -- that `spec.json`, `review.json` and `status.json` are authoritative and must not be overwritten by stale seeds -- was correct for exactly those three files and wrong for every other file the glob matched. `impl-report.json`, `map.json`, `tasks.json` and `peer-review.json` are written IN the worktree, and for them the canonical copy is the stale one. Measured on #34: the archive recorded an implementation report predating two rounds of fixes and a `map.json` token count the run had already corrected, while `status.json` was correctly taken from the canonical side. Do not collapse this back to one flag in either direction -- both directions are wrong for half the files.
+
+The `"$SRC" != "$DST"` guard is a no-op safety for the case where a future change runs Phases 3-4 in the same checkout as the orchestrator.
+
+**Prose is not the enforcement.** The "run it twice" rule above is a rule for the orchestrator, and this repo has measured what a rule stated only in prose is worth. The enforcement is in `scripts/knowledge-store.mjs`: at archival, `archiveIssue` compares each worktree-produced artifact against the worktree's own copy when that worktree still exists, and REFUSES to write a stale archive. It abstains when the worktree is already gone, so it is a backstop and not a guarantee -- but the state it refuses is the state #34 actually shipped.
 
 Do NOT merge. The owner merges to the integration branch. Presenting a PR as ready to merge is a **full voice mode** moment (see "Human-facing responses"): the owner is being asked to accept the change and owns what happens next, so give them the report, the scales, and the decision block if a call is open. Merges to the integration branch follow your project's review policy; production/release promotion needs the owner's explicit go. Remote CI-green is the MERGE precondition that ran concurrently with the panel: before presenting the PR as ready to merge, verify remote CI is green on the current head (the PR head SHA matches the reviewed HEAD, and the CI conclusion on that head is green), since the panel entered without waiting on it.
 

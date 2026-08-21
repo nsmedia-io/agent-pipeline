@@ -9,6 +9,16 @@ import { join, resolve, relative, basename, isAbsolute, sep } from "node:path";
 const COLLECTIONS = ["living-context", "issue-archive", "decisions"];
 // Pipeline artifacts folded into an issue archive, in phase order; each read only if present.
 const ARCHIVE_ARTIFACTS = ["spec", "map", "review", "tasks", "impl-report", "peer-review", "status"];
+// The subset PRODUCED IN the Phase 3 worktree rather than seeded into it. This list MIRRORS the
+// ownership split in the Phase 4 sync step of commands/pipeline.md and has to: the staleness
+// check below is what proves that sync actually ran. `status` is deliberately absent -- the
+// orchestrator owns it, and the canonical copy being AHEAD of the worktree's is the correct
+// state, not a divergence.
+const WORKTREE_PRODUCED = ["map", "tasks", "impl-report", "peer-review"];
+// The escape hatch is an ENV VAR and not a flag, so it reaches archiveIssue identically through
+// both entry points; archive-pipeline.mjs is documented as a thin re-dispatch and a flag only
+// one of the two parsed would make that false.
+const ALLOW_STALE_ENV = "PIPELINE_ARCHIVE_ALLOW_STALE";
 
 const HELP = `knowledge-store.mjs — file-based knowledge store (no deps, no network)
 
@@ -197,6 +207,52 @@ function redactAbsolutePaths(value, rootAbs, counter) {
   return walk(value);
 }
 
+// Key order is not a difference. Both copies are written by JSON.stringify from the same
+// authors, but a re-serialized artifact can legitimately reorder keys, and a staleness check
+// that HALTS archival must not halt on that.
+const stable = (v) =>
+  v === null || typeof v !== "object"
+    ? JSON.stringify(v)
+    : Array.isArray(v)
+      ? "[" + v.map(stable).join(",") + "]"
+      : "{" + Object.keys(v).sort().map((k) => JSON.stringify(k) + ":" + stable(v[k])).join(",") + "}";
+
+// #58: THE CANONICAL DIRECTORY CAN BE STALE, and archiving it faithfully records a state that
+// never merged. On #34 the archive carried an impl-report predating two rounds of fixes and a
+// map.json token count the run had already corrected, because the Phase 4 sync runs once, at the
+// 3-to-4 transition, and the APPROVE_WITH_NOTES rubric permits a nit round AFTER it. Nothing
+// noticed: the Librarian archived faithfully from a directory that was wrong.
+//
+// So the check is HERE, at the choke point, rather than resting on the orchestrator remembering
+// to re-sync. The knowledge store is the durable half -- an archive that silently records a
+// pre-fix state is a wrong answer with a long shelf life.
+//
+// WHAT IT DOES NOT DO, stated plainly rather than left for someone to discover: it ABSTAINS
+// whenever the worktree is already gone, which post-merge cleanup makes common. It is a backstop
+// that catches the state #34 actually shipped, not a guarantee that no stale archive can be
+// written. The re-sync rule in commands/pipeline.md is still the primary control.
+function staleArtifacts({ fromDir, rootAbs, issue, docs }) {
+  const wt = [docs.tasks, docs["impl-report"]]
+    .map((d) => (d && typeof d.worktree_path === "string" ? d.worktree_path : null))
+    .find(Boolean);
+  if (!wt) return { checked: false, stale: [], worktreeDir: null };
+  const wtAbs = isAbsolute(wt) ? wt : join(rootAbs, wt);
+  const worktreeDir = join(wtAbs, ".pipeline", String(issue));
+  // Same directory, or no worktree left to compare against: nothing to say.
+  if (resolve(worktreeDir) === fromDir) return { checked: false, stale: [], worktreeDir: null };
+  if (!existsSync(worktreeDir) || !statSync(worktreeDir).isDirectory())
+    return { checked: false, stale: [], worktreeDir: null };
+  const stale = [];
+  for (const name of WORKTREE_PRODUCED) {
+    const mine = readJson(join(worktreeDir, `${name}.json`));
+    if (mine === null) continue; // absent in the worktree: it produced nothing to sync
+    const canon = docs[name] ?? null;
+    if (canon === null) { stale.push(`${name} (absent from the canonical dir)`); continue; }
+    if (stable(canon) !== stable(mine)) stale.push(name);
+  }
+  return { checked: true, stale, worktreeDir };
+}
+
 // Exported so archive-pipeline.mjs is a thin re-dispatch of this exact logic.
 export function archiveIssue({ root, issue, from }) {
   // The id lands in a filename below. Unchecked, `../../escaped` writes outside the archive
@@ -213,13 +269,33 @@ export function archiveIssue({ root, issue, from }) {
   }
   if (found.length === 0) throw new Error(`no pipeline artifacts found in ${fromDir}`);
   const rootAbs = resolve(root ?? process.cwd());
+
+  // REFUSE A STALE INPUT before writing anything. A half-written archive is worse than none.
+  const { checked, stale, worktreeDir } = staleArtifacts({ fromDir, rootAbs, issue, docs: archive });
+  if (stale.length > 0) {
+    const detail =
+      `canonical: ${fromDir}\n  worktree:  ${worktreeDir}\n  diverged:  ${stale.join(", ")}`;
+    if (!process.env[ALLOW_STALE_ENV]) {
+      throw new Error(
+        `archive refused: the canonical artifacts are STALE against the Phase 3 worktree.\n  ${detail}\n` +
+        `  Re-run the artifact sync from commands/pipeline.md ("Sync Phase 3 artifacts to the ` +
+        `orchestrator pipeline directory") and archive again. To archive the canonical copies ` +
+        `anyway, set ${ALLOW_STALE_ENV}=1 -- and say in the run record that you did.`,
+      );
+    }
+    // Overridden, never silent: the whole defect was an archive that recorded the wrong state
+    // and said nothing. stderr rather than stdout so the wrapper stays a byte-identical
+    // re-dispatch of this function.
+    console.error(`Warning: archiving STALE canonical artifacts (${ALLOW_STALE_ENV} is set).\n  ${detail}`);
+  }
+
   const counter = { count: 0 };
   const redacted = redactAbsolutePaths(archive, rootAbs, counter);
   const outDir = join(rootAbs, "knowledge", "issue-archive");
   mkdirSync(outDir, { recursive: true });
   const outPath = join(outDir, `${issue}.json`);
   writeFileSync(outPath, JSON.stringify(redacted, null, 2) + "\n"); // idempotent overwrite
-  return { outPath, found, redactions: counter.count };
+  return { outPath, found, redactions: counter.count, stalenessChecked: checked, stale };
 }
 
 function cmdArchive(args) {

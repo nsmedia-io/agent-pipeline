@@ -278,6 +278,155 @@ assert_eq "#59: and no string anywhere in it still starts with a POSIX root" \
 # one of the six would show up here even if its own cell were deleted.
 assert_contains "#59: and the run still reports what it redacted" "$OUT" "absolute paths redacted: 6"
 
+suite "archive-pipeline: archival REFUSES a canonical dir that is stale against the worktree (#58)"
+
+# THE STATE THIS EXISTS FOR. On #34 the Phase 5 archive recorded a run that never merged: an
+# impl-report predating two rounds of nit fixes and a map.json token count (26/25) the run had
+# already corrected to 27/26. The Phase 4 sync runs ONCE, at the 3-to-4 transition, and the
+# APPROVE_WITH_NOTES rubric explicitly permits a fix round AFTER it -- so Dev kept writing to the
+# worktree copies after the only sync the run performed. The Librarian then archived faithfully
+# from a canonical directory that was wrong, and nothing anywhere noticed.
+#
+# The ownership split in commands/pipeline.md is the primary fix; this is the half that FAILS
+# LOUDLY instead of resting on the orchestrator remembering to re-sync. Scope, stated rather than
+# implied: it ABSTAINS when the worktree is already gone, which post-merge cleanup makes common,
+# so it catches the state #34 shipped and does not promise that no stale archive can be written.
+
+# mk_stale_fixture <canonical-impl-report-json> [--no-worktree]
+#
+# A FRESH REGISTERED TEMP ROOT PER CALL, never a hand-rolled `rm -rf` on a reused path: that is
+# the harness rule (test-harness.sh pins that exactly one rm -rf exists in the whole suite tree,
+# inside the registry cleanup), and the reason is that an empty or mistyped variable turns a
+# rebuild helper into a destructive one.
+mk_stale_fixture() {
+  new_tmpdir || exit 90
+  STALE_ROOT="$NEW_TMPDIR"
+  STALE_WT="$STALE_ROOT/.claude/worktrees/wt58/.pipeline/58"
+  STALE_CANON="$STALE_ROOT/.pipeline/58"
+  mkdir -p "$STALE_CANON"
+  [[ "${2:-}" == "--no-worktree" ]] || mkdir -p "$STALE_WT"
+  # worktree_path is RELATIVE here on purpose: it is the spelling status.schema.json requires,
+  # and it exercises the resolve-against-the-repo-root branch rather than the absolute one.
+  for d in "$STALE_CANON" "$STALE_WT"; do
+    [[ -d "$d" ]] || continue
+    printf '%s' '{"issue_number":58,"worktree_path":".claude/worktrees/wt58","tasks":[{"id":"T1"}]}' > "$d/tasks.json"
+    printf '%s' '{"contracts":27,"consumers":26}' > "$d/map.json"
+    printf '%s' '{"qa":{"verdict":"APPROVE_WITH_NOTES"}}' > "$d/peer-review.json"
+    printf '%s' '{"title":"Spec"}' > "$d/spec.json"
+  done
+  [[ -d "$STALE_WT" ]] &&
+    printf '%s' '{"issue_number":58,"phase4_nit_fixes":["a","b"],"post_ci_fix":true}' > "$STALE_WT/impl-report.json"
+  printf '%s' "$1" > "$STALE_CANON/impl-report.json"
+}
+
+# --- IT FIRES: the canonical impl-report predates the nit round, exactly as on #34 -----------
+mk_stale_fixture '{"issue_number":58}'
+ap --issue 58 --from "$STALE_CANON" --root "$STALE_ROOT"
+assert_eq "#58: a canonical dir stale against the worktree is REFUSED" "$RC" "1"
+assert_contains "#58: and the refusal says what it refused" "$ERR" "archive refused"
+assert_contains "#58: and NAMES the diverging artifact rather than only the fact of divergence" \
+  "$ERR" "diverged:  impl-report"
+assert_contains "#58: and names both directories, so the operator can diff them" "$ERR" "worktree:"
+assert_contains "#58: and says which step to re-run" "$ERR" "Sync Phase 3 artifacts"
+# NOTHING IS WRITTEN. A half-archive that records the stale state and also errors is the worst of
+# both: the next reader sees a file and trusts it.
+assert_eq "#58: and NO archive is written on the refusal" \
+  "$([[ -f "$STALE_ROOT/knowledge/issue-archive/58.json" ]] && echo written || echo absent)" "absent"
+
+# --- THE CONTROL, and the suite is a rubber stamp without it ---------------------------------
+# Same tree, same live worktree, canonical copy now MATCHING. If this reddened, the cell above
+# would be measuring "a worktree exists" rather than "the copies disagree".
+mk_stale_fixture '{"issue_number":58,"phase4_nit_fixes":["a","b"],"post_ci_fix":true}'
+ap --issue 58 --from "$STALE_CANON" --root "$STALE_ROOT"
+assert_eq "CONTROL: an in-sync canonical dir archives normally" "$RC" "0"
+assert_eq "CONTROL: and the archive is written" \
+  "$([[ -f "$STALE_ROOT/knowledge/issue-archive/58.json" ]] && echo written || echo absent)" "written"
+assert_eq "CONTROL: carrying the POST-nit-round report, which is the whole point" \
+  "$(jget "$STALE_ROOT/knowledge/issue-archive/58.json" impl-report.post_ci_fix)" "true"
+
+# KEY ORDER IS NOT A DIVERGENCE. A check that halts archival must not halt on re-serialization,
+# or the first agent that round-trips an artifact wedges Phase 5.
+mk_stale_fixture '{"post_ci_fix":true,"phase4_nit_fixes":["a","b"],"issue_number":58}'
+ap --issue 58 --from "$STALE_CANON" --root "$STALE_ROOT"
+assert_eq "CONTROL: the same document with its keys REORDERED is not a divergence" "$RC" "0"
+
+# status.json IS EXCLUDED, and that is the correct direction. The orchestrator owns it, so the
+# canonical copy being AHEAD of the worktree's (5-archived vs 4-review-complete, as on #34) is
+# the right state and must not be read as staleness.
+mk_stale_fixture '{"issue_number":58,"phase4_nit_fixes":["a","b"],"post_ci_fix":true}'
+printf '%s' '{"current_phase":"4-review-complete","events":[]}' > "$STALE_WT/status.json"
+printf '%s' '{"current_phase":"5-archived","events":[],"completed_at":"2026-01-01T00:00:00Z"}' > "$STALE_CANON/status.json"
+ap --issue 58 --from "$STALE_CANON" --root "$STALE_ROOT"
+assert_eq "#58: an orchestrator-owned status.json AHEAD of the worktree's is not staleness" "$RC" "0"
+assert_eq "#58: and the canonical status.json is what lands in the archive" \
+  "$(jget "$STALE_ROOT/knowledge/issue-archive/58.json" status.current_phase)" "5-archived"
+
+# ABSENT FROM THE CANONICAL DIR is the same defect in its most severe form: the sync never ran at
+# all for that artifact, so the archive would omit it silently.
+mk_stale_fixture '{"issue_number":58,"phase4_nit_fixes":["a","b"],"post_ci_fix":true}'
+rm -f "$STALE_CANON/peer-review.json"
+ap --issue 58 --from "$STALE_CANON" --root "$STALE_ROOT"
+assert_eq "#58: an artifact the worktree produced and the canonical dir never received is REFUSED" "$RC" "1"
+assert_contains "#58: and the refusal says it is absent rather than merely different" \
+  "$ERR" "peer-review (absent from the canonical dir)"
+
+# --- IT ABSTAINS, in both of the two ways it can ---------------------------------------------
+# (a) The worktree is GONE, which post-merge cleanup makes the common case. Abstaining is the
+# designed behaviour and it is asserted, not assumed, because a check that halted here would
+# break every normal Phase 5.
+mk_stale_fixture '{"issue_number":58}' --no-worktree
+ap --issue 58 --from "$STALE_CANON" --root "$STALE_ROOT"
+assert_eq "#58: with the worktree already removed the check ABSTAINS and archival proceeds" "$RC" "0"
+assert_eq "#58: ...on the stale copy, which is the disclosed limit of this backstop" \
+  "$(jget "$STALE_ROOT/knowledge/issue-archive/58.json" impl-report.post_ci_fix)" "undefined"
+# (a2) The worktree EXISTS but produced fewer artifacts than the canonical dir holds. This is
+# ordinary, not exotic: map.json is written at Phase 0.5, before any worktree exists, so a run
+# whose nit round never touched it has a canonical map.json and no worktree copy. Asserted
+# because it is the one cell that discriminates "absent in the worktree" from "diverged" -- a
+# check that treated absence as staleness would halt Phase 5 on a perfectly ordinary run, and
+# every other cell here would stay green while it did.
+mk_stale_fixture '{"issue_number":58,"phase4_nit_fixes":["a","b"],"post_ci_fix":true}'
+rm -f "$STALE_WT/map.json"
+ap --issue 58 --from "$STALE_CANON" --root "$STALE_ROOT"
+assert_eq "#58: an artifact the worktree never produced is not staleness (canonical is all there is)" "$RC" "0"
+assert_eq "#58: and that canonical-only artifact still reaches the archive" \
+  "$(jget "$STALE_ROOT/knowledge/issue-archive/58.json" map.contracts)" "27"
+
+# (b) No artifact carries worktree_path, so there is no worktree to compare against.
+mk_stale_fixture '{"issue_number":58}'
+printf '%s' '{"issue_number":58,"tasks":[{"id":"T1"}]}' > "$STALE_CANON/tasks.json"
+printf '%s' '{"issue_number":58,"tasks":[{"id":"T1"}]}' > "$STALE_WT/tasks.json"
+ap --issue 58 --from "$STALE_CANON" --root "$STALE_ROOT"
+assert_eq "#58: with no worktree_path recorded anywhere the check ABSTAINS too" "$RC" "0"
+
+# --- THE OVERRIDE is loud, and it is an ENV VAR so both entry points honour it ----------------
+# A guard with no override wedges Phase 5 for an operator who has already decided; a guard whose
+# override is silent is not a guard. This one refuses by default, overrides on an explicit
+# variable, and says on stderr that it did.
+mk_stale_fixture '{"issue_number":58}'
+OVERRIDE_ERR="$TEMP_PROJECT/override-err.txt"
+( cd "$TEMP_PROJECT" && PIPELINE_ARCHIVE_ALLOW_STALE=1 node "$ARCHIVE" --issue 58 --from "$STALE_CANON" --root "$STALE_ROOT" ) \
+  > "$TEMP_PROJECT/override-out.txt" 2>"$OVERRIDE_ERR"
+OVERRIDE_RC=$?
+assert_eq "#58: PIPELINE_ARCHIVE_ALLOW_STALE=1 archives anyway" "$OVERRIDE_RC" "0"
+assert_contains "#58: and WARNS that it archived a stale record" "$(cat "$OVERRIDE_ERR")" "archiving STALE canonical artifacts"
+assert_contains "#58: naming the same diverging artifact the refusal named" "$(cat "$OVERRIDE_ERR")" "impl-report"
+# The warning goes to STDERR on purpose: stdout is pinned byte-for-byte against the store CLI by
+# the re-dispatch suite below, and a warning on stdout would make that contract false.
+assert_not_contains "#58: the warning stays OFF stdout, so the thin-re-dispatch contract holds" \
+  "$(cat "$TEMP_PROJECT/override-out.txt")" "STALE"
+# THE ENV VAR IS THE MECHANISM, not a flag: knowledge-store.mjs must honour the identical
+# variable, or the two documented-interchangeable entry points have different safety behaviour.
+mk_stale_fixture '{"issue_number":58}'
+( cd "$TEMP_PROJECT" && node "$STORE" --archive-issue 58 --from "$STALE_CANON" --root "$STALE_ROOT" ) \
+  > /dev/null 2>"$TEMP_PROJECT/store-err.txt"
+assert_eq "#58: the store CLI refuses on the same input" "$?" "1"
+assert_contains "#58: with the same refusal" "$(cat "$TEMP_PROJECT/store-err.txt")" "archive refused"
+mk_stale_fixture '{"issue_number":58}'
+( cd "$TEMP_PROJECT" && PIPELINE_ARCHIVE_ALLOW_STALE=1 node "$STORE" --archive-issue 58 --from "$STALE_CANON" --root "$STALE_ROOT" ) \
+  > /dev/null 2>/dev/null
+assert_eq "#58: and honours the same env var, so the two entry points cannot diverge on safety" "$?" "0"
+
 suite "archive-pipeline: it is a thin re-dispatch, not a second implementation"
 
 ROOT_A="$TEMP_PROJECT/root-a"
