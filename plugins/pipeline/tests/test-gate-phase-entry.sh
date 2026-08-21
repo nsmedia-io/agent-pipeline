@@ -1945,6 +1945,69 @@ assert_eq "#61-T5 and the exported set for 2-review is identical at all six tier
   "$(ac61_reported 2-review architectural)/$(ac61_reported 2-review architectural)/$(ac61_reported 2-review architectural)/$(ac61_reported 2-review architectural)/$(ac61_reported 2-review architectural)"
 
 # ---------------------------------------------------------------------------
+suite "#61 the rule table's ROW SHAPE, which is what makes the arity ceiling LOUD instead of silent"
+# ---------------------------------------------------------------------------
+# WHY THIS EXISTS. `also` expresses exactly TWO requirements. A third, written as a nested
+# `also.also`, is measured to be BOTH invisible to `satisfyingTokens` (the drift walk stays 37/0
+# with a stray planted there) AND inert on the decision path (rc 0 with its file absent) -- a
+# written requirement silently not enforced, which is the guard claiming more than it knows. The
+# union in `satisfyingTokens` is total for the shape someone remembered, not total by
+# construction. This converts that permissive silence into a failure.
+#
+# AN OUTCOME PROPERTY OVER THE WHOLE TABLE, not a blocklist over a spelling: the module walks its
+# own live table and reports every key set it holds, and the PERMITTED sets are stated HERE, so
+# the table is not graded against its own opinion. A key nobody taught the walk to read fails
+# whatever it is called.
+AC61_ROW_KEYS="file tokens content tiers byTier also"
+AC61_ALSO_KEYS="file tokens content"
+ac61_shape_strays() {  # <permitted row keys> <permitted also keys> -> "<path>:<key>" ... , sorted
+  node --input-type=module -e '
+    const m = await import(process.argv[1]);
+    const allow = {
+      row: new Set(process.argv[2].split(" ")),
+      also: new Set(process.argv[3].split(" ")),
+    };
+    const strays = [];
+    for (const s of m.rowShapes()) {
+      for (const k of s.keys) if (!allow[s.kind].has(k)) strays.push(s.path + ":" + k);
+    }
+    process.stdout.write(strays.sort().join(" "));
+  ' "$GUARD" "$1" "$2" 2>&1
+}
+
+reg61 "#61-S1"
+assert_eq "#61-S1 every row's key set is a subset of {$AC61_ROW_KEYS} and every also sub-row's is a subset of {$AC61_ALSO_KEYS} -- EXPIRY: if this fails the row shape grew a key the token walk does not read, so either teach satisfyingTokens that key IN THE SAME COMMIT or normalize the table to a requires[] list; do NOT widen the permitted set to make it green" \
+  "$(ac61_shape_strays "$AC61_ROW_KEYS" "$AC61_ALSO_KEYS")" ""
+# NON-ZERO CONTROL that DISCRIMINATES rather than merely fires: drop `also` from the permitted
+# row keys and exactly ONE stray comes back, naming the row that carries it. That pins three
+# things at once -- the checker can go red, the `also` key is really on the table, and it is on
+# ONE row (the spec forbids a belt-and-braces second siting).
+reg61 "#61-S2"
+assert_eq "#61-S2 NON-ZERO CONTROL: with \`also\` removed from the permitted set the check reddens, on exactly one row, and it is the re-sited one" \
+  "$(ac61_shape_strays "file tokens content tiers byTier" "$AC61_ALSO_KEYS")" "2-review:also"
+# AND THE SUB-ROW IS GRADED AGAINST THE NARROWER SET, which is the half that defends the ceiling:
+# withhold `tokens` from the ALSO permitted keys only. `tokens` is still permitted on a ROW, so a
+# sub-row graded by the wrong list would come back clean and this control would pass on two
+# absences agreeing. Exactly one stray, and it is the sub-row's.
+reg61 "#61-S3"
+assert_eq "#61-S3 SECOND CONTROL: the also sub-row is graded against the ALSO list, not the wider row list -- which is what makes a nested third requirement fail rather than pass as a row" \
+  "$(ac61_shape_strays "$AC61_ROW_KEYS" "file content")" "2-review.also:tokens"
+# 19 = 15 rows + 3 byTier cells + 1 also sub-row. EXPIRY: this is EXPECTED to fail the day the
+# table grows another sub-structure, and that failure is the point -- read the new entry, decide
+# whether satisfyingTokens reads it, and only then move the number.
+reg61 "#61-S4"
+assert_eq "#61-S4 VACUITY CONTROL: the shape walk visited one entry per guarded row, plus the sub-structures, rather than a subset it happened to remember" \
+  "$(node --input-type=module -e '
+     const m = await import(process.argv[1]);
+     const s = m.rowShapes();
+     // A phase name CONTAINS a dot (`0.5-map`, `2.5-design`), so "top level" is the absence of a
+     // sub-structure SEGMENT, never the absence of a dot. The first spelling of this counted 13.
+     const sub = (p) => p.includes(".byTier.") || p.endsWith(".also");
+     process.stdout.write(s.filter((r) => !sub(r.path)).length + "/" + s.length);
+   ' "$GUARD" 2>&1)" \
+  "${#GUARDED_ROWS[@]}/19"
+
+# ---------------------------------------------------------------------------
 suite "#61 edge cases: the map half is a PRESENCE check, and the decision is replayable"
 # ---------------------------------------------------------------------------
 # PRESENCE, NOT CONTENT. Every other map.json obligation in the table is plain presence, and
