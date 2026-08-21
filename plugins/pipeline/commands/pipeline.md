@@ -60,13 +60,25 @@ Non-negotiables (carry through to every subagent prompt you construct):
 }
 ```
 
-**`ask_text` is a truncated, human-written task summary. It must never carry a secret.** If a /pipeline argument contains a token-shaped substring (API key, Bearer token, OAuth code, password, `.env` line), redact it before writing `ask_text`, because `status.json` is committed to git history (see the durable-checkpoint convention below) and a pasted secret would persist there. Only the truncated ask, phase events, and 140-char flag summaries are written to `status.json`; no code path copies provider tokens, Bearer tokens, OAuth codes, or database rows into it.
-
 Append an entry to `events` after each phase transition: `{"phase": "1-ba", "verdict": "<agent verdict>", "at": "<iso>"}`.
 
 **The exit event for phase N and the entry checkpoint for phase N+1 are ONE write, in that order, committed together.** Appending the closing event first and checkpointing the next phase second are not two steps to be interleaved with anything, least of all with the end of a turn. The Stop hook fires at the turn boundary and a turn very commonly ends right after a checkpoint commit, so checkpointing first and appending later leaves a window in which the record says "entering 3-impl" with neither `design.json` (absent in a fresh checkout, because every artifact except `status.json` is gitignored) nor a closing 2.5 event. The phase-entry guard is CORRECT to refuse in that window -- the record is the only truth it has, and it genuinely does not show the phase closed -- so this convention, not a guard exemption, is what prevents the state.
 
 **`events[]` entries are EXIT markers and `current_phase` is an ENTRY marker.** An event is appended AFTER a phase finishes and carries that phase's `verdict`, so it records a phase CLOSING; `current_phase` is set BEFORE a phase begins and names the phase being ENTERED. Two fields with opposite conventions five lines apart is the trap that made the telemetry credit every interval to the wrong phase, so the two are named here rather than left to be inferred.
+
+**NO FREE-TEXT FIELD IN `status.json` MAY CARRY A SECRET.** This file reaches a public tree twice: it is the one `.pipeline/` artifact committed to git (see the durable-checkpoint convention below), and Phase 5 copies it **verbatim** into `knowledge/issue-archive/<n>.json`. Neither copy is rewritten afterwards, so a pasted secret persists in history and a fix-forward commit does not remove it. Before writing any of these five fields, redact any token-shaped substring (API key, Bearer token, OAuth code, password, DSN with inline credentials, `.env` line):
+
+| field | why it is exposed |
+|---|---|
+| `ask_text` | a truncated, human-written task summary; the /pipeline argument is pasted by a human |
+| `events[].note` | orchestrator prose, unbounded |
+| `flags[].summary` | orchestrator prose, 140 chars |
+| `veto_reason` | orchestrator prose, unbounded |
+| `error` | **the sharpest case**: the natural content of an error field is COPIED MACHINE OUTPUT -- a failed `gh`/`curl` echoing a URL with a token, a DB connection error carrying a DSN, a stack trace |
+
+**The instrument is CONTENT, not length.** Do not "solve" this by truncating. `events[].note` is deliberately unbounded and a 600-char note recording a live reproduction is correct work; `veto_reason` is a sentence by design. Capping them would destroy audit content to address a problem length was never the mechanism of. Redact the token and keep the sentence.
+
+**YOU are the writer, so YOU are the control.** It is true that no code path copies provider tokens, Bearer tokens, OAuth codes, or database rows into `status.json` -- and it is beside the point, because every field above is written by the orchestrator, which is not a code path. `tests/test-status-schema-contract.sh` runs a credential-shaped scan over the committed records and the archived copies, but that is DETECTION AFTER THE FACT: by the time it reddens, the string is already in the branch's history. If it fires on something you just wrote, **amend the commit; do not fix forward.**
 
 ### Durable checkpoint convention (resume reliability)
 

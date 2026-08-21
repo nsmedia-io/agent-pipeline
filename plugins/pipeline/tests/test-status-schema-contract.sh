@@ -573,4 +573,245 @@ for f in test-gate-phase-entry-drift.sh test-gate-phase-entry.sh; do
     "$([[ "$(grep -c 'until #42\|#42' "$TESTS_DIR/$f" | tr -d ' ')" -ge 1 ]] && echo anchored || echo "no #42 reference: the comment was deleted rather than re-anchored")" "anchored"
 done
 
+
+# ---------------------------------------------------------------------------
+suite "AC-52a: the secret rule covers EVERY free-text field, and covers it by CONTENT"
+# ---------------------------------------------------------------------------
+# #34 bounded the two verdict fields. #52 is the half deliberately NOT bounded, and the reason it
+# needed a different instrument: status.json reaches a public tree twice (committed, then archived
+# VERBATIM at Phase 5), and the rule at commands/pipeline.md named exactly ONE field. Four others
+# in the same file were uncovered -- events[].note, flags[].summary, veto_reason and error -- and
+# `error` is the sharpest, because the natural content of an error field is COPIED MACHINE OUTPUT.
+#
+# SECOPS RULED THAT A LENGTH CAP IS THE WRONG INSTRUMENT HERE and that ruling is not re-litigated:
+# #34's own 600-char events[0].note is CORRECT WORK (it records a live reproduction of #45), and a
+# cap would refuse it to solve a problem length was never the mechanism of. So the assertions
+# below come in PAIRS -- the description is present, AND no maxLength appeared -- because the
+# cheapest way to make a content problem look solved is to cap the field.
+FREETEXT_FACTS="$(node -e '
+  const fs = require("fs");
+  const s = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+  const ev = (s.properties.events.items || {}).properties || {};
+  const fl = (s.properties.flags.items || {}).properties || {};
+  const fields = {
+    ask_text: s.properties.ask_text,
+    veto_reason: s.properties.veto_reason,
+    error: s.properties.error,
+    "events_note": ev.note,
+    "flags_summary": fl.summary,
+  };
+  let out = "";
+  for (const [k, v] of Object.entries(fields)) {
+    out += k + "_desc=" + String((v || {}).description ?? "<absent>").replace(/[\r\n]+/g, " ") + "\n";
+    out += k + "_max=" + String((v || {}).maxLength ?? "<none>") + "\n";
+  }
+  process.stdout.write(out);
+' "$SCHEMA" 2>/dev/null)"
+assert_eq "the free-text extraction produced a report at all" \
+  "$([[ -n "$FREETEXT_FACTS" ]] && echo parsed || echo "UNPARSEABLE: $SCHEMA")" "parsed"
+
+# The needle is the EXPOSURE, not a wording: what every one of these descriptions has to tell the
+# next author is that the field is archived verbatim. A description that says anything else has
+# not stated the reason the rule exists.
+for fld in ask_text veto_reason error events_note flags_summary; do
+  assert_contains "AC-52a: ${fld}'s description says the field is archived verbatim" \
+    "$(rfield "$FREETEXT_FACTS" "${fld}_desc")" "ARCHIVED VERBATIM"
+done
+# THE PAIRED HALF. Three of the five are unbounded ON PURPOSE and must stay that way; the two that
+# do carry a cap carry the pre-existing one, unchanged. Pinned by VALUE, so "someone added a cap"
+# and "someone changed the cap" are both visible.
+for fld in ask_text veto_reason error events_note; do
+  assert_eq "AC-52a: ...and ${fld} still carries NO maxLength (the ruling was CONTENT, not length)" \
+    "$(rfield "$FREETEXT_FACTS" "${fld}_max")" "<none>"
+done
+assert_eq "AC-52a: flags[].summary keeps its pre-existing 140 and gains no new one" \
+  "$(rfield "$FREETEXT_FACTS" flags_summary_max)" "140"
+assert_contains "AC-52a: ...and says plainly that the 140 is a digest bound, not a secret control" \
+  "$(rfield "$FREETEXT_FACTS" flags_summary_desc)" "not a secret control"
+assert_contains "AC-52a: events[].note's description records WHY it stays unbounded, so the next author does not 'fix' it" \
+  "$(rfield "$FREETEXT_FACTS" events_note_desc)" "600-char note"
+
+# THE WRITER'S COPY. The schema is read by one runtime consumer and it is not the writer; the
+# orchestrator reads commands/pipeline.md. A rule that lives only in the schema is a comment.
+# Asserted per field, not as one grep, because "the rule mentions free text" is satisfied by
+# ask_text alone -- which is the exact hole #52 is about.
+PIPELINE_SECRET_RULE="$(sed -n '/NO FREE-TEXT FIELD IN/,/amend the commit/p' "$PIPELINE_MD")"
+assert_eq "AC-52b: the free-text secret rule is present in the document the WRITER reads" \
+  "$([[ -n "$PIPELINE_SECRET_RULE" ]] && echo present || echo "ABSENT from $PIPELINE_MD")" "present"
+for fld in 'ask_text' 'events\[\].note' 'flags\[\].summary' 'veto_reason' 'error'; do
+  assert_eq "AC-52b: ...and it names $fld" \
+    "$([[ "$(printf '%s' "$PIPELINE_SECRET_RULE" | grep -c "$fld" | tr -d ' ')" -ge 1 ]] && echo named || echo "NOT NAMED: $fld")" "named"
+done
+assert_contains "AC-52b: ...and states the archival exposure, which is the half the old rule omitted" \
+  "$PIPELINE_SECRET_RULE" "knowledge/issue-archive"
+assert_contains "AC-52b: ...and refuses the length instrument in the writer's own copy" \
+  "$PIPELINE_SECRET_RULE" "CONTENT, not length"
+# THE RESIDUAL #52 RECORDED: detection is post-commit, and nothing told the writer what to do
+# about that. CI gates the public tree, but by the time it reddens the string is in the branch's
+# history and a fix-forward commit does not remove it.
+assert_contains "AC-52b: ...and says AMEND rather than fix forward, which detection-after-the-fact requires" \
+  "$PIPELINE_SECRET_RULE" "amend the commit; do not fix forward"
+
+# ---------------------------------------------------------------------------
+suite "AC-52c: a credential-shaped scan over the committed records AND the archived copies"
+# ---------------------------------------------------------------------------
+# The population is BOTH, because #52's measurement covered only the first and said so: "the
+# archived copy under knowledge/issue-archive/ is walked by nothing." It is walked here. The
+# archive is the larger exposure of the two -- 5154 strings against 2030 -- and it is the one
+# no test had ever read.
+CRED_SCAN="$TEMP_PROJECT/cred-scan.cjs"
+cat > "$CRED_SCAN" <<'NODE'
+const fs = require("fs");
+const files = process.argv.slice(2);
+// A GIT SHA IS NOT A SECRET, and this corpus is largely made of them: reviewed_commit,
+// merge_base, diff_base, qa_contract_sha, basis_commit, quoted bare AND mid-sentence.
+//
+// There is NO SHA exemption list here, deliberately. An earlier draft carried one and it was
+// removed as DEAD CODE: the mixed-case-and-digit requirement on the entropy class below already
+// excludes every hex digest, because hex is single-case, and no mutation to the exemption could
+// be made to change a single verdict. An exemption no test can discriminate is a comment that
+// looks like a control. What excludes the SHAs is the lookahead pair on `high_entropy`, and the
+// two NEGATIVE_*_sha cells below are anchored on that instead -- narrow the character class and
+// they redden, which is the property actually being relied on.
+const CLASSES = [
+  ["aws_akid",     /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/],
+  ["github_pat",   /\bgh[pousr]_[A-Za-z0-9]{36,}\b/],
+  ["slack_token",  /\bxox[abprs]-[A-Za-z0-9-]{10,}\b/],
+  ["sk_key",       /\bsk-(?:ant-)?[A-Za-z0-9_-]{16,}\b/],
+  ["bearer",       /\bBearer\s+[A-Za-z0-9._~+/-]{16,}={0,2}/],
+  ["jwt",          /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/],
+  ["pem_private",  /-----BEGIN(?: [A-Z]+)* PRIVATE KEY-----/],
+  // `pg` leads this alternation deliberately. #52 measured the previous enumeration MISSING
+  // `pg://u:p4ssw0rdlong@h/db` and reported the miss rather than patching it out, because a class
+  // list is not a proof. This is that miss, closed.
+  ["db_url_creds", /\b(?:pg|postgres|postgresql|mysql|mongodb(?:\+srv)?|redis|amqp):\/\/[^\s:/@]+:[^\s@]+@/],
+  ["env_line",     /\b[A-Z][A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL)[A-Z0-9_]*=[^\s"']+/],
+  ["assignment",   /\b(?:api[_-]?key|apikey|secret|password|passwd|access[_-]?key|auth[_-]?token)\b\s*[=:]\s*["']?[A-Za-z0-9._\-\/+]{12,}/i],
+  // Mixed-case-AND-digit is required, so a slash-separated prose run like
+  // "ENTRY/EXIT/UNGUARDED/TERMINAL/satisfyingTokens" is not reported as base64. Controlled below.
+  ["high_entropy", /\b(?=[A-Za-z0-9+/]*[a-z])(?=[A-Za-z0-9+/]*[A-Z])(?=[A-Za-z0-9+/]*[0-9])[A-Za-z0-9+/]{40,}={0,2}\b/],
+];
+const hits = [];
+let strings = 0, read = 0;
+const unreadable = [];
+for (const f of files) {
+  let doc;
+  try { doc = JSON.parse(fs.readFileSync(f, "utf8")); }
+  catch (e) { unreadable.push(f); continue; }
+  read++;
+  // KEYS ARE WALKED TOO: a credential pasted as an object key reaches the same public tree.
+  (function walk(v, p) {
+    if (typeof v === "string") {
+      strings++;
+      for (const [name, re] of CLASSES) if (re.test(v)) hits.push(f + " " + p + " [" + name + "]");
+      return;
+    }
+    if (Array.isArray(v)) return v.forEach((x, i) => walk(x, p + "[" + i + "]"));
+    if (v && typeof v === "object")
+      return Object.entries(v).forEach(([k, x]) => { walk(k, p + ".<key>"); walk(x, p + "." + k); });
+  })(doc, "");
+}
+process.stdout.write(
+  "files=" + files.length + "\nread=" + read + "\nstrings=" + strings + "\nclasses=" + CLASSES.length +
+  "\nunreadable=" + unreadable.join(" ;; ") + "\nhits=" + hits.join(" ;; ") + "\n");
+NODE
+
+# THE HAND-CHECKED ALLOWLIST. One entry, and it is a real credential SHAPE in a committed file:
+# #34's SecOps shard quotes the planted `pg://u:p4ssw0rdlong@h/db` it used as its OWN non-zero
+# control while measuring this very exposure. It is a fake in a security report, hand-checked at
+# the time and again here. Keyed on file AND json path AND class, so if it moves the suite
+# reddens and somebody re-checks -- which is the direction a secret allowlist must fail in.
+CRED_ALLOW='knowledge/issue-archive/34.json .peer-review.secops.concerns[2].description [db_url_creds]'
+
+CRED_STATUS_FILES="$(corpus_files "$REPO_ROOT" '.pipeline/*/status.json')"
+CRED_ARCHIVE_FILES="$(cd "$REPO_ROOT" && ls -1 knowledge/issue-archive/*.json 2>/dev/null)"
+CRED_ALL_FILES="$(printf '%s\n%s\n' "$CRED_STATUS_FILES" "$CRED_ARCHIVE_FILES" | grep -v '^$')"
+# Word splitting on the path list is deliberate, as in verdict_report above.
+# shellcheck disable=SC2086
+CRED_REPORT="$( cd "$REPO_ROOT" 2>/dev/null && node "$CRED_SCAN" $CRED_ALL_FILES )"
+
+# VACUITY FIRST, on BOTH populations independently. A zero over an empty walk is not a result, and
+# the two populations are enumerated by different means, so one can go empty while the other does
+# not -- which is exactly the silence this would otherwise report as "clean".
+assert_eq "VACUITY: the scan produced a report" \
+  "$([[ -n "$CRED_REPORT" ]] && echo reported || echo "NO REPORT: the scanner did not run")" "reported"
+assert_eq "VACUITY: the archived-copy population is non-empty (it is the half nothing walked before #52)" \
+  "$([[ "$(printf '%s\n' "$CRED_ARCHIVE_FILES" | grep -c . | tr -d ' ')" -ge 1 ]] && echo enough || echo "ZERO archives found")" "enough"
+assert_eq "VACUITY: and the committed-record population is non-empty too" \
+  "$([[ "$(printf '%s\n' "$CRED_STATUS_FILES" | grep -c . | tr -d ' ')" -ge 1 ]] && echo enough || echo "ZERO status records found")" "enough"
+assert_eq "VACUITY: every file in both populations parsed" "$(rfield "$CRED_REPORT" unreadable)" ""
+assert_eq "VACUITY: and the walk actually inspected strings (which is what makes a clean result a result)" \
+  "$([[ "$(rfield "$CRED_REPORT" strings)" -ge 500 ]] && echo inspected || echo "only $(rfield "$CRED_REPORT" strings) strings walked")" "inspected"
+assert_eq "VACUITY: with the full class list live, not a subset someone trimmed to go green" \
+  "$(rfield "$CRED_REPORT" classes)" "11"
+
+# THE MEASUREMENT.
+CRED_UNEXPECTED="$(printf '%s\n' "$(rfield "$CRED_REPORT" hits)" | sed 's/ ;; /\n/g' | sed 's/^ *//;s/ *$//' \
+  | grep -v '^$' | grep -vxF "$CRED_ALLOW" | tr '\n' ' ' | sed 's/ *$//')"
+assert_eq "AC-52c: no unallowlisted credential-shaped string is committed or archived" "$CRED_UNEXPECTED" ""
+# THE ALLOWLIST ENTRY MUST STILL HAVE A SUBJECT. An allowlist that quietly protects nothing is how
+# a suite keeps a stale exemption forever; if this fails, the hit moved or the archive was
+# regenerated, and the entry needs re-checking, not deleting.
+assert_contains "AC-52c: the single allowlisted hit is still exactly where it was hand-checked" \
+  "$(rfield "$CRED_REPORT" hits)" "$CRED_ALLOW"
+
+# THE NON-ZERO CONTROL, in-suite and permanent rather than something an author ran once. Every
+# class gets its own planted string: a control that fires on one class says nothing about the
+# other ten, and #52's own measurement is the precedent -- its DB-URL class MISSED `pg://` while
+# the suite around it looked green.
+new_tmpdir || exit 90
+CRED_PLANT="$NEW_TMPDIR"
+mkdir -p "$CRED_PLANT/.pipeline/plant"
+cat > "$CRED_PLANT/.pipeline/plant/status.json" <<'PLANT'
+{"current_phase":"3-impl","events":[],
+ "aws_akid":"AKIAIOSFODNN7EXAMPLE",
+ "github_pat":"ghp_012345678901234567890123456789012345",
+ "slack_token":"xoxb-123456789012-abcdefghijkl",
+ "sk_key":"sk-ant-api03-AAAABBBBCCCCDDDDEEEEFFFF",
+ "bearer":"Authorization: Bearer abcdefghijklmnopqrstuvwxyz012345",
+ "jwt":"eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dBjftJeZ4CVPmB92K27uhbUJU1p1r_wW1gFWFOEjXk",
+ "pem_private":"-----BEGIN RSA PRIVATE KEY-----",
+ "db_url_pg_alias":"pg://u:p4ssw0rdlong@h/db",
+ "db_url_postgres":"postgres://user:hunter2hunter2@db.internal:5432/app",
+ "env_line":"export DATABASE_PASSWORD=s3cr3tvalue",
+ "assignment":"api_key = 'aVeryLongLookingKey123456'",
+ "high_entropy":"Zm9vYmFyQmF6MTIzNDU2Nzg5MEFCQ0RFRkdISUpLTE1OT1A=",
+ "NEGATIVE_bare_sha":"2ec6dd73931c16922ea299db73bdc4be96912deb",
+ "NEGATIVE_sha_in_prose":"reviewed at 2ec6dd73931c16922ea299db73bdc4be96912deb (origin/main), blob sha256 82bce3d843e89fb6953211e90de2be301bc2c7f125ca3ec465c578f0ac301ff0 unchanged",
+ "NEGATIVE_slash_prose":"imports ENTRY/EXIT/UNGUARDED/TERMINAL/satisfyingTokens from the drift suite",
+ "NEGATIVE_ordinary":"the 600-char note recording a live reproduction is correct work"}
+PLANT
+CRED_PLANT_REPORT="$( cd "$CRED_PLANT" && node "$CRED_SCAN" .pipeline/plant/status.json 2>/dev/null )"
+CRED_PLANT_HITS="$(rfield "$CRED_PLANT_REPORT" hits)"
+# ONE CELL PER CLASS. Eleven classes, eleven cells, because a class proven through one member is
+# an example again -- the discipline AC10 applies to its verb class, applied here to the scanner.
+for cls in aws_akid github_pat slack_token sk_key bearer jwt pem_private db_url_creds env_line assignment high_entropy; do
+  assert_contains "AC-52c NON-ZERO CONTROL: the [$cls] class fires on its planted string" \
+    "$CRED_PLANT_HITS" "[$cls]"
+done
+# BOTH DSN SPELLINGS, because the one #52 measured missing is the one that matters here.
+assert_contains "AC-52c NON-ZERO CONTROL: the pg:// alias #52 measured as MISSED now fires" \
+  "$CRED_PLANT_HITS" ".db_url_pg_alias [db_url_creds]"
+assert_contains "AC-52c NON-ZERO CONTROL: ...and the postgres:// spelling still does too" \
+  "$CRED_PLANT_HITS" ".db_url_postgres [db_url_creds]"
+# THE NEGATIVE CONTROLS, one per exemption. Without these the scanner could be one that fires on
+# everything, and "no unallowlisted hits" over the live corpus would be measuring luck. The two
+# SHA cells are what the entropy class's mixed-case-and-digit lookaheads are FOR: widen that class
+# to accept single-case runs and both go red, because this repo's records quote commit ids
+# everywhere. That mutation is the one these cells exist to catch.
+for neg in NEGATIVE_bare_sha NEGATIVE_sha_in_prose NEGATIVE_slash_prose NEGATIVE_ordinary; do
+  assert_eq "AC-52c NEGATIVE CONTROL: $neg is NOT reported (the scanner discriminates)" \
+    "$(printf '%s' "$CRED_PLANT_HITS" | grep -c "$neg" | tr -d ' ')" "0"
+done
+# A CREDENTIAL UNDER A KEY, not a value: the walk covers keys, and #52's exposure is prose written
+# by an orchestrator that can put a pasted string anywhere.
+new_tmpdir || exit 90
+CRED_KEY="$NEW_TMPDIR"
+mkdir -p "$CRED_KEY/.pipeline/plant"
+printf '{"current_phase":"3-impl","events":[],"AKIAIOSFODNN7EXAMPLE":"a credential as a KEY"}' \
+  > "$CRED_KEY/.pipeline/plant/status.json"
+assert_contains "AC-52c NON-ZERO CONTROL: a credential spelled as an object KEY is reported too" \
+  "$(rfield "$( cd "$CRED_KEY" && node "$CRED_SCAN" .pipeline/plant/status.json 2>/dev/null )" hits)" "[aws_akid]"
+
+
 finish
