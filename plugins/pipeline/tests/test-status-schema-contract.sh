@@ -814,4 +814,202 @@ assert_contains "AC-52c NON-ZERO CONTROL: a credential spelled as an object KEY 
   "$(rfield "$( cd "$CRED_KEY" && node "$CRED_SCAN" .pipeline/plant/status.json 2>/dev/null )" hits)" "[aws_akid]"
 
 
+
+# ---------------------------------------------------------------------------
+suite "AC-54a: the cap is checked against the DECLARED verdict vocabulary, not only against history"
+# ---------------------------------------------------------------------------
+# AC3 above walks the committed corpus and asserts no STORED verdict exceeds the cap. That is the
+# right population for the exposure #34 was filed about, and it leaves the other direction
+# unchecked: nothing compared the cap to the vocabulary the project DECLARES. At d8686bc this
+# suite referenced review.schema.json and peer-review.schema.json exactly ZERO times.
+#
+# WHY THAT DIRECTION MATTERS, and it is not symmetry for its own sake. If someone later declares a
+# 40-character verdict, the history-side check notices nothing until a run COMMITS one. At that
+# moment the failure surfaces as a red corpus check, and the cheapest way to make it green is to
+# RAISE THE CAP -- inferring what the field should hold from what it happens to have held. The
+# check would be teaching the wrong lesson at the one moment anybody is reading it. This assertion
+# fires at the moment of DECLARATION instead, before any record exists to argue from.
+#
+# THE ASSERTION IS THE BOUND, NOT MEMBERSHIP. A naive "every stored verdict is in the declared
+# enum" would refuse 23 of the 29 strings in the current corpus, because the orchestrator
+# vocabulary (complete, SKIPPED, NOTE) appears in no declared enum and is correct work.
+VERDICT_VOCAB="$TEMP_PROJECT/verdict-vocab.cjs"
+cat > "$VERDICT_VOCAB" <<'NODE'
+const fs = require("fs");
+// BY PROPERTY NAME, not "every enum in the file": these schemas also enumerate severities, panel
+// roles, model names and compliance actions, and folding those in would measure the longest
+// token in the project rather than the longest VERDICT. `verdict` and `final_verdict` are the two
+// spellings the artifact schemas use.
+const VERDICT_KEYS = new Set(["verdict", "final_verdict"]);
+const tokens = new Set();
+const perFile = [];
+for (const f of process.argv.slice(2)) {
+  let doc;
+  try { doc = JSON.parse(fs.readFileSync(f, "utf8")); }
+  catch { perFile.push(f + ":UNREADABLE"); continue; }
+  let n = 0;
+  (function walk(v, key) {
+    if (!v || typeof v !== "object") return;
+    if (VERDICT_KEYS.has(key) && Array.isArray(v.enum)) {
+      for (const t of v.enum) if (typeof t === "string") { tokens.add(t); n++; }
+    }
+    for (const [k, x] of Object.entries(v)) walk(x, k);
+  })(doc, "");
+  perFile.push(f.replace(/^.*\//, "") + ":" + n);
+}
+const list = [...tokens].sort();
+const longest = list.reduce((a, t) => (t.length > a.length ? t : a), "");
+process.stdout.write(
+  "tokens=" + list.join(" ") + "\ncount=" + list.length +
+  "\nlongest=" + longest + "\nlongestlen=" + longest.length +
+  "\nperfile=" + perFile.join(" ") + "\n");
+NODE
+
+VERDICT_SCHEMAS="$PLUGIN_DIR/schemas/review.schema.json $PLUGIN_DIR/schemas/peer-review.schema.json $SCHEMA"
+# shellcheck disable=SC2086
+VOCAB="$(node "$VERDICT_VOCAB" $VERDICT_SCHEMAS 2>/dev/null)"
+
+# VACUITY, before the bound. A derivation that found nothing has a longest of 0, and 0 <= 32 is
+# green -- the exact vacuous pass this whole suite exists to refuse elsewhere.
+assert_eq "VACUITY: the vocabulary derivation produced a report" \
+  "$([[ -n "$VOCAB" ]] && echo reported || echo "NO REPORT: the extractor did not run")" "reported"
+assert_eq "VACUITY: it derived a non-empty verdict set of at least 5 tokens" \
+  "$([[ "$(rfield "$VOCAB" count)" -ge 5 ]] && echo enough || echo "ONLY $(rfield "$VOCAB" count) declared verdicts found")" "enough"
+# EVERY SOURCE FILE CONTRIBUTED, derived from the file list rather than pinned to a number. A
+# count-only floor is satisfied by ONE schema carrying six tokens while the other two are silently
+# unread -- which is how a derivation quietly stops covering half its sources.
+VOCAB_SILENT="$(printf '%s\n' "$(rfield "$VOCAB" perfile)" | tr ' ' '\n' | grep -v '^$' | grep -E ':(0|UNREADABLE)$' | tr '\n' ' ' | sed 's/ *$//')"
+assert_eq "VACUITY: and EVERY verdict schema contributed at least one enum (none silently unread)" \
+  "$VOCAB_SILENT" ""
+assert_eq "VACUITY: the derivation read all three schemas" \
+  "$(printf '%s\n' "$(rfield "$VOCAB" perfile)" | tr ' ' '\n' | grep -c . | tr -d ' ')" "3"
+# The set is derived, so this names the CURRENT longest rather than pinning a vocabulary. If it
+# changes, the declared vocabulary changed -- re-read the bound below, do not edit this to match.
+assert_eq "AC-54a: the longest DECLARED verdict is the 18-char APPROVE_WITH_NOTES" \
+  "$(rfield "$VOCAB" longest)/$(rfield "$VOCAB" longestlen)" "APPROVE_WITH_NOTES/18"
+
+# THE BOUND. Both sides are READ -- the cap out of status.schema.json, the vocabulary out of the
+# artifact schemas -- so neither can drift without moving this verdict.
+assert_eq "AC-54a: the declared vocabulary FITS the cap read from status.schema.json" \
+  "$([[ "$(rfield "$VOCAB" longestlen)" -le "$LIVE_CAP" ]] && echo fits || \
+     echo "DECLARED '$(rfield "$VOCAB" longest)' is $(rfield "$VOCAB" longestlen) chars against a cap of $LIVE_CAP -- widen the CAP deliberately or shorten the TOKEN; do not infer the cap from the corpus")" "fits"
+
+# THE NON-ZERO CONTROL. A declared 40-character verdict must redden this BEFORE any run commits
+# one. Injected into a COPY, so the check is proven falsifiable without a schema edit.
+new_tmpdir || exit 90
+VOCAB_PLANT="$NEW_TMPDIR"
+node -e '
+  const fs = require("fs");
+  const s = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+  s.definitions.panelVerdict.properties.verdict.enum.push("A".repeat(40));
+  fs.writeFileSync(process.argv[2], JSON.stringify(s, null, 2));
+' "$PLUGIN_DIR/schemas/peer-review.schema.json" "$VOCAB_PLANT/peer-review.schema.json"
+PLANTED_VOCAB="$(node "$VERDICT_VOCAB" "$PLUGIN_DIR/schemas/review.schema.json" "$VOCAB_PLANT/peer-review.schema.json" "$SCHEMA" 2>/dev/null)"
+assert_eq "AC-54a NON-ZERO CONTROL: a 40-char verdict declared in a schema is SEEN by the derivation" \
+  "$(rfield "$PLANTED_VOCAB" longestlen)" "40"
+assert_eq "AC-54a NON-ZERO CONTROL: ...and the bound REFUSES it, at declaration time" \
+  "$([[ "$(rfield "$PLANTED_VOCAB" longestlen)" -le "$LIVE_CAP" ]] && echo fits || echo refused)" "refused"
+# CONTROL ON THE CONTROL: the planted file differs from the shipped one only by that token, so the
+# cell above is measuring the injection and not a broken read.
+assert_eq "AC-54a NON-ZERO CONTROL: the planted schema still yields every real token too" \
+  "$([[ "$(rfield "$PLANTED_VOCAB" count)" -eq "$(( $(rfield "$VOCAB" count) + 1 ))" ]] && echo "one more" || \
+     echo "planted=$(rfield "$PLANTED_VOCAB" count) live=$(rfield "$VOCAB" count)")" "one more"
+# THE KEY FILTER IS LOAD-BEARING, and unasserted it is invisible: drop it and the derivation
+# swallows severities and panel roles, whose longest token is unrelated to any verdict.
+assert_eq "AC-54a: the derivation is scoped to verdict fields -- a severity is NOT a verdict" \
+  "$(printf '%s' "$(rfield "$VOCAB" tokens)" | tr ' ' '\n' | grep -cx 'blocker' | tr -d ' ')" "0"
+assert_eq "AC-54a: ...nor is a panel role" \
+  "$(printf '%s' "$(rfield "$VOCAB" tokens)" | tr ' ' '\n' | grep -cx 'secops' | tr -d ' ')" "0"
+assert_contains "AC-54a: ...while the SecOps veto token, which IS a verdict, is in the set" \
+  "$(rfield "$VOCAB" tokens)" "SECOPS_VETO"
+
+# ---------------------------------------------------------------------------
+suite "AC-54b: the anti-vacuity floor is anchored to the records this suite's controls NAME"
+# ---------------------------------------------------------------------------
+# THE LIMIT #54 RECORDED. AC2's floor is max(tracked, ondisk) and every conjunct bottoms out at 1,
+# so a corpus that collapsed from six records to one -- on the index and the filesystem at once --
+# satisfies it. The floor is derived from the same two enumerations it bounds, so it can only
+# detect the two DISAGREEING, never both shrinking together.
+#
+# THE TWO LENSES DISAGREED AND NEITHER REMEDY IS TAKEN, with reasons.
+#   BA proposed pinning 4. Rejected: the corpus is a set of RUN RECORDS and stale ones get pruned
+#   deliberately (several .pipeline/<n> dirs here belong to closed issues and are slated for
+#   exactly that). A pinned floor turns routine housekeeping into a red suite, which is refusing
+#   correct work -- the test this repo applies before adopting any guardrail. It is also the
+#   practice evidence.md argued against in 931af1c and that #33 exists to oppose.
+#   QA proposed leaving it. Rejected as the whole answer: "it is disclosed" is not a control.
+#   The issue's own third option -- derive the floor from the record count at the merge base --
+#   is refused too, because #37 rules against a test population derived from a range against a
+#   moving ref, and origin/main is exactly that.
+#
+# WHAT IS BUILT INSTEAD. The floor is anchored to the records this suite's OWN CONTROLS depend on,
+# derived by reading those controls rather than by pinning a number. AC3's non-zero control rests
+# on .pipeline/17/status.json carrying an 18-char verdict; if that record leaves the corpus, the
+# control has lost its subject, and that is a fact this suite can state directly instead of hoping
+# a count notices. The list grows by itself the day someone anchors a control to a new record.
+# THE DISCRIMINATOR IS THE ID SHAPE, and it is a rule this suite already followed by habit before
+# it was written down: a LIVE record is named by its ISSUE NUMBER (.pipeline/17/), while every
+# crafted fixture in this file uses a non-numeric id (ev, fl, ok, run, a, b, c, plant,
+# unanchored). So a numeric id appearing anywhere in this source is a reference to the real
+# corpus, and a crafted tree cannot be mistaken for one. Asserted below rather than assumed.
+CORPUS_ANCHORS="$(grep -oE '\.pipeline/[0-9]+/status\.json' "${BASH_SOURCE[0]}" | LC_ALL=C sort -u)"
+CORPUS_ANCHOR_N="$(printf '%s\n' "$CORPUS_ANCHORS" | grep -c . | tr -d ' ')"
+# VACUITY ON THE VACUITY CONTROL: an empty anchor list makes every assertion below trivially true.
+assert_eq "AC-54b VACUITY: the anchor list was derived non-empty from this suite's own controls" \
+  "$([[ "${CORPUS_ANCHOR_N:-0}" -ge 1 ]] && echo enough || echo "ZERO anchors derived: the grep found nothing, so the floor below is vacuous")" "enough"
+
+# anchors_missing <corpus-file-list> -> the anchors absent from it
+anchors_missing() {
+  local corpus="$1" missing="" a
+  while IFS= read -r a; do
+    [[ -n "$a" ]] || continue
+    printf '%s\n' "$corpus" | grep -qF "$a" || missing="$missing $a"
+  done <<< "$CORPUS_ANCHORS"
+  printf '%s' "${missing# }"
+}
+# MEASURED LIMIT, disclosed rather than left to be re-discovered: the population is the tracked
+# UNION on-disk walk, so deleting an anchored record from the WORKING TREE alone does not redden
+# this -- git's index still lists it, and it is still in the repo. What reddens it is the record
+# actually leaving the corpus (untracked AND off disk), which is the state that costs a control
+# its subject. Both halves were run against this cell before it shipped.
+LIVE_CORPUS_LIST="$(corpus_files "$REPO_ROOT" '.pipeline/*/status.json')"
+assert_eq "AC-54b: every record this suite's controls are anchored to is still IN the corpus. If this fails, a control below has lost its subject: re-anchor it to whatever the corpus then holds, do NOT delete it." \
+  "$(anchors_missing "$LIVE_CORPUS_LIST")" ""
+# AND THE FLOOR RISES WITH THE ANCHORS rather than sitting at 1 forever.
+CORPUS_FLOOR_54=$(( CORPUS_FLOOR > CORPUS_ANCHOR_N ? CORPUS_FLOOR : CORPUS_ANCHOR_N ))
+assert_eq "AC-54b: the walked corpus meets a floor that accounts for the anchored records too" \
+  "$([[ "${CORPUS_N:-0}" -ge "$CORPUS_FLOOR_54" ]] && echo enough || echo "walked=$CORPUS_N floor=$CORPUS_FLOOR_54")" "enough"
+
+# THE NON-ZERO CONTROL, on a tree this file owns. A collapsed corpus that keeps SOME record but
+# loses an anchored one now fails, and fails by NAME -- which is the case the max(tracked, ondisk)
+# floor passes green.
+new_tmpdir || exit 90
+COLLAPSED="$NEW_TMPDIR"
+mkdir -p "$COLLAPSED/.pipeline/unanchored"
+printf '{"current_phase":"3-impl","events":[{"phase":"3-impl","at":"x","verdict":"APPROVE"}]}' \
+  > "$COLLAPSED/.pipeline/unanchored/status.json"
+COLLAPSED_LIST="$(cd "$COLLAPSED" && ls -1 .pipeline/*/status.json 2>/dev/null)"
+assert_eq "AC-54b NON-ZERO CONTROL: a corpus collapsed to one UNANCHORED record is refused, and names what is gone" \
+  "$(anchors_missing "$COLLAPSED_LIST")" ".pipeline/17/status.json"
+# CONTROL ON THE CONTROL: the same predicate accepts a corpus that still holds the anchor, so the
+# cell above is measuring absence and not a helper that always reports something.
+assert_eq "AC-54b CONTROL: and a corpus that still holds the anchored record is accepted" \
+  "$(anchors_missing '.pipeline/17/status.json
+.pipeline/unanchored/status.json')" ""
+# THE DISCRIMINATOR ITSELF, asserted: the crafted tree above lives under .pipeline/unanchored/ and
+# must NOT be derived as an anchor. Without this cell the derivation would quietly grow an anchor
+# every time someone added a numbered fixture, and the floor would then demand a record that only
+# ever existed inside this file.
+assert_eq "AC-54b: a crafted fixture id is NOT derived as a corpus anchor (numeric ids only)" \
+  "$(printf '%s\n' "$CORPUS_ANCHORS" | grep -c 'unanchored' | tr -d ' ')" "0"
+assert_eq "AC-54b: ...and every derived anchor really is issue-numbered" \
+  "$(printf '%s\n' "$CORPUS_ANCHORS" | grep -v '^$' | grep -cvE '^\.pipeline/[0-9]+/status\.json$' | tr -d ' ')" "0"
+# The old floor is UNCHANGED and still asserted above; this is an addition, not a replacement. Its
+# limit is stated rather than fixed: a corpus that collapsed to exactly the anchored records still
+# passes, because at that point every control still has its subject and the walk still has
+# something to be right about. That is the honest boundary of what a vacuity control can claim.
+assert_eq "AC-54b: the derived union floor from AC2 is still live alongside this one" \
+  "$([[ "${CORPUS_FLOOR:-0}" -ge 1 && "${CORPUS_N:-0}" -ge "$CORPUS_FLOOR" ]] && echo enough || echo "union floor lost: $CORPUS_N vs $CORPUS_FLOOR")" "enough"
+
+
 finish
