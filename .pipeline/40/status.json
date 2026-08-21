@@ -1,8 +1,8 @@
 {
   "issue_number": 40,
-  "current_phase": "1-ba",
+  "current_phase": "2.5-design",
   "started_at": "2026-08-21T18:53:19Z",
-  "updated_at": "2026-08-21T19:56:42Z",
+  "updated_at": "2026-08-21T20:13:52Z",
   "branch": "claude/lane-4-a521bf",
   "ask_text": "#40: reviewers state properties, not implementations; only QA and Dev propose how. Typed required_property across agents/*.md, both review schemas, Phase 4 preamble.",
   "events": [
@@ -26,6 +26,11 @@
       "verdict": "REQUEST_CHANGES",
       "at": "2026-08-21T19:56:42Z",
       "note": "round 2"
+    },
+    {
+      "phase": "1-ba",
+      "verdict": "SPEC_FINAL",
+      "at": "2026-08-21T20:13:52Z"
     }
   ],
   "flags": [
@@ -84,6 +89,13 @@
       "verdict": "APPROVE_WITH_NOTES",
       "summary": "lane-2 branch already narrows #59 redaction; whichever merges second falsifies the others shipped claim",
       "at": "2026-08-21T19:56:42Z"
+    },
+    {
+      "phase": "1-ba-final",
+      "agent": "ba",
+      "verdict": "SPEC_FINAL",
+      "summary": "opened #66 for the inert validator; deployment-mode scoping replaces the false repo-scoped claim; 11 req/16 AC",
+      "at": "2026-08-21T20:13:52Z"
     }
   ],
   "risk_tier": "architectural",
