@@ -119,9 +119,32 @@ assert_eq "CONTROL: the same count reports 2 when two files match, so the 1 abov
 assert_contains "the run step is the exact command" "$(cat "$WF_WITH_SUITE")" "bash plugins/pipeline/tests/run.sh"
 assert_contains "it triggers on pull_request" "$(cat "$WF_WITH_SUITE")" "pull_request"
 assert_contains "and on push to main" "$(cat "$WF_WITH_SUITE")" "branches: [main]"
-assert_not_contains "with no install step (matching the repo's dependency-free CI constraint)" \
-  "$(cat "$WF_WITH_SUITE")" "npm install"
-assert_not_contains "and no package.json dependency" "$(cat "$WF_WITH_SUITE")" "npm ci"
+# THE CLAIM IS ABOUT STEPS, AND SO IS THE READING. Both of these matched the WHOLE FILE, so they
+# could not tell an instruction from an explanation of why there is no such instruction: the
+# workflow now carries a paragraph about the repo's dependency-free constraint, and the phrase
+# `npm install` inside that paragraph turned the assertion red while the workflow ran no npm at
+# all. A check that a comment can flip is a check about prose (#47).
+WF_RUN_LINES="$(grep -E '^[[:space:]]*run:' "$WF_WITH_SUITE")"
+assert_eq "CONTROL: the run: steps were actually extracted (an empty read refuses nothing)" \
+  "$([[ -n "$WF_RUN_LINES" ]] && echo ok || echo "no run: step found")" "ok"
+assert_not_contains "no step runs npm install (the repo's dependency-free CI constraint)" \
+  "$WF_RUN_LINES" "npm install"
+assert_not_contains "and no step runs npm ci" "$WF_RUN_LINES" "npm ci"
+# NON-ZERO CONTROL, or the two above are equally satisfied by a reader pointed at nothing.
+WF_NPM_PROBE="$TEMP_PROJECT/npm-step-probe.yml"
+printf 'jobs:\n  a:\n    steps:\n      - run: npm install\n' > "$WF_NPM_PROBE"
+assert_contains "CONTROL: the same extraction DOES find an npm step when one is present" \
+  "$(grep -E '^[[:space:]]*(- )?run:' "$WF_NPM_PROBE")" "npm install"
+
+# THE ONE INSTALL STEP THE WORKFLOW DOES CARRY, pinned here so it cannot be dropped in silence.
+# The `[zsh]` columns in test-mis-tier-tripwire.sh and test-panel-composition-fail-direction.sh
+# are the regression test for the #17 VETO, and ubuntu-latest has no zsh: without this step those
+# 32 assertions did not exist where the gate is enforced, on a green build (#47). Removing the
+# step reddens HERE rather than shrinking a suite nobody is counting.
+assert_contains "the workflow installs zsh, so the [zsh] columns run where the gate is enforced" \
+  "$WF_RUN_LINES" "install -y zsh"
+assert_contains "and it runs the suite in strict-capability mode, so a future absent tool is a FAILURE" \
+  "$(cat "$WF_WITH_SUITE")" "PIPELINE_TESTS_REQUIRE_CAPABILITIES"
 
 # The file must PARSE as YAML, not merely exist. No YAML parser ships with node, so the
 # structural properties are asserted directly: a top-level `on:` with both triggers, a `jobs:`
