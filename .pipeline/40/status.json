@@ -1,10 +1,25 @@
 {
   "issue_number": 40,
-  "current_phase": "1-ba",
+  "current_phase": "2-review",
   "started_at": "2026-08-21T18:53:19Z",
-  "updated_at": "2026-08-21T18:53:19Z",
+  "updated_at": "2026-08-21T19:08:38Z",
   "branch": "claude/lane-4-a521bf",
   "ask_text": "#40: reviewers state properties, not implementations; only QA and Dev propose how. Typed required_property across agents/*.md, both review schemas, Phase 4 preamble.",
-  "events": [],
-  "flags": []
+  "events": [
+    {
+      "phase": "1-ba",
+      "verdict": "SPEC_WRITTEN",
+      "at": "2026-08-21T19:08:38Z"
+    }
+  ],
+  "flags": [
+    {
+      "phase": "1-ba",
+      "agent": "ba",
+      "verdict": "SPEC_WRITTEN",
+      "summary": "architectural; 10 req/16 AC; enforcement lands on review.schema only, peer-review half deferred to #38; $1 probe defect folded in",
+      "at": "2026-08-21T19:08:38Z"
+    }
+  ],
+  "risk_tier": "architectural"
 }
