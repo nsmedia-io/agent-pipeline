@@ -455,9 +455,14 @@ assert_eq "surface module PRESENT + resolver PRESENT: and the tripwire is silent
 # `{db/migrate/001_add_users.rb, src/app.ts}`: bash halted, zsh was silent. This is the
 # control the whole issue exists to protect, so it gets the matrix nobody had.
 
+# The zsh column is DECLARED, not discovered. A bare `command -v zsh` opened this column on a
+# developer's machine and closed it with a self-equal assertion on ubuntu-latest, so eight
+# assertions here simply did not exist where CI enforces the gate (#47). optional_tool records
+# the answer either way and, under PIPELINE_TESTS_REQUIRE_CAPABILITIES=1 (which the workflow
+# sets), fails by NAME rather than shrinking the population in silence.
 RUNNERS=(bash bash-nosplit)
 ZSH_PRESENT=no
-if command -v zsh >/dev/null 2>&1; then RUNNERS+=(zsh); ZSH_PRESENT=yes; fi
+if optional_tool zsh; then RUNNERS+=(zsh); ZSH_PRESENT=yes; fi
 
 # `bash-nosplit` is bash with IFS emptied, i.e. field splitting off: the defect condition
 # itself, in a shell every checkout has, so this dimension is never skipped for want of zsh.
@@ -528,9 +533,6 @@ if [[ "$ZSH_PRESENT" == yes ]]; then
   assert_eq "and the stand-in reproduces it byte-for-byte on this form" \
     "$(run_tripwire_in zsh "$ROOT_OK" "$REPO_MULTI" "$OLD_TRIPWIRE")" \
     "$(run_tripwire_in bash-nosplit "$ROOT_OK" "$REPO_MULTI" "$OLD_TRIPWIRE")"
-else
-  assert_eq "zsh is ABSENT on this machine: the real-zsh cells were NOT RUN (the stand-in covers the condition)" \
-    "not-run" "not-run"
 fi
 
 suite "THE FIX: the shipped tripwire gives the same verdict in every cell of shell x path count"

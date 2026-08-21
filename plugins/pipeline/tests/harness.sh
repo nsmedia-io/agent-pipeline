@@ -92,6 +92,68 @@ assert_not_contains() {
   fi
 }
 
+# ---- REPORTING lines, which are counted but are not tests --------------------
+#
+# A suite sometimes needs to put a MEASUREMENT in the transcript that has no pass/fail sense:
+# which shell it found, what two constructs returned, that a remote lookup was unavailable. The
+# shape reached for is `assert_eq "<name>" "reported" "reported"` -- an assertion whose two
+# operands are the same literal, so it cannot fail. That reads in a green transcript exactly
+# like a real assertion and reads in the ledger exactly like a real assertion, which is how a
+# skipped column came to be indistinguishable from a passing one (#47).
+#
+# `record` is the honest spelling. It counts (so the ledger and the tally still agree) and it
+# prints, but it claims nothing, and its name is what a reader greps for when asking which lines
+# in this suite could never have gone red. Use it for a measurement; use assert_* for a claim.
+record() {
+  TESTS_PASSED=$((TESTS_PASSED + 1))
+  _ledger ok "$1"
+  printf '  ok    %s\n' "$1"
+}
+
+# ---- OPTIONAL CAPABILITIES: a population that shrinks must say so, and CI must refuse it -----
+#
+# THE DEFECT THIS EXISTS FOR (#47). Two suites carry a `[zsh]` column because zsh does not
+# word-split an unquoted parameter expansion, and zsh is the shell the orchestrator runs -- that
+# column is the regression test for the #17 VETO. Both opened the column with a bare
+# `command -v zsh` and closed the else branch with a self-equal assertion. On ubuntu-latest,
+# which has no zsh, the two suites ran 70 and 141 assertions against 78 and 165 locally: 32
+# assertions vanished, both platforms printed failed=0, and both were green. The guarantee CI
+# reported green on was the bash half only. Nothing compared the two totals, and the printed and
+# counted numbers agreed on each platform, so the harness's own count guard could not see it
+# either -- the POPULATION differed, not the accounting.
+#
+# THE RULE. A suite may run with a capability absent on a developer's machine. CI may not. So
+# the answer is always RECORDED (the transcript names the tool and its state either way), and
+# under PIPELINE_TESTS_REQUIRE_CAPABILITIES=1 -- which .github/workflows/tests.yml sets -- an
+# absent capability becomes a counted FAILURE naming the tool, instead of a column that quietly
+# does not exist.
+#
+# WHY NOT AN ASSERTED PER-PLATFORM COUNT, which is the other option #47 lists. An integer floor
+# is the instrument #33 is open against: it decays every time the suite it guards legitimately
+# grows, silently, because nothing forces the literal up -- measured twice already in this repo.
+# A capability NAME does not decay, and it fails with the tool named rather than with a delta a
+# reader has to interpret. With zsh installed on the runner the population no longer depends on
+# the platform at all, which is the precondition #33's label-set pin needs to be stated once for
+# every platform rather than once per platform.
+CAPABILITY_STRICT="${PIPELINE_TESTS_REQUIRE_CAPABILITIES:-0}"
+
+# optional_tool <name> -> 0 when <name> is on PATH, 1 when it is not.
+# Emits exactly one line either way, so `if optional_tool zsh; then RUNNERS+=(zsh); fi` reads
+# the way the bare `command -v` did and cannot skip in silence.
+optional_tool() {
+  local name="$1" state=absent
+  command -v "$name" >/dev/null 2>&1 && state=present
+  if [[ "$CAPABILITY_STRICT" == "1" ]]; then
+    # The label carries the tool, not the verdict: this is the line that must be readable in a
+    # CI log as "the column that covers the zsh half of the #17 veto did not run".
+    assert_eq "CAPABILITY \`$name\` is present (strict: an absent tool SHRINKS this suite's population)" \
+      "$state" "present"
+  else
+    record "CAPABILITY \`$name\` is $state (PIPELINE_TESTS_REQUIRE_CAPABILITIES=1, as CI sets, refuses an absent one)"
+  fi
+  [[ "$state" == "present" ]]
+}
+
 # Create a throwaway git repo. Echoes its path; caller removes it.
 # Pre-existing helper, used by the three hook suites. Left exactly as it was: those suites
 # keep their own inline rm -rf and are NOT refactored onto the guarded helper below.

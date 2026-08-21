@@ -27,9 +27,34 @@ jobs:
           # This job is the only place the depth matters, and a repo of markdown and JSON is
           # small enough that a full fetch costs nothing worth measuring.
           fetch-depth: 0
-      # No package.json, no dependencies, no install step, matching manifests.yml's own
+      # THE ONE INSTALL STEP, and it is here because leaving it out was measured to cost 32
+      # assertions. test-mis-tier-tripwire.sh and test-panel-composition-fail-direction.sh each
+      # carry a `[zsh]` column, and that column is the regression test for the #17 VETO: zsh does
+      # not word-split an unquoted parameter expansion, so a multi-file diff reached the surface
+      # probes as one glued argument and the mis-tier tripwire silently failed to halt. zsh is
+      # the shell the orchestrator's own tool runs. ubuntu-latest has no zsh, so those columns
+      # ran on the author's laptop and NOWHERE ELSE -- 70 and 141 assertions here against 78 and
+      # 165 locally, both reporting failed=0, both green (#47). The gate was enforced on the
+      # bash half only.
+      #
+      # This does not reopen what the note below refuses. The constraint there is about a gate
+      # that breaks on SOMEONE ELSE'S package -- a lockfile, a registry, a transitive dep that
+      # moves. zsh is a distro package this workflow names by hand and pins to nothing; if apt
+      # cannot produce it, the honest outcome is a red build, because the alternative is the
+      # silently-narrower suite that made this step necessary.
+      - name: install zsh (the [zsh] columns are the #17 veto's regression test)
+        run: sudo apt-get update && sudo apt-get install -y zsh
+      # No package.json, no dependencies, no npm install step, matching manifests.yml's own
       # deliberate constraint: a gate that can break on someone else's package is a gate that
       # gets disabled the first time it does. run.sh is bash plus the runner's bundled Node.
       # A non-zero exit from run.sh fails the build; that is the whole point of the job.
+      #
+      # PIPELINE_TESTS_REQUIRE_CAPABILITIES turns an absent optional tool from a column that
+      # quietly does not exist into a counted failure naming the tool (see optional_tool in
+      # tests/harness.sh). It is set HERE and only here: a developer's machine may legitimately
+      # lack zsh, the platform the gate is enforced on may not. Without it, uninstalling zsh
+      # above would put this job straight back to a green build over a narrower suite.
       - name: plugin test suite
+        env:
+          PIPELINE_TESTS_REQUIRE_CAPABILITIES: "1"
         run: bash plugins/pipeline/tests/run.sh

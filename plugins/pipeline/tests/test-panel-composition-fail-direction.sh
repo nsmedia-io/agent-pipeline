@@ -233,9 +233,12 @@ make_diff_repo() {  # $1 = dest dir, remaining args = paths to add in the HEAD c
 # CONDITION of the second escape (see the matrix section below), reproduced in a shell every
 # checkout has, so that dimension is never skipped for want of zsh. Real zsh is added when
 # present, and the two are asserted equivalent rather than assumed to be.
+# The zsh column is DECLARED, not discovered -- see optional_tool in harness.sh. Discovered by
+# `command -v`, this column simply did not exist on ubuntu-latest and said nothing about it:
+# 24 assertions fewer than a local run, both green (#47).
 RUNNERS=(bash bash-nosplit)
 ZSH_PRESENT=no
-if command -v zsh >/dev/null 2>&1; then RUNNERS+=(zsh); ZSH_PRESENT=yes; fi
+if optional_tool zsh; then RUNNERS+=(zsh); ZSH_PRESENT=yes; fi
 
 in_shell() {  # $1 = runner name, $2 = script text; runs it, stdout only
   case "$1" in
@@ -524,8 +527,6 @@ suite "the bash-nosplit stand-in, and the EXACT boundary of what it stands in fo
 # splits strictly less than zsh, so it reddens on every shape zsh reddens on and on some it
 # does not. Over-detection is the correct direction for a guard; the reverse would be a
 # stand-in that quietly passes a shape the real shell breaks on.
-assert_eq "zsh availability is REPORTED, so an absent shell is never read as a passing cell" \
-  "$([[ "$ZSH_PRESENT" == yes || "$ZSH_PRESENT" == no ]] && echo reported || echo unreported)" "reported"
 split_argc() {  # $1 = runner, $2 = shell snippet ending in `set -- ...`
   in_shell "$1" "printf 'a\nb\n' > \"$TEMP_PROJECT/two-lines.txt\"; $2; echo \$#"
 }
@@ -542,9 +543,6 @@ if [[ "$ZSH_PRESENT" == yes ]]; then
     "$(run_old_in zsh "$DL_MULTI")" "$(run_old_in bash-nosplit "$DL_MULTI")"
   assert_not_contains "and real zsh is the shell the orchestrator runs: it drops dba on the pre-fix shape" \
     "$(run_old_in zsh "$DL_MULTI")" "dba"
-else
-  assert_eq "zsh is ABSENT on this machine: the real-zsh cells were NOT RUN (the stand-in over-detects, so it still covers the condition)" \
-    "not-run" "not-run"
 fi
 
 suite "THE FIX: the shipped block gives the same answer in every cell of shell x path count"
