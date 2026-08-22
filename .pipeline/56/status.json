@@ -1,0 +1,59 @@
+{
+  "issue_number": 56,
+  "current_phase": "1-ba-rework-required",
+  "started_at": "2026-08-22T18:10:00Z",
+  "updated_at": "2026-08-22T20:33:26Z",
+  "branch": "claude/pipeline-resume-56-a82065",
+  "ask_text": "voice-lint: scope the voice obligation to the turn that produced the record",
+  "risk_tier": "architectural",
+  "veto_reason": "SecOps VETO on Phase 2 review: the proposed human-turn freshness predicate (R5) classifies voice-lint's own blocking refusal record as a human turn, so the Stop-hook control disarms itself the moment it first fires -- a resent identical message then passes (rc 0). DBA independently returned REQUEST_CHANGES on the same defect family: R7 states its own residual's fail direction backwards, R5's human-turn definition silently disarms on ordinary auto-compaction continuations (18.8% of corpus), and AC9's mirror-property claim is already false on two measured inputs. DevOps APPROVE_WITH_NOTES flagged a related fail-open in main()'s blanket try/catch. Spec returns to BA for rework.",
+  "events": [
+    {
+      "phase": "0.5-map",
+      "verdict": "COMPLETE",
+      "at": "2026-08-22T18:10:00Z",
+      "note": "Deep three-layer map written, seeded from 3 living-context consumer catalogs."
+    },
+    {
+      "phase": "1-ba",
+      "verdict": "APPROVE",
+      "at": "2026-08-22T18:10:00Z",
+      "note": "spec.json written, risk_tier architectural, 3 open_questions all non-blocking and resolved (ba_default)."
+    },
+    {
+      "phase": "2-review",
+      "verdict": "VETO",
+      "at": "2026-08-22T19:05:00Z",
+      "note": "RECONSTRUCTED: this status.json checkpoint was never committed by the originating session (no .pipeline/56/status.json existed anywhere, worktree or main checkout, on --resume). Rebuilt from spec.json/map.json/review.json, which were present and internally consistent. secops VETO, dba REQUEST_CHANGES, devops APPROVE_WITH_NOTES; no design_review (spec is not frontend-scoped)."
+    }
+  ],
+  "flags": [
+    {
+      "phase": "2-review",
+      "agent": "dba",
+      "verdict": "REQUEST_CHANGES",
+      "summary": "3 blockers, one family: R7 states its residual's fail direction backwards; R5 disarms on auto-compact continuations; AC9 mirror false.",
+      "at": "2026-08-22T18:40:00Z"
+    },
+    {
+      "phase": "2-review",
+      "agent": "devops",
+      "verdict": "APPROVE_WITH_NOTES",
+      "summary": "Major: main()'s try/catch fail-opens on any new predicate exception, opposite of R3's direction. Flags SecOps to confirm AC7 exhaustive.",
+      "at": "2026-08-22T19:05:00Z"
+    },
+    {
+      "phase": "2-review",
+      "agent": "secops",
+      "verdict": "VETO",
+      "summary": "Critical: predicate classifies voice-lint's own refusal as a human turn, so the Stop-hook control self-disarms after firing once.",
+      "at": "2026-08-22T19:05:00Z"
+    },
+    {
+      "phase": "0-setup",
+      "agent": "orchestrator",
+      "summary": "Checkpoint discipline broken upstream: no status.json existed. Reconstructed this record from spec.json/map.json/review.json on --resume 56.",
+      "at": "2026-08-22T20:33:26Z"
+    }
+  ]
+}
