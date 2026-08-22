@@ -1,8 +1,8 @@
 {
   "issue_number": 19,
-  "current_phase": "1-ba",
+  "current_phase": "2.5-design",
   "started_at": "2026-08-22T19:06:32Z",
-  "updated_at": "2026-08-22T20:35:27Z",
+  "updated_at": "2026-08-22T20:50:58Z",
   "branch": "claude/lane-4-a521bf",
   "ask_text": "#19: Phase 4 panelists share one worktree, so mutation batteries corrupt each other. Live evidence gathered during #40 and #21.",
   "events": [
@@ -39,6 +39,17 @@
       "verdict": "PROCEED_NARROWED",
       "at": "2026-08-22T20:35:27Z",
       "note": "owner chose option 1 at the convergence budget"
+    },
+    {
+      "phase": "1-ba",
+      "verdict": "SPEC_NARROWED",
+      "at": "2026-08-22T20:50:00Z",
+      "note": "owner PROCEED_NARROWED applied: schema leg (R8, tracked_writes) deleted and deferred to #76 issuecomment-5382489901; both review schemas out of the editable surface; DBA blocker closed by two new criteria (AC6 trigger, AC7 commit hygiene); SecOps HIGH closed by --absolute-git-dir plus new AC9"
+    },
+    {
+      "phase": "1-ba",
+      "verdict": "SPEC_NARROWED",
+      "at": "2026-08-22T20:50:58Z"
     }
   ],
   "flags": [
@@ -97,6 +108,20 @@
       "verdict": "APPROVE_WITH_NOTES",
       "summary": "0 blockers; reproduced every measurement incl. the discriminator control",
       "at": "2026-08-22T20:31:32Z"
+    },
+    {
+      "phase": "1-ba-narrow",
+      "agent": "ba",
+      "verdict": "SPEC_NARROWED",
+      "summary": "16 criteria, 3 new (AC6 trigger, AC7 hygiene, AC16 privacy); AC9 carves out the topology-independent spelling; schema leg verified written to #76",
+      "at": "2026-08-22T20:50:00Z"
+    },
+    {
+      "phase": "1-ba-narrow",
+      "agent": "ba",
+      "verdict": "SPEC_NARROWED",
+      "summary": "schema leg dropped to #76; trigger and commit-hygiene criteria added; git commit -a disqualified as a literal at 9/9",
+      "at": "2026-08-22T20:50:58Z"
     }
   ],
   "risk_tier": "architectural",
