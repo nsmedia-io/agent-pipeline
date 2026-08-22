@@ -1,8 +1,8 @@
 {
   "issue_number": 40,
-  "current_phase": "3-impl",
+  "current_phase": "4-review",
   "started_at": "2026-08-21T18:53:19Z",
-  "updated_at": "2026-08-21T23:56:40Z",
+  "updated_at": "2026-08-22T01:47:14Z",
   "branch": "claude/lane-4-a521bf",
   "ask_text": "#40: reviewers state properties, not implementations; only QA and Dev propose how. Typed required_property across agents/*.md, both review schemas, Phase 4 preamble.",
   "events": [
@@ -47,6 +47,11 @@
       "verdict": "REQUEST_CHANGES",
       "at": "2026-08-21T23:56:40Z",
       "note": "round 1, full six-role panel; 3 REQUEST_CHANGES / 3 APPROVE_WITH_NOTES"
+    },
+    {
+      "phase": "3-impl",
+      "verdict": "FIX_ROUND_COMPLETE",
+      "at": "2026-08-22T01:47:14Z"
     }
   ],
   "flags": [
@@ -168,6 +173,13 @@
       "verdict": "APPROVE_WITH_NOTES",
       "summary": "README Upgrading list is the repo convention for this and was not updated; cache runs the old form post-merge",
       "at": "2026-08-21T23:56:40Z"
+    },
+    {
+      "phase": "3-fix",
+      "agent": "dev",
+      "verdict": "FIX_ROUND_COMPLETE",
+      "summary": "canonical text names the deciding pair; digest published; recipe fixed; 81 cells, 22 controls OK",
+      "at": "2026-08-22T01:47:14Z"
     }
   ],
   "risk_tier": "architectural",
@@ -181,7 +193,7 @@
     "dev",
     "qa"
   ],
-  "review_rounds": 1,
+  "review_rounds": 2,
   "reviewed_head": "2ef09a523f7b9143eeed6f9a3d1d3728a478bc1d",
   "final_verdict": "REQUEST_CHANGES",
   "peer_review_verdict_counts": {
@@ -190,5 +202,6 @@
     "request_changes": 3,
     "request_refactor": 0,
     "veto": 0
-  }
+  },
+  "first_round_head": "2ef09a523f7b9143eeed6f9a3d1d3728a478bc1d"
 }
