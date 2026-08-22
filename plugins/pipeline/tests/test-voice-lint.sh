@@ -350,7 +350,15 @@ assert_eq "  CONTROL on the injection itself: dropping a phase the tables never 
 #
 # The second copy of the tri-partition (the drift suite carries the first, with the full fixture
 # matrix). Two copies of the wide pattern remain in Lane 1; each carries this control, so a
-# narrowing in either copy reddens in that copy. Every occurrence of the BARE WORD
+# narrowing in either copy reddens in that copy.
+#
+# THE DUPLICATION IS A KNOWN RESIDUAL AND CLOSURE IS TRACKED, so this comment is a pointer and
+# not a shrug: HANDOFF C (a single Lane-1 derivation helper consumed by both suites) is recorded
+# in the deferral ledger posted as a comment on issue #53. Its BINDING CONSTRAINT is recorded
+# there too and is repeated here because it is the part a future implementer will get wrong: a
+# shared helper returns the EXTRACTION from pipeline.md and NEVER an asserted set. Lane 2
+# asserts 27 because it ADDS `halted-error` under a stated rule of its own, so a helper that
+# returned the asserted set would make Lane 2 refuse correct work. Every occurrence of the BARE WORD
 # `current_phase` is CLAIMED (inside a span this suite's shipped derivation matched), EXCLUDED
 # (inside NO span of a pattern strictly WIDER than the claim pattern) or UNCLASSIFIED (a real
 # assignment the derivation misses). UNCLASSIFIED must be EMPTY and is reported BY NAME.
@@ -366,6 +374,13 @@ tripart() {
     import { readFileSync } from "node:fs";
     const md = readFileSync(process.argv[1], "utf8");
     const CLAIM = /"?current_phase"?: *"([^"]*)"/g;
+    // WIDER IS A FLOOR, NOT A TOTAL, and it has misses of its own. Measured over four spellings:
+    // a bracket-index assignment, a markdown-bold key, and a YAML block scalar are matched by
+    // NEITHER pattern, so all three land in EXCLUDED and read as prose; only the
+    // single-quoted-value form with an = separator lands in UNCLASSIFIED where it belongs.
+    // Three misses out of four tested. Do not read a green UNCLASSIFIED as "no spelling can
+    // escape": what bounds the damage is the BARE-WORD population, because a missed spelling is
+    // still COUNTED and still has to be named in the excluded list somebody reads.
     const WIDER = /["\x27`]?current_phase["\x27`]?\s*[:=]\s*(?:"[^"]*"|\x27[^\x27]*\x27|`[^`]*`|[A-Za-z0-9._<>-]+)/g;
     const spans = (re) => [...md.matchAll(re)].map((m) => [m.index, m.index + m[0].length, m[0]]);
     const claimSpans = spans(CLAIM), widerSpans = spans(WIDER);
@@ -400,6 +415,14 @@ tp_exfp() { printf '%s' "$1" | sed -n '/^--EXFP--$/,$p' | sed '1d'; }
 # NOT a heredoc inside a $( ) capture: /bin/bash 3.2.57 scans a command substitution for its
 # closing paren WITHOUT honouring quoted-heredoc rules, so the UNPAIRED backtick left by a
 # 72-character truncation makes the whole file un-parseable.
+#
+# THE FINGERPRINT IS NON-INJECTIVE, and pipeline.md already contains a colliding pair. Measured
+# at this commit: lines 270 and 284 are both 107 trimmed characters and agree for the first 99,
+# differing only at `SecOps` versus `DevOps` -- past the 72-character cut, so they share one
+# fingerprint. Neither carries `current_phase`, so the collision is LATENT rather than live.
+# What it costs is stated in the assertion label below rather than left to be inferred: two
+# occurrences that share a fingerprint can be exchanged invisibly, so this cell catches an
+# ADDITION or a REMOVAL and not every conceivable swap.
 EXCLUDED_MULTISET_8='133|- **User interrupts mid-phase**: status.json preserves position. `/pipel
 285|- If starts with `--resume <issue>`: set `ISSUE=<issue>`, read `.pipelin
 285|- If starts with `--resume <issue>`: set `ISSUE=<issue>`, read `.pipelin
@@ -424,7 +447,7 @@ assert_eq "UNCLASSIFIED is EMPTY: no assignment the WIDER pattern can see is mis
 # whether the module's tables can be imported at all.
 assert_eq "the derived label SET is exactly the 26 concrete literals pipeline.md writes, \`0-setup\` among them -- and it is the SAME sorted list the drift suite pins, so a narrowing in either copy reddens in that copy" \
   "$(vl "$TP_REAL" LITERALS)" "$PHASE_LITERALS_26"
-assert_eq "and the EXCLUDED bucket's MEMBERSHIP is asserted -- the sorted occurrence-text MULTISET, so an occurrence cannot move between buckets at constant bucket sizes" \
+assert_eq "and the EXCLUDED bucket's MEMBERSHIP is asserted -- the sorted occurrence-text MULTISET, so an occurrence cannot be ADDED to or REMOVED from this bucket at constant bucket sizes. NARROWED deliberately from \"cannot move between buckets\": the key is a length-plus-72-character FINGERPRINT and it is non-injective (pipeline.md already holds a colliding pair, see above), so a swap BETWEEN two occurrences sharing one fingerprint is invisible here. The add/remove form is what this cell supports; the bucket-swap fixture that exercises it lives in the drift suite, which carries the full fixture matrix, and not in this copy" \
   "$(tp_exfp "$TP_REAL")" "$EXCLUDED_MULTISET_8"
 assert_eq "MULTISET, NOT A SET: \`sort -u\` collapses those 8 entries to 5, which is measured here rather than asserted absent by inspection" \
   "$(tp_exfp "$TP_REAL" | sort -u | grep -c . | tr -d ' ')/$(tp_exfp "$TP_REAL" | grep -c . | tr -d ' ')" "5/8"

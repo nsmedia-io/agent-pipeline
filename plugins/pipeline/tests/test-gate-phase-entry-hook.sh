@@ -410,9 +410,11 @@ suite "AC27: the two suites that already own this hook are UNCHANGED consumers"
 # pin over another suite's whole population, which is the class #33 retired elsewhere in Lane 1.
 # It would be better as a LABEL-SET assertion -- pin the sorted label list, and an addition then
 # forces the editor to paste the label while a REMOVAL or a rename reddens by name instead of
-# arriving as an unexplained delta that a re-baseline can absorb. Filed as a pointer for whoever
-# revisits this file; #53 only re-baselined the number it broke, and deliberately touched
-# nothing else here.
+# arriving as an unexplained delta that a re-baseline can absorb. CLOSURE IS TRACKED, so this is
+# a pointer with a destination rather than a wish: the count-pin re-baseline and the
+# label-set successor are recorded in the deferral ledger posted as a comment on issue #53,
+# which is where a future reader picks this up. #53 itself only re-baselined the number it
+# broke, and deliberately touched nothing else here.
 run_suite_counts() {  # <suite-file> -> SUITE_PASSED, SUITE_FAILED
   local out
   out="$(cd "$TESTS_DIR" && bash "$1" 2>&1 | sed 's/\x1b\[[0-9;]*m//g')"

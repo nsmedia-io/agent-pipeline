@@ -98,6 +98,13 @@ export const NON_VOICE_PHASES = new Set([
   // between the step that writes `0-setup` and the next `Checkpoint first` write. Re-derive
   // with `grep -n 'full voice\|decision block\|Checkpoint first\|current_phase' on
   // commands/pipeline.md and read what falls between the two.
+  //
+  // #80 IS WHAT MAKES THAT EXPIRY CHECKABLE RATHER THAN ASPIRATIONAL. The mechanism above says
+  // the halt at Phase 0 step 1 is structurally unreachable by this lint, because it runs before
+  // a phase is ever recorded -- so the one owner-facing moment in Phase 0 is not covered by
+  // anything here, and no failing assertion marks that. #80 tracks it. If #80 changes where
+  // that decision block sits, or gives it a phase of its own, this declaration is the line that
+  // has to move.
   "0-setup",
   "0.5-map", "0.5-map-complete",
   "1-ba", "1-ba-complete",

@@ -399,6 +399,16 @@ assert_not_contains "  and the bare 'Opt-out for one-off iterations.' comment is
 #   UNCLASSIFIED = matched by the wider pattern but not by the shipped one, i.e. a REAL
 #                  assignment the derivation misses. Must be EMPTY, and is reported BY NAME.
 #
+# TWO COPIES OF THIS CONTROL REMAIN IN LANE 1, one here and one in the voice-lint suite, and
+# each pins the same label set so a narrowing reddens in the copy where it happens. THE
+# DUPLICATION IS A KNOWN RESIDUAL AND CLOSURE IS TRACKED: HANDOFF C (a single Lane-1 derivation
+# helper consumed by both suites) is recorded in the deferral ledger posted as a comment on
+# issue #53. Its BINDING CONSTRAINT is recorded there and repeated here because it is the part a
+# future implementer will get wrong: a shared helper returns the EXTRACTION from pipeline.md and
+# NEVER an asserted set. The Lane-2 status-schema suite asserts 27 because it ADDS `halted-error`
+# under a stated rule of its own, so a helper handing back the asserted set would make Lane 2
+# refuse correct work.
+#
 # THE EXCLUSION RULE IS THE NEGATION OF THE WIDER PATTERN, NOT AN INDEPENDENTLY SPELLED THIRD
 # RULE. That is what makes the claim rule and the exclusion rule structurally unable to disagree
 # about what an assignment operator is -- the disagreement that lets `current_phase = "0-setup"`
@@ -420,6 +430,12 @@ assert_not_contains "  and the bare 'Opt-out for one-off iterations.' comment is
 #     still collapses 8 to 5 and the multiset property still bites, while the assertion stays
 #     readable. Any edit to an excluded occurrence's line changes its length or its prefix and
 #     forces the editor to paste the occurrence rather than increment a digit.
+#   - AND THE FINGERPRINT IS NON-INJECTIVE, which is what the assertion label below is narrowed
+#     to. pipeline.md already holds a colliding pair: measured at this commit, lines 270 and 284
+#     are both 107 trimmed characters and agree for the first 99, differing only at `SecOps`
+#     versus `DevOps`, past the 72-character cut. Neither carries `current_phase`, so the
+#     collision is LATENT rather than live -- but two occurrences sharing a fingerprint could be
+#     exchanged invisibly, so this cell catches an ADDITION or a REMOVAL and not every swap.
 # ===========================================================================================
 
 # tripart <md-path> [wider|sameline] -> a line-oriented report.
@@ -435,6 +451,14 @@ tripart() {
     // [:=]; whitespace around it that MAY SPAN NEWLINES; value quoted three ways or a bare
     // token. Written with \x27 rather than a literal quote so the whole program survives the
     // single-quoted shell string it lives in.
+    //
+    // WIDER IS A FLOOR, NOT A TOTAL, and it has misses of its own. Measured over four spellings:
+    // a bracket-index assignment, a markdown-bold key, and a YAML block scalar are matched by
+    // NEITHER pattern, so all three land in EXCLUDED and read as prose; only the
+    // single-quoted-value form with an = separator lands in UNCLASSIFIED where it belongs.
+    // Three misses out of four tested. Do not read a green UNCLASSIFIED as "no spelling can
+    // escape": what bounds the damage is the BARE-WORD population, because a missed spelling is
+    // still COUNTED and still has to be named in the excluded list somebody reads.
     const WIDER = /["\x27`]?current_phase["\x27`]?\s*[:=]\s*(?:"[^"]*"|\x27[^\x27]*\x27|`[^`]*`|[A-Za-z0-9._<>-]+)/g;
     const spans = (re) => [...md.matchAll(re)].map((m) => [m.index, m.index + m[0].length, m[0]]);
     const claimSpans = spans(CLAIM), widerSpans = spans(WIDER);
@@ -497,7 +521,7 @@ EXCLUDED_MULTISET_8='133|- **User interrupts mid-phase**: status.json preserves 
 479|`status.json` is the `/pipeline --resume <issue>` checkpoint, so it must
 479|`status.json` is the `/pipeline --resume <issue>` checkpoint, so it must
 89|# Run BEFORE entering each phase, after setting current_phase to the pha'
-assert_eq "and the EXCLUDED bucket's MEMBERSHIP is what is asserted -- the sorted occurrence-text MULTISET, so an occurrence cannot move between buckets at constant bucket sizes" \
+assert_eq "and the EXCLUDED bucket's MEMBERSHIP is what is asserted -- the sorted occurrence-text MULTISET, so an occurrence cannot be ADDED to or REMOVED from this bucket at constant bucket sizes. NARROWED deliberately from \"cannot move between buckets\": the key is a length-plus-72-character FINGERPRINT and it is non-injective (pipeline.md already holds a colliding pair, see above), so a swap BETWEEN two occurrences sharing one fingerprint is invisible here. The add/remove form is what this cell supports and is what the ghost fixture below exercises" \
   "$(tp_exfp "$TP_REAL")" "$EXCLUDED_MULTISET_8"
 assert_eq "MULTISET, NOT A SET: three of the five excluded LINES carry two occurrences each with identical text, so \`sort -u\` would collapse 8 entries to 5 and re-open the bypass. This cell measures that collapse rather than asserting it is absent by inspection" \
   "$(tp_exfp "$TP_REAL" | sort -u | grep -c . | tr -d ' ')/$(tp_exfp "$TP_REAL" | grep -c . | tr -d ' ')" "5/8"
