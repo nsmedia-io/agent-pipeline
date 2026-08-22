@@ -1,8 +1,8 @@
 {
   "issue_number": 40,
-  "current_phase": "4-review",
+  "current_phase": "3-impl",
   "started_at": "2026-08-21T18:53:19Z",
-  "updated_at": "2026-08-22T01:47:14Z",
+  "updated_at": "2026-08-22T02:41:15Z",
   "branch": "claude/lane-4-a521bf",
   "ask_text": "#40: reviewers state properties, not implementations; only QA and Dev propose how. Typed required_property across agents/*.md, both review schemas, Phase 4 preamble.",
   "events": [
@@ -52,6 +52,12 @@
       "phase": "3-impl",
       "verdict": "FIX_ROUND_COMPLETE",
       "at": "2026-08-22T01:47:14Z"
+    },
+    {
+      "phase": "4-review",
+      "verdict": "REQUEST_CHANGES",
+      "at": "2026-08-22T02:41:15Z",
+      "note": "delta round 2: qa secops dba; QA and DBA flipped to APPROVE_WITH_NOTES, SecOps still objects"
     }
   ],
   "flags": [
@@ -180,6 +186,27 @@
       "verdict": "FIX_ROUND_COMPLETE",
       "summary": "canonical text names the deciding pair; digest published; recipe fixed; 81 cells, 22 controls OK",
       "at": "2026-08-22T01:47:14Z"
+    },
+    {
+      "phase": "4-qa-d2",
+      "agent": "qa",
+      "verdict": "APPROVE_WITH_NOTES",
+      "summary": "binding verdict satisfied; wrote its own mutations on Devs new cells; census verified as a fourth person",
+      "at": "2026-08-22T02:41:15Z"
+    },
+    {
+      "phase": "4-dba-d2",
+      "agent": "dba",
+      "verdict": "APPROVE_WITH_NOTES",
+      "summary": "all three objections discharged; two majors on figure grain and retroactive reach 996 of 996 vs 17 of 229",
+      "at": "2026-08-22T02:41:15Z"
+    },
+    {
+      "phase": "4-secops-d2",
+      "agent": "secops",
+      "verdict": "REQUEST_CHANGES",
+      "summary": "eleventh copy still carries the weaker presence test; refusal scoped to shards but also reaches merged review.json",
+      "at": "2026-08-22T02:41:15Z"
     }
   ],
   "risk_tier": "architectural",
@@ -198,8 +225,8 @@
   "final_verdict": "REQUEST_CHANGES",
   "peer_review_verdict_counts": {
     "approve": 0,
-    "approve_with_notes": 3,
-    "request_changes": 3,
+    "approve_with_notes": 5,
+    "request_changes": 1,
     "request_refactor": 0,
     "veto": 0
   },
