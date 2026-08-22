@@ -1,8 +1,8 @@
 {
   "issue_number": 56,
-  "current_phase": "2-review-round-budget",
+  "current_phase": "1-ba-rework-required",
   "started_at": "2026-08-22T18:10:00Z",
-  "updated_at": "2026-08-22T21:25:12Z",
+  "updated_at": "2026-08-22T21:38:52Z",
   "branch": "claude/pipeline-resume-56-a82065",
   "ask_text": "voice-lint: scope the voice obligation to the turn that produced the record",
   "risk_tier": "architectural",
@@ -37,6 +37,12 @@
       "verdict": "REQUEST_CHANGES",
       "at": "2026-08-22T21:25:12Z",
       "note": "Round 2, all three reviewers re-dispatched fresh (not a delta merge; Phase 2 has no shard-preservation mechanic). secops APPROVE_WITH_NOTES (VETO lifted; all 4 round-1 findings independently reproduced closed via a live reference-implementation patch, plus 1 major and 3 lows). devops APPROVE_WITH_NOTES (round-1 fail-open concern resolved by new R11/extended AC7; 1 nit). dba REQUEST_CHANGES: all 3 of ITS OWN round-1 blockers independently reverified closed, and it confirmed BA's two counter-corrections against its own round-1 work were right, but found ONE NEW blocker: R9's max(mtimeMs, Date.parse(updated_at)) does not cover cp -p / rsync -a / tar -x, which carry a stale updated_at value along with a stale mtime; demonstrated live (a cp -p just now on a 72h-old record still reads 72.0h stale). This is the SECOND consecutive Phase 2 round to return REQUEST_CHANGES, which trips the round-budget rule in commands/pipeline.md's Convergence budget section: do not auto-loop a third BA rework; stop and let the owner choose split / defer / proceed-with-constraints."
+    },
+    {
+      "phase": "2-review-round-budget",
+      "verdict": "PROCEED_A",
+      "at": "2026-08-22T21:38:52Z",
+      "note": "Owner chose option A from the round-budget decision block: one more targeted round, scoped to exactly two items (dba's R9 cp-p/rsync-a/tar-x gap, secops's one-line AC7/R3 unreadable-transcript contradiction), not a full rework. Everything else DBA/DevOps/SecOps already approved stands. Round 3 will re-dispatch only dba and secops; devops is not re-seated (its round-2 APPROVE_WITH_NOTES is preserved unchanged, since neither targeted fix touches its lens)."
     }
   ],
   "flags": [
