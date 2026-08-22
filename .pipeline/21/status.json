@@ -1,8 +1,8 @@
 {
   "issue_number": 21,
-  "current_phase": "1-ba",
+  "current_phase": "2-review",
   "started_at": "2026-08-22T12:13:26Z",
-  "updated_at": "2026-08-22T12:50:59Z",
+  "updated_at": "2026-08-22T14:09:52Z",
   "branch": "claude/lane-4-a521bf",
   "ask_text": "#21: pipeline.md claims a config-path tier trigger in bold that nothing evaluates. Make the claim honest; mechanical seat filed as #76.",
   "risk_tier": "architectural",
@@ -22,6 +22,11 @@
       "phase": "2-review",
       "verdict": "REQUEST_CHANGES",
       "at": "2026-08-22T12:49:11Z"
+    },
+    {
+      "phase": "1-ba",
+      "verdict": "SPEC_REWORKED",
+      "at": "2026-08-22T14:09:52Z"
     }
   ],
   "flags": [
@@ -52,6 +57,13 @@
       "verdict": "APPROVE_WITH_NOTES",
       "summary": "frozen-test claim reproduced exactly; caught a concurrent process mutating pipeline.md mid-baseline",
       "at": "2026-08-22T12:49:11Z"
+    },
+    {
+      "phase": "1-ba-rework",
+      "agent": "ba",
+      "verdict": "SPEC_REWORKED",
+      "summary": "floor literal written into ba.md; 12-cell cross product; AC pinned to a named SHA; #76 deferral fixed and re-read",
+      "at": "2026-08-22T14:09:52Z"
     }
   ]
 }
