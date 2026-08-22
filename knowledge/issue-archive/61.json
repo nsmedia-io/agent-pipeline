@@ -2254,5 +2254,10 @@
     },
     "merge_commit": "cc41c11",
     "completed_at": "2026-08-22T04:23:09Z"
+  },
+  "librarian_addendum": {
+    "added_at": "2026-08-22T01:00:00Z",
+    "added_by_issue": 61,
+    "note": "Two real schema violations found in this archived record while re-validating it correctly (see the retracted-and-corrected $ref finding in knowledge/living-context/architecture--pipeline-artifact-validation-gaps.json -- an earlier validate() call in that investigation passed a string instead of the root schema object as the third argument, which silently suppressed every $ref-declared check and hid these two). Neither affects the merged change: correctness there rests on the behavioural suite (impl-report.phase4_fix_round_2.checks / round_3: 2530 assertions passed, 0 failed, 34 suites) and on CI, both verified directly -- `gh pr checks 70` shows both the `suite` and `sync` checks green at the merged commit, and `gh pr view 70` shows state MERGED. (1) review.secops.concerns[] -- MEASURED COUNT: all FIVE entries (not four) are missing the required `description` field; each carries `summary` instead (review.schema.json's concerns.items.required is [\"severity\", \"description\"], re-derive with `git grep -n '\"concerns\"' -A10 plugins/pipeline/schemas/review.schema.json`). Every dba and devops concerns[] entry in this same archived review.json DOES carry `description`; the field-name mismatch is confined to secops's shard. (2) peer-review.dev.concerns[0].severity is the string \"must-fix\", not a member of peer-review.schema.json's panelVerdict concerns severity enum (blocker|major|nit|critical|high|medium|low|info) -- exactly one entry, confirmed by sweeping every role's concerns[] in this archived peer-review.json (only this one entry, across all six roles, has an out-of-enum severity)."
   }
 }
