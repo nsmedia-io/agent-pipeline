@@ -2,11 +2,17 @@
   "issue_number": 21,
   "current_phase": "1-ba",
   "started_at": "2026-08-22T12:13:26Z",
-  "updated_at": "2026-08-22T12:49:11Z",
+  "updated_at": "2026-08-22T12:50:59Z",
   "branch": "claude/lane-4-a521bf",
   "ask_text": "#21: pipeline.md claims a config-path tier trigger in bold that nothing evaluates. Make the claim honest; mechanical seat filed as #76.",
   "risk_tier": "architectural",
   "events": [
+    {
+      "phase": "0.5-map",
+      "verdict": "MAP_WRITTEN",
+      "at": "2026-08-22T12:13:26Z",
+      "note": "map.json produced inside the BA intake dispatch, not as a separate 0.5 dispatch; recording the closing event that folding omitted"
+    },
     {
       "phase": "1-ba",
       "verdict": "SPEC_WRITTEN",
