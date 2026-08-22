@@ -1,8 +1,8 @@
 {
   "issue_number": 56,
-  "current_phase": "2-review",
+  "current_phase": "2-review-complete",
   "started_at": "2026-08-22T18:10:00Z",
-  "updated_at": "2026-08-22T22:03:38Z",
+  "updated_at": "2026-08-22T22:17:08Z",
   "branch": "claude/pipeline-resume-56-a82065",
   "ask_text": "voice-lint: scope the voice obligation to the turn that produced the record",
   "risk_tier": "architectural",
@@ -55,6 +55,12 @@
       "verdict": "REWORKED",
       "at": "2026-08-22T22:03:38Z",
       "note": "BA round-3 part 2 (same continued session as part 1): re-derived all 4 majors independently before fixing, at up to 3x DBA's corpus. AC9 (major 1): ran all 6 cells live, found DBA exactly right about cell (d) (ordering flips the verdict) and only half right about cell (c) (both orderings diverge; round-2 BA's and round-1 DBA's each described a different, real arrangement); ran (e)/(f), which round 2 had left with no measured expectation. AC8 (major 2): confirmed at 398,088 records -- 0 co-occurrences of origin.kind:human with isSidechain/isMeta/role-mismatch; narrowed the falsifiability entry to the one mutation that can redden, declared the other three expected survivors, forbade fabricating a fixture to force a red. R5/origin nesting (major 3): confirmed record-level, 0 under message, across 2,742 objects; added AC8(f), a nesting-discrimination pair, since a wrong-level read would have inverted both an implementation bug and its own fixture at once. R7 residual (major 4): booked as R7(vii), direction false refusal, bounded to the window between a status write and the next owner-typed message (not all of problem (a)); population given at two grains (60.7% of turn-episodes vs 41.4% of assistant-text records) because they disagree, with the rate itself declared unmeasured. Also independently found a 5th origin.kind value (coordinator, 340 subagent-only records) nobody had named; correctly excluded, flagged as an enumeration gap for the header, not a predicate defect. Counts held: 12 requirements, 18 acceptance criteria; measured_state 17->20. DBA's 3 nits and SecOps's 3 lows remain open, not blocking. Ready for Phase 2 round 3: re-dispatching dba and secops only (devops's round-2 APPROVE_WITH_NOTES stands; none of these four majors touch its lens)."
+    },
+    {
+      "phase": "2-review",
+      "verdict": "APPROVE_WITH_NOTES",
+      "at": "2026-08-22T22:17:08Z",
+      "note": "Round 3, dba and secops re-dispatched on continued sessions (full context of rounds 1-2); devops's round-2 APPROVE_WITH_NOTES preserved unchanged in the merge (not re-reviewed). ALL THREE now APPROVE_WITH_NOTES, 0 blockers anywhere. Phase 2 CLEARS after 3 rounds. dba: blocker + all 4 majors independently reverified resolved (was half-wrong about itself on AC9 cell (c), corrected; confirmed BA's other 3 corrections). secops: its 1 major (AC7/R3) verified closed live. Both reviewers ALSO independently found a new, non-blocking major apiece in the round-3 WRITTEN JUSTIFICATIONS (not the live behavior): dba found R7(iii-b)'s stated reason for rejecting a ctime-based fix is factually wrong (the ruling to reject ctime survives; the given reason does not -- a real stale fixture CAN be built without utimesSync, just via a timing-dependent method BA didn't consider). secops found the expected_survivor note's claim about which record the AC14 relabel would silence is backwards for the Stop-hook's own refusal record specifically (claims silenced, measured LOUD) -- the exact record the original veto was about -- and that isMeta is actually falsifiable (not a true survivor) on fixtures the spec already builds. Both are text slated to ship into the module header/knowledge store; getting BA to correct them now, no re-review required per the APPROVE_WITH_NOTES rubric."
     }
   ],
   "flags": [
@@ -119,6 +125,20 @@
       "verdict": "REWORKED",
       "summary": "Round 3: all 4 majors re-derived (up to 3x DBA's corpus), 3 confirmed/refined, 1 fully confirmed. Found a 5th origin.kind value too.",
       "at": "2026-08-22T22:03:38Z"
+    },
+    {
+      "phase": "2-review",
+      "agent": "dba",
+      "verdict": "APPROVE_WITH_NOTES",
+      "summary": "Blocker + all 4 majors reverified resolved (half-wrong about own AC9 cell c, corrected). New major: ctime-rejection reason is wrong.",
+      "at": "2026-08-22T22:12:00Z"
+    },
+    {
+      "phase": "2-review",
+      "agent": "secops",
+      "verdict": "APPROVE_WITH_NOTES",
+      "summary": "AC7/R3 verified closed live. New major: expected_survivor claim backwards for the Stop-hook's own refusal record specifically.",
+      "at": "2026-08-22T22:08:00Z"
     }
   ]
 }
