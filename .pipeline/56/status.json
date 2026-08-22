@@ -2,7 +2,8 @@
   "issue_number": 56,
   "current_phase": "3-impl",
   "started_at": "2026-08-22T18:10:00Z",
-  "updated_at": "2026-08-22T22:45:18Z",
+  "updated_at": "2026-08-22T23:53:17Z",
+  "phase3_qa_test_commit": "e9da93700cbb3075c4cc5f9150ebaa8ecfc36acd",
   "branch": "claude/pipeline-resume-56-a82065",
   "ask_text": "voice-lint: scope the voice obligation to the turn that produced the record",
   "risk_tier": "architectural",
@@ -79,6 +80,12 @@
       "verdict": "APPROVED",
       "at": "2026-08-22T22:45:18Z",
       "note": "Owner approved proceeding to implementation ('approved, lets execute on the plan'). This is a NEW, distinct authorization from the earlier 'proceed with A', which was explicitly scoped to stop before anything was built. Entering Phase 3, architectural-tier shape: QA-first. Worktree note: this session's cwd (.claude/worktrees/harddrive-space-review-4c7a9e, branch claude/pipeline-resume-56-a82065) has served as both PIPELINE_BASE and the Phase 3 implementation worktree throughout this run -- there is no separate orchestrator-only checkout in this session's topology, so no new worktree is pre-created and no artifact seeding/copy is needed; spec.json/review.json/map.json/design.json are already at the one ARTIFACT_DIR this whole run has used."
+    },
+    {
+      "phase": "3-impl",
+      "verdict": "QA_CONTRACT",
+      "at": "2026-08-22T23:53:17Z",
+      "note": "QA authored the Phase 3a failing behavioral contract, committed at e9da937 (test-only; production files confirmed byte-identical to parent by the orchestrator's own diff, not just QA's claim). 186 new cells (71->257), 0 removed/renamed. Orchestrator independently re-ran the suite: passed=200 failed=57, matching QA's report exactly -- a real red, not a silent harness zero (QA had already flagged that risk from two earlier incidents this session). QA additionally ran a 31-mutation + 5-vacuous-form falsifiability battery against a throwaway reference implementation (257/257, then reverted, nothing committed): found 2 legitimate declared survivors (isSidechain, boundary-as-max-timestamp) and, more notably, found 2 defects in its OWN first-draft mutations (a no-op edit, and a mutation landing where no cell was watching) and fixed both before handing off, adding a call-site cell that closes a real gap in the process. Covers all 18 ACs plus every design.json commitment: the nesting-discrimination pair, the self-disarm pair, AC9's full nine-run divergence table, the AC16 restore-residual cells (asserting the DECLARED limitation reads stale, not a fix that doesn't exist), and the two judge-discovered items (a statSync-guard pair, a residual-viii cell). Handled two collateral consumers (test-status-schema-contract.sh's needle match, test-gate-phase-entry-hook.sh's count pin) without weakening either. Dev's explicit marching orders for design.json's disputed placements: origin is record-level (record.origin?.kind), guard statSync to return +Infinity on failure, and the R10 line goes in main()'s lines array outside failures.map (matching the Phase 2.5 judge's live-measured ruling exactly). Dispatching Dev now that the commit is confirmed and recorded."
     }
   ],
   "flags": [
