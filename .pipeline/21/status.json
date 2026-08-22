@@ -1,8 +1,8 @@
 {
   "issue_number": 21,
-  "current_phase": "3-impl",
+  "current_phase": "4-review",
   "started_at": "2026-08-22T12:13:26Z",
-  "updated_at": "2026-08-22T15:46:48Z",
+  "updated_at": "2026-08-22T16:52:46Z",
   "branch": "claude/lane-4-a521bf",
   "ask_text": "#21: pipeline.md claims a config-path tier trigger in bold that nothing evaluates. Make the claim honest; mechanical seat filed as #76.",
   "risk_tier": "architectural",
@@ -43,6 +43,11 @@
       "phase": "3a-qa",
       "verdict": "CONTRACT_AUTHORED",
       "at": "2026-08-22T15:46:48Z"
+    },
+    {
+      "phase": "3-impl",
+      "verdict": "IMPL_COMPLETE",
+      "at": "2026-08-22T16:52:46Z"
     }
   ],
   "flags": [
@@ -115,7 +120,31 @@
       "verdict": "CONTRACT_AUTHORED",
       "summary": "58 cells: 27 red contract, 30 non-regression green, 1 loud skip; 14 controls, 3 documented survivors",
       "at": "2026-08-22T15:46:48Z"
+    },
+    {
+      "phase": "3b-dev",
+      "agent": "dev",
+      "verdict": "IMPL_COMPLETE",
+      "summary": "57/0 then 59/0; named five things it made load-bearing; refused to edit the battery or reshape the diff",
+      "at": "2026-08-22T16:52:46Z"
+    },
+    {
+      "phase": "3a-qa",
+      "agent": "qa",
+      "verdict": "APPROVE",
+      "summary": "repaired AC15b, proved both directions at the crashing shape; no test opens ba.md at all, ratchet not gap",
+      "at": "2026-08-22T16:52:46Z"
     }
   ],
-  "phase3_qa_battery": ".pipeline/21/verify-21.sh"
+  "phase3_qa_battery": ".pipeline/21/verify-21.sh",
+  "panel_roles": [
+    "ba",
+    "dba",
+    "devops",
+    "secops",
+    "dev",
+    "qa"
+  ],
+  "review_rounds": 1,
+  "reviewed_head": "372293474fa6d6c3d069486b8987fb802ac8a0fa"
 }
