@@ -1,0 +1,283 @@
+{
+  "issue_number": 40,
+  "current_phase": "4-review-complete",
+  "started_at": "2026-08-21T18:53:19Z",
+  "updated_at": "2026-08-22T06:10:00Z",
+  "branch": "claude/lane-4-a521bf",
+  "ask_text": "#40: reviewers state properties, not implementations; only QA and Dev propose how. Typed required_property across agents/*.md, both review schemas, Phase 4 preamble.",
+  "events": [
+    {
+      "phase": "1-ba",
+      "verdict": "SPEC_WRITTEN",
+      "at": "2026-08-21T19:08:38Z"
+    },
+    {
+      "phase": "2-review",
+      "verdict": "REQUEST_CHANGES",
+      "at": "2026-08-21T19:25:16Z"
+    },
+    {
+      "phase": "1-ba",
+      "verdict": "SPEC_REWORKED",
+      "at": "2026-08-21T19:42:56Z"
+    },
+    {
+      "phase": "2-review",
+      "verdict": "REQUEST_CHANGES",
+      "at": "2026-08-21T19:56:42Z",
+      "note": "round 2"
+    },
+    {
+      "phase": "1-ba",
+      "verdict": "SPEC_FINAL",
+      "at": "2026-08-21T20:13:52Z"
+    },
+    {
+      "phase": "2.5-design",
+      "verdict": "DESIGN_LOCKED",
+      "at": "2026-08-21T20:36:52Z"
+    },
+    {
+      "phase": "3-impl",
+      "verdict": "IMPL_COMPLETE",
+      "at": "2026-08-21T23:23:01Z"
+    },
+    {
+      "phase": "4-review",
+      "verdict": "REQUEST_CHANGES",
+      "at": "2026-08-21T23:56:40Z",
+      "note": "round 1, full six-role panel; 3 REQUEST_CHANGES / 3 APPROVE_WITH_NOTES"
+    },
+    {
+      "phase": "3-impl",
+      "verdict": "FIX_ROUND_COMPLETE",
+      "at": "2026-08-22T01:47:14Z"
+    },
+    {
+      "phase": "4-review",
+      "verdict": "REQUEST_CHANGES",
+      "at": "2026-08-22T02:41:15Z",
+      "note": "delta round 2: qa secops dba; QA and DBA flipped to APPROVE_WITH_NOTES, SecOps still objects"
+    },
+    {
+      "phase": "4-review",
+      "verdict": "REQUEST_CHANGES",
+      "at": "2026-08-22T04:10:13Z",
+      "note": "delta round 3: qa secops; SecOps cleared, QA blocker on the IN-bounds exemplar"
+    },
+    {
+      "phase": "3-impl",
+      "verdict": "FIX_ROUND_COMPLETE",
+      "at": "2026-08-22T05:10:00Z",
+      "note": "round 4 fixes: QA Q2 blocker (worked cases re-sorted in all 11 locations, RFC 6238 IN case, AC3.pairsort + pairflip), Q1 (AC15.52.replaced now bites on review/remediation), Q3 (clause d population rule + shrink hazard), AC1.verbatim retired; rebased onto cc41c11"
+    },
+    {
+      "phase": "3-impl",
+      "verdict": "FIX_ROUND_COMPLETE",
+      "at": "2026-08-22T05:20:44Z",
+      "note": "round 4: exemplar sorts OUT, RFC-located IN case, credential cell rebuilt, AC1.verbatim retired"
+    },
+    {
+      "phase": "4-review",
+      "verdict": "APPROVE_WITH_NOTES",
+      "at": "2026-08-22T05:34:00Z",
+      "note": "delta round 4: all six roles approve"
+    },
+    {
+      "phase": "4-nit-pass",
+      "agent": "dev",
+      "verdict": "APPROVE_WITH_NOTES",
+      "summary": "nits fixed before merge (no panel re-run). Five closed: QA-N1 exposure-note inversion (class scan + negated-protection leg), QA-N2 IN-case literal derived from the block and required in the eleventh copy, SecOps-N1 propagation sentence names four loci, QA-N3 locator message stops claiming the note is absent, QA-N4 QM5 recorded as AC3.pairsort expected survivor. Block unchanged, span digest still 14b65c48479dfceefb780689adccfbd53656b21e.",
+      "at": "2026-08-22T06:10:00Z"
+    }
+  ],
+  "flags": [
+    {
+      "phase": "1-ba",
+      "agent": "ba",
+      "verdict": "SPEC_WRITTEN",
+      "summary": "architectural; 10 req/16 AC; enforcement lands on review.schema only, peer-review half deferred to #38; $1 probe defect folded in",
+      "at": "2026-08-21T19:08:38Z"
+    },
+    {
+      "phase": "2-dba",
+      "agent": "dba",
+      "verdict": "REQUEST_CHANGES",
+      "summary": "validator detects but never refused: 17 violations across 13 archived blocks, 0 refusals; archive rows uncounted",
+      "at": "2026-08-21T19:25:16Z"
+    },
+    {
+      "phase": "2-devops",
+      "agent": "devops",
+      "verdict": "APPROVE_WITH_NOTES",
+      "summary": "re-derived 68/0 and 65/3; probe defect reproduced incl. naive-escape failure; no lane collisions on edit surface",
+      "at": "2026-08-21T19:25:16Z"
+    },
+    {
+      "phase": "2-secops",
+      "agent": "secops",
+      "verdict": "REQUEST_CHANGES",
+      "summary": "required field misses vulnerabilities[] where SecOps files; rule drops MEASURABLE; provenance-fixed bounds refused",
+      "at": "2026-08-21T19:25:16Z"
+    },
+    {
+      "phase": "1-ba-rework",
+      "agent": "ba",
+      "verdict": "SPEC_REWORKED",
+      "summary": "B1 closed with a real gate (vulnerabilities.remediation required, 68/0); 56 blocks in adopting projects vs 0 here",
+      "at": "2026-08-21T19:42:56Z"
+    },
+    {
+      "phase": "2-dba-r2",
+      "agent": "dba",
+      "verdict": "REQUEST_CHANGES",
+      "summary": "cause found: AGENT_RULES keyed bare; namespaced agent_type returns zero failures. 622 namespaced dispatches, 0 blocks",
+      "at": "2026-08-21T19:56:42Z"
+    },
+    {
+      "phase": "2-secops-r2",
+      "agent": "secops",
+      "verdict": "REQUEST_CHANGES",
+      "summary": "compliance_flags is a third blocking location with no required list; provenance rule over-refuses judgement-set bounds",
+      "at": "2026-08-21T19:56:42Z"
+    },
+    {
+      "phase": "2-devops-r2",
+      "agent": "devops",
+      "verdict": "APPROVE_WITH_NOTES",
+      "summary": "lane-2 branch already narrows #59 redaction; whichever merges second falsifies the others shipped claim",
+      "at": "2026-08-21T19:56:42Z"
+    },
+    {
+      "phase": "1-ba-final",
+      "agent": "ba",
+      "verdict": "SPEC_FINAL",
+      "summary": "opened #66 for the inert validator; deployment-mode scoping replaces the false repo-scoped claim; 11 req/16 AC",
+      "at": "2026-08-21T20:13:52Z"
+    },
+    {
+      "phase": "2.5-design",
+      "agent": "dev-judge",
+      "verdict": "DESIGN_LOCKED",
+      "summary": "Sketch A shape wins; idiom it relied on measured as already drifted 3 of 9; grafted B field pair must_satisfy+rationale_not_checked",
+      "at": "2026-08-21T20:36:52Z"
+    },
+    {
+      "phase": "3b-dev",
+      "agent": "dev",
+      "verdict": "IMPL_COMPLETE",
+      "summary": "78/78 battery cells, 18 controls OK; 9 fold-ins; AC13 unobservable (loader reads the stale plugin cache)",
+      "at": "2026-08-21T23:23:01Z"
+    },
+    {
+      "phase": "4-secops",
+      "agent": "secops",
+      "verdict": "REQUEST_CHANGES",
+      "summary": "replicated block asserts refusal that is false for design.md; AGENT_RULES has no design key; independent of #66",
+      "at": "2026-08-21T23:56:40Z"
+    },
+    {
+      "phase": "4-dba",
+      "agent": "dba",
+      "verdict": "REQUEST_CHANGES",
+      "summary": "sentence true in 3 of 10 files; record enumerates by location, gate keys by agent identity; recipe says Task, corpus has Agent",
+      "at": "2026-08-21T23:56:40Z"
+    },
+    {
+      "phase": "4-qa",
+      "agent": "qa",
+      "verdict": "REQUEST_CHANGES",
+      "summary": "byte-identity pin blocks per-file fix; AC4 quantified over locations not role x location conjunction",
+      "at": "2026-08-21T23:56:40Z"
+    },
+    {
+      "phase": "4-ba",
+      "agent": "ba",
+      "verdict": "APPROVE_WITH_NOTES",
+      "summary": "deferral ledger verified by opening issues; AC3 ask 4 undecidable from shipped text",
+      "at": "2026-08-21T23:56:40Z"
+    },
+    {
+      "phase": "4-dev",
+      "agent": "dev",
+      "verdict": "APPROVE_WITH_NOTES",
+      "summary": "brace fix invisible as a fix; a revert of both copies passes every shipped test",
+      "at": "2026-08-21T23:56:40Z"
+    },
+    {
+      "phase": "4-devops",
+      "agent": "devops",
+      "verdict": "APPROVE_WITH_NOTES",
+      "summary": "README Upgrading list is the repo convention for this and was not updated; cache runs the old form post-merge",
+      "at": "2026-08-21T23:56:40Z"
+    },
+    {
+      "phase": "3-fix",
+      "agent": "dev",
+      "verdict": "FIX_ROUND_COMPLETE",
+      "summary": "canonical text names the deciding pair; digest published; recipe fixed; 81 cells, 22 controls OK",
+      "at": "2026-08-22T01:47:14Z"
+    },
+    {
+      "phase": "4-qa-d2",
+      "agent": "qa",
+      "verdict": "APPROVE_WITH_NOTES",
+      "summary": "binding verdict satisfied; wrote its own mutations on Devs new cells; census verified as a fourth person",
+      "at": "2026-08-22T02:41:15Z"
+    },
+    {
+      "phase": "4-dba-d2",
+      "agent": "dba",
+      "verdict": "APPROVE_WITH_NOTES",
+      "summary": "all three objections discharged; two majors on figure grain and retroactive reach 996 of 996 vs 17 of 229",
+      "at": "2026-08-22T02:41:15Z"
+    },
+    {
+      "phase": "4-secops-d2",
+      "agent": "secops",
+      "verdict": "REQUEST_CHANGES",
+      "summary": "eleventh copy still carries the weaker presence test; refusal scoped to shards but also reaches merged review.json",
+      "at": "2026-08-22T02:41:15Z"
+    },
+    {
+      "phase": "4-secops-d3",
+      "agent": "secops",
+      "verdict": "APPROVE_WITH_NOTES",
+      "summary": "all four round-2 findings resolved by own measurement; digest tracks text across two refs; no veto",
+      "at": "2026-08-22T04:10:13Z"
+    },
+    {
+      "phase": "4-qa-d3",
+      "agent": "qa",
+      "verdict": "REQUEST_CHANGES",
+      "summary": "IN-bounds exemplar names no openable source and round 3 made it the rules oracle; credential cell blind on remediation",
+      "at": "2026-08-22T04:10:13Z"
+    },
+    {
+      "at": "2026-08-22T05:10:00Z",
+      "flag": "AC7.noRepoScope caught this round's own regression: the first cut of the clause (d) population fix named the two checkouts, which the criterion forbids. Replaced with a runnable rule before any commit."
+    }
+  ],
+  "risk_tier": "architectural",
+  "review_rounds_phase2": 2,
+  "phase3_shape": "3a-qa-battery-outside-tests-dir (tests/ frozen: owned by another session)",
+  "panel_roles": [
+    "ba",
+    "dba",
+    "devops",
+    "secops",
+    "dev",
+    "qa"
+  ],
+  "review_rounds": 4,
+  "reviewed_head": "2ef09a523f7b9143eeed6f9a3d1d3728a478bc1d",
+  "final_verdict": "APPROVE_WITH_NOTES",
+  "peer_review_verdict_counts": {
+    "approve": 0,
+    "approve_with_notes": 6,
+    "request_changes": 0,
+    "request_refactor": 0,
+    "veto": 0
+  },
+  "first_round_head": "2ef09a523f7b9143eeed6f9a3d1d3728a478bc1d"
+}
