@@ -119,6 +119,7 @@ At the standard tier there is no pre-code SecOps review: the pipeline's Phase 2-
 ### SecOps constraints (security baseline; SecOps reviews the finished diff at Phase 4 with veto power)
 
 - TRIPWIRE: a standard-tier change adds NO new auth flow, NO crypto, NO webhook-verification change, NO new external data intake, and NO new compliance-relevant data type. If the implementation turns out to need one, STOP and report a tripwire to the orchestrator; that is architectural-tier work.
+- Config-tier backstop: a diff that touches `pipeline.config.json` itself under a non-architectural tier is a mis-tier. No script evaluates a diff for this trigger; report it to the orchestrator when you find it. See #76 for the mechanical seat this awaits.
 - Every new or changed endpoint goes through the authenticated-handler wrapper. A deliberately public endpoint needs an explicit justification comment and rate limiting. `# CUSTOMIZE: your auth wrapper`
 - Validate every external input with a shared schema at the boundary. Respect the project's payload caps. `# CUSTOMIZE: your validation library + payload caps`
 - Never log secrets, tokens, or PII beyond request IDs. User-controlled text is sanitized before logging.

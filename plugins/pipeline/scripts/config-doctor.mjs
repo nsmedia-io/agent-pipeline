@@ -111,7 +111,8 @@ const CODE_KEYS = {
 const PROSE_KEYS = {
   architecturalTriggers: {
     type: "object",
-    reader: "BA's tiering decision (prose, not code)",
+    reader:
+      "prose: agents/ba.md Phase 1 duty 6 (floor + config union) and commands/pipeline.md ### Risk-tiered orchestration depth (post-BA validation clause)",
   },
 };
 
