@@ -2,7 +2,7 @@
   "issue_number": 40,
   "current_phase": "3-impl",
   "started_at": "2026-08-21T18:53:19Z",
-  "updated_at": "2026-08-22T02:41:15Z",
+  "updated_at": "2026-08-22T04:10:13Z",
   "branch": "claude/lane-4-a521bf",
   "ask_text": "#40: reviewers state properties, not implementations; only QA and Dev propose how. Typed required_property across agents/*.md, both review schemas, Phase 4 preamble.",
   "events": [
@@ -58,6 +58,12 @@
       "verdict": "REQUEST_CHANGES",
       "at": "2026-08-22T02:41:15Z",
       "note": "delta round 2: qa secops dba; QA and DBA flipped to APPROVE_WITH_NOTES, SecOps still objects"
+    },
+    {
+      "phase": "4-review",
+      "verdict": "REQUEST_CHANGES",
+      "at": "2026-08-22T04:10:13Z",
+      "note": "delta round 3: qa secops; SecOps cleared, QA blocker on the IN-bounds exemplar"
     }
   ],
   "flags": [
@@ -207,6 +213,20 @@
       "verdict": "REQUEST_CHANGES",
       "summary": "eleventh copy still carries the weaker presence test; refusal scoped to shards but also reaches merged review.json",
       "at": "2026-08-22T02:41:15Z"
+    },
+    {
+      "phase": "4-secops-d3",
+      "agent": "secops",
+      "verdict": "APPROVE_WITH_NOTES",
+      "summary": "all four round-2 findings resolved by own measurement; digest tracks text across two refs; no veto",
+      "at": "2026-08-22T04:10:13Z"
+    },
+    {
+      "phase": "4-qa-d3",
+      "agent": "qa",
+      "verdict": "REQUEST_CHANGES",
+      "summary": "IN-bounds exemplar names no openable source and round 3 made it the rules oracle; credential cell blind on remediation",
+      "at": "2026-08-22T04:10:13Z"
     }
   ],
   "risk_tier": "architectural",
@@ -220,7 +240,7 @@
     "dev",
     "qa"
   ],
-  "review_rounds": 2,
+  "review_rounds": 3,
   "reviewed_head": "2ef09a523f7b9143eeed6f9a3d1d3728a478bc1d",
   "final_verdict": "REQUEST_CHANGES",
   "peer_review_verdict_counts": {
