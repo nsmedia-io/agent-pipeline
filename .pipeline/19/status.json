@@ -1,10 +1,31 @@
 {
   "issue_number": 19,
-  "current_phase": "1-ba",
+  "current_phase": "2-review",
   "started_at": "2026-08-22T19:06:32Z",
-  "updated_at": "2026-08-22T19:06:32Z",
+  "updated_at": "2026-08-22T19:22:06Z",
   "branch": "claude/lane-4-a521bf",
   "ask_text": "#19: Phase 4 panelists share one worktree, so mutation batteries corrupt each other. Live evidence gathered during #40 and #21.",
-  "events": [],
-  "flags": []
+  "events": [
+    {
+      "phase": "0.5-map",
+      "verdict": "MAP_WRITTEN",
+      "at": "2026-08-22T19:22:06Z",
+      "note": "map.json produced inside the BA intake dispatch; recording the closing event that folding omits (see #25)"
+    },
+    {
+      "phase": "1-ba",
+      "verdict": "SPEC_WRITTEN",
+      "at": "2026-08-22T19:22:06Z"
+    }
+  ],
+  "flags": [
+    {
+      "phase": "1-ba",
+      "agent": "ba",
+      "verdict": "SPEC_WRITTEN",
+      "summary": "architectural forced; recommends a synthesis of all three options; git-completeness is the discriminator, not location",
+      "at": "2026-08-22T19:22:06Z"
+    }
+  ],
+  "risk_tier": "architectural"
 }
