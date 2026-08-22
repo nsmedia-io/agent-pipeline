@@ -511,10 +511,11 @@ function prerequisiteSatisfied(issueDir, row, events) {
  * "not-a-date" all land identically in both. They part only on values that are NOT strings,
  * where `Date.parse` coerces to string first and the constructor does not. `updated_at: 12345`
  * reads here as the year 12345, so the record is permanently in flight, while
- * pipeline-status.mjs never classifies it at all: its filter is not reached on ANY path. With
- * two or more issue dirs it throws first in `listActive`'s sort comparator, in both markdown
- * and `--json`; with one dir it throws in `renderMarkdown`; and the sole non-throwing case, one
- * dir under `--json`, does not run the filter either. Nothing in this tree pins either spelling.
+ * pipeline-status.mjs never classifies it at all: its `stuck` filter is not reached on any
+ * path. Markdown mode always throws before it -- in `listActive`'s sort comparator or in
+ * `renderMarkdown`'s table loop, depending on where the offending row lands in readdir order --
+ * and `--json` never calls `renderMarkdown` at all, so the filter does not run there even when
+ * nothing throws. Nothing in this tree pins either spelling.
  *
  * That mtime-for-updated_at substitution is the same grain mismatch #74 records against
  * session-start.sh, in a second module #74 does not yet count. No symbol is shared either, so
