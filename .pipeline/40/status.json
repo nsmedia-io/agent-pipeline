@@ -1,8 +1,8 @@
 {
   "issue_number": 40,
-  "current_phase": "4-review",
+  "current_phase": "4-review-complete",
   "started_at": "2026-08-21T18:53:19Z",
-  "updated_at": "2026-08-22T05:20:44Z",
+  "updated_at": "2026-08-22T05:34:00Z",
   "branch": "claude/lane-4-a521bf",
   "ask_text": "#40: reviewers state properties, not implementations; only QA and Dev propose how. Typed required_property across agents/*.md, both review schemas, Phase 4 preamble.",
   "events": [
@@ -76,6 +76,12 @@
       "verdict": "FIX_ROUND_COMPLETE",
       "at": "2026-08-22T05:20:44Z",
       "note": "round 4: exemplar sorts OUT, RFC-located IN case, credential cell rebuilt, AC1.verbatim retired"
+    },
+    {
+      "phase": "4-review",
+      "verdict": "APPROVE_WITH_NOTES",
+      "at": "2026-08-22T05:34:00Z",
+      "note": "delta round 4: all six roles approve"
     }
   ],
   "flags": [
@@ -258,11 +264,11 @@
   ],
   "review_rounds": 4,
   "reviewed_head": "2ef09a523f7b9143eeed6f9a3d1d3728a478bc1d",
-  "final_verdict": "REQUEST_CHANGES",
+  "final_verdict": "APPROVE_WITH_NOTES",
   "peer_review_verdict_counts": {
     "approve": 0,
-    "approve_with_notes": 5,
-    "request_changes": 1,
+    "approve_with_notes": 6,
+    "request_changes": 0,
     "request_refactor": 0,
     "veto": 0
   },
