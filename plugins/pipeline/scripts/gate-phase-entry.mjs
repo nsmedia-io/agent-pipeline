@@ -23,8 +23,10 @@
  * among the issue dirs. Two consequences are load-bearing and neither is hypothetical:
  *   - The Stop hook is PROJECT-scoped, not run-scoped, so without a recency ceiling an
  *     abandoned run parked at a guarded phase would refuse every turn in that project forever.
- *     Hence the in-flight predicate below (R6), reusing pipeline-status.mjs's own 24h /
- *     no-final-verdict definition rather than inventing a second one.
+ *     Hence the in-flight predicate below (R6). Its 24h / no-final-verdict window is a SECOND
+ *     copy of the one pipeline-status.mjs holds in its `stuck` filter, not a shared symbol: see
+ *     the drift note above `inFlight`, which is where that duplication lives and where #74
+ *     tracks it.
  *   - An explicit signal (CLAUDE_PIPELINE_ACTIVE_ISSUE / PIPELINE_ACTIVE_ISSUE) must not be
  *     able to NARROW the subject: pointing it at a satisfied dir would be the env-var opt-out
  *     the design rejected, and it would leave no trace in the archived record. So both the
@@ -160,7 +162,7 @@ export const UNGUARDED = [
  */
 export const TERMINAL = ["5-archived"];
 
-const IN_FLIGHT_MS = 24 * 60 * 60 * 1000;
+export const IN_FLIGHT_MS = 24 * 60 * 60 * 1000;
 
 /**
  * An unusable risk_tier resolves to the STRICTEST row, never the loosest. That default is right
@@ -487,10 +489,38 @@ function prerequisiteSatisfied(issueDir, row, events) {
 }
 
 /**
- * A run is IN FLIGHT when it was updated under 24h ago and carries no final verdict -- the
- * predicate pipeline-status.mjs already uses to call a run "possibly stuck", inverted. A record
+ * A run is IN FLIGHT when it was updated under 24h ago and carries no final verdict. A record
  * with no readable `updated_at` is not in flight: the guard cannot date it, and a control that
  * cannot date a record must not hold a project's turns open on it.
+ *
+ * DRIFT RISK, LIVE AND UNRESOLVED, TRACKED IN #74. The window below is this module's OWN
+ * literal. pipeline-status.mjs holds an independent copy of the same number in its `stuck`
+ * filter, to call a run "possibly stuck", and on the AGE term those two comparisons are
+ * complements. Neither predicate is the negation of the other even so, and the DATABILITY term
+ * is where they part -- not in agreement, as an earlier draft of this comment had it. This
+ * guard dates a record from its OWN `updated_at` and abstains when that will not parse;
+ * pipeline-status.mjs substitutes the status.json FILE MTIME for an ABSENT or NULL one first
+ * (`updated_at: status?.updated_at ?? mtime`). So a record carrying no `updated_at` at all is
+ * NOT in flight here and IS listed "possibly stuck" there as soon as the file is a day old.
+ * Measured, not reasoned. An unparseable STRING is the one undatable spelling the two still
+ * agree on, because `??` does not fire on it.
+ *
+ * They also DATE the field differently -- `Date.parse` here, `new Date(...).getTime()` there --
+ * and MEASURED, those two agree on every STRING, not only the ISO ones status.schema.json
+ * requires: `new Date(string)` delegates to `Date.parse`, so "March 3, 2020", "2020/03/03" and
+ * "not-a-date" all land identically in both. They part only on values that are NOT strings,
+ * where `Date.parse` coerces to string first and the constructor does not. `updated_at: 12345`
+ * reads here as the year 12345, so the record is permanently in flight, while
+ * pipeline-status.mjs never classifies it at all: its `stuck` filter is not reached on any
+ * path. Markdown mode always throws before it -- in `listActive`'s sort comparator or in
+ * `renderMarkdown`'s table loop, depending on where the offending row lands in readdir order --
+ * and `--json` never calls `renderMarkdown` at all, so the filter does not run there even when
+ * nothing throws. Nothing in this tree pins either spelling.
+ *
+ * That mtime-for-updated_at substitution is the same grain mismatch #74 records against
+ * session-start.sh, in a second module #74 does not yet count. No symbol is shared either, so
+ * the numbers agree only for as long as nobody moves one of them, and nothing in this tree
+ * fails if one does.
  */
 function inFlight(status, now) {
   if (status.final_verdict) return false;
