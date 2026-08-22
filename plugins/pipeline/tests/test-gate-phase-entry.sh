@@ -212,7 +212,7 @@ reg63 "#63-P1"
 assert_eq "#63-P1 FRESH_ISO is INSIDE the ceiling. This is the only thing standing between the corpus walk's zero (\`no committed record is refused by the table\`) and a VACUOUS green: that walk rewrites every committed record's updated_at to FRESH_ISO precisely so staleness cannot mask the table, and its pass set is granted|not-applicable -- so if FRESH_ISO ever fell OUTSIDE, every corpus record would abstain and the zero would stay green over a wholly abstaining population. DIAGNOSIS, not sole detection: ~234 other cells redden in the same run" \
   "$(ac63_age_vs_ceiling "$FRESH_ISO" "$IN_FLIGHT_MS")" "inside"
 reg63 "#63-P2"
-assert_eq "#63-P2 STALE_ISO is OUTSIDE the ceiling. With #63-P1 this is the ONLY remaining bound on the VALUE of IN_FLIGHT_MS after #63 -- roughly (1.0h, 25.05h) -- because every other new cell is DERIVED from the value and therefore value-independent. EXPECTED RED, and correctly so, under a rewrite of the constant to 48h: STALE_ISO is a 25h literal and 25h is legitimately inside a 48h window" \
+assert_eq "#63-P2 STALE_ISO is OUTSIDE the ceiling. With #63-P1 this brackets the VALUE of IN_FLIGHT_MS to roughly (1.0h, 25.05h), which is the only bound the DERIVED cells contribute -- they read the value and are therefore value-independent. It is NOT the tightest bound in #63, and an earlier draft of this label said it was: #63-A2 pins the constant's exact SOURCE TEXT, is neither derived nor value-independent, and is strictly tighter -- MEASURED, a rewrite of the shipped constant to 2h leaves this cell GREEN and reddens #63-A2 as the sole red. So do not read this label as licence to delete #63-A2 as redundant. EXPECTED RED, and correctly so, under a rewrite of the constant to 48h: STALE_ISO is a 25h literal and 25h is legitimately inside a 48h window" \
   "$(ac63_age_vs_ceiling "$STALE_ISO" "$IN_FLIGHT_MS")" "outside"
 
 # new_case <issue-dir-name> <status-json> -> CASE_ROOT, CASE_DIR
@@ -2607,7 +2607,7 @@ reg63 "#63-A1"
 assert_eq "#63-A1 the guard EXPORTS the ceiling exactly once, so this suite can read the number instead of re-spelling it. Read from the CHECKOUT, never \$GUARD" \
   "$(grep -c '^export const IN_FLIGHT_MS' "$AC63_CHECKOUT_GUARD" 2>/dev/null | tr -d ' ')" "1"
 reg63 "#63-A2"
-assert_eq "#63-A2 and the exported VALUE is unchanged by the export -- both halves are needed, since a cell asserting only the grep count would pass with the value silently moved" \
+assert_eq "#63-A2 and the exported VALUE is unchanged by the export -- both halves are needed, since a cell asserting only the grep count would pass with the value silently moved. THIS IS THE PERMANENT VALUE PIN, not a one-shot check on the export refactor: it is the TIGHTEST bound on IN_FLIGHT_MS in this file, strictly tighter than the #63-P1/#63-P2 interval and the SOLE red when the shipped constant is rewritten to 2h, so do not delete it as redundant with #63-P2. It pins EXACT SOURCE TEXT, so this cell's failure direction is toward FALSE ALARM -- a behaviour-preserving reformat to 86_400_000 reddens it for a non-defect reason, so read the diff" \
   "$(sed -n 's/^export const IN_FLIGHT_MS = \(.*\);$/\1/p' "$AC63_CHECKOUT_GUARD" 2>/dev/null)" "24 * 60 * 60 * 1000"
 
 # The three pins under the FIRST declared survivor. They catch the CHEAP ways its premise stops
@@ -2700,6 +2700,20 @@ reg63 "#63-V5"
 assert_eq "#63-V5 probe43's staleness branch is LIVE: a fixture past the ceiling by MARGIN produces exactly that diagnosis. Before this cell the branch was DEAD -- every fixture in this file sat INSIDE the ceiling, all three call sites assert == ok, and both flipping the comparison and DELETING the whole staleness push left the suite at 462/0. This buys LIVENESS, not falsifiability: the > versus >= distinction is the second declared survivor and stays unpinned" \
   "$(probe43 "$CASE_DIR/status.json" fresh exact:architectural)" \
   "updated_at is past the in-flight ceiling this suite reads from the guard: this cell would test staleness"
+
+# THE LAST WRITE-CAPABLE COPY CALL IS ABOVE (#63-V1's no-export driver). #63-C4 and #63-C5 sit
+# after the FIRST copy call only, so neither can see a write performed after they ran, and the
+# LAST call is the one whose residue an interrupted run actually leaves behind: under the copy
+# helper's own named mutation (repoint AC63_COPY_GUARD at $SCRIPTS_DIR) the run ends with the
+# shipped guard reading `const IN_FLIGHT_MS = 86400000;` -- this PR's only executable change,
+# reverted AND the literal respelled, sitting in the checkout waiting for a `git commit -a`.
+# Do not delete this as a duplicate of #63-C5; a checksum taken earlier proves nothing about a
+# later write. Failure direction is toward a REAL defect, not false alarm: if this reddens, the
+# checkout has been written by this file and the diff must be inspected before anything is
+# committed.
+reg63 "#63-C6"
+assert_eq "#63-C6 the SHIPPED guard is STILL byte-identical after the LAST copy-driven cell in this file (checksum, two non-empty operands, so this is not a zero-versus-zero comparison). #63-C5 covers only the copies above it" \
+  "$(cksum < "$SCRIPTS_DIR/gate-phase-entry.mjs")" "$AC63_GUARD_SUM_BEFORE"
 
 # ---------------------------------------------------------------------------
 suite "#63 the label namespace: unique, and every id that exists actually RAN"

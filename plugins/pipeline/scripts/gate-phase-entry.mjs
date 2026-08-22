@@ -24,8 +24,9 @@
  *   - The Stop hook is PROJECT-scoped, not run-scoped, so without a recency ceiling an
  *     abandoned run parked at a guarded phase would refuse every turn in that project forever.
  *     Hence the in-flight predicate below (R6). Its 24h / no-final-verdict window is a SECOND
- *     copy of the one pipeline-status.mjs holds at :156, not a shared symbol: see the drift
- *     note above `inFlight`, which is where that duplication lives and where #74 tracks it.
+ *     copy of the one pipeline-status.mjs holds in its `stuck` filter, not a shared symbol: see
+ *     the drift note above `inFlight`, which is where that duplication lives and where #74
+ *     tracks it.
  *   - An explicit signal (CLAUDE_PIPELINE_ACTIVE_ISSUE / PIPELINE_ACTIVE_ISSUE) must not be
  *     able to NARROW the subject: pointing it at a satisfied dir would be the env-var opt-out
  *     the design rejected, and it would leave no trace in the archived record. So both the
@@ -493,12 +494,27 @@ function prerequisiteSatisfied(issueDir, row, events) {
  * cannot date a record must not hold a project's turns open on it.
  *
  * DRIFT RISK, LIVE AND UNRESOLVED, TRACKED IN #74. The window below is this module's OWN
- * literal. pipeline-status.mjs:156 holds an independent copy of the same number to call a run
- * "possibly stuck", and the two are inverses on the age term ALONE: an undatable record is
- * neither stuck there nor in flight here, so neither predicate is the negation of the other.
- * No symbol is shared, so they agree only for as long as nobody moves one of them, and nothing
- * in this tree fails if one does. #74 carries the several independent spellings of this window
- * and the abstention they hide; until it lands the agreement is a coincidence, not a contract.
+ * literal. pipeline-status.mjs holds an independent copy of the same number in its `stuck`
+ * filter, to call a run "possibly stuck", and on the AGE term those two comparisons are
+ * complements. Neither predicate is the negation of the other even so, and the DATABILITY term
+ * is where they part -- not in agreement, as an earlier draft of this comment had it. This
+ * guard dates a record from its OWN `updated_at` and abstains when that will not parse;
+ * pipeline-status.mjs substitutes the status.json FILE MTIME for an ABSENT or NULL one first
+ * (`updated_at: status?.updated_at ?? mtime`). So a record carrying no `updated_at` at all is
+ * NOT in flight here and IS listed "possibly stuck" there as soon as the file is a day old.
+ * Measured, not reasoned. An unparseable STRING is the one undatable spelling the two still
+ * agree on, because `??` does not fire on it.
+ *
+ * They also DATE the field differently -- `Date.parse` here, `new Date(...).getTime()` there --
+ * which agree on the ISO strings status.schema.json requires and diverge on anything else.
+ * `updated_at: 12345` reads here as the year 12345, so the record is permanently in flight,
+ * while pipeline-status.mjs never classifies it at all: it throws on the number before its
+ * filter is reached. Nothing in this tree pins either spelling.
+ *
+ * That mtime-for-updated_at substitution is the same grain mismatch #74 records against
+ * session-start.sh, in a second module #74 does not yet count. No symbol is shared either, so
+ * the numbers agree only for as long as nobody moves one of them, and nothing in this tree
+ * fails if one does.
  */
 function inFlight(status, now) {
   if (status.final_verdict) return false;
