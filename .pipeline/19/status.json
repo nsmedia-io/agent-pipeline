@@ -2,7 +2,7 @@
   "issue_number": 19,
   "current_phase": "3-impl",
   "started_at": "2026-08-22T19:06:32Z",
-  "updated_at": "2026-08-22T21:19:25Z",
+  "updated_at": "2026-08-22T22:10:25Z",
   "branch": "claude/lane-4-a521bf",
   "ask_text": "#19: Phase 4 panelists share one worktree, so mutation batteries corrupt each other. Live evidence gathered during #40 and #21.",
   "events": [
@@ -55,6 +55,11 @@
       "phase": "2.5-design",
       "verdict": "DESIGN_LOCKED",
       "at": "2026-08-22T21:19:25Z"
+    },
+    {
+      "phase": "3a-qa",
+      "verdict": "CONTRACT_AUTHORED",
+      "at": "2026-08-22T22:10:25Z"
     }
   ],
   "flags": [
@@ -134,6 +139,13 @@
       "verdict": "DESIGN_LOCKED",
       "summary": "Sketch A wins; both sketches mis-measured their own costs in opposite directions; AC9 found unsatisfiable by running it",
       "at": "2026-08-22T21:19:25Z"
+    },
+    {
+      "phase": "3a-qa",
+      "agent": "qa",
+      "verdict": "CONTRACT_AUTHORED",
+      "summary": "56 cells, 30 red contract; proved passable on a throwaway reference impl (67/0); 11 kill-mutations caught, 3 survivors",
+      "at": "2026-08-22T22:10:25Z"
     }
   ],
   "risk_tier": "architectural",
@@ -143,5 +155,6 @@
     "question": "ship #19 narrowed to the prose half, deferring the schema attestation?",
     "answer": "proceed narrowed",
     "detail": "add the trigger and commit-hygiene criteria; ship the prose rules plus the --absolute-git-dir fix; defer tracked_writes to #76 with its measurement block intact"
-  }
+  },
+  "phase3_qa_battery": ".pipeline/19/verify-19.sh"
 }
