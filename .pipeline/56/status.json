@@ -1,8 +1,8 @@
 {
   "issue_number": 56,
-  "current_phase": "2-review",
+  "current_phase": "2-review-round-budget",
   "started_at": "2026-08-22T18:10:00Z",
-  "updated_at": "2026-08-22T21:05:37Z",
+  "updated_at": "2026-08-22T21:25:12Z",
   "branch": "claude/pipeline-resume-56-a82065",
   "ask_text": "voice-lint: scope the voice obligation to the turn that produced the record",
   "risk_tier": "architectural",
@@ -31,6 +31,12 @@
       "verdict": "REWORKED",
       "at": "2026-08-22T21:05:00Z",
       "note": "BA round-2 rework: requirements 8->12, criteria 12->18. Re-derived on an 84-transcript/134,438-record corpus (wider than either reviewer's). Did not adopt SecOps's remediation verbatim: it still admitted 1,439 non-owner records including the 22 auto-compaction summaries that were DBA's own second blocker. Added origin.kind (a field SecOps's own not_reached flagged as unchecked) to reach 1 non-owner admission and flip all 10 drift classes loud. Also: corrected R7's fail-direction (false refusal, not silence, per DBA), replaced AC9's mirror claim with an asserted-divergence table (found a 3rd outcome neither reviewer's two covered), ruled explicitly on updated_at vs mtime (max, widen-only), corrected DBA's own AC6 coverage number (5/65, not 0), named the existing utimesSync idiom for R8's fixture construction, and extended AC7 to the fail-open tail DevOps flagged. review.json backed up to review.round1.json before this round's Phase 2 re-dispatch."
+    },
+    {
+      "phase": "2-review",
+      "verdict": "REQUEST_CHANGES",
+      "at": "2026-08-22T21:25:12Z",
+      "note": "Round 2, all three reviewers re-dispatched fresh (not a delta merge; Phase 2 has no shard-preservation mechanic). secops APPROVE_WITH_NOTES (VETO lifted; all 4 round-1 findings independently reproduced closed via a live reference-implementation patch, plus 1 major and 3 lows). devops APPROVE_WITH_NOTES (round-1 fail-open concern resolved by new R11/extended AC7; 1 nit). dba REQUEST_CHANGES: all 3 of ITS OWN round-1 blockers independently reverified closed, and it confirmed BA's two counter-corrections against its own round-1 work were right, but found ONE NEW blocker: R9's max(mtimeMs, Date.parse(updated_at)) does not cover cp -p / rsync -a / tar -x, which carry a stale updated_at value along with a stale mtime; demonstrated live (a cp -p just now on a 72h-old record still reads 72.0h stale). This is the SECOND consecutive Phase 2 round to return REQUEST_CHANGES, which trips the round-budget rule in commands/pipeline.md's Convergence budget section: do not auto-loop a third BA rework; stop and let the owner choose split / defer / proceed-with-constraints."
     }
   ],
   "flags": [
@@ -67,6 +73,27 @@
       "verdict": "REWORKED",
       "summary": "Round 2: reqs 8->12, ACs 12->18. Rejected SecOps's fix as still admitting DBA's auto-compact blocker; added origin.kind instead.",
       "at": "2026-08-22T21:05:00Z"
+    },
+    {
+      "phase": "2-review",
+      "agent": "dba",
+      "verdict": "REQUEST_CHANGES",
+      "summary": "Round 1's 3 blockers genuinely closed (reverified live). 1 new blocker: max(mtime,updated_at) misses cp -p/rsync -a/tar -x.",
+      "at": "2026-08-22T21:17:00Z"
+    },
+    {
+      "phase": "2-review",
+      "agent": "devops",
+      "verdict": "APPROVE_WITH_NOTES",
+      "summary": "Round-1 fail-open concern resolved via new R11 + extended AC7. 0 blockers, 1 nit. Still zero deploy/secret/queue impact.",
+      "at": "2026-08-22T21:08:00Z"
+    },
+    {
+      "phase": "2-review",
+      "agent": "secops",
+      "verdict": "APPROVE_WITH_NOTES",
+      "summary": "VETO lifted: origin.kind is real, reproduces live, closes all 4 round-1 findings. 1 major: AC7 contradicts R3 on unreadable transcripts.",
+      "at": "2026-08-22T21:23:00Z"
     }
   ]
 }
