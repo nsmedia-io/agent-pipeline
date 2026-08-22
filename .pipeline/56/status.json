@@ -1,8 +1,8 @@
 {
   "issue_number": 56,
-  "current_phase": "1-ba-rework-required",
+  "current_phase": "2-review",
   "started_at": "2026-08-22T18:10:00Z",
-  "updated_at": "2026-08-22T20:33:26Z",
+  "updated_at": "2026-08-22T21:05:37Z",
   "branch": "claude/pipeline-resume-56-a82065",
   "ask_text": "voice-lint: scope the voice obligation to the turn that produced the record",
   "risk_tier": "architectural",
@@ -25,6 +25,12 @@
       "verdict": "VETO",
       "at": "2026-08-22T19:05:00Z",
       "note": "RECONSTRUCTED: this status.json checkpoint was never committed by the originating session (no .pipeline/56/status.json existed anywhere, worktree or main checkout, on --resume). Rebuilt from spec.json/map.json/review.json, which were present and internally consistent. secops VETO, dba REQUEST_CHANGES, devops APPROVE_WITH_NOTES; no design_review (spec is not frontend-scoped)."
+    },
+    {
+      "phase": "1-ba",
+      "verdict": "REWORKED",
+      "at": "2026-08-22T21:05:00Z",
+      "note": "BA round-2 rework: requirements 8->12, criteria 12->18. Re-derived on an 84-transcript/134,438-record corpus (wider than either reviewer's). Did not adopt SecOps's remediation verbatim: it still admitted 1,439 non-owner records including the 22 auto-compaction summaries that were DBA's own second blocker. Added origin.kind (a field SecOps's own not_reached flagged as unchecked) to reach 1 non-owner admission and flip all 10 drift classes loud. Also: corrected R7's fail-direction (false refusal, not silence, per DBA), replaced AC9's mirror claim with an asserted-divergence table (found a 3rd outcome neither reviewer's two covered), ruled explicitly on updated_at vs mtime (max, widen-only), corrected DBA's own AC6 coverage number (5/65, not 0), named the existing utimesSync idiom for R8's fixture construction, and extended AC7 to the fail-open tail DevOps flagged. review.json backed up to review.round1.json before this round's Phase 2 re-dispatch."
     }
   ],
   "flags": [
@@ -54,6 +60,13 @@
       "agent": "orchestrator",
       "summary": "Checkpoint discipline broken upstream: no status.json existed. Reconstructed this record from spec.json/map.json/review.json on --resume 56.",
       "at": "2026-08-22T20:33:26Z"
+    },
+    {
+      "phase": "1-ba",
+      "agent": "ba",
+      "verdict": "REWORKED",
+      "summary": "Round 2: reqs 8->12, ACs 12->18. Rejected SecOps's fix as still admitting DBA's auto-compact blocker; added origin.kind instead.",
+      "at": "2026-08-22T21:05:00Z"
     }
   ]
 }
