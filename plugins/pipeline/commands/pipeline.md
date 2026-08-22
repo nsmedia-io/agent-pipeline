@@ -658,6 +658,14 @@ fi
 # the same three-outcome shape instead of a second spelling of it. One function, one fail
 # direction, one place to get it wrong.
 surface_probe() {  # $1 = module basename under scripts/, $2 = predicate export; NUL path list on STDIN
+  # THE BRACES ARE LOAD-BEARING, and nothing else in the tree says so. Plain bash treats
+  # "$1" and "${1}" identically, so reverting both copies to the bare form is a no-op to a
+  # shell, to the test suite, and to any diff review: it reads as a stray-brace cleanup. The
+  # risk sits UPSTREAM of any shell. This file is a slash-command template, and the loader
+  # substitutes bare $N tokens in the TEXT before a shell ever runs it; a rendered copy with
+  # $1 substituted away exits 1 (INDETERMINATE) on every call, which the caller reads as a
+  # broken probe rather than a broken template. Keep the braces, and keep both copies
+  # byte-identical to each other.
   node -e 'const fs=require("node:fs");new Promise(r=>r(fs.readFileSync(0,"utf8").split("\0").filter(Boolean))).then(paths=>import(process.env.CLAUDE_PLUGIN_ROOT + "/scripts/" + process.argv[1]).then(m=>{const f=m[process.argv[2]];if(typeof f!=="function")throw new Error("missing export "+process.argv[2]+" in "+process.argv[1]);if(paths.length===0)throw new Error("empty path list: an unread diff is not a clean diff");process.exit(f(paths)?0:20)})).catch(e=>{console.error("SURFACE-INDETERMINATE: "+process.argv[2]+": "+(e&&e.message));process.exit(1)})' "${1}" "${2}"
 }
 surface_probe data-layer-surface.mjs diffTouchesDataLayer < "$CHANGED_PATHS"; RC=$?
@@ -873,6 +881,14 @@ fi
 # list is passed by REDIRECTION at the call site rather than named inside the function, which
 # is what lets the two definitions stay byte-identical across two differently-named lists.
 surface_probe() {  # $1 = module basename under scripts/, $2 = predicate export; NUL path list on STDIN
+  # THE BRACES ARE LOAD-BEARING, and nothing else in the tree says so. Plain bash treats
+  # "$1" and "${1}" identically, so reverting both copies to the bare form is a no-op to a
+  # shell, to the test suite, and to any diff review: it reads as a stray-brace cleanup. The
+  # risk sits UPSTREAM of any shell. This file is a slash-command template, and the loader
+  # substitutes bare $N tokens in the TEXT before a shell ever runs it; a rendered copy with
+  # $1 substituted away exits 1 (INDETERMINATE) on every call, which the caller reads as a
+  # broken probe rather than a broken template. Keep the braces, and keep both copies
+  # byte-identical to each other.
   node -e 'const fs=require("node:fs");new Promise(r=>r(fs.readFileSync(0,"utf8").split("\0").filter(Boolean))).then(paths=>import(process.env.CLAUDE_PLUGIN_ROOT + "/scripts/" + process.argv[1]).then(m=>{const f=m[process.argv[2]];if(typeof f!=="function")throw new Error("missing export "+process.argv[2]+" in "+process.argv[1]);if(paths.length===0)throw new Error("empty path list: an unread diff is not a clean diff");process.exit(f(paths)?0:20)})).catch(e=>{console.error("SURFACE-INDETERMINATE: "+process.argv[2]+": "+(e&&e.message));process.exit(1)})' "${1}" "${2}"
 }
 surface_probe data-layer-surface.mjs diffTouchesDataLayer < "$FIX_CHANGED_PATHS"; RC=$?
