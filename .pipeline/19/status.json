@@ -1,8 +1,8 @@
 {
   "issue_number": 19,
-  "current_phase": "4-review",
+  "current_phase": "3-impl",
   "started_at": "2026-08-22T19:06:32Z",
-  "updated_at": "2026-08-22T23:01:59Z",
+  "updated_at": "2026-08-22T23:40:49Z",
   "branch": "claude/lane-4-a521bf",
   "ask_text": "#19: Phase 4 panelists share one worktree, so mutation batteries corrupt each other. Live evidence gathered during #40 and #21.",
   "events": [
@@ -65,6 +65,12 @@
       "phase": "3-impl",
       "verdict": "IMPL_COMPLETE",
       "at": "2026-08-22T23:01:59Z"
+    },
+    {
+      "phase": "4-review",
+      "verdict": "REQUEST_CHANGES",
+      "at": "2026-08-22T23:40:49Z",
+      "note": "round 1; QA binding blocker on a machine-dependent PASS example"
     }
   ],
   "flags": [
@@ -178,5 +184,13 @@
     "qa"
   ],
   "review_rounds": 1,
-  "reviewed_head": "76f5e2bdd08957690b6ce31b8c14fdf284a9af3c"
+  "reviewed_head": "76f5e2bdd08957690b6ce31b8c14fdf284a9af3c",
+  "final_verdict": "REQUEST_CHANGES",
+  "peer_review_verdict_counts": {
+    "approve": 0,
+    "approve_with_notes": 4,
+    "request_changes": 2,
+    "request_refactor": 0,
+    "veto": 0
+  }
 }
