@@ -162,6 +162,29 @@ export const UNGUARDED = [
  */
 export const TERMINAL = ["5-archived"];
 
+/**
+ * The run's setup step, and the one phase that precedes every guarded one.
+ *
+ * A FIFTH CELL rather than a PREREQUISITES row or a widening of UNGUARDED, and both refusals are
+ * load-bearing. ENTRY is DERIVED from PREREQUISITES keys and must equal the set of phases
+ * pipeline.md names at its `Checkpoint first` sites; `0-setup` is written at no such site, so a
+ * row there would break a correct invariant. And UNGUARDED's own reason reads "a halt or rework
+ * state, which is never guarded", which is not true of the step that starts the run: shipping a
+ * reason that is false of its subject is the defect this cell exists to correct.
+ *
+ * MECHANISM. pipeline.md writes `current_phase: "0-setup"` at Phase 0 step 5, before any phase
+ * artifact exists and before the first dispatch, so there is no prerequisite a record here could
+ * satisfy or fail. Phase 0's only full-voice owner-facing decision block is the dirty-worktree
+ * halt at step 1, which runs BEFORE that write, so a turn cannot end parked at this phase in
+ * that halt either -- the same mechanism voice-lint.mjs's NON_VOICE_PHASES declaration rests on,
+ * stated here so the two declarations cannot drift apart in their justification.
+ *
+ * EXPIRY, general rather than the single reversal that suggests it: this cell is wrong the moment
+ * ANY owner-facing decision block comes to sit between the step that writes `0-setup` and the
+ * next `Checkpoint first` write, because a run can then END here rather than only pass through.
+ */
+export const PRELUDE = ["0-setup"];
+
 export const IN_FLIGHT_MS = 24 * 60 * 60 * 1000;
 
 /**
@@ -555,6 +578,12 @@ function decideForDir(issueDir, now) {
   const at = `.pipeline/${name} at \`${phase}\``;
 
   if (isTerminal(phase, status)) return decided("not-applicable", `${at} is finished.`);
+  // AFTER the terminal check, and the order is the assertion's subject rather than a style
+  // choice: measured, this branch placed BEFORE it renders a `0-setup` record carrying
+  // `completed_at` as a setup step, un-finishing every concluded run that ended here.
+  if (PRELUDE.includes(phase)) {
+    return decided("not-applicable", `${at} is the run's setup step, which precedes every guarded phase.`);
+  }
   if (UNGUARDED.includes(phase)) {
     return decided("not-applicable", `${at} is a halt or rework state, which is never guarded.`);
   }

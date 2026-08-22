@@ -67,7 +67,17 @@ const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 // defect this plugin keeps re-learning. tests/test-voice-lint.sh now parses every
 // `current_phase: "..."` out of pipeline.md and fails when one is neither listed here nor
 // explicitly declared non-voice, so the table cannot drift from the orchestrator again.
-const VOICE_MOMENTS = {
+// EXPORTED so tests/test-voice-lint.sh can assert SET MEMBERSHIP over the table itself. The
+// check it replaces was `grep -q "\"$phase\"" voice-lint.mjs`, a substring grep over this
+// source that a phase named in a COMMENT satisfies and that cannot tell a table key from a
+// mention.
+//
+// NEITHER TABLE IS FROZEN, and that is a ruling rather than an omission. Measured:
+// `Object.freeze(new Set(["a"]))` reports `Object.isFrozen === true` and then accepts
+// `.add("b")` with size going 1 -> 2, because a Set's members are not own properties. Freezing
+// the Set would report a protection it does not provide, and freezing only the object half
+// would leave a reader assuming both were covered.
+export const VOICE_MOMENTS = {
   "1-ba-open-questions": { decision: true, label: "a blocking open question" },
   "1-ba-rework-required": { scales: true, label: "a veto rework halt" },
   "2.5-design-owner-decision": { decision: true, label: "the design-lock" },
@@ -79,7 +89,23 @@ const VOICE_MOMENTS = {
 
 // Phases that are deliberately NOT voice moments: internal checkpoints the owner never sees.
 // Listed explicitly so the drift test can tell "decided this is silent" from "forgot about it".
-const NON_VOICE_PHASES = new Set([
+export const NON_VOICE_PHASES = new Set([
+  // The run's setup step. MECHANISM: pipeline.md's Phase 0 holds exactly one full-voice
+  // owner-facing decision block, the dirty-worktree halt at step 1, and it runs BEFORE step 5
+  // writes `current_phase: "0-setup"`, so a turn cannot end at this phase in that halt.
+  // EXPIRY, stated generally rather than as the single reversal that suggests it: this
+  // declaration is wrong the moment ANY full-voice owner-facing decision block comes to sit
+  // between the step that writes `0-setup` and the next `Checkpoint first` write. Re-derive
+  // with `grep -n 'full voice\|decision block\|Checkpoint first\|current_phase' on
+  // commands/pipeline.md and read what falls between the two.
+  //
+  // #80 IS WHAT MAKES THAT EXPIRY CHECKABLE RATHER THAN ASPIRATIONAL. The mechanism above says
+  // the halt at Phase 0 step 1 is structurally unreachable by this lint, because it runs before
+  // a phase is ever recorded -- so the one owner-facing moment in Phase 0 is not covered by
+  // anything here, and no failing assertion marks that. #80 tracks it. If #80 changes where
+  // that decision block sits, or gives it a phase of its own, this declaration is the line that
+  // has to move.
+  "0-setup",
   "0.5-map", "0.5-map-complete",
   "1-ba", "1-ba-complete",
   "2-constraints", "2-constraints-complete",
@@ -372,7 +398,16 @@ function selfTest() {
   return fail === 0;
 }
 
-if (isMainScript("voice-lint.mjs")) {
+// Self-run ONLY as a real CLI entry, copied from gate-phase-entry.mjs, which ships this guard
+// and the comment describing the hazard. isMainScript compares the BASENAME of argv[1], and a
+// test that imports this module passes the module's own path there -- without the execArgv
+// test, `await import()` SELF-RUNS main(), the importing eval body never executes, and every
+// assertion built on the exports above reads a green nothing. Measured before it was added:
+// a marker printed BEFORE the import appears and the one after it never does, rc 0.
+const evalEntry = process.execArgv.some(
+  (a) => a === "-e" || a === "--eval" || a === "--input-type=module" || /^--eval=/.test(a),
+);
+if (isMainScript("voice-lint.mjs") && !evalEntry) {
   if (process.argv.includes("--self-test")) process.exit(selfTest() ? 0 : 1);
   main();
 }
