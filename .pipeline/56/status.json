@@ -2,7 +2,7 @@
   "issue_number": 56,
   "current_phase": "2-review-complete",
   "started_at": "2026-08-22T18:10:00Z",
-  "updated_at": "2026-08-22T22:17:08Z",
+  "updated_at": "2026-08-22T22:22:42Z",
   "branch": "claude/pipeline-resume-56-a82065",
   "ask_text": "voice-lint: scope the voice obligation to the turn that produced the record",
   "risk_tier": "architectural",
@@ -61,6 +61,12 @@
       "verdict": "APPROVE_WITH_NOTES",
       "at": "2026-08-22T22:17:08Z",
       "note": "Round 3, dba and secops re-dispatched on continued sessions (full context of rounds 1-2); devops's round-2 APPROVE_WITH_NOTES preserved unchanged in the merge (not re-reviewed). ALL THREE now APPROVE_WITH_NOTES, 0 blockers anywhere. Phase 2 CLEARS after 3 rounds. dba: blocker + all 4 majors independently reverified resolved (was half-wrong about itself on AC9 cell (c), corrected; confirmed BA's other 3 corrections). secops: its 1 major (AC7/R3) verified closed live. Both reviewers ALSO independently found a new, non-blocking major apiece in the round-3 WRITTEN JUSTIFICATIONS (not the live behavior): dba found R7(iii-b)'s stated reason for rejecting a ctime-based fix is factually wrong (the ruling to reject ctime survives; the given reason does not -- a real stale fixture CAN be built without utimesSync, just via a timing-dependent method BA didn't consider). secops found the expected_survivor note's claim about which record the AC14 relabel would silence is backwards for the Stop-hook's own refusal record specifically (claims silenced, measured LOUD) -- the exact record the original veto was about -- and that isMeta is actually falsifiable (not a true survivor) on fixtures the spec already builds. Both are text slated to ship into the module header/knowledge store; getting BA to correct them now, no re-review required per the APPROVE_WITH_NOTES rubric."
+    },
+    {
+      "phase": "2-review-complete",
+      "verdict": "APPROVE_WITH_NOTES",
+      "at": "2026-08-22T22:22:42Z",
+      "note": "BA's final round-3 pass: re-derived all three notes before fixing, confirmed both reviewers right and itself wrong in each case. R7(iii-b) now gives the real reason ctime was rejected (forces every stale fixture to become timing-dependent instead of instantly stamped via utimesSync, not that it 'cannot be built at all', which was false). expected_survivor corrected to name task-notification and auto-compaction as the classes an origin.kind relabel would silence (not the Stop-hook refusal, which stays loud via isMeta -- BA had it backwards). isMeta moved out of the survivor list into its own falsifiable mutation entry (2 of 4 classes flip when dropped); exactly two genuine survivors remain (isSidechain, message.role). No acceptance-criterion text changed; counts held at 12 requirements / 18 ACs / 20 measured_state / 18 mutations / 4 unmutable. Phase 2 is now fully complete, no further review round needed. Proceeding to Phase 2.5 (design bake-off)."
     }
   ],
   "flags": [
