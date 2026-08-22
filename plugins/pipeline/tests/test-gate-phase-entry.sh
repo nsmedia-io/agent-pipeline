@@ -1954,49 +1954,101 @@ suite "#61 the rule table's ROW SHAPE, which is what makes the arity ceiling LOU
 # union in `satisfyingTokens` is total for the shape someone remembered, not total by
 # construction. This converts that permissive silence into a failure.
 #
-# AN OUTCOME PROPERTY OVER THE WHOLE TABLE, not a blocklist over a spelling: the module walks its
-# own live table and reports every key set it holds, and the PERMITTED sets are stated HERE, so
-# the table is not graded against its own opinion. A key nobody taught the walk to read fails
-# whatever it is called.
-AC61_ROW_KEYS="file tokens content tiers byTier also"
+# AN OUTCOME PROPERTY OVER EVERY POSITION THE WALK REACHES, not a blocklist over a spelling: the
+# module walks its own live table, reports every key set it holds TAGGED BY POSITION, and the
+# permitted set for each position is stated HERE, so the table is not graded against its own
+# opinion. A key nobody taught the walk to read fails whatever it is called.
+#
+# WHY POSITION AND NOT JUST NAME, measured rather than reasoned about. The first spelling of this
+# check was total over key NAMES and read two structurally distinct positions as one "row", and
+# two written-but-never-read keys passed it with both suites fully green:
+#   - `tiers` on a `byTier` CELL. `appliesAtTier` reads the RAW top-level row, so the cell's copy
+#     is inert; the row went on firing at the tier the cell said to exclude.
+#   - `file`/`tokens` on a `byTier` DISPATCHER row. `rowFor` returns the cell, so the dispatcher's
+#     copy is inert -- and the guard GRANTED rc 0 with the named file absent, which is a written
+#     requirement never enforced, the same claim-more direction as the nested `also.also`.
+# Hence four permitted sets, one per position, each naming exactly the keys a reader reaches
+# there. The dispatcher's `tiers` is in its set because it IS read: driven through the CLI, a
+# `tiers: ["architectural"]` written on the `3-impl` dispatcher turned a standard-tier refusal
+# into `not-applicable`, so excluding it would refuse a key the guard honours.
+#
+# WHAT THIS STILL DOES NOT GRADE, so nobody reads it as more than it is. The walk descends into
+# `byTier` and `also` and nowhere else: a key holding a nested object under any OTHER name is
+# reported as a stray at its parent, which is the right failure, but its interior is never
+# visited. And a NEW position whose keys are all permitted is invisible here BY CONSTRUCTION --
+# #61-S4's count is the only leg that sees one, which is why that count carries its own expiry.
+AC61_ROW_KEYS="file tokens content tiers also"
+AC61_CELL_KEYS="file tokens content also"
+AC61_DISPATCH_KEYS="byTier tiers"
 AC61_ALSO_KEYS="file tokens content"
-ac61_shape_strays() {  # <permitted row keys> <permitted also keys> -> "<path>:<key>" ... , sorted
+# <row keys> <byTier cell keys> <byTier dispatcher keys> <also sub-row keys> -> "<path>:<key>" ...
+# An unrecognised kind is deliberately NOT defaulted: allow[kind] comes back undefined, the walk
+# throws, 2>&1 puts the stack where the expected value should be, and the cell reddens. A default
+# would silently grade a fifth position against somebody else's list.
+ac61_shape_strays() {
   node --input-type=module -e '
     const m = await import(process.argv[1]);
     const allow = {
       row: new Set(process.argv[2].split(" ")),
-      also: new Set(process.argv[3].split(" ")),
+      cell: new Set(process.argv[3].split(" ")),
+      dispatcher: new Set(process.argv[4].split(" ")),
+      also: new Set(process.argv[5].split(" ")),
     };
     const strays = [];
     for (const s of m.rowShapes()) {
       for (const k of s.keys) if (!allow[s.kind].has(k)) strays.push(s.path + ":" + k);
     }
     process.stdout.write(strays.sort().join(" "));
-  ' "$GUARD" "$1" "$2" 2>&1
+  ' "$GUARD" "$1" "$2" "$3" "$4" 2>&1
 }
 
 reg61 "#61-S1"
-assert_eq "#61-S1 every row's key set is a subset of {$AC61_ROW_KEYS} and every also sub-row's is a subset of {$AC61_ALSO_KEYS} -- EXPIRY: if this fails the row shape grew a key the token walk does not read, so either teach satisfyingTokens that key IN THE SAME COMMIT or normalize the table to a requires[] list; do NOT widen the permitted set to make it green" \
-  "$(ac61_shape_strays "$AC61_ROW_KEYS" "$AC61_ALSO_KEYS")" ""
+assert_eq "#61-S1 every position's key set is a subset of the keys a reader actually reaches THERE -- row {$AC61_ROW_KEYS}, byTier cell {$AC61_CELL_KEYS}, byTier dispatcher {$AC61_DISPATCH_KEYS}, also sub-row {$AC61_ALSO_KEYS} -- EXPIRY: if this fails the table grew a key at a position nothing reads, so either teach that position's reader (satisfyingTokens, rowFor, appliesAtTier or the decision path) IN THE SAME COMMIT or normalize the table to a requires[] list; do NOT widen the permitted set to make it green" \
+  "$(ac61_shape_strays "$AC61_ROW_KEYS" "$AC61_CELL_KEYS" "$AC61_DISPATCH_KEYS" "$AC61_ALSO_KEYS")" ""
 # NON-ZERO CONTROL that DISCRIMINATES rather than merely fires: drop `also` from the permitted
 # row keys and exactly ONE stray comes back, naming the row that carries it. That pins three
 # things at once -- the checker can go red, the `also` key is really on the table, and it is on
 # ONE row (the spec forbids a belt-and-braces second siting).
 reg61 "#61-S2"
 assert_eq "#61-S2 NON-ZERO CONTROL: with \`also\` removed from the permitted set the check reddens, on exactly one row, and it is the re-sited one" \
-  "$(ac61_shape_strays "file tokens content tiers byTier" "$AC61_ALSO_KEYS")" "2-review:also"
+  "$(ac61_shape_strays "file tokens content tiers" "file tokens content" "$AC61_DISPATCH_KEYS" "$AC61_ALSO_KEYS")" "2-review:also"
 # AND THE SUB-ROW IS GRADED AGAINST THE NARROWER SET, which is the half that defends the ceiling:
 # withhold `tokens` from the ALSO permitted keys only. `tokens` is still permitted on a ROW, so a
 # sub-row graded by the wrong list would come back clean and this control would pass on two
 # absences agreeing. Exactly one stray, and it is the sub-row's.
 reg61 "#61-S3"
 assert_eq "#61-S3 SECOND CONTROL: the also sub-row is graded against the ALSO list, not the wider row list -- which is what makes a nested third requirement fail rather than pass as a row" \
-  "$(ac61_shape_strays "$AC61_ROW_KEYS" "file content")" "2-review.also:tokens"
-# 19 = 15 rows + 3 byTier cells + 1 also sub-row. EXPIRY: this is EXPECTED to fail the day the
-# table grows another sub-structure, and that failure is the point -- read the new entry, decide
-# whether satisfyingTokens reads it, and only then move the number.
+  "$(ac61_shape_strays "$AC61_ROW_KEYS" "$AC61_CELL_KEYS" "$AC61_DISPATCH_KEYS" "file content")" "2-review.also:tokens"
+# EACH POSITION IS GRADED AGAINST ITS OWN LIST, and both halves of that need a control that
+# DISCRIMINATES rather than merely fires. Withhold `byTier` from the DISPATCHER list while
+# leaving it permitted on a plain row: exactly one stray comes back, and only because `3-impl` is
+# tagged `dispatcher`. Were it tagged `row` the key would be permitted and this would return
+# nothing, so the cell cannot pass on two absences agreeing.
+reg61 "#61-S5"
+assert_eq "#61-S5 THIRD CONTROL: the byTier DISPATCHER row is graded against the dispatcher list, which is what makes a primary requirement written where rowFor never looks fail instead of pass as a row" \
+  "$(ac61_shape_strays "file tokens content tiers byTier also" "$AC61_CELL_KEYS" "tiers" "$AC61_ALSO_KEYS")" "3-impl:byTier"
+# The same shape for the CELL half: withhold `content` from the cell list only. `content` stays
+# permitted on a row, so a cell graded by the wrong list comes back clean and this control fails.
+reg61 "#61-S6"
+assert_eq "#61-S6 FOURTH CONTROL: a byTier CELL is graded against the cell list, which is what makes a \`tiers\` written on a cell -- inert, because appliesAtTier reads the raw top-level row -- fail instead of pass as a row" \
+  "$(ac61_shape_strays "$AC61_ROW_KEYS" "file tokens also" "$AC61_DISPATCH_KEYS" "$AC61_ALSO_KEYS")" "3-impl.byTier.standard:content"
+# AND THE KINDS THEMSELVES ARE PINNED. Every control above is a statement about a kind, so a walk
+# that re-tagged one position as another would move which list grades what while every subset
+# check stayed green. EXPIRY: this moves when the TABLE's shape moves, never to make a suite
+# green -- a kind count that changed without a table change means the walk started tagging by
+# contents instead of by position.
+reg61 "#61-S7"
+assert_eq "#61-S7 the walk tags 14 plain rows, 1 byTier dispatcher, 3 byTier cells and 1 also sub-row -- the census the four permitted sets are grading" \
+  "$(node --input-type=module -e '
+     const m = await import(process.argv[1]);
+     const n = {};
+     for (const s of m.rowShapes()) n[s.kind] = (n[s.kind] || 0) + 1;
+     process.stdout.write(Object.keys(n).sort().map((k) => k + ":" + n[k]).join(" "));
+   ' "$GUARD" 2>&1)" \
+  "also:1 cell:3 dispatcher:1 row:14"
+# 19 = 15 rows + 3 byTier cells + 1 also sub-row.
 reg61 "#61-S4"
-assert_eq "#61-S4 VACUITY CONTROL: the shape walk visited one entry per guarded row, plus the sub-structures, rather than a subset it happened to remember" \
+assert_eq "#61-S4 VACUITY CONTROL: the shape walk visited one entry per guarded row, plus the sub-structures, rather than a subset it happened to remember -- EXPIRY: a new row or a new sub-structure is EXPECTED to redden this, and that failure is the point. #61-S1 grades KEYS and is blind BY CONSTRUCTION to a new POSITION whose keys are all permitted; this count is the only leg that sees one. Read the new entry, decide whether satisfyingTokens AND the decision path both reach it, and move the number in that same commit -- never alone to make the suite green" \
   "$(node --input-type=module -e '
      const m = await import(process.argv[1]);
      const s = m.rowShapes();
@@ -2006,6 +2058,73 @@ assert_eq "#61-S4 VACUITY CONTROL: the shape walk visited one entry per guarded 
      process.stdout.write(s.filter((r) => !sub(r.path)).length + "/" + s.length);
    ' "$GUARD" 2>&1)" \
   "${#GUARDED_ROWS[@]}/19"
+
+# ---------------------------------------------------------------------------
+suite "#61 a row with no primary \`file\` still owes its \`also\` -- on the DECISION path, not only in the report"
+# ---------------------------------------------------------------------------
+# WHY THIS EXISTS. \`prerequisiteSatisfied\` used to answer a vacuous primary with an early return,
+# which skipped \`row.also\` entirely: an \`also\` written on a \`file: null\` row was REPORTED by
+# \`satisfyingTokens\` and never enforced, and the guard granted rc 0 with the named file absent.
+# That is the guard claiming more than it knows -- the same direction as the nested \`also.also\`
+# the shape walk above exists to make loud, in a shape the shape walk cannot see, because \`also\`
+# is a permitted key on any row and the combination is what was wrong.
+#
+# WHY IT NEEDS A PATCHED TABLE. No shipped row is a \`file: null\` row carrying an \`also\`, so the
+# behaviour cannot be driven through the live table -- and asserting it only when some future row
+# happens to need it is how a latent footgun stays latent. \`0.5-map\` is the ONLY \`file: null\` row
+# and, this issue's subject being whether the map obligation is enforced at all, the likeliest
+# home for a second requirement. So these cells run the REAL CLI against a COPY of the scripts
+# dir carrying exactly one literal substitution, and they assert the substitution COUNT: an edit
+# that no longer matches reddens here instead of silently testing the unpatched module.
+ac61_patch_literal() {  # <file> <literal find> <literal replace> -> prints the substitution count
+  node -e '
+    const fs = require("node:fs");
+    const src = fs.readFileSync(process.argv[1], "utf8");
+    const parts = src.split(process.argv[2]);
+    fs.writeFileSync(process.argv[1], parts.join(process.argv[3]));
+    process.stdout.write(String(parts.length - 1));
+  ' "$1" "$2" "$3"
+}
+# gate() against a PATCHED COPY of the module, restoring \$GUARD so no later cell inherits it.
+gate_using() {
+  local saved="$GUARD"
+  GUARD="$1"
+  gate "$2"
+  GUARD="$saved"
+}
+
+new_tmpdir || exit 90
+AC61_VDIR="$NEW_TMPDIR"
+cp -R "$SCRIPTS_DIR" "$AC61_VDIR/scripts"
+AC61_VGUARD="$AC61_VDIR/scripts/gate-phase-entry.mjs"
+AC61_VPATCHED="$(ac61_patch_literal "$AC61_VGUARD" \
+  '"0.5-map": { file: null, tokens: [] },' \
+  '"0.5-map": { file: null, tokens: [], also: { file: "map.json", tokens: ["0.5"] } },')"
+reg61 "#61-V1"
+assert_eq "#61-V1 the one-line table patch these cells rest on applied EXACTLY once -- 0 means the row was reformatted and the cells below are silently driving the SHIPPED table" \
+  "$AC61_VPATCHED" "1"
+
+# The fixture: parked at the one \`file: null\` row, nothing in events[], no map.json on disk.
+new_case 4242 "$(mk61 "0.5-map" '"architectural"' '[]')"
+gate "$CASE_ROOT"
+reg61 "#61-V2"
+assert_eq "#61-V2 CONTROL: the SHIPPED table grants this record, because its row demands nothing -- so the refusal below is the second requirement's doing and not the fixture's" \
+  "$GATE_DEC/$GATE_RC" "granted/0"
+
+gate_using "$AC61_VGUARD" "$CASE_ROOT"
+reg61 "#61-V3"
+assert_eq "#61-V3 with an \`also\` on that same row and its file absent, the guard REFUSES: a vacuous primary answers only for the primary half" \
+  "$GATE_DEC/$GATE_RC" "refused/2"
+reg61 "#61-V4"
+assert_contains "#61-V4 and the refusal names the second requirement's file, which is the only file that row demands" \
+  "$GATE_OUT" "map.json"
+
+# NON-ZERO CONTROL in the other direction: the patched table is not simply refusing everything.
+printf '{}' > "$CASE_DIR/map.json"
+gate_using "$AC61_VGUARD" "$CASE_ROOT"
+reg61 "#61-V5"
+assert_eq "#61-V5 NON-ZERO CONTROL: satisfy that second requirement and the same patched table grants, so #61-V3 discriminates rather than refusing on sight" \
+  "$GATE_DEC/$GATE_RC" "granted/0"
 
 # ---------------------------------------------------------------------------
 suite "#61 edge cases: the map half is a PRESENCE check, and the decision is replayable"

@@ -330,23 +330,44 @@ export function satisfyingTokens(phase, tier) {
 }
 
 /**
- * Every key set in the rule table above -- one entry per row, per `byTier` cell and per `also`
- * sub-row, tagged with the kind of position it occupies. The PERMITTED key sets deliberately
- * live in the test and not here: a table that published its own permitted keys would be graded
- * against its own opinion, and the thing worth catching is a key nobody taught the walk to read.
+ * Every key set in the rule table above, one entry per position, tagged with WHICH POSITION it
+ * occupies. The PERMITTED key sets deliberately live in the test and not here: a table that
+ * published its own permitted keys would be graded against its own opinion, and the thing worth
+ * catching is a key nobody taught the walk to read.
+ *
+ * FOUR KINDS, NOT TWO, because the same key name means different things depending on where it is
+ * written, and a check total over NAMES is not total over POSITIONS. Each kind is named for the
+ * set of readers that reach it:
+ *   - `row`        a plain top-level row. Every reader reaches it.
+ *   - `dispatcher` a top-level row carrying `byTier`. `rowFor` returns the CELL, so `file`,
+ *                  `tokens`, `content` and `also` written here are never read -- and a `file`
+ *                  written here is a requirement the guard grants without checking.
+ *   - `cell`       a `byTier` cell. `appliesAtTier` reads `tiers` off the RAW top-level row, so
+ *                  a `tiers` written on a cell is never read.
+ *   - `also`       a second-requirement sub-row. Its arity ceiling is two, so a nested `also`
+ *                  here is the third requirement nothing enforces.
+ * Every inert position named above was driven through the CLI rather than reasoned about, and
+ * `tiers` on a DISPATCHER is the one key that survives that test: it IS read, so it stays in the
+ * dispatcher's permitted set. Excluding a key the guard honours is the same error pointed the
+ * other way.
  */
 export function rowShapes() {
   const out = [];
+  // The kind is a property of the POSITION, not of the contents: a `byTier` nested inside a cell
+  // is tagged `cell` and its `byTier` key is a stray, which is what it deserves -- it disarms the
+  // row it is written on. Tagging by contents would re-admit it as another dispatcher.
   const walk = (at, kind, obj) => {
     out.push({ path: at, kind, keys: Object.keys(obj).sort() });
     if (obj.byTier) {
       for (const [cellTier, cell] of Object.entries(obj.byTier)) {
-        walk(`${at}.byTier.${cellTier}`, "row", cell);
+        walk(`${at}.byTier.${cellTier}`, "cell", cell);
       }
     }
     if (obj.also) walk(`${at}.also`, "also", obj.also);
   };
-  for (const [phase, raw] of Object.entries(PREREQUISITES)) walk(phase, "row", raw);
+  for (const [phase, raw] of Object.entries(PREREQUISITES)) {
+    walk(phase, raw.byTier ? "dispatcher" : "row", raw);
+  }
   return out;
 }
 
@@ -424,10 +445,17 @@ function checkOne(issueDir, subRow, events) {
  * failing row names ONE file, which is the single-route shape the refusal template and its test
  * both depend on. The cost is that an operator who fails both halves at once returns for a
  * second refusal after fixing the first; both refusals are correct and both are actionable.
+ *
+ * A VACUOUS PRIMARY IS A VALUE, NEVER AN EARLY RETURN. A row with no `file` owes nothing on its
+ * primary half, and it is tempting to answer `ok` and stop -- but stopping there skips `also`
+ * entirely, so a second requirement written on such a row would be reported by
+ * `satisfyingTokens` and never enforced: the guard claiming more than it knows, which is the
+ * one failure this row's own arity ceiling exists to prevent. No shipped row is shaped that way,
+ * and the fall-through is what keeps that a fact about the table rather than a fact about the
+ * table's current contents.
  */
 function prerequisiteSatisfied(issueDir, row, events) {
-  if (!row.file) return { ok: true, artifact: "none", file: null, content: null };
-  const primary = checkOne(issueDir, row, events);
+  const primary = row.file ? checkOne(issueDir, row, events) : { ok: true, artifact: "none" };
   if (!primary.ok) return { ...primary, file: row.file, content: row.content || null };
   if (row.also) {
     const secondary = checkOne(issueDir, row.also, events);
@@ -435,7 +463,12 @@ function prerequisiteSatisfied(issueDir, row, events) {
       return { ...secondary, file: row.also.file, content: row.also.content || null };
     }
   }
-  return { ok: true, artifact: primary.artifact, file: row.file, content: row.content || null };
+  return {
+    ok: true,
+    artifact: primary.artifact,
+    file: row.file || null,
+    content: row.content || null,
+  };
 }
 
 /**
