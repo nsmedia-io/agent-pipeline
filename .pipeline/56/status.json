@@ -43,6 +43,12 @@
       "verdict": "PROCEED_A",
       "at": "2026-08-22T21:38:52Z",
       "note": "Owner chose option A from the round-budget decision block: one more targeted round, scoped to exactly two items (dba's R9 cp-p/rsync-a/tar-x gap, secops's one-line AC7/R3 unreadable-transcript contradiction), not a full rework. Everything else DBA/DevOps/SecOps already approved stands. Round 3 will re-dispatch only dba and secops; devops is not re-seated (its round-2 APPROVE_WITH_NOTES is preserved unchanged, since neither targeted fix touches its lens)."
+    },
+    {
+      "phase": "1-ba-rework-required",
+      "verdict": "SCOPE_WIDENED",
+      "at": "2026-08-22T21:52:48Z",
+      "note": "Orchestrator error caught before dispatch: the round-budget report only surfaced dba's 1 blocker, omitting dba's 4 open majors and 3 nits and secops's 3 lows from round 2. Corrected with the owner: BA's first round-3 pass (items 1-2) is done and confirmed scope-clean (spec.json already reflects it) -- item 1 (R9 freshness gap) was NOT patched as claimed in round 2; BA re-measured, found no clean mechanical fix (a candidate third signal, ctime, is reset by the very utimesSync mechanism R8 mandates for building test fixtures, so it would make real fixtures indistinguishable from the bug), and instead converted it into an explicit bounded residual (R7 iii-b) with a measured production frequency of zero in this repo's own history. Item 2 (secops's AC7/R3 contradiction) fixed cleanly (today's silent behavior on an unreadable transcript is preserved; R6 now says explicitly that this spec only ever removes refusals, never adds one). Owner then chose to ALSO fold dba's 4 majors into this same round rather than risk them resurfacing as a fresh round-budget trip at round 4."
     }
   ],
   "flags": [
