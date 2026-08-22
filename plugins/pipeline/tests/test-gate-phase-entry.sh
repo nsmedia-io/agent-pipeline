@@ -36,7 +36,184 @@ REPO_ROOT="$(git -C "$PLUGIN_ROOT" rev-parse --show-toplevel 2>/dev/null || prin
 iso_hours_ago() { node -e 'process.stdout.write(new Date(Date.now()-Number(process.argv[1])*3600e3).toISOString())' "$1"; }
 
 FRESH_ISO="$(iso_hours_ago 1)"     # in flight
-STALE_ISO="$(iso_hours_ago 25)"    # past R6's 24h ceiling
+STALE_ISO="$(iso_hours_ago 25)"    # past the in-flight window; #63-P2 asserts that against
+                                   # the value the guard exports, rather than restating it here
+
+# ===========================================================================================
+# #63 -- THE IN-FLIGHT CEILING, READ FROM THE GUARD INSTEAD OF RE-SPELLED HERE (preflight half)
+#
+# THE DEFECT. `IN_FLIGHT_MS` decides whether this guard evaluates a record AT ALL, and until now
+# no cell in this suite pinned either side of its boundary. The measured green window was roughly
+# (1.0h, 25.05h): the constant could fall to 1/23rd of its value with every assertion in the
+# three gate suites still green. TWO FIXED FIXTURE AGES WOULD REPRODUCE THAT DEFECT AT NEW
+# COORDINATES, so both ages below are COMPUTED from the value the module exports, and the only
+# remaining bound on the VALUE is the pair of premise cells at the bottom of this block.
+#
+# THE PATH RULE, STATED ONCE AND NOT RESTATED AT EACH CELL. Three resolutions are in play and
+# mixing them is the collision this section is most likely to be broken by.
+#   - #63-A1/#63-A2 (the export and its value) and #63-D1/#63-D2/#63-D3 (the module-shape pins
+#     the declared survivor rests on) read the CHECKOUT, `$REPO_ROOT/plugins/pipeline/scripts/
+#     gate-phase-entry.mjs`. REPO_ROOT derives from PLUGIN_ROOT, which no SCRIPTS_DIR redirect
+#     moves. Bind those to $GUARD instead and they go RED under the rewritten copy described
+#     below WITH THE CHECKOUT UNTOUCHED -- a red cell about nothing, and one that falsifies the
+#     expected-red declaration below for a reason unrelated to the constant.
+#   - The two off-checkout copies (#63-C1..#63-C3, #63-V1..#63-V3) resolve $SCRIPTS_DIR, which
+#     harness.sh:11 leaves overridable.
+#   - probe43 expands $GUARD at CALL time, so `GUARD="<copy>" probe43 ...` drives a copy for
+#     exactly that call. On /bin/bash 3.2.57 a prefix assignment before a FUNCTION call is scoped
+#     to the call (`G=outer; G=inner f; echo $G` prints `outer`); no subshell, no global rebind.
+#
+# DRIFT IMMUNITY, AND WHAT A REWRITTEN RUN IS EXPECTED TO LOOK LIKE. harness.sh:11 is
+# `SCRIPTS_DIR="${SCRIPTS_DIR:-...}"`, so
+#     SCRIPTS_DIR=<tmpdir copy of the WHOLE scripts dir, constant rewritten> \
+#       /bin/bash plugins/pipeline/tests/test-gate-phase-entry.sh
+# drives a different ceiling with the checkout untouched. At 24h and at 2h THIS suite is fully
+# green -- so the declaration below DISCRIMINATES rather than merely permits. At 48h EXACTLY TWO
+# cells in THIS suite are expected red, and both fail for the same correct reason, that STALE_ISO
+# is a 25h LITERAL and 25h is legitimately INSIDE a 48h window:
+#     (i) the existing label `(a) 25h old, no final verdict -> not-applicable even at a guarded
+#         phase`, and (ii) #63-P2 below.
+# Leave those red or record them. Do NOT rebase STALE_ISO onto the constant (out of scope) and do
+# NOT delete #63-P2. Neither red is evidence against the derivation.
+#
+# SCRIPTS_DIR IS NOT TRANSPARENT, AND THE NON-TRANSPARENCY IS NOT THIS CONSTANT'S DOING. Measured
+# in three checkouts on ONE machine and ONE toolchain (bash 3.2.57(1)-release
+# x86_64-apple-darwin25, node v24.19.0 -- three observations, not three environments): an
+# UNMODIFIED whole-directory copy under SCRIPTS_DIR leaves THIS suite at 462/0 and takes
+# test-gate-phase-entry-hook.sh from 59/0 to 57/2 at EVERY ceiling value (24h, 2h and 48h alike),
+# because test-voice-lint.sh itself measures 44/4 under a redirected SCRIPTS_DIR. So a WHOLE-SET
+# run at 48h shows THREE reds, not two: this suite's two, plus the hook suite's two-cell artefact
+# of the REDIRECTION. Whoever re-derives this months from now reads this file, not a PR body.
+#
+# TWO MUTATIONS ARE EXPECTED TO SURVIVE THIS SECTION, each with a stated mechanism, because a
+# battery in which everything reddens cannot tell coverage from a rubber stamp.
+#   1. `inFlight`'s `now - updated <= IN_FLIGHT_MS` -> `<`. The two spellings differ only when the
+#      age is exactly IN_FLIGHT_MS to the MILLISECOND, and the guard reads its own Date.now() in a
+#      child process started AFTER the fixture was written, so no CLI-driven fixture lands there.
+#      The residual is bounded to one millisecond and points toward ABSTENTION -- a silence, not a
+#      falsehood. #63-D1/#63-D2/#63-D3 pin the CHEAP ways that premise stops holding (a re-spelled
+#      clock, an override folded into the single read, an added `inFlight` export). THEY DO NOT
+#      CLOSE THE CLASS: an override threaded into `inFlight`'s `now` ARGUMENT at its call site
+#      leaves all three green and makes the guard's clock millisecond-exact from outside. That
+#      remains a REVIEW OBLIGATION on any future edit to that argument, not a mechanized guarantee.
+#   2. probe43's `age > CEIL` -> `>=`, the exact COMPLEMENT of (1), unreachable for the same
+#      reason. #63-V5 makes that BRANCH live -- before it, deleting the staleness push entirely
+#      left this suite at 462/0 -- which buys liveness, not falsifiability. The OPERATOR stays
+#      unpinned and this section does not claim otherwise.
+# If either ever reddens, something changed about the CLOCK, not about the boundary.
+# ===========================================================================================
+
+# MARGIN: how far each boundary fixture sits from the ceiling, on both sides. A LITERAL, pinned
+# here rather than left to a caller, by a two-sided rule -- at least two orders of magnitude above
+# the measured fixture-write-to-gate-return elapsed (237/227/239 ms over three runs, so ~1250x
+# headroom, and #63-E1 ASSERTS that headroom rather than assuming it), and under 1% of the window
+# (0.35% at 24h). Note the grain: that elapsed is fixture-write-to-gate-RETURN, which is not the
+# 80-90 ms figure for a bare CLI invocation. The two measure different spans.
+MARGIN=300000
+
+# The #63 id ledger. Its own, not an extension of #43's or #61's: their Z2 cells grep `#43-...`
+# and `#61-...` and a `#63-` id would not match either, so the three are independent by
+# construction. Every `#63-` id is registered as its cell RUNS, and #63-Z2 at the bottom of this
+# file compares that against every `#63-` id written in this file's SOURCE -- comments included.
+# So do not write a `#63-<suffix>` in a comment unless a cell registers it.
+AC63_IDS=""
+reg63() { AC63_IDS="$AC63_IDS$1
+"; }
+
+# iso_ms_ago <ms> -> an ISO timestamp COMPUTED NOW, at MILLISECOND grain. `iso_hours_ago` above
+# cannot express a margin small enough to sit inside the window without rounding it away.
+iso_ms_ago() { node -e 'process.stdout.write(new Date(Date.now()-Number(process.argv[1])).toISOString())' "$1"; }
+
+# ac63_age_vs_ceiling <iso> <ceiling-ms> -> `inside` | `outside` | `exactly-at-the-ceiling` | a
+# diagnosis. Three-way on purpose: folding equality into either side would let a premise cell
+# claim a strictness it never checked.
+ac63_age_vs_ceiling() {
+  node -e '
+    const CEIL = Number(process.argv[2]);
+    if (!Number.isFinite(CEIL) || CEIL <= 0) { process.stdout.write("the exported IN_FLIGHT_MS did not read as a finite positive number"); process.exit(0); }
+    const parsed = Date.parse(process.argv[1]);
+    if (!Number.isFinite(parsed)) { process.stdout.write("NOT DATABLE: " + JSON.stringify(process.argv[1])); process.exit(0); }
+    const age = Date.now() - parsed;
+    process.stdout.write(age < CEIL ? "inside" : age > CEIL ? "outside" : "exactly-at-the-ceiling");
+  ' "$1" "$2"
+}
+
+# ac63_capture_staleness <status.json> <ceiling-ms> -> `stale` | `REFRESHED` | the validation
+# sentence. EXTRACTED rather than left inline at its one call site, because #63-V4 has to drive
+# THE SAME FUNCTION the capture tripwire calls; an exercise against a COPY of the tripwire would
+# be testing a copy of the check rather than the check.
+#
+# THE GUARD IS NOT DEFENCE IN DEPTH HERE. A substituted read can arrive as `undefined` or as an
+# empty shell argument where a literal could not, and `age > undefined` and `age > NaN` are both
+# FALSE -- so an unvalidated site answers `REFRESHED` about a 437-hour-old capture and the
+# tripwire silently retires. `Number("") === 0`, so an EMPTY argument is caught by the `CEIL <= 0`
+# half and not by `isFinite`: both halves are required, and the argument must be QUOTED at every
+# call site or an empty one vanishes and shifts argv.
+ac63_capture_staleness() {
+  node -e '
+    const CEIL = Number(process.argv[2]);
+    if (!Number.isFinite(CEIL) || CEIL <= 0) { process.stdout.write("the exported IN_FLIGHT_MS did not read as a finite positive number"); process.exit(0); }
+    const s = require(process.argv[1]);
+    process.stdout.write((Date.now() - new Date(s.updated_at).getTime()) > CEIL ? "stale" : "REFRESHED");
+  ' "$1" "$2"
+}
+
+# ac63_read_state <read> <margin> -> `ok`, or a diagnosis that NAMES what came back.
+ac63_read_state() {
+  node -e '
+    const raw = process.argv[1], margin = Number(process.argv[2]);
+    if (raw === "") { process.stdout.write("the read produced NOTHING: the import failed, or the module threw before it could be read"); process.exit(0); }
+    if (raw === "undefined") { process.stdout.write("the module exports no IN_FLIGHT_MS: the read came back as the string \"undefined\""); process.exit(0); }
+    const n = Number(raw);
+    if (!Number.isFinite(n)) { process.stdout.write("the read is not a finite number: " + JSON.stringify(raw)); process.exit(0); }
+    if (!Number.isInteger(n)) { process.stdout.write("the read is not an integer: " + JSON.stringify(raw)); process.exit(0); }
+    if (!(n > 2 * margin)) { process.stdout.write("the read is " + n + ", which is not strictly greater than 2*MARGIN (" + (2 * margin) + ")"); process.exit(0); }
+    process.stdout.write("ok");
+  ' "$1" "$2"
+}
+
+# THE READ: ONCE, here, through the dynamic-import path probe43 already uses. Everything #63
+# derives is derived from this one value.
+IN_FLIGHT_MS="$(node --input-type=module -e 'const m = await import(process.argv[1]); process.stdout.write(String(m.IN_FLIGHT_MS))' "$GUARD" 2>/dev/null)"
+
+# ---------------------------------------------------------------------------
+suite "#63 preflight: the ceiling is READ from the guard, and asserted before anything derives from it"
+# ---------------------------------------------------------------------------
+AC63_READ_STATE="$(ac63_read_state "$IN_FLIGHT_MS" "$MARGIN")"
+reg63 "#63-R1"
+assert_eq "#63-R1 the ceiling read out of the guard is a finite INTEGER strictly greater than 2*MARGIN -- \"a positive integer of plausible magnitude\" is one adjective short of the precondition the fixtures need: any value at or below MARGIN makes the INSIDE age IN_FLIGHT_MS - MARGIN zero or NEGATIVE, which dates that fixture in the FUTURE, and the guard has no floor, so a future-dated record is PERMANENTLY in flight" \
+  "$AC63_READ_STATE" "ok"
+
+# THE HALT, AND WHY IT IS NOT BELT-AND-BRACES. Measured against a real export-only build: with an
+# EMPTY read -- the one spelling `set -u` does NOT catch, since $(( IN_FLIGHT_MS - MARGIN )) then
+# yields -300000 with rc 0 and no diagnostic -- the INSIDE fixture is dated in the FUTURE and
+# #63-B1 PASSES, the #63-C1..#63-C3 control's shift goes negative so every record falls out of
+# flight and #63-C3 PASSES too, and ONLY #63-B2 reddens, with a message that says nothing about
+# the read. Two of the three boundary cells go green VACUOUSLY. Halting here is the only thing
+# that turns that one-cell red into a diagnosis.
+#
+# THE SPELLING IS LOAD-BEARING: `finish || exit 1`, never a bare `exit`. A bare exit skips
+# finish(), so the run prints no passed=/failed= tally AND never runs the harness's
+# uncounted-assertion guard. The assertion above fires FIRST so the failure is a COUNTED red cell
+# in the ledger rather than a bare message.
+if [[ "$AC63_READ_STATE" != "ok" ]]; then
+  printf '\n#63 HALT: %s\n' "$AC63_READ_STATE" >&2
+  printf '       Every age this suite derives from that value is meaningless, and two of the three\n' >&2
+  printf '       boundary cells would go GREEN VACUOUSLY rather than red. Refusing to report on them.\n' >&2
+  printf '       The guard must export IN_FLIGHT_MS (see #63-A1). If this is a partial revert that\n' >&2
+  printf '       dropped the export while keeping this suite, restore the export or revert both.\n' >&2
+  finish || exit 1
+fi
+
+# THE TWO PREMISES. These carry more weight than their own cells and are NOT a nicety a later
+# author may tidy away. FRESH_ISO and STALE_ISO are load-bearing for 400-plus assertions in this
+# file and their in/out status was, until now, assumed and never stated.
+reg63 "#63-P1"
+assert_eq "#63-P1 FRESH_ISO is INSIDE the ceiling. This is the only thing standing between the corpus walk's zero (\`no committed record is refused by the table\`) and a VACUOUS green: that walk rewrites every committed record's updated_at to FRESH_ISO precisely so staleness cannot mask the table, and its pass set is granted|not-applicable -- so if FRESH_ISO ever fell OUTSIDE, every corpus record would abstain and the zero would stay green over a wholly abstaining population. DIAGNOSIS, not sole detection: ~234 other cells redden in the same run" \
+  "$(ac63_age_vs_ceiling "$FRESH_ISO" "$IN_FLIGHT_MS")" "inside"
+reg63 "#63-P2"
+assert_eq "#63-P2 STALE_ISO is OUTSIDE the ceiling. With #63-P1 this is the ONLY remaining bound on the VALUE of IN_FLIGHT_MS after #63 -- roughly (1.0h, 25.05h) -- because every other new cell is DERIVED from the value and therefore value-independent. EXPECTED RED, and correctly so, under a rewrite of the constant to 48h: STALE_ISO is a 25h literal and 25h is legitimately inside a 48h window" \
+  "$(ac63_age_vs_ceiling "$STALE_ISO" "$IN_FLIGHT_MS")" "outside"
 
 # new_case <issue-dir-name> <status-json> -> CASE_ROOT, CASE_DIR
 new_case() {
@@ -609,7 +786,7 @@ assert_eq "(b) 1h old (COMPUTED at test time) at the same phase -> refused" "$GA
 # refreshes exp-script-test-coverage's updated_at, this fails loudly instead of the staleness
 # check silently retiring.
 assert_eq "the capture is still permanently stale (>24h), which is what (c) tests" \
-  "$(node -e 'const s=require(process.argv[1]);process.stdout.write((Date.now()-new Date(s.updated_at).getTime())>24*3600e3?"stale":"REFRESHED")' "$REC_STC")" \
+  "$(ac63_capture_staleness "$REC_STC" "$IN_FLIGHT_MS")" \
   "stale"
 new_case exp-script-test-coverage '{}'
 capture "$REC_STC" "$CASE_DIR/status.json" '{}'
@@ -983,11 +1160,18 @@ probe43() {
     import { readFileSync } from "node:fs";
     const mod = await import(process.argv[1]);
     const guarded = new Set([...mod.ENTRY, ...mod.EXIT]);
+    // #63: the ceiling this probe judges against is the guard'"'"'s OWN exported value, not a second
+    // copy of the number spelled here -- and it is VALIDATED before it is compared against. A
+    // substituted read can arrive as `undefined` where a literal could not, and `age > undefined`
+    // and `age > NaN` are both FALSE, so an unvalidated read answers `ok` about a fixture it never
+    // judged, silently, for the ~345 assertions this probe qualifies.
+    const CEIL = Number(mod.IN_FLIGHT_MS);
     let s;
     try { s = JSON.parse(readFileSync(process.argv[2], "utf8")); }
     catch (e) { process.stdout.write("UNPARSEABLE FIXTURE: " + e.message.slice(0, 60)); process.exit(0); }
     if (!s || typeof s !== "object" || Array.isArray(s)) { process.stdout.write("NON-OBJECT FIXTURE"); process.exit(0); }
     const bad = [];
+    if (!Number.isFinite(CEIL) || CEIL <= 0) bad.push("the exported IN_FLIGHT_MS did not read as a finite positive number");
     if (s.completed_at) bad.push("completed_at is truthy: this fixture exits by the isTerminal route");
     if (s.final_verdict) bad.push("final_verdict is truthy: this fixture exits by the concluded route");
     if (typeof s.current_phase !== "string" || !guarded.has(s.current_phase)) {
@@ -996,7 +1180,7 @@ probe43() {
     const parsed = Date.parse(s.updated_at);
     if (process.argv[3] === "fresh") {
       if (!Number.isFinite(parsed)) bad.push("updated_at is NOT datable, but this cell is the datable control");
-      else if (Date.now() - parsed > 24 * 3600e3) bad.push("updated_at is past the 24h ceiling: this cell would test staleness");
+      else if (Number.isFinite(CEIL) && CEIL > 0 && Date.now() - parsed > CEIL) bad.push("updated_at is past the in-flight ceiling this suite reads from the guard: this cell would test staleness");
     } else if (process.argv[3] === "undatable") {
       if (Number.isFinite(parsed)) bad.push("updated_at IS datable, so this cell tests staleness, not undatability");
     } else bad.push("the cell asked for an unknown datability: " + process.argv[3]);
@@ -2273,5 +2457,260 @@ assert_eq "#61-Z1 no #61 assertion id is used twice (a colliding label makes the
 assert_eq "#61-Z2 every #61 id written in this file was REGISTERED by a cell that ran" \
   "$(printf '%s\n' "$AC61_UNIQ" | grep -c . | tr -d ' ')" \
   "$(grep -o '#61-[A-Za-z0-9][A-Za-z0-9]*' "${BASH_SOURCE[0]}" | sort -u | grep -c . | tr -d ' ')"
+
+
+# ===========================================================================================
+# #63 -- THE BOUNDARY PAIR, ITS CONTROL, AND THE PINS UNDER THE DECLARED SURVIVOR.
+#
+# The preflight half of this section is at the top of the file, beside the fixture helpers,
+# because the capture tripwire at the AC15 suite calls one of its functions. The PATH RULE, the
+# expected-red declaration under a rewritten ceiling, the SCRIPTS_DIR non-transparency
+# measurement and the two expected survivors are all stated there, once, and are not restated
+# here.
+#
+# ONE COPY HELPER, TWO CONSUMERS. `ac63_guard_copy` below is the only way this section builds an
+# off-checkout guard, and it copies the WHOLE scripts directory every time. harness.sh's
+# `copy_script_with_deps` (the script plus lib.mjs) is NOT usable here and the near-miss is the
+# most likely wrong turn in this section: gate-phase-entry.mjs imports ./lib.mjs,
+# ./dispatch-model.mjs, ./pipeline-telemetry.mjs and ./validate-pipeline-artifact.mjs by relative
+# path, and a partial copy throws ERR_MODULE_NOT_FOUND straight into the guard's own
+# fail-open-on-tooling-error catch. MEASURED: that produces `<no-decision-on-stdout>` with rc 1 --
+# which an rc-only assertion reads as a pass -- and, worse, probe43 folds stderr into stdout, so
+# against a partial copy the VALIDATED and the UNVALIDATED probe emit BYTE-IDENTICAL stack traces
+# and an `output != "ok"` exercise passes identically for both. That is why every cell below
+# asserts the DECISION STRING or the EXACT SENTENCE, and never an exit code and never an
+# inequality against "ok".
+# ===========================================================================================
+
+# ac63_guard_copy <label> <replacement-line> -> AC63_COPY_GUARD, AC63_COPY_MATCHES.
+# The match count is REPORTED, never swallowed, because every call site asserts it is exactly 1:
+# a 0 means the declaration was reformatted and the cells below are silently driving the SHIPPED
+# ceiling while claiming to drive a rewritten one.
+#
+# IT SETS GLOBALS AND DOES NOT ECHO, for the reason new_tmpdir gives one line up in harness.sh: a
+# `$(...)` capture runs in a SUBSHELL, so both the guard path AND the temp-dir REGISTRATION would
+# be discarded there and the trap would never own the directory it handed out. MEASURED, on the
+# first draft of this section: `X="$(ac63_guard_copy ...)"` died at the next line with
+# `AC63_COPY_GUARD: unbound variable`.
+ac63_guard_copy() {
+  local label="$1" repl="$2"
+  new_tmpdir || exit 90
+  cp -R "$SCRIPTS_DIR" "$NEW_TMPDIR/scripts" || exit 90
+  AC63_COPY_GUARD="$NEW_TMPDIR/scripts/gate-phase-entry.mjs"
+  AC63_COPY_MATCHES="$(node -e '
+    const fs = require("node:fs");
+    const p = process.argv[1], repl = process.argv[2];
+    const re = /^export const IN_FLIGHT_MS = .*;$/;
+    let n = 0;
+    const out = fs.readFileSync(p, "utf8").split("\n").map((l) => { if (re.test(l)) { n++; return repl; } return l; });
+    fs.writeFileSync(p, out.join("\n"));
+    if (n !== 1) process.stderr.write("ac63_guard_copy(" + process.argv[3] + "): matched " + n + " declaration line(s), expected 1\n");
+    process.stdout.write(String(n));
+  ' "$AC63_COPY_GUARD" "$repl" "$label")"
+}
+
+# ---------------------------------------------------------------------------
+suite "#63 the boundary PAIR: both ages COMPUTED from the exported ceiling, neither spelled"
+# ---------------------------------------------------------------------------
+# Both cells are `3-impl` at the architectural tier with the prerequisite ABSENT and no events --
+# the same shape the AC15(a)/(b) cells use -- so the only thing that differs between them is
+# which side of the ceiling the record sits on.
+
+AC63_IN_AGE=$(( IN_FLIGHT_MS - MARGIN ))
+AC63_OUT_AGE=$(( IN_FLIGHT_MS + MARGIN ))
+
+AC63_T0="$(node -e 'process.stdout.write(String(Date.now()))')"
+MK_UPDATED="$(iso_ms_ago "$AC63_IN_AGE")"
+new_case 4242 "$(mk_status "3-impl" '"architectural"' "$NO_EVENTS")"
+MK_UPDATED=""
+AC63_IN_ROOT="$CASE_ROOT"
+gate "$CASE_ROOT"
+AC63_ELAPSED=$(( $(node -e 'process.stdout.write(String(Date.now()))') - AC63_T0 ))
+reg63 "#63-B1"
+assert_eq "#63-B1 INSIDE the ceiling by MARGIN (updated_at = now - (IN_FLIGHT_MS - MARGIN), COMPUTED from the exported value and spelled nowhere): the guard EVALUATES the record and refuses" \
+  "$GATE_DEC/$GATE_RC" "refused/2"
+reg63 "#63-E1"
+assert_eq "#63-E1 the wall clock from writing the INSIDE fixture to the gate returning is strictly under MARGIN. ASSERTED, not printed: that cell's EFFECTIVE age is IN_FLIGHT_MS - MARGIN + elapsed, so an unasserted margin turns a slow runner into a FLAKE instead of a failure. Measured elapsed here: ${AC63_ELAPSED}ms against a MARGIN of ${MARGIN}ms" \
+  "$(if [[ "$AC63_ELAPSED" -lt "$MARGIN" ]]; then printf 'under'; else printf 'OVER'; fi)" "under"
+
+MK_UPDATED="$(iso_ms_ago "$AC63_OUT_AGE")"
+new_case 4242 "$(mk_status "3-impl" '"architectural"' "$NO_EVENTS")"
+MK_UPDATED=""
+AC63_OUT_ROOT="$CASE_ROOT"
+gate "$CASE_ROOT"
+reg63 "#63-B2"
+assert_eq "#63-B2 OUTSIDE the ceiling by MARGIN (the IDENTICAL record body, updated_at = now - (IN_FLIGHT_MS + MARGIN)): the guard ABSTAINS -- and with #63-B1 that is the first pin either side of a boundary whose green window was measured at roughly (1.0h, 25.05h)" \
+  "$GATE_DEC/$GATE_RC" "not-applicable/0"
+reg63 "#63-B3"
+assert_contains "#63-B3 and the abstention names the IN-FLIGHT route specifically: decideForDir reaches not-applicable by four routes before this one, and a decision-only assertion cannot say which fired" \
+  "$GATE_OUT" "is not in flight"
+
+# ---------------------------------------------------------------------------
+suite "#63 the NON-ZERO CONTROL: the pair reads the ceiling rather than merely equalling itself"
+# ---------------------------------------------------------------------------
+# THE SHIFT IS COMPUTED, NEVER SPELLED. floor((IN_FLIGHT_MS - MARGIN) / 2) is strictly below the
+# INSIDE fixture's age at EVERY base value, because floor(X/2) < X for X = IN_FLIGHT_MS - MARGIN
+# > MARGIN -- which is exactly what #63-R1 asserts. So the flip below is guaranteed, not lucky.
+# A control that rewrote the LITERAL instead would find ZERO occurrences of it in a rewritten
+# build and would manufacture a third red cell there, falsifying the expected-red declaration in
+# the preflight block for a reason that has nothing to do with the constant.
+
+AC63_PORCELAIN_BEFORE="$(git -C "$PLUGIN_ROOT" status --porcelain 2>/dev/null)"
+AC63_GUARD_SUM_BEFORE="$(cksum < "$SCRIPTS_DIR/gate-phase-entry.mjs")"
+
+AC63_SHIFT=$(( (IN_FLIGHT_MS - MARGIN) / 2 ))
+ac63_guard_copy "shifted-boundary control" "export const IN_FLIGHT_MS = $AC63_SHIFT;"
+AC63_SHIFT_GUARD="$AC63_COPY_GUARD"
+reg63 "#63-C1"
+assert_eq "#63-C1 the shifted-boundary rewrite located EXACTLY ONE declaration line -- 0 means the declaration was reformatted and #63-C2/#63-C3 are silently driving the SHIPPED ceiling while reporting a control" \
+  "$AC63_COPY_MATCHES" "1"
+
+gate_using "$AC63_SHIFT_GUARD" "$AC63_IN_ROOT"
+reg63 "#63-C2"
+assert_eq "#63-C2 against a whole-scripts-dir copy whose ceiling is HALVED, the IDENTICAL INSIDE fixture FLIPS to not-applicable. Asserted on the DECISION STRING and never on rc: a partial copy fails open to <no-decision-on-stdout> with rc 1, which an rc-only assertion reads as a pass and cannot tell from a real abstention" \
+  "$GATE_DEC" "not-applicable"
+gate_using "$AC63_SHIFT_GUARD" "$AC63_OUT_ROOT"
+reg63 "#63-C3"
+assert_eq "#63-C3 and the OUTSIDE fixture HOLDS at not-applicable against that same copy, so #63-C2 is a DISCRIMINATION and not a copy that abstains on sight" \
+  "$GATE_DEC" "not-applicable"
+
+# THE CHECKOUT IS NEVER WRITTEN. Both halves are asserted, and #63-C5 is the load-bearing one.
+# MEASURED, by pointing the rewrite at $SCRIPTS_DIR/gate-phase-entry.mjs in a tree where that
+# file was ALREADY modified: #63-C4 SURVIVED that mutation and only #63-C5 caught it, because
+# `git status --porcelain` prints the same ` M <path>` line before and after -- a file already
+# recorded as modified cannot be recorded as modified twice. So the porcelain half is the coarse
+# one and is blind in a dirty tree, which is the tree Dev works in; the checksum half compares
+# two NON-EMPTY operands and fires either way. Do not delete #63-C5 as a duplicate of #63-C4.
+#
+# DELIBERATE DEVIATION, FLAGGED FOR REVIEW: the criterion says `git status --porcelain` is EMPTY.
+# Asserted as written, this cell reddens for anyone with unrelated uncommitted work in the tree --
+# including whoever is mid-edit on this very file -- which is a red cell about the operator's
+# working tree rather than about the control. INVARIANCE is the property the criterion exists for
+# ("an interrupted run cannot leave a shifted constant in the checkout") and it reddens under the
+# criterion's own named mutation (point the rewrite at $SCRIPTS_DIR/gate-phase-entry.mjs).
+AC63_PORCELAIN_AFTER="$(git -C "$PLUGIN_ROOT" status --porcelain 2>/dev/null)"
+reg63 "#63-C4"
+assert_eq "#63-C4 the controls left the checkout EXACTLY as they found it: git status --porcelain inside the plugin tree is unchanged across them, so an interrupted run cannot leave a shifted constant behind. THE COARSE HALF: it is blind when the guard is already modified, since porcelain prints the same line before and after -- #63-C5 is what bites there" \
+  "$AC63_PORCELAIN_AFTER" "$AC63_PORCELAIN_BEFORE"
+reg63 "#63-C5"
+assert_eq "#63-C5 and the SHIPPED guard is byte-identical after those cells ran (checksum, two non-empty operands, so this is not a zero-versus-zero comparison)" \
+  "$(cksum < "$SCRIPTS_DIR/gate-phase-entry.mjs")" "$AC63_GUARD_SUM_BEFORE"
+
+# ---------------------------------------------------------------------------
+suite "#63 the export itself, and the module shape the declared survivor rests on"
+# ---------------------------------------------------------------------------
+AC63_CHECKOUT_GUARD="$REPO_ROOT/plugins/pipeline/scripts/gate-phase-entry.mjs"
+reg63 "#63-A0"
+assert_eq "#63-A0 REPO_ROOT resolves and the checkout copy of the guard is readable. This cell FAILS rather than skipping: the five cells below are the only ones in #63 that read the CHECKOUT rather than whatever \$SCRIPTS_DIR points at, and a skip would retire all five in silence" \
+  "$(if [[ -n "$REPO_ROOT" && -f "$AC63_CHECKOUT_GUARD" ]]; then printf 'resolved'; else printf 'UNRESOLVED: REPO_ROOT=%s' "${REPO_ROOT:-<empty>}"; fi)" "resolved"
+reg63 "#63-A1"
+assert_eq "#63-A1 the guard EXPORTS the ceiling exactly once, so this suite can read the number instead of re-spelling it. Read from the CHECKOUT, never \$GUARD" \
+  "$(grep -c '^export const IN_FLIGHT_MS' "$AC63_CHECKOUT_GUARD" 2>/dev/null | tr -d ' ')" "1"
+reg63 "#63-A2"
+assert_eq "#63-A2 and the exported VALUE is unchanged by the export -- both halves are needed, since a cell asserting only the grep count would pass with the value silently moved" \
+  "$(sed -n 's/^export const IN_FLIGHT_MS = \(.*\);$/\1/p' "$AC63_CHECKOUT_GUARD" 2>/dev/null)" "24 * 60 * 60 * 1000"
+
+# The three pins under the FIRST declared survivor. They catch the CHEAP ways its premise stops
+# holding. They do NOT close the class -- see the preflight block.
+reg63 "#63-D1"
+assert_eq "#63-D1 Date.now() occurs exactly ONCE in the module. IF THIS FAILS: the count moved, which means EITHER a clock seam now exists OR the token was written in a comment or a string with no seam at all -- this cell's failure direction is toward FALSE ALARM, so read the diff. If it is a seam, the <=/< survivor is no longer justified and must be re-opened" \
+  "$(grep -o 'Date\.now()' "$AC63_CHECKOUT_GUARD" 2>/dev/null | grep -c . | tr -d ' ')" "1"
+reg63 "#63-D2"
+assert_eq "#63-D2 the initializer that feeds inFlight is spelled exactly \`  const now = Date.now();\`. This is NOT redundant with #63-D1: folding an override into that single read (\`Number(process.env.GATE_NOW) || Date.now()\`) leaves the whole-file count at exactly 1 and #63-D1 GREEN, and that divergence is the entire reason this cell exists. IF THIS FAILS the survivor's justification must be re-opened" \
+  "$(grep -c '^  const now = Date\.now();$' "$AC63_CHECKOUT_GUARD" 2>/dev/null | tr -d ' ')" "1"
+reg63 "#63-D3"
+assert_eq "#63-D3 the module exports no inFlight, asserted by DYNAMIC IMPORT and deliberately not by grep: appending \`export { inFlight };\` leaves \`grep -c '^export function inFlight'\` at 0 while the import reads \`function\`. Exporting the predicate would create a second parallel path to the same answer, which is what the survivor's justification rests on NOT existing" \
+  "$(node --input-type=module -e 'const m = await import(process.argv[1]); process.stdout.write(typeof m.inFlight === "undefined" ? "absent" : "EXPORTED as " + typeof m.inFlight)' "$AC63_CHECKOUT_GUARD" 2>/dev/null)" "absent"
+
+# ---------------------------------------------------------------------------
+suite "#63 the guard's own prose: the shared-definition claim is corrected AND sited"
+# ---------------------------------------------------------------------------
+# (i) and (ii) are both satisfied by DELETION, which would leave no drift-risk sentence anywhere
+# near the predicate and nothing citing the follow-up issue in the file. (iii) is the cell that
+# closes that: it is POSITIVE and SITED, and it is RED before the change (neither token occurs
+# anywhere under scripts/ or tests/ today), so it can go green only by putting the citation where
+# the predicate is. The BAND IS RELATIVE to `function inFlight(`, never an absolute line range:
+# an absolute range decays the first time anything above it moves.
+ac63_scripts_hits() { grep -r -c -- "$1" "$REPO_ROOT/plugins/pipeline/scripts/" 2>/dev/null | awk -F: '{ s += $NF } END { print s + 0 }'; }
+reg63 "#63-H1"
+assert_eq "#63-H1 the guard no longer claims it is \"reusing\" pipeline-status.mjs's window: there is no shared symbol and both modules hold their own literal, so the header claim was flatly false (non-zero control: exactly 1 hit before the change)" \
+  "$(ac63_scripts_hits 'reusing pipeline-status')" "0"
+reg63 "#63-H2"
+assert_eq "#63-H2 and inFlight's own doc comment no longer claims the predicate is the one pipeline-status.mjs \"already uses\" -- TRUE today and silently FALSE the moment either literal moves, which is the exact drift risk being named (non-zero control: exactly 1 hit before the change)" \
+  "$(ac63_scripts_hits 'already uses to call a run')" "0"
+reg63 "#63-H3"
+assert_eq "#63-H3 a #74 citation is SITED in the 20 lines above \`function inFlight(\`, where the duplication actually is. Without this, deleting the false clause outright passes #63-H1 and #63-H2 while leaving the drift risk unstated and unciteable anywhere in the file. A citation in the FILE HEADER alone does NOT satisfy this" \
+  "$(node -e '
+    const fs = require("node:fs");
+    const src = fs.readFileSync(process.argv[1], "utf8").split("\n");
+    const i = src.findIndex((l) => /^function inFlight\(/.test(l));
+    if (i < 0) { process.stdout.write("NO `function inFlight(` LINE FOUND: re-anchor this cell, do not delete it"); process.exit(0); }
+    const band = src.slice(Math.max(0, i - 20), i);
+    process.stdout.write(band.some((l) => l.indexOf("#74") !== -1) ? "sited" : "NOT SITED: no #74 in lines " + Math.max(1, i - 19) + "-" + i);
+  ' "$AC63_CHECKOUT_GUARD" 2>/dev/null)" "sited"
+
+# ---------------------------------------------------------------------------
+suite "#63 this suite stops re-deriving the ceiling, in code AND in the prose beside it"
+# ---------------------------------------------------------------------------
+# THE PATTERNS ARE ASSEMBLED SO THEY CANNOT MATCH THEIR OWN CELL. This file is inside the
+# population these two greps walk, and a self-matching detector is un-passable for a reason that
+# has nothing to do with the subject -- the trap this repo has hit twice. The character class in
+# the first pattern and the split literal in the second are what keep these lines out of their
+# own results; verify with the mutations below rather than by eye.
+AC63_VALUE_PHRASE="24h ""ceiling"
+reg63 "#63-G1"
+assert_eq "#63-G1 no cell in this suite re-derives the ceiling as its own hardcoded arithmetic: both former sites (the capture tripwire and probe43's staleness diagnosis) now READ the exported constant. MUTATE THE TWO SITES SEPARATELY -- restoring one and restoring both are indistinguishable to a zero-hit grep, and that hides a dead site" \
+  "$(grep -c '24 *[*] *3600e3' "${BASH_SOURCE[0]}" | tr -d ' ')" "0"
+reg63 "#63-G2"
+assert_eq "#63-G2 and no prose in this suite still spells that ceiling's VALUE (\"$AC63_VALUE_PHRASE\"): a message asserting 24h while comparing against a constant that may not be 24h is the same false claim in prose that this issue corrects in the guard's header. SCOPED TO THE PHRASE, not to the bare number, deliberately: a zero-hit rule over \"24h\" alone would collide with the frozen assertion label at the capture tripwire" \
+  "$(grep -c "$AC63_VALUE_PHRASE" "${BASH_SOURCE[0]}" | tr -d ' ')" "0"
+
+# ---------------------------------------------------------------------------
+suite "#63 the substituted reads are VALIDATED, the validation is EXERCISED, the branch is LIVE"
+# ---------------------------------------------------------------------------
+# ~345 assertions in this file rest on probe43's qualification and its failure mode is SILENCE, so
+# a read that arrives as `undefined` must be named rather than compared against: `age > undefined`
+# is FALSE, and the probe would answer `ok` about a fixture it never judged.
+
+ac63_guard_copy "no-export driver" "const IN_FLIGHT_MS = $IN_FLIGHT_MS;"
+AC63_NOEXP_GUARD="$AC63_COPY_GUARD"
+reg63 "#63-V1"
+assert_eq "#63-V1 the no-export rewrite located EXACTLY ONE declaration line. The replacement is the SAME declaration with the \`export\` keyword stripped and the value carried across from the read, so ENTRY/EXIT still export and the module still imports cleanly -- only the ceiling becomes unreadable" \
+  "$AC63_COPY_MATCHES" "1"
+
+new_case 4242 "$(mk_status "3-impl" '"architectural"' "$NO_EVENTS")"
+AC63_PROBE_FIXTURE="$CASE_DIR/status.json"
+reg63 "#63-V2"
+assert_eq "#63-V2 CONTROL: against the SHIPPED guard this same fixture qualifies cleanly, so #63-V3 is the VALIDATION firing and not the fixture being wrong" \
+  "$(probe43 "$AC63_PROBE_FIXTURE" fresh exact:architectural)" "ok"
+reg63 "#63-V3"
+assert_eq "#63-V3 driven against a WHOLE-scripts-dir copy with the export stripped, probe43 NAMES the unreadable ceiling instead of answering ok. Asserted as an EXACT SENTENCE and never as \`!= ok\`: probe43 folds stderr into stdout, so against a partial copy a module-resolution stack trace satisfies \`!= ok\` IDENTICALLY for the probe that validates and the probe that does not -- the rubber stamp reappearing inside the cell written to abolish one" \
+  "$(GUARD="$AC63_NOEXP_GUARD" probe43 "$AC63_PROBE_FIXTURE" fresh exact:architectural)" \
+  "the exported IN_FLIGHT_MS did not read as a finite positive number"
+
+reg63 "#63-V4"
+assert_eq "#63-V4 the capture tripwire's OWN validation, exercised in ITS environment -- a shell variable, not a module read -- by driving THE SAME function that tripwire calls with the ceiling argument EMPTY. Number(\"\") === 0, so an empty argument is caught by the \`CEIL <= 0\` half and NOT by isFinite: both halves are required, and the argument must be QUOTED or an empty one vanishes and shifts argv" \
+  "$(ac63_capture_staleness "$REC_STC" "")" \
+  "the exported IN_FLIGHT_MS did not read as a finite positive number"
+
+MK_UPDATED="$(iso_ms_ago "$AC63_OUT_AGE")"
+new_case 4242 "$(mk_status "3-impl" '"architectural"' "$NO_EVENTS")"
+MK_UPDATED=""
+reg63 "#63-V5"
+assert_eq "#63-V5 probe43's staleness branch is LIVE: a fixture past the ceiling by MARGIN produces exactly that diagnosis. Before this cell the branch was DEAD -- every fixture in this file sat INSIDE the ceiling, all three call sites assert == ok, and both flipping the comparison and DELETING the whole staleness push left the suite at 462/0. This buys LIVENESS, not falsifiability: the > versus >= distinction is the second declared survivor and stays unpinned" \
+  "$(probe43 "$CASE_DIR/status.json" fresh exact:architectural)" \
+  "updated_at is past the in-flight ceiling this suite reads from the guard: this cell would test staleness"
+
+# ---------------------------------------------------------------------------
+suite "#63 the label namespace: unique, and every id that exists actually RAN"
+# ---------------------------------------------------------------------------
+reg63 "#63-Z1"
+reg63 "#63-Z2"
+AC63_UNIQ="$(printf '%s' "$AC63_IDS" | grep . | sort -u)"
+assert_eq "#63-Z1 no #63 assertion id is used twice (a colliding label makes the battery's grep return two unrelated sites)" \
+  "$(printf '%s\n' "$AC63_IDS" | grep -c . | tr -d ' ')" "$(printf '%s\n' "$AC63_UNIQ" | grep -c . | tr -d ' ')"
+assert_eq "#63-Z2 every #63 id written in this file was REGISTERED by a cell that ran" \
+  "$(printf '%s\n' "$AC63_UNIQ" | grep -c . | tr -d ' ')" \
+  "$(grep -o '#63-[A-Za-z0-9][A-Za-z0-9]*' "${BASH_SOURCE[0]}" | sort -u | grep -c . | tr -d ' ')"
 
 finish
