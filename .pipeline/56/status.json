@@ -1,8 +1,8 @@
 {
   "issue_number": 56,
-  "current_phase": "2.5-design-complete",
+  "current_phase": "3-impl",
   "started_at": "2026-08-22T18:10:00Z",
-  "updated_at": "2026-08-22T22:39:21Z",
+  "updated_at": "2026-08-22T22:45:18Z",
   "branch": "claude/pipeline-resume-56-a82065",
   "ask_text": "voice-lint: scope the voice obligation to the turn that produced the record",
   "risk_tier": "architectural",
@@ -73,6 +73,12 @@
       "verdict": "APPROVE",
       "at": "2026-08-22T22:39:21Z",
       "note": "Two blind opposing-stance sketches (A: smallest-blast-radius, two files, one new internal helper, fuses R5 into the existing scan function; B: cleanest-seam, extracts isHumanTurnRecord/scanTranscript/RESIDUAL_LIMITS/ORIGIN_KINDS as named units, +90-130/+40-60 estimated lines) judged by an opus dispatch. Winner: A, on three MEASURED points, not preference: (1) B's forward-scan running-max picks the quiet side of a fail-direction fork SecOps had already flagged (a later boundary silences more); (2) B's R10 placement was built as a real patch and run through the live CLI -- it reddens a PRE-EXISTING test cell (6 named_failures against the suite's asserted 5 on a byte-identical fixture), which AC6 forbids; A's placement does not; (3) cost measured on a 56.6MB/26,460-record transcript: A never slower than today's shipped code (85.1ms both), B ~1.7x on every invocation (143.9ms) for no coverage gained. Grafted from B into A: resolveStatus's `dir` field (load-bearing -- A's original plan read a status field, `issue`, that status.schema.json does not declare), isHumanTurnRecord exported (AC8(f) is the only cell catching R5's fatal nesting misreading, and both DBA and SecOps needed their own reference predicate to verify it -- Phase 4 needs the real one), and the origin.kind census content as header prose (not B's frozen RESIDUAL_LIMITS/ORIGIN_KINDS structures, declined on correctness grounds B's own residual_risks conceded). The judge ALSO independently found two things NEITHER sketch had, now binding in design.json: a previously-undiscovered residual (viii) where phaseShapeFailure refuses before the transcript is even read (a stale/foreign record's malformed current_phase still refuses this session's message; false-refusal direction, a coverage limit not a regression) that needs to reach spec.json's own R7 list eventually; and an unguarded statSync call the design newly introduces, which would silently fail into main()'s existing blanket catch (exit 0) -- the exact R3-inversion class DevOps already flagged for Phase 4 -- ruled to be guarded so a stat failure can only read fresh-and-loud (mtimeMs = +Infinity on throw), never an excuse to go silent. owner_decision.required: false, with reasoning recorded in design.json (blast radius identical outside voice-lint.mjs under both sketches per B's own admission; once the declined manifest is subtracted, the real cost delta is single digits; the remaining differences are measured correctness, not preference). No design-lock halt triggered. NOT yet proceeding to Phase 3: the original owner authorization ('proceed with A') was explicitly scoped through review, 'before anything is built' -- pausing here to report the design outcome and get an explicit go before dispatching QA/Dev."
+    },
+    {
+      "phase": "2.5-design-complete",
+      "verdict": "APPROVED",
+      "at": "2026-08-22T22:45:18Z",
+      "note": "Owner approved proceeding to implementation ('approved, lets execute on the plan'). This is a NEW, distinct authorization from the earlier 'proceed with A', which was explicitly scoped to stop before anything was built. Entering Phase 3, architectural-tier shape: QA-first. Worktree note: this session's cwd (.claude/worktrees/harddrive-space-review-4c7a9e, branch claude/pipeline-resume-56-a82065) has served as both PIPELINE_BASE and the Phase 3 implementation worktree throughout this run -- there is no separate orchestrator-only checkout in this session's topology, so no new worktree is pre-created and no artifact seeding/copy is needed; spec.json/review.json/map.json/design.json are already at the one ARTIFACT_DIR this whole run has used."
     }
   ],
   "flags": [
