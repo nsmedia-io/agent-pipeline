@@ -1,0 +1,19 @@
+{
+  "title": "An unquoted `git diff -U0` hunk-header parse under `set -u` crashes on a one-line hunk, not on hunk content",
+  "domain": "testing",
+  "status": "current",
+  "last_updated": "2026-08-22T15:01:08Z",
+  "updated_by_issue": 21,
+  "tags": [
+    "qa-battery",
+    "verify-sh",
+    "git-diff",
+    "set -u",
+    "hunk-header",
+    "bash-word-splitting"
+  ],
+  "content": "Recorded from #21 (merged to main as cab267f) for any future QA battery cell that parses `git diff -U0` hunk headers, because this is a generic bash-word-splitting bug that will recur in the next battery that tries the same shape of check, not a one-off in this run's cell. `verify-21.sh`'s AC15b cell parsed each `git diff -U0` hunk header of the form `@@ -<old_start>[,<old_count>] +<new_start>[,<new_count>] @@` with `a=$(sed -E 's/^@@ -([0-9]+)(,[0-9]+)? \\+([0-9]+)(,[0-9]+)? @@.*/\\1 \\2 \\3 \\4/')` followed by an UNQUOTED `set -- $a`. git OMITS the `,<count>` group entirely when a hunk is exactly one line on that side (rendering `@@ -125 +125 @@` rather than `@@ -125,1 +125,1 @@`), so the sed capture leaves two of the four groups empty, and the unquoted `set --` word-splits the empty fields away, leaving only TWO positionals instead of four. Under `set -uo pipefail` (the mode this battery, and most careful ones, run under), the reference to `$3` for the new-hunk start line is then a `TypeError`-equivalent bash 'unbound variable' that terminates the ENTIRE script at that cell -- every later cell (AC16, AC17, and this battery's D-series) never runs at all, and a script that dies mid-run reads exactly like a smaller, passing battery unless the operator checks the cell count against the expected total.\n\nMEASURED, FOUR HEADER SHAPES (the failure is a function of HUNK SHAPE, not diff content): `@@ -125,2 +125,3 @@` (both sides multi-line) parses correctly, 4 fields; `@@ -126,0 +127,1 @@` (a pure insertion) parses correctly, 4 fields; `@@ -125 +125,3 @@` (old side one-line, new side multi-line) parses to 3 fields and is SILENTLY WRONG (the old-count field absorbs the '+125,3' text under word-splitting) -- worse than the crash, because it produces a wrong answer with no error; `@@ -125 +125 @@` (both sides exactly one line) parses to 2 fields and CRASHES under `set -u`. A hunk confined to a single physical line on BOTH sides -- which is exactly what a design that puts several edits on one line (a common shape for a one-line prose or config edit) produces -- hits the worst case.\n\nFIX, APPLIED BY QA AT #21 PHASE 4 (three lines, semantics unchanged for the shapes that already worked): change the sed replacement to `\\1 x\\2 \\3 x\\4` (an `x` PREFIX on the two optional count groups, so an EMPTY optional group becomes the literal string `x` rather than disappearing under word-splitting), then after `set -- $a`, read `ol=\"$1\" oc=\"${2#x}\" nl=\"$3\" nc=\"${4#x}\"`, strip a leading comma (`oc=\"${oc#,}\"`; `nc=\"${nc#,}\"`), and default an empty count to 1 (`oc=\"${oc:-1}\"`; `nc=\"${nc:-1}\"`) since git's own header convention is that an omitted count means exactly 1.\n\nGENERALIZATION FOR THE NEXT BATTERY AUTHOR: never parse an optional regex-capture group with an unquoted `set --`/word-splitting shell idiom; either quote every expansion (`set -- \"$1\" \"$2\" \"$3\" \"$4\"` still loses positional COUNT information the same way, so quoting alone does not fix this) or, as done here, make an empty optional group survive as a non-empty sentinel before splitting. Add a control fixture with a one-line-both-sides hunk (the shape a single-physical-line edit produces) to any battery cell that walks `git diff -U0` hunk headers, before trusting it against a real diff; QA's own repair added exactly that as `AC15b.parser-oracle`, exercising the isolated parser over four header shapes it must read correctly and two it must refuse.",
+  "see_also": [
+    "architecture--config-tier-trigger-floor"
+  ]
+}
