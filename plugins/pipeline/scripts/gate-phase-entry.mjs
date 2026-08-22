@@ -506,10 +506,15 @@ function prerequisiteSatisfied(issueDir, row, events) {
  * agree on, because `??` does not fire on it.
  *
  * They also DATE the field differently -- `Date.parse` here, `new Date(...).getTime()` there --
- * which agree on the ISO strings status.schema.json requires and diverge on anything else.
- * `updated_at: 12345` reads here as the year 12345, so the record is permanently in flight,
- * while pipeline-status.mjs never classifies it at all: it throws on the number before its
- * filter is reached. Nothing in this tree pins either spelling.
+ * and MEASURED, those two agree on every STRING, not only the ISO ones status.schema.json
+ * requires: `new Date(string)` delegates to `Date.parse`, so "March 3, 2020", "2020/03/03" and
+ * "not-a-date" all land identically in both. They part only on values that are NOT strings,
+ * where `Date.parse` coerces to string first and the constructor does not. `updated_at: 12345`
+ * reads here as the year 12345, so the record is permanently in flight, while
+ * pipeline-status.mjs never classifies it at all: its filter is not reached on ANY path. With
+ * two or more issue dirs it throws first in `listActive`'s sort comparator, in both markdown
+ * and `--json`; with one dir it throws in `renderMarkdown`; and the sole non-throwing case, one
+ * dir under `--json`, does not run the filter either. Nothing in this tree pins either spelling.
  *
  * That mtime-for-updated_at substitution is the same grain mismatch #74 records against
  * session-start.sh, in a second module #74 does not yet count. No symbol is shared either, so
