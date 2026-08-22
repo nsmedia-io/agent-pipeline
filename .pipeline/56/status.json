@@ -1,8 +1,8 @@
 {
   "issue_number": 56,
-  "current_phase": "2.5-design",
+  "current_phase": "2.5-design-complete",
   "started_at": "2026-08-22T18:10:00Z",
-  "updated_at": "2026-08-22T22:24:41Z",
+  "updated_at": "2026-08-22T22:39:21Z",
   "branch": "claude/pipeline-resume-56-a82065",
   "ask_text": "voice-lint: scope the voice obligation to the turn that produced the record",
   "risk_tier": "architectural",
@@ -67,6 +67,12 @@
       "verdict": "APPROVE_WITH_NOTES",
       "at": "2026-08-22T22:22:42Z",
       "note": "BA's final round-3 pass: re-derived all three notes before fixing, confirmed both reviewers right and itself wrong in each case. R7(iii-b) now gives the real reason ctime was rejected (forces every stale fixture to become timing-dependent instead of instantly stamped via utimesSync, not that it 'cannot be built at all', which was false). expected_survivor corrected to name task-notification and auto-compaction as the classes an origin.kind relabel would silence (not the Stop-hook refusal, which stays loud via isMeta -- BA had it backwards). isMeta moved out of the survivor list into its own falsifiable mutation entry (2 of 4 classes flip when dropped); exactly two genuine survivors remain (isSidechain, message.role). No acceptance-criterion text changed; counts held at 12 requirements / 18 ACs / 20 measured_state / 18 mutations / 4 unmutable. Phase 2 is now fully complete, no further review round needed. Proceeding to Phase 2.5 (design bake-off)."
+    },
+    {
+      "phase": "2.5-design",
+      "verdict": "APPROVE",
+      "at": "2026-08-22T22:39:21Z",
+      "note": "Two blind opposing-stance sketches (A: smallest-blast-radius, two files, one new internal helper, fuses R5 into the existing scan function; B: cleanest-seam, extracts isHumanTurnRecord/scanTranscript/RESIDUAL_LIMITS/ORIGIN_KINDS as named units, +90-130/+40-60 estimated lines) judged by an opus dispatch. Winner: A, on three MEASURED points, not preference: (1) B's forward-scan running-max picks the quiet side of a fail-direction fork SecOps had already flagged (a later boundary silences more); (2) B's R10 placement was built as a real patch and run through the live CLI -- it reddens a PRE-EXISTING test cell (6 named_failures against the suite's asserted 5 on a byte-identical fixture), which AC6 forbids; A's placement does not; (3) cost measured on a 56.6MB/26,460-record transcript: A never slower than today's shipped code (85.1ms both), B ~1.7x on every invocation (143.9ms) for no coverage gained. Grafted from B into A: resolveStatus's `dir` field (load-bearing -- A's original plan read a status field, `issue`, that status.schema.json does not declare), isHumanTurnRecord exported (AC8(f) is the only cell catching R5's fatal nesting misreading, and both DBA and SecOps needed their own reference predicate to verify it -- Phase 4 needs the real one), and the origin.kind census content as header prose (not B's frozen RESIDUAL_LIMITS/ORIGIN_KINDS structures, declined on correctness grounds B's own residual_risks conceded). The judge ALSO independently found two things NEITHER sketch had, now binding in design.json: a previously-undiscovered residual (viii) where phaseShapeFailure refuses before the transcript is even read (a stale/foreign record's malformed current_phase still refuses this session's message; false-refusal direction, a coverage limit not a regression) that needs to reach spec.json's own R7 list eventually; and an unguarded statSync call the design newly introduces, which would silently fail into main()'s existing blanket catch (exit 0) -- the exact R3-inversion class DevOps already flagged for Phase 4 -- ruled to be guarded so a stat failure can only read fresh-and-loud (mtimeMs = +Infinity on throw), never an excuse to go silent. owner_decision.required: false, with reasoning recorded in design.json (blast radius identical outside voice-lint.mjs under both sketches per B's own admission; once the declined manifest is subtracted, the real cost delta is single digits; the remaining differences are measured correctness, not preference). No design-lock halt triggered. NOT yet proceeding to Phase 3: the original owner authorization ('proceed with A') was explicitly scoped through review, 'before anything is built' -- pausing here to report the design outcome and get an explicit go before dispatching QA/Dev."
     }
   ],
   "flags": [
