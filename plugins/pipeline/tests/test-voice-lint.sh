@@ -217,34 +217,269 @@ done
 
 # ---------------------------------------------------------------------------
 suite "voice-lint: the table cannot drift from pipeline.md (config-derived)"
-
+# ---------------------------------------------------------------------------
 # The first VOICE_MOMENTS table was written from memory and invented FOUR phases no checkpoint
 # writes, so those checks could never fire while the real completion report went uncovered.
 # This derives the truth from pipeline.md rather than trusting the table, per evidence.md rule
 # 19: build the expected set from CONFIGURATION, not from what has been observed.
+#
+# TWO THINGS CHANGED HERE, AND BOTH WERE DEFECTS RATHER THAN STYLE (#53).
+#
+#   1. THE POPULATION WAS NARROWER THAN ITS SUBJECT. The derivation matched `current_phase: "x"`
+#      only, while pipeline.md ALSO writes the JSON form `"current_phase": "x"`. So this suite
+#      derived 25 concrete literals from a file that writes 26, asserted that all 25 were
+#      accounted for, and printed `found 26` as its reassurance -- assertion and control ranging
+#      over the same narrowed set. `0-setup` was in neither voice table and in no partition cell
+#      of the phase-entry guard, and nothing here could see it, because a phase the pattern
+#      cannot see is not an unaccounted phase, it is not a phase at all.
+#
+#   2. THE ACCOUNTING WAS A SUBSTRING GREP OVER THE SOURCE. `grep -q "\"$phase\"" "$LINT_SRC"`
+#      is satisfied by a phase named in a COMMENT and cannot tell a table key from a mention --
+#      the exact shape the sibling drift suite's own header names as what it exists to replace.
+#      It is now SET MEMBERSHIP over the module's exported tables, which is what makes the
+#      negative cell below (declared in a comment, absent from the table -> RED) possible at all.
+#
+# THE WIDE FORM is the ONE extraction this suite performs; re-derive both copies with
+# `git grep -n "THE WIDE FORM" -- plugins/pipeline/tests`.
 PIPELINE_MD="$PLUGIN_ROOT/commands/pipeline.md"
 LINT_SRC="$SCRIPTS_DIR/voice-lint.mjs"
 
-UNACCOUNTED=""
-while IFS= read -r phase; do
-  [[ -z "$phase" || "$phase" == *"<"* ]] && continue   # skip the <phase>-error template
-  grep -q "\"$phase\"" "$LINT_SRC" || UNACCOUNTED="$UNACCOUNTED $phase"
-done < <(grep -o 'current_phase: *"[^"]*"' "$PIPELINE_MD" | sed 's/.*"\(.*\)"/\1/' | sort -u)
+# THE PINNED LABEL SET (#33). Identical to the drift suite's, on purpose: two copies of the wide
+# pattern remain in Lane 1 and this is what makes them check each other -- a narrowing in either
+# copy reddens in that copy. Never a bare count: a count is discharged by editing one digit.
+PHASE_LITERALS_26='0-setup,0.5-map,0.5-map-complete,1-ba,1-ba-complete,1-ba-open-questions,1-ba-rework-required,2-constraints,2-constraints-complete,2-review,2-review-complete,2.5-design,2.5-design-complete,2.5-design-owner-decision,3-impl,3-impl-complete,3-impl-frontend-gate-failed,3-impl-gate-failed,3-impl-live-verify-unverified,3-impl-tripwire,3-impl-tripwire-indeterminate,4-review,4-review-complete,4-veto-rework-required,5-archive,5-archived'
 
-assert_eq "every phase pipeline.md writes is accounted for in voice-lint.mjs" \
-  "${UNACCOUNTED# }" ""
+# vl_account [phase-to-DROP-from-the-tables] -> a KEY=value report, or "" if the import produced
+# nothing. The drop argument runs the IDENTICAL accounting over a deliberately holed table, which
+# is what makes the negative cell a control rather than a claim.
+#
+# THE MODULE PATH IS argv[1], DELIBERATELY. That is the shipped import idiom in this repo (the
+# drift suite passes the module it is importing as argv[1] at four call sites), and it is the
+# ORDER that triggers the hazard: `isMain` compares the BASENAME of process.argv[1], so with the
+# module path there the module SELF-RUNS its CLI on import, main() executes, and the eval body
+# NEVER RUNS -- rc 0, no output, and every membership assertion below reads a green nothing.
+# Reordering the arguments would hide that, and would leave the landmine armed for whoever next
+# writes the idiom the natural way. gate-phase-entry.mjs already ships the fix; see the control
+# immediately below the premise.
+#
+# `</dev/null` is not decoration: if the import self-runs the CLI, that CLI reads stdin.
+vl_account() {
+  node --input-type=module -e '
+    import { readFileSync } from "node:fs";
+    const [lintPath, mdPath, drop] = process.argv.slice(1);
+    const m = await import(lintPath);
+    const vm = m.VOICE_MOMENTS, nv = m.NON_VOICE_PHASES;
+    const kind = (v) => v === undefined ? "ABSENT"
+      : v instanceof Set ? "Set" : Array.isArray(v) ? "Array" : typeof v;
+    const nvList = nv instanceof Set ? [...nv] : Array.isArray(nv) ? [...nv] : [];
+    const vmKeys = vm && typeof vm === "object" && !Array.isArray(vm) ? Object.keys(vm) : [];
+    const declared = new Set([...nvList, ...vmKeys].filter((p) => p !== drop));
+    const md = readFileSync(mdPath, "utf8");
+    const literals = [...new Set([...md.matchAll(/"?current_phase"?: *"([^"]*)"/g)].map((x) => x[1]))]
+      .filter((p) => p !== "<phase>-error");
+    const out = [];
+    out.push("VMKIND=" + kind(vm));
+    out.push("NVKIND=" + kind(nv));
+    out.push("VMKEYS=" + vmKeys.slice().sort().join(","));
+    out.push("NVSIZE=" + nvList.length);
+    // The drift suite consumes an exported cell through `Array.isArray(x) ? x : []`. Applied to
+    // a Set that yields length 0 -- a green zero, not an error. Measured here against the REAL
+    // exported value rather than asserted about an inline fixture.
+    out.push("ARRAYIDIOMSIZE=" + (Array.isArray(nv) ? nv.length : 0));
+    out.push("LITERALS=" + literals.slice().sort().join(","));
+    out.push("UNACCOUNTED=" + literals.filter((p) => !declared.has(p)).sort().join(","));
+    out.push("OVERLAP=" + vmKeys.filter((k) => nvList.includes(k)).sort().join(","));
+    out.push("NV_HAS_0SETUP=" + (nvList.includes("0-setup") ? "yes" : "no"));
+    out.push("VM_HAS_0SETUP=" + (vmKeys.includes("0-setup") ? "yes" : "no"));
+    out.push("NV_HAS_3IMPL=" + (nvList.includes("3-impl") ? "yes" : "no"));
+    out.push("VM_HAS_5ARCHIVED=" + (vmKeys.includes("5-archived") ? "yes" : "no"));
+    process.stdout.write(out.join("\n"));
+  ' "$LINT_SRC" "$PIPELINE_MD" "${1:-}" </dev/null 2>/dev/null
+}
 
-# CONTROL: the derivation must actually find phases, or an empty result would "pass" vacuously
-# (rule 19's own trap: a check over an empty set reports success).
-PHASE_COUNT=$(grep -o 'current_phase: *"[^"]*"' "$PIPELINE_MD" | sed 's/.*"\(.*\)"/\1/' | sort -u | wc -l | tr -d ' ')
-assert_eq "CONTROL: the phase derivation is non-empty (found $PHASE_COUNT)" \
-  "$([ "$PHASE_COUNT" -ge 20 ] && echo many || echo "too few: $PHASE_COUNT")" "many"
+# vl <report> <KEY> -> the value, or an explicit marker. An absence assertion that cannot tell
+# "nothing wrong" from "nothing measured" is not an assertion.
+vl() {
+  [[ -n "$1" ]] || { printf '<no-report>'; return; }
+  case "$1" in *"$2="*) ;; *) printf '<no-field:%s>' "$2"; return ;; esac
+  printf '%s' "$1" | sed -n "s/^$2=//p"
+}
 
-# CONTROL: a phase that exists in NEITHER table must be detectable by the same grep, or the
-# check above proves only that grep runs.
-grep -q '"9-does-not-exist"' "$LINT_SRC" \
-  && assert_eq "CONTROL: the drift grep can report a miss" "found" "not found" \
-  || assert_eq "CONTROL: the drift grep can report a miss" "not found" "not found"
+VL_RAW="$(vl_account)"
+case "$VL_RAW" in
+  VMKIND=*) VL_STATE="ok" ;;
+  "")       VL_STATE="THE EVAL BODY NEVER RAN. Importing voice-lint.mjs SELF-RUNS its CLI (isMainScript compares the BASENAME of argv[1], and argv[1] here is the module path), so main() executes, the import never returns a value this program can read, and every membership assertion below would read a GREEN NOTHING. gate-phase-entry.mjs already ships the fix and a comment describing this exact hazard: an \`evalEntry\` test over process.execArgv, ANDed with isMain. voice-lint.mjs carries no such guard, and the exports are unusable without it" ;;
+  *)        VL_STATE="the import returned something other than a report: $VL_RAW" ;;
+esac
+
+# --- THE PREMISE, asserted BEFORE anything is concluded from the tables ----------------------
+assert_eq "PREMISE: voice-lint.mjs's tables can be IMPORTED without the module self-running its CLI" \
+  "$VL_STATE" "ok"
+assert_eq "  POSITIVE CONTROL on the idiom, so a red premise reads as \"voice-lint.mjs lacks the guard\" and not as \"this import style does not work\": the SIBLING module, which ships an \`evalEntry\` test beside its isMain check, returns its exports through the byte-identical call" \
+  "$(node --input-type=module -e 'const m = await import(process.argv[1]); process.stdout.write(Array.isArray(m.ENTRY) && m.ENTRY.length > 0 ? "exports-readable" : "EMPTY")' "$SCRIPTS_DIR/gate-phase-entry.mjs" </dev/null 2>/dev/null)" \
+  "exports-readable"
+assert_eq "  and both tables read back in the SHAPE this suite consumes them in -- VOICE_MOMENTS an object, NON_VOICE_PHASES a Set. A renamed or ABSENT export is named here rather than producing an empty population three assertions later" \
+  "$(vl "$VL_RAW" VMKIND)/$(vl "$VL_RAW" NVKIND)" "object/Set"
+assert_eq "  ANTI-VACUITY, by LABEL and not by a count floor: both tables are non-empty, witnessed by a member each that this change does not touch" \
+  "$(vl "$VL_RAW" NV_HAS_3IMPL)/$(vl "$VL_RAW" VM_HAS_5ARCHIVED)" "yes/yes"
+assert_eq "  MEASURED CONTROL for the cell above: the drift suite's \`Array.isArray(x) ? x : []\` idiom, applied to the REAL exported Set, yields a population of size 0 while the Set itself is non-empty. That green zero is what the shape assertion exists to refuse" \
+  "$(vl "$VL_RAW" ARRAYIDIOMSIZE)/$([[ "$(vl "$VL_RAW" NVSIZE)" == "0" ]] && echo EMPTY || echo non-empty)" "0/non-empty"
+
+# --- the accounting itself -------------------------------------------------------------------
+assert_eq "every phase pipeline.md writes is accounted for in voice-lint.mjs's own tables (SET MEMBERSHIP, never a source grep)" \
+  "$(vl "$VL_RAW" UNACCOUNTED)" ""
+assert_eq "\`0-setup\` is declared NON-VOICE and is in no voice-moment table" \
+  "$(vl "$VL_RAW" NV_HAS_0SETUP)/$(vl "$VL_RAW" VM_HAS_0SETUP)" "yes/no"
+assert_eq "and the two halves of the partition do not overlap -- the module's own self-test asserts this too, but that loop iterates VOICE_MOMENTS' keys and asks NON_VOICE_PHASES.has(k), so an EMPTY or renamed table satisfies it having checked nothing. Its non-emptiness premise is the cell above" \
+  "$(vl "$VL_RAW" OVERLAP)" ""
+
+# --- DISCRIMINATION, negative: a phase in a COMMENT is not a phase in a TABLE ----------------
+# The old check was `grep -q "\"$phase\"" "$LINT_SRC"`, which a comment satisfies. This pair is
+# what proves the replacement reads the TABLE: with `0-setup` dropped from the tables and the
+# LITERAL STRING still present in the source, the accounting still reports it unaccounted.
+VL_DROPPED="$(vl_account 0-setup)"
+assert_contains "DISCRIMINATION: with \`0-setup\` removed from the tables, the accounting names it" \
+  "$(vl "$VL_DROPPED" UNACCOUNTED)" "0-setup"
+assert_eq "  and it does so WHILE the string \"0-setup\" is present in voice-lint.mjs's source, which is what the retired substring grep would have read as \"accounted for\"" \
+  "$([[ "$(grep -c '"0-setup"' "$LINT_SRC" | tr -d ' ')" == "0" ]] && echo "ABSENT FROM SOURCE: this cell cannot discriminate" || echo present)" "present"
+assert_eq "  CONTROL on the injection itself: dropping a phase the tables never held moves nothing, so the cell above reports a real removal rather than the drop argument reddening everything" \
+  "$(vl "$(vl_account 9-does-not-exist)" UNACCOUNTED)" ""
+
+# ===========================================================================================
+# #53 -- THE FORM-COVERAGE CONTROL: a population no assignment spelling can leave
+#
+# The second copy of the tri-partition (the drift suite carries the first, with the full fixture
+# matrix). Two copies of the wide pattern remain in Lane 1; each carries this control, so a
+# narrowing in either copy reddens in that copy. Every occurrence of the BARE WORD
+# `current_phase` is CLAIMED (inside a span this suite's shipped derivation matched), EXCLUDED
+# (inside NO span of a pattern strictly WIDER than the claim pattern) or UNCLASSIFIED (a real
+# assignment the derivation misses). UNCLASSIFIED must be EMPTY and is reported BY NAME.
+#
+# The EXCLUDED bucket is a sorted occurrence-text MULTISET, asserted; its SIZE is only reported.
+# Never `sort -u`: three of the five excluded LINES carry two occurrences each with identical
+# text, so a set would turn 8 entries into 5 and re-open the bypass. Line numbers are REPORTED
+# beside the entries and never asserted -- pipeline.md is edited by a lane that does not own this
+# suite, and a coordinate pin is #68's shape.
+# ===========================================================================================
+tripart() {
+  node --input-type=module -e '
+    import { readFileSync } from "node:fs";
+    const md = readFileSync(process.argv[1], "utf8");
+    const CLAIM = /"?current_phase"?: *"([^"]*)"/g;
+    const WIDER = /["\x27`]?current_phase["\x27`]?\s*[:=]\s*(?:"[^"]*"|\x27[^\x27]*\x27|`[^`]*`|[A-Za-z0-9._<>-]+)/g;
+    const spans = (re) => [...md.matchAll(re)].map((m) => [m.index, m.index + m[0].length, m[0]]);
+    const claimSpans = spans(CLAIM), widerSpans = spans(WIDER);
+    const within = (i, ss) => ss.find(([a, b]) => i >= a && i < b);
+    const lines = md.split("\n");
+    const starts = []; { let o = 0; for (const l of lines) { starts.push(o); o += l.length + 1; } }
+    const lineOf = (i) => { let lo = 0, hi = starts.length - 1;
+      while (lo < hi) { const m = (lo + hi + 1) >> 1; if (starts[m] <= i) lo = m; else hi = m - 1; } return lo; };
+    const claimed = [], excluded = [], unclassified = [];
+    for (const m of md.matchAll(/current_phase/g)) {
+      const i = m.index, li = lineOf(i), text = lines[li];
+      if (within(i, claimSpans)) { claimed.push({ li, text }); continue; }
+      const w = within(i, widerSpans);
+      if (!w) excluded.push({ li, text }); else unclassified.push({ li, span: w[2] });
+    }
+    const out = [];
+    out.push("TOTAL=" + [...md.matchAll(/current_phase/g)].length);
+    out.push("CLAIMED=" + claimed.length);
+    out.push("EXCLUDED=" + excluded.length);
+    out.push("UNCLASSIFIED=" + unclassified.length);
+    out.push("LITERALS=" + [...new Set([...md.matchAll(CLAIM)].map((m) => m[1]))]
+      .filter((p) => p !== "<phase>-error").sort().join(","));
+    out.push("EXLINES=" + excluded.map((e) => e.li + 1).join(","));
+    out.push("UNNAMED=" + unclassified.map((e) => (e.li + 1) + ":" + e.span.replace(/\s+/g, " ")).join(" ;; "));
+    out.push("--EXFP--");
+    for (const line of excluded.map((e) => e.text.trim().length + "|" + e.text.trim().slice(0, 72)).sort()) out.push(line);
+    process.stdout.write(out.join("\n"));
+  ' "$1" 2>&1
+}
+tp_exfp() { printf '%s' "$1" | sed -n '/^--EXFP--$/,$p' | sed '1d'; }
+
+# NOT a heredoc inside a $( ) capture: /bin/bash 3.2.57 scans a command substitution for its
+# closing paren WITHOUT honouring quoted-heredoc rules, so the UNPAIRED backtick left by a
+# 72-character truncation makes the whole file un-parseable.
+EXCLUDED_MULTISET_8='133|- **User interrupts mid-phase**: status.json preserves position. `/pipel
+285|- If starts with `--resume <issue>`: set `ISSUE=<issue>`, read `.pipelin
+285|- If starts with `--resume <issue>`: set `ISSUE=<issue>`, read `.pipelin
+461|**`events[]` entries are EXIT markers and `current_phase` is an ENTRY ma
+461|**`events[]` entries are EXIT markers and `current_phase` is an ENTRY ma
+479|`status.json` is the `/pipeline --resume <issue>` checkpoint, so it must
+479|`status.json` is the `/pipeline --resume <issue>` checkpoint, so it must
+89|# Run BEFORE entering each phase, after setting current_phase to the pha'
+
+# ---------------------------------------------------------------------------
+suite "#53 AC2: every bare-word occurrence lands in exactly one named bucket"
+# ---------------------------------------------------------------------------
+TP_REAL="$(tripart "$PIPELINE_MD")"
+record "REPORTED, never asserted: pipeline.md holds $(vl "$TP_REAL" TOTAL) bare-word \`current_phase\` occurrences, $(vl "$TP_REAL" CLAIMED) CLAIMED and $(vl "$TP_REAL" EXCLUDED) EXCLUDED, at lines $(vl "$TP_REAL" EXLINES). Grain is OCCURRENCES, not distinct literals"
+assert_eq "the three buckets ACCOUNT FOR every bare-word occurrence" \
+  "$(( $(vl "$TP_REAL" CLAIMED) + $(vl "$TP_REAL" EXCLUDED) + $(vl "$TP_REAL" UNCLASSIFIED) ))" \
+  "$(vl "$TP_REAL" TOTAL)"
+assert_eq "UNCLASSIFIED is EMPTY: no assignment the WIDER pattern can see is missed by the derivation this suite ships" \
+  "$(vl "$TP_REAL" UNNAMED)" ""
+# AC1, asserted OFF THE TRI-PARTITION rather than off the module report, deliberately: this is a
+# property of pipeline.md and of the pattern, and it must be able to go red independently of
+# whether the module's tables can be imported at all.
+assert_eq "the derived label SET is exactly the 26 concrete literals pipeline.md writes, \`0-setup\` among them -- and it is the SAME sorted list the drift suite pins, so a narrowing in either copy reddens in that copy" \
+  "$(vl "$TP_REAL" LITERALS)" "$PHASE_LITERALS_26"
+assert_eq "and the EXCLUDED bucket's MEMBERSHIP is asserted -- the sorted occurrence-text MULTISET, so an occurrence cannot move between buckets at constant bucket sizes" \
+  "$(tp_exfp "$TP_REAL")" "$EXCLUDED_MULTISET_8"
+assert_eq "MULTISET, NOT A SET: \`sort -u\` collapses those 8 entries to 5, which is measured here rather than asserted absent by inspection" \
+  "$(tp_exfp "$TP_REAL" | sort -u | grep -c . | tr -d ' ')/$(tp_exfp "$TP_REAL" | grep -c . | tr -d ' ')" "5/8"
+
+# ---------------------------------------------------------------------------
+suite "#53 AC13: RUNTIME NEUTRALITY -- what the lint says is byte-unchanged by this change"
+# ---------------------------------------------------------------------------
+# R6 exports a table `run()` does not read, and the cheapest wrong next step is to start reading
+# it and make the unrecognised-phase branch LOUD, converting a documented fail-open into a
+# refusal of the first turn of every pipeline run.
+#
+# THREE CELLS, AND THE THIRD IS THE ONLY ONE THAT DISCRIMINATES. Once `0-setup` is DECLARED it
+# takes the quiet path under BOTH the correct and the broken implementation, so a matrix of
+# {`0-setup`, `5-archived`} sits entirely in the branch that works and the broken branch never
+# runs. The silent class is narrower than "unrecognised": `9-invented` is SHAPE-INVALID and
+# exits 2, and `halted-error` is shape-VALID but error-suffixed and also exits 2. The class is
+# {shape-valid AND undeclared AND not error-suffixed}, and `3-impl-nonesuch` is its witness.
+#
+# Byte counts of a NON-ZERO result are deliberately not pinned: two readers measured 913 and 914
+# for the same cell, because the number is message-dependent. ZERO bytes is pinned; a non-zero
+# result is pinned by its NAMED-FAILURE count.
+named_failures() { printf '%s\n' "$1" | grep -c '^- ' | tr -d ' '; }
+EM_DASH_NO_BLOCKS="Refactored the parser — it now handles the nested case — and tests pass."
+
+set_phase "0-setup"
+write_transcript "$EM_DASH_NO_BLOCKS"
+lint
+assert_eq "(1) at \`0-setup\` the lint is SILENT: exit 0" "$RC" "0"
+assert_eq "    and says nothing at all -- ZERO bytes, em dashes and all" "$ERR" ""
+
+set_phase "3-impl-nonesuch"
+write_transcript "$EM_DASH_NO_BLOCKS"
+lint
+assert_eq "(3) THE DISCRIMINATING CELL: a SHAPE-VALID phase this change leaves UNDECLARED still exits 0 -- the documented fail-open. This is the cell that goes red if run() starts consulting the newly exported NON_VOICE_PHASES" "$RC" "0"
+assert_eq "    and it too says nothing -- ZERO bytes" "$ERR" ""
+
+set_phase "5-archived"
+write_transcript "$EM_DASH_NO_BLOCKS"
+lint
+assert_eq "(2) NON-ZERO CONTROL: the identical message at a declared voice moment exits 2, so cells (1) and (3) are silence and not a lint that stopped firing" "$RC" "2"
+assert_eq "    with its five NAMED failures (the count, never the byte length: two readers measured 913 and 914 for this same message)" \
+  "$(named_failures "$ERR")" "5"
+
+set_phase "halted-error"
+write_transcript "$EM_DASH_NO_BLOCKS"
+lint
+assert_eq "    NARROWING, so the silent class is not read as \"unrecognised\": \`halted-error\` is shape-VALID and still exits 2, because errorMoment matches /-error\$/" "$RC" "2"
+
+set_phase "9-invented"
+write_transcript "$EM_DASH_NO_BLOCKS"
+lint
+assert_eq "    and \`9-invented\` exits 2 for a different reason again -- it is SHAPE-INVALID against status.schema.json's pattern" "$RC" "2"
+assert_contains "    naming the schema rather than a voice rule, which is what makes it a different cell from (3)" "$ERR" "status.schema.json"
+
+rm -f "$TEMP_ISSUE_DIR/status.json"
 
 # ---------------------------------------------------------------------------
 suite "voice-lint: exp-<slug> runs are LINTED, not exempt"

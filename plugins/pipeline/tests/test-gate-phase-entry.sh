@@ -1673,6 +1673,14 @@ suite "#61 AC1 (routing half): the siting is a CHECKPOINTED entry phase, not a p
 # occurrences shared one. This is the ONE property of the siting that ships to an adopting project
 # with no `.pipeline` history: the OCCUPANCY half of R1 is a census over committed records and is
 # deliberately not asserted anywhere, because it would fail in every downstream clone.
+# LIMIT, stated rather than rewritten (#53 R1's sixth strict-form site). The terms passed here
+# spell the phase assignment in the UNQUOTED-KEY form `current_phase: "x"`, and pipeline.md
+# ALSO writes one assignment in JSON form, `"current_phase": "0-setup"`. Both live terms below
+# name phases written the unquoted way, so this helper is CORRECT today and is deliberately not
+# widened. A term aimed at a JSON-form assignment would silently return 0 here, which reads as
+# "pipeline.md does not say that" rather than as "this pattern cannot see it" -- the exact
+# confusion that let a 26-literal file be policed by a 25-literal population. Any new term
+# added here must first be checked against BOTH quoting forms.
 md61() { grep -o "$1" "$PIPELINE_MD" | wc -l | tr -d ' '; }
 
 reg61 "#61-A1"
@@ -2726,5 +2734,145 @@ assert_eq "#63-Z1 no #63 assertion id is used twice (a colliding label makes the
 assert_eq "#63-Z2 every #63 id written in this file was REGISTERED by a cell that ran" \
   "$(printf '%s\n' "$AC63_UNIQ" | grep -c . | tr -d ' ')" \
   "$(grep -o '#63-[A-Za-z0-9][A-Za-z0-9]*' "${BASH_SOURCE[0]}" | sort -u | grep -c . | tr -d ' ')"
+
+# ===========================================================================================
+# #53 -- THE JUDGEMENT CLAUSE FOR `0-setup` MUST DISCRIMINATE FROM AN UNRECOGNISED PHASE
+#
+# THE DEFECT. `0-setup` is the run's first recorded phase and a real occupied one, but it sits
+# in no cell of this guard's partition, so it falls through to the fail-open branch for a phase
+# the table does not know. Its decision reason therefore carries a judgement clause BYTE-
+# IDENTICAL to the one produced for an invented phase: the run's setup step is judged as if it
+# were a typo.
+#
+# THE CLAUSE, NOT THE REASON STRING, AND THAT DISTINCTION IS WHAT MAKES THIS FALSIFIABLE. The
+# guard interpolates the record's OWN directory and phase into a leading
+# `.pipeline/<dir> at `<phase>`` span, so the two FULL reason strings ALREADY differ at HEAD and
+# an assertion over them is green with the defect live. Everything below strips that
+# record-derived span first and compares what remains.
+#
+# THE STRIP IS AN ANCHORED PATTERN, NEVER A FIXED-LENGTH CUT. Measured at HEAD: the two records'
+# interpolated spans have DIFFERENT byte lengths, so a `cut -c N-` makes the two clauses differ
+# trivially, ships green with the defect live, and reproduces the original defect at new
+# coordinates. #53-A7 asserts that length difference rather than leaving it as a claim.
+#
+# EXPECTED STATE OF THIS SECTION BEFORE THE FIX: #53-A4 is the RED one, and it is red because
+# both clauses are the same 31 bytes. Every other cell here is green at HEAD, by design -- they
+# are the premises and the controls that make #53-A4's red mean what it says.
+# ===========================================================================================
+
+AC53_IDS=""
+reg53() { AC53_IDS="$AC53_IDS$1
+"; }
+
+# ac53_probe <phase> [updated_at-iso] [extra-top-level-json-with-leading-comma]
+#   -> "<rc>|<decision>|<clause>|<clause-bytes>|<prefix-bytes>"
+# The clause and BOTH byte counts are taken off the guard's LIVE stdout, never off this file's
+# own prose: a spec's text is not the running guard, and the only number worth asserting is the
+# one the process produced.
+ac53_probe() {
+  new_tmpdir || exit 90
+  local root="$NEW_TMPDIR" out rc
+  mkdir -p "$root/.pipeline/999"
+  printf '{"issue_number":999,"current_phase":"%s","updated_at":"%s","events":[]%s}' \
+    "$1" "${2:-$FRESH_ISO}" "${3:-}" > "$root/.pipeline/999/status.json"
+  out="$(node "$GUARD" --root "$root" 2>/dev/null)"; rc=$?
+  printf '%s' "$out" | node -e '
+    let s = "";
+    process.stdin.on("data", (d) => (s += d)).on("end", () => {
+      let j;
+      try { j = JSON.parse(s); } catch { process.stdout.write(process.argv[1] + "|<unparseable-stdout>|<none>|-1|-1"); return; }
+      const reason = String(j.reason == null ? "" : j.reason);
+      const m = /^\.pipeline\/[^ ]+ at `[^`]*`/.exec(reason);
+      const clause = m ? reason.slice(m[0].length) : "<NO-RECORD-DERIVED-PREFIX>";
+      process.stdout.write([
+        process.argv[1], String(j.decision), clause,
+        String(Buffer.byteLength(clause, "utf8")),
+        String(m ? Buffer.byteLength(m[0], "utf8") : -1),
+      ].join("|"));
+    });
+  ' "$rc"
+}
+ac53_f() { printf '%s' "$1" | cut -d'|' -f"$2"; }
+
+AC53_SETUP="$(ac53_probe "0-setup")"
+AC53_GHOST="$(ac53_probe "9-invented")"
+AC53_HALT="$(ac53_probe "1-ba-open-questions")"
+AC53_TERM="$(ac53_probe "5-archived")"
+
+# ---------------------------------------------------------------------------
+suite "#53 AC7 premises: the record-derived span is real, and the strip removes exactly it"
+# ---------------------------------------------------------------------------
+reg53 "#53-A1"
+assert_eq "#53-A1 the reason for a record at \`0-setup\` carries the record-derived \`.pipeline/<dir> at \\\`<phase>\\\`\` span, and the anchored strip matches it. Without this premise a failed strip would return the WHOLE reason and #53-A4 would compare two strings that trivially differ" \
+  "$([[ "$(ac53_f "$AC53_SETUP" 5)" -gt 0 ]] && echo stripped || echo "NO PREFIX MATCHED: $(ac53_f "$AC53_SETUP" 3)")" "stripped"
+reg53 "#53-A2"
+assert_eq "#53-A2 and so does the reason for a record at \`9-invented\`" \
+  "$([[ "$(ac53_f "$AC53_GHOST" 5)" -gt 0 ]] && echo stripped || echo "NO PREFIX MATCHED: $(ac53_f "$AC53_GHOST" 3)")" "stripped"
+reg53 "#53-A7"
+assert_eq "#53-A7 THE STRIP CANNOT BE A FIXED-LENGTH CUT: the two records' interpolated spans have DIFFERENT byte lengths, so any \`cut -c N-\` makes the two clauses differ at HEAD and ships GREEN with the defect live. This cell is why the strip is an anchored pattern" \
+  "$([[ "$(ac53_f "$AC53_SETUP" 5)" != "$(ac53_f "$AC53_GHOST" 5)" ]] && echo differ || echo "EQUAL LENGTHS: a fixed cut would be indistinguishable here")" "differ"
+
+# ---------------------------------------------------------------------------
+suite "#53 AC7: the clause for \`0-setup\` DIFFERS from the clause for an invented phase"
+# ---------------------------------------------------------------------------
+reg53 "#53-A3"
+assert_eq "#53-A3 PAIRED NEGATIVE, an EXACT equality taken off LIVE stdout: an unrecognised phase's remaining clause is still exactly the fail-open sentence, 31 bytes. This is what makes #53-A4 a discrimination rather than a claim that something changed" \
+  "$(ac53_f "$AC53_GHOST" 3)/$(ac53_f "$AC53_GHOST" 4)" ", which is not a guarded phase./31"
+reg53 "#53-A4"
+assert_eq "#53-A4 THE CRITERION: with the record-derived span stripped, the judgement clause for \`0-setup\` is NOT the clause for an invented phase. RED before the fix, where both are the identical 31-byte fail-open sentence and the run's own setup step is judged as if it were a typo" \
+  "$([[ "$(ac53_f "$AC53_SETUP" 3)" != "$(ac53_f "$AC53_GHOST" 3)" ]] && echo discriminates || echo "IDENTICAL CLAUSES ($(ac53_f "$AC53_SETUP" 4) bytes each): $(ac53_f "$AC53_SETUP" 3)")" \
+  "discriminates"
+reg53 "#53-A5"
+assert_eq "#53-A5 and this change is BEHAVIOUR-NEUTRAL at runtime: both records still decide \`not-applicable\` and still exit 0. Only the declaration and the clause move" \
+  "$(ac53_f "$AC53_SETUP" 1)/$(ac53_f "$AC53_SETUP" 2)/$(ac53_f "$AC53_GHOST" 1)/$(ac53_f "$AC53_GHOST" 2)" \
+  "0/not-applicable/0/not-applicable"
+reg53 "#53-A6"
+assert_eq "#53-A6 LIVE POSITIVE CONTROLS that a clause CAN differ under this instrument, so #53-A4's red is about the subject and not about the strip: an UNGUARDED phase's clause is 51 bytes and a TERMINAL one's is 13, both taken off live stdout and both distinct from the 31" \
+  "$(ac53_f "$AC53_HALT" 4)/$(ac53_f "$AC53_TERM" 4)" "51/13"
+
+# ---------------------------------------------------------------------------
+suite "#53 R4(b): the new cell's branch sits AFTER the terminal check"
+# ---------------------------------------------------------------------------
+# A PRESERVATION PIN. Green at HEAD and green after a correct fix; its bite is proved by
+# mutation, not by colour. MEASURED both ways: with the new branch placed AFTER the terminal
+# check a `0-setup` record carrying `completed_at` still renders ` is finished.`; with the same
+# branch moved BEFORE it, the identical record renders the setup-step clause -- a terminal
+# record judged non-terminal. That is the concrete regression this cell exists to refuse.
+AC53_TERM_SETUP="$(ac53_probe "0-setup" "$FRESH_ISO" ",\"completed_at\":\"$FRESH_ISO\"")"
+reg53 "#53-P1"
+assert_eq "#53-P1 a record at \`0-setup\` carrying \`completed_at\` is judged FINISHED, not judged as a setup step: the terminal check runs first, and a new partition branch placed before it would silently un-finish every concluded run that ended at this phase" \
+  "$(ac53_f "$AC53_TERM_SETUP" 3)" " is finished."
+
+# ---------------------------------------------------------------------------
+suite "#53 AC7's non-zero control: dated from the ceiling the guard exports, not from a literal"
+# ---------------------------------------------------------------------------
+# A LITERAL ISO TIMESTAMP STOPS BEING A CONTROL, SILENTLY, ON A 24-HOUR TIMER. Measured against
+# this guard: the same `3-impl` architectural record with no design.json gives rc 2 `refused` at
+# now-23h and rc 0 `not-applicable` at now-25h and at any fixed past date. And `Date.parse`
+# splits on MAGNITUDE rather than on numeric-ness -- `"12345"` parses to the YEAR 12345, finite
+# and FUTURE-dated, so such a fixture reads as permanently in flight and fires the control for
+# the wrong reason, surviving any staleness mutation aimed at it. The date below is therefore
+# derived AT RUN TIME from the ceiling the guard itself exports, and the age is asserted INSIDE
+# that ceiling BEFORE the rc-2 outcome is read as evidence.
+AC53_CTRL_ISO="$(iso_ms_ago $(( IN_FLIGHT_MS / 2 )))"
+reg53 "#53-N1"
+assert_eq "#53-N1 PREMISE, asserted before the outcome is read as evidence: the control fixture's age is INSIDE the ceiling read out of the guard. An out-of-window fixture fails by name here instead of abstaining with rc 0 and looking like a pass" \
+  "$(ac63_age_vs_ceiling "$AC53_CTRL_ISO" "$IN_FLIGHT_MS")" "inside"
+AC53_CTRL="$(ac53_probe "3-impl" "$AC53_CTRL_ISO" ",\"risk_tier\":\"architectural\"")"
+reg53 "#53-N2"
+assert_eq "#53-N2 NON-ZERO CONTROL: the same probe over a record whose prerequisite is genuinely missing exits 2 and decides \`refused\`, so every \`not-applicable\`/exit-0 cell above is the guard abstaining on purpose and not the probe failing to reach it" \
+  "$(ac53_f "$AC53_CTRL" 1)/$(ac53_f "$AC53_CTRL" 2)" "2/refused"
+
+# ---------------------------------------------------------------------------
+suite "#53 the label namespace: unique, and every id that exists actually RAN"
+# ---------------------------------------------------------------------------
+reg53 "#53-Z1"
+reg53 "#53-Z2"
+AC53_UNIQ="$(printf '%s' "$AC53_IDS" | grep . | sort -u)"
+assert_eq "#53-Z1 no #53 assertion id is used twice (a colliding label makes a mutation battery's grep return two unrelated sites)" \
+  "$(printf '%s\n' "$AC53_IDS" | grep -c . | tr -d ' ')" "$(printf '%s\n' "$AC53_UNIQ" | grep -c . | tr -d ' ')"
+assert_eq "#53-Z2 every #53 id written in this file was REGISTERED by a cell that ran" \
+  "$(printf '%s\n' "$AC53_UNIQ" | grep -c . | tr -d ' ')" \
+  "$(grep -o '#53-[A-Za-z0-9][A-Za-z0-9]*' "${BASH_SOURCE[0]}" | sort -u | grep -c . | tr -d ' ')"
 
 finish
