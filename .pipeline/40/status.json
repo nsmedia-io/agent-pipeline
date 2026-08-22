@@ -1,8 +1,8 @@
 {
   "issue_number": 40,
-  "current_phase": "3-impl",
+  "current_phase": "4-review",
   "started_at": "2026-08-21T18:53:19Z",
-  "updated_at": "2026-08-22T05:10:00Z",
+  "updated_at": "2026-08-22T05:20:44Z",
   "branch": "claude/lane-4-a521bf",
   "ask_text": "#40: reviewers state properties, not implementations; only QA and Dev propose how. Typed required_property across agents/*.md, both review schemas, Phase 4 preamble.",
   "events": [
@@ -70,6 +70,12 @@
       "verdict": "FIX_ROUND_COMPLETE",
       "at": "2026-08-22T05:10:00Z",
       "note": "round 4 fixes: QA Q2 blocker (worked cases re-sorted in all 11 locations, RFC 6238 IN case, AC3.pairsort + pairflip), Q1 (AC15.52.replaced now bites on review/remediation), Q3 (clause d population rule + shrink hazard), AC1.verbatim retired; rebased onto cc41c11"
+    },
+    {
+      "phase": "3-impl",
+      "verdict": "FIX_ROUND_COMPLETE",
+      "at": "2026-08-22T05:20:44Z",
+      "note": "round 4: exemplar sorts OUT, RFC-located IN case, credential cell rebuilt, AC1.verbatim retired"
     }
   ],
   "flags": [
@@ -250,7 +256,7 @@
     "dev",
     "qa"
   ],
-  "review_rounds": 3,
+  "review_rounds": 4,
   "reviewed_head": "2ef09a523f7b9143eeed6f9a3d1d3728a478bc1d",
   "final_verdict": "REQUEST_CHANGES",
   "peer_review_verdict_counts": {
