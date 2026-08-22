@@ -23,8 +23,9 @@
  * among the issue dirs. Two consequences are load-bearing and neither is hypothetical:
  *   - The Stop hook is PROJECT-scoped, not run-scoped, so without a recency ceiling an
  *     abandoned run parked at a guarded phase would refuse every turn in that project forever.
- *     Hence the in-flight predicate below (R6), reusing pipeline-status.mjs's own 24h /
- *     no-final-verdict definition rather than inventing a second one.
+ *     Hence the in-flight predicate below (R6). Its 24h / no-final-verdict window is a SECOND
+ *     copy of the one pipeline-status.mjs holds at :156, not a shared symbol: see the drift
+ *     note above `inFlight`, which is where that duplication lives and where #74 tracks it.
  *   - An explicit signal (CLAUDE_PIPELINE_ACTIVE_ISSUE / PIPELINE_ACTIVE_ISSUE) must not be
  *     able to NARROW the subject: pointing it at a satisfied dir would be the env-var opt-out
  *     the design rejected, and it would leave no trace in the archived record. So both the
@@ -160,7 +161,7 @@ export const UNGUARDED = [
  */
 export const TERMINAL = ["5-archived"];
 
-const IN_FLIGHT_MS = 24 * 60 * 60 * 1000;
+export const IN_FLIGHT_MS = 24 * 60 * 60 * 1000;
 
 /**
  * An unusable risk_tier resolves to the STRICTEST row, never the loosest. That default is right
@@ -487,10 +488,17 @@ function prerequisiteSatisfied(issueDir, row, events) {
 }
 
 /**
- * A run is IN FLIGHT when it was updated under 24h ago and carries no final verdict -- the
- * predicate pipeline-status.mjs already uses to call a run "possibly stuck", inverted. A record
+ * A run is IN FLIGHT when it was updated under 24h ago and carries no final verdict. A record
  * with no readable `updated_at` is not in flight: the guard cannot date it, and a control that
  * cannot date a record must not hold a project's turns open on it.
+ *
+ * DRIFT RISK, LIVE AND UNRESOLVED, TRACKED IN #74. The window below is this module's OWN
+ * literal. pipeline-status.mjs:156 holds an independent copy of the same number to call a run
+ * "possibly stuck", and the two are inverses on the age term ALONE: an undatable record is
+ * neither stuck there nor in flight here, so neither predicate is the negation of the other.
+ * No symbol is shared, so they agree only for as long as nobody moves one of them, and nothing
+ * in this tree fails if one does. #74 carries the several independent spellings of this window
+ * and the abstention they hide; until it lands the agreement is a coincidence, not a contract.
  */
 function inFlight(status, now) {
   if (status.final_verdict) return false;
