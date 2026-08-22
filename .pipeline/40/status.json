@@ -2,7 +2,7 @@
   "issue_number": 40,
   "current_phase": "3-impl",
   "started_at": "2026-08-21T18:53:19Z",
-  "updated_at": "2026-08-22T04:10:13Z",
+  "updated_at": "2026-08-22T05:10:00Z",
   "branch": "claude/lane-4-a521bf",
   "ask_text": "#40: reviewers state properties, not implementations; only QA and Dev propose how. Typed required_property across agents/*.md, both review schemas, Phase 4 preamble.",
   "events": [
@@ -64,6 +64,12 @@
       "verdict": "REQUEST_CHANGES",
       "at": "2026-08-22T04:10:13Z",
       "note": "delta round 3: qa secops; SecOps cleared, QA blocker on the IN-bounds exemplar"
+    },
+    {
+      "phase": "3-impl",
+      "verdict": "FIX_ROUND_COMPLETE",
+      "at": "2026-08-22T05:10:00Z",
+      "note": "round 4 fixes: QA Q2 blocker (worked cases re-sorted in all 11 locations, RFC 6238 IN case, AC3.pairsort + pairflip), Q1 (AC15.52.replaced now bites on review/remediation), Q3 (clause d population rule + shrink hazard), AC1.verbatim retired; rebased onto cc41c11"
     }
   ],
   "flags": [
@@ -227,6 +233,10 @@
       "verdict": "REQUEST_CHANGES",
       "summary": "IN-bounds exemplar names no openable source and round 3 made it the rules oracle; credential cell blind on remediation",
       "at": "2026-08-22T04:10:13Z"
+    },
+    {
+      "at": "2026-08-22T05:10:00Z",
+      "flag": "AC7.noRepoScope caught this round's own regression: the first cut of the clause (d) population fix named the two checkouts, which the criterion forbids. Replaced with a runnable rule before any commit."
     }
   ],
   "risk_tier": "architectural",
