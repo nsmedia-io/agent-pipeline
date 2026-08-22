@@ -1,8 +1,8 @@
 {
   "issue_number": 21,
-  "current_phase": "4-review-complete",
+  "current_phase": "5-archived",
   "started_at": "2026-08-22T12:13:26Z",
-  "updated_at": "2026-08-22T17:30:02Z",
+  "updated_at": "2026-08-22T19:03:29Z",
   "branch": "claude/lane-4-a521bf",
   "ask_text": "#21: pipeline.md claims a config-path tier trigger in bold that nothing evaluates. Make the claim honest; mechanical seat filed as #76.",
   "risk_tier": "architectural",
@@ -54,6 +54,18 @@
       "verdict": "APPROVE_WITH_NOTES",
       "at": "2026-08-22T17:30:02Z",
       "note": "six of six approve"
+    },
+    {
+      "phase": "4-review",
+      "verdict": "merged",
+      "at": "2026-08-22T19:01:08Z",
+      "note": "PR #81 squash-merged as cab267f; #21 closed. This plugin's own hook suite passes at HEAD (71/0), re-verified during the 0.25.0 release prep; not measured at the original merge point."
+    },
+    {
+      "phase": "5-archive",
+      "verdict": "dispatched",
+      "at": "2026-08-22T19:03:29Z",
+      "note": "Librarian dispatched non-blocking; the run is terminal at dispatch time, not on its return. Backfilled during the 0.25.0 release prep: knowledge/issue-archive/21.json was written at this timestamp (commit 51fc0f9) but this event and the current_phase update were never recorded, leaving the run looking open."
     }
   ],
   "flags": [
