@@ -1,8 +1,8 @@
 {
   "issue_number": 19,
-  "current_phase": "3-impl",
+  "current_phase": "4-review",
   "started_at": "2026-08-22T19:06:32Z",
-  "updated_at": "2026-08-22T22:10:25Z",
+  "updated_at": "2026-08-22T23:01:59Z",
   "branch": "claude/lane-4-a521bf",
   "ask_text": "#19: Phase 4 panelists share one worktree, so mutation batteries corrupt each other. Live evidence gathered during #40 and #21.",
   "events": [
@@ -60,6 +60,11 @@
       "phase": "3a-qa",
       "verdict": "CONTRACT_AUTHORED",
       "at": "2026-08-22T22:10:25Z"
+    },
+    {
+      "phase": "3-impl",
+      "verdict": "IMPL_COMPLETE",
+      "at": "2026-08-22T23:01:59Z"
     }
   ],
   "flags": [
@@ -146,6 +151,13 @@
       "verdict": "CONTRACT_AUTHORED",
       "summary": "56 cells, 30 red contract; proved passable on a throwaway reference impl (67/0); 11 kill-mutations caught, 3 survivors",
       "at": "2026-08-22T22:10:25Z"
+    },
+    {
+      "phase": "3b-dev",
+      "agent": "dev",
+      "verdict": "IMPL_COMPLETE",
+      "summary": "67/0 battery, all controls fire; ran the suite in a tree built by the rule it ships; registry 18 to 18",
+      "at": "2026-08-22T23:01:59Z"
     }
   ],
   "risk_tier": "architectural",
@@ -156,5 +168,15 @@
     "answer": "proceed narrowed",
     "detail": "add the trigger and commit-hygiene criteria; ship the prose rules plus the --absolute-git-dir fix; defer tracked_writes to #76 with its measurement block intact"
   },
-  "phase3_qa_battery": ".pipeline/19/verify-19.sh"
+  "phase3_qa_battery": ".pipeline/19/verify-19.sh",
+  "panel_roles": [
+    "ba",
+    "dba",
+    "devops",
+    "secops",
+    "dev",
+    "qa"
+  ],
+  "review_rounds": 1,
+  "reviewed_head": "76f5e2bdd08957690b6ce31b8c14fdf284a9af3c"
 }
