@@ -1,8 +1,8 @@
 {
   "issue_number": 40,
-  "current_phase": "4-review-complete",
+  "current_phase": "5-archived",
   "started_at": "2026-08-21T18:53:19Z",
-  "updated_at": "2026-08-22T06:10:00Z",
+  "updated_at": "2026-08-22T11:48:01Z",
   "branch": "claude/lane-4-a521bf",
   "ask_text": "#40: reviewers state properties, not implementations; only QA and Dev propose how. Typed required_property across agents/*.md, both review schemas, Phase 4 preamble.",
   "events": [
@@ -89,6 +89,11 @@
       "verdict": "APPROVE_WITH_NOTES",
       "summary": "nits fixed before merge (no panel re-run). Five closed: QA-N1 exposure-note inversion (class scan + negated-protection leg), QA-N2 IN-case literal derived from the block and required in the eleventh copy, SecOps-N1 propagation sentence names four loci, QA-N3 locator message stops claiming the note is absent, QA-N4 QM5 recorded as AC3.pairsort expected survivor. Block unchanged, span digest still 14b65c48479dfceefb780689adccfbd53656b21e.",
       "at": "2026-08-22T06:10:00Z"
+    },
+    {
+      "phase": "5-archive",
+      "verdict": "ARCHIVED",
+      "at": "2026-08-22T11:48:01Z"
     }
   ],
   "flags": [
@@ -279,5 +284,8 @@
     "request_refactor": 0,
     "veto": 0
   },
-  "first_round_head": "2ef09a523f7b9143eeed6f9a3d1d3728a478bc1d"
+  "first_round_head": "2ef09a523f7b9143eeed6f9a3d1d3728a478bc1d",
+  "completed_at": "2026-08-22T11:48:01Z",
+  "merged_sha": "7a052d3",
+  "knowledge_pr": "https://github.com/nsmedia-io/agent-pipeline/pull/75"
 }
