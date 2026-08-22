@@ -83,12 +83,33 @@ import { activeIssueDir } from "./validate-pipeline-artifact.mjs";
  * `content` marks a row whose prerequisite is not satisfied by mere presence. Such a row is
  * strictly weaker through events[] than through the file, because an event attests DISPATCH,
  * never APPROVAL, and that asymmetry is stated rather than defended against.
+ *
+ * `also` is a SECOND requirement on the same row, carrying its own file, its own token set and
+ * its own optional `content`. It is checked only after the primary one passes, so a refusal
+ * never names two files at once and the message keeps its single-route shape. THE ARITY IS TWO,
+ * and the ceiling is defended rather than assumed: a third requirement written as a nested
+ * `also.also` would be both invisible to `satisfyingTokens` and inert on the decision path -- a
+ * written requirement silently not enforced, the guard claiming more than it knows -- so the
+ * table's key sets are asserted as a shape (re-derive with `git grep -n 'rowShapes'
+ * plugins/pipeline/tests/test-gate-phase-entry.sh`). An `also` on a `byTier` cell is legal and
+ * fully live on both paths; measured, not assumed. Nothing needs one today.
  */
 const PREREQUISITES = {
   "0.5-map": { file: null, tokens: [] },
+  // The `tiers` key survives for the REWORK RE-ENTRY only: a second visit to this checkpoint can
+  // find a tier already in the field, and there the row applies normally. It cannot police a
+  // first visit, because the checkpoint is written before the dispatch that returns the tier --
+  // which is why the map obligation is now ALSO stated at `2-review`, where the routing itself is
+  // the tier evidence. Do not delete this key: commands/pipeline.md publishes a re-derivation
+  // command asserting exactly one hit, and it is this one.
   "1-ba": { file: "map.json", tokens: ["0.5"], tiers: ["architectural"] },
   "2-constraints": { file: "spec.json", tokens: ["1"], content: "ba-approved" },
-  "2-review": { file: "spec.json", tokens: ["1"], content: "ba-approved" },
+  "2-review": {
+    file: "spec.json",
+    tokens: ["1"],
+    content: "ba-approved",
+    also: { file: "map.json", tokens: ["0.5"] },
+  },
   "2.5-design": { file: "review.json", tokens: ["2"] },
   "3-impl": {
     byTier: {
@@ -172,20 +193,44 @@ const IN_FLIGHT_MS = 24 * 60 * 60 * 1000;
  * count the times the record sits at this phase. Reading it the other way is what made both of
  * the since-deleted `necessarily` versions named above look true.
  *
- * WHAT THIS COSTS, stated accurately because the comfortable version of the sentence is false
- * the moment it is written: `1-ba` is the only row carrying a `tiers` key (re-derive with
- * `git grep -n 'tiers: \[' plugins/pipeline/scripts/gate-phase-entry.mjs`), and on the path
- * pipeline.md mandates, its map.json requirement is RETIRED AT EVERY TIER -- not narrowed to
- * the architectural one. A row gated on a resolved tier cannot fire while the tier is still
- * absent, and where a tier IS in the field this early it is there BECAUSE 0.5 ran -- the same
- * run whose `0.5` event satisfies this row. So on the mandated path the row either does not
- * apply or is already satisfied when it does, at every tier and on the first visit as much as
- * on a re-entry. (The corpus above is the evidence: the two records that arrive at `1-ba`
- * carrying `architectural` carry `0.5-map` in events[] as well.) What is traded away is an UNDISCRIMINATING refusal (today the
- * row refuses trivial, standard and architectural alike at `1-ba`), and what is bought is the
- * removal of a first-turn refusal that teaches its operator to reach for this guard's widest
- * disarm. Re-siting the requirement at a phase where the tier IS resolved is #61, which must
- * also rule on the now-mostly-dead `tiers` key rather than leave a row that looks live.
+ * WHAT THIS COSTS AT `1-ba`, stated accurately because the comfortable version of the sentence
+ * is false the moment it is written: `1-ba` is the only row carrying a tier restriction
+ * (re-derive with `git grep -n 'tiers: \[' plugins/pipeline/scripts/gate-phase-entry.mjs`), and
+ * on the path pipeline.md mandates that row's map.json obligation cannot police a first visit at
+ * any tier. A row gated on a resolved tier cannot fire while the tier is still absent, and where
+ * a tier IS in the field this early it is there BECAUSE 0.5 ran -- the same run whose `0.5` event
+ * satisfies the row. So on the mandated path the row either does not apply or is already
+ * satisfied when it does. (The corpus above is the evidence: the two records that arrive at
+ * `1-ba` carrying `architectural` carry `0.5-map` in events[] as well.) What was traded away is
+ * an UNDISCRIMINATING refusal -- the row used to refuse trivial, standard and architectural alike
+ * at `1-ba` -- and what was bought is the removal of a first-turn refusal that teaches its
+ * operator to reach for this guard's widest disarm. The key is kept, and the rework re-entry is
+ * the one thing it still does.
+ *
+ * WHERE THE OBLIGATION IS ENFORCED INSTEAD (#61): the map.json requirement now lives on the
+ * 2-review row, as a SECOND requirement beside that row's existing ba-approved spec.json check
+ * rather than in place of it -- swapping would have deleted the only ba-approved gate an
+ * architectural run ever reaches. That row takes no tier restriction of any kind, and does not
+ * need one, because the PHASE NAME is the tier evidence and a strictly better one than the
+ * record's own field: `risk_tier` is optional in status.schema.json and no script writes it,
+ * while `current_phase` is written by the orchestrator following pipeline.md's routing.
+ *
+ * WHY THAT ROW, on two measured properties, each cited by a command rather than by a number that
+ * would rot. ROUTING: pipeline.md mandates a checkpoint into `2-review` on the architectural
+ * route only, and mandates no checkpoint into any `<phase>-complete` literal -- re-derive the
+ * pair with `git grep -c 'Checkpoint first.*current_phase: "2-review"'
+ * plugins/pipeline/commands/pipeline.md` and the same command with `1-ba-complete`, which must
+ * return 1 and 0. The naive `git grep -c 'current_phase: "2-review"'` does NOT discriminate: it
+ * returns 1 for this row and 1 for every `-complete` literal too, so it answers the same for the
+ * row that was chosen and the row that was rejected. OCCUPANCY: five of the fifteen guarded rows
+ * have never been a persisted `current_phase` in any commit of any ref, and all five are
+ * `-complete` literals the orchestrator passes THROUGH in a single write; a requirement sited on
+ * one of those is unreachable in production however green its tests are. Take that census, never
+ * quote a stored count -- every run checkpoints into the corpus being counted, so the figure
+ * decays between readings while the ZEROES do not:
+ * `git log --all --format=%H | while read s; do git ls-tree -r --name-only $s | grep -E
+ * '^\.pipeline/[^/]+/status\.json$' | while read f; do echo "$(git rev-parse $s:$f)|$f|$(git
+ * show $s:$f | grep -o '"current_phase": *"[^"]*"')"; done; done | sort -u`.
  *
  * THE SECOND COST, accepted: a typo'd risk_tier turns a tiers-restricted row OFF rather than
  * ON. That does not contradict the strictest default above; it is the same rule one function
@@ -211,7 +256,13 @@ const IN_FLIGHT_MS = 24 * 60 * 60 * 1000;
  * concluded. (1) Tooling fail-open: an unreadable or non-object record returns null and the
  * caller renders silence -- rc 0 and empty stdout, which an rc-only reader cannot tell from a
  * pass. (2) An mtime tie resolves to NO active issue rather than to readdir order (re-derive
- * with `git log --oneline --grep 'mtime tie'`). (3) This undetermined-tier row-off.
+ * with `git log --oneline --grep 'mtime tie'`). (3) This undetermined-tier row-off, which since
+ * #61 skips only the `1-ba` rework re-entry check and no longer decides whether the map
+ * obligation is enforced at all -- the count of abstaining rows is unchanged, what changed is
+ * what the abstention costs. The set is asserted on the OUTCOME rather than on this sentence
+ * (re-derive with `git grep -n 'exactly ONE guarded row abstains'
+ * plugins/pipeline/tests/test-gate-phase-entry.sh`), because an inventory is prose and prose
+ * cannot fail.
  *
  * Split, because the conjunction claimed the wrong thing: (3) is the only one that names itself
  * in its own OUTPUT. (2) is silent, but it IS pinned, with a tie-breaking control (re-derive
@@ -263,10 +314,68 @@ function appliesAtTier(phase, tier, tierDetermined) {
 /**
  * The row's satisfying token set. Empty for a phase with no prerequisite and for any phase that
  * is not a guarded row, so a caller cannot read "no tokens" as "any token will do".
+ *
+ * The UNION over both halves of a two-requirement row, because this is the only surface through
+ * which the drift suite enumerates what the guard will accept: a token the decision path honours
+ * but this function does not return is invisible to the one check that exists to catch strays.
+ * The union is a REPORTING surface and is never fed back into `eventsSatisfy` -- each half is
+ * matched against its OWN tokens, or a `1-ba` event would stand in for the map.
  */
 export function satisfyingTokens(phase, tier) {
   const row = rowFor(phase, normalizeTier(tier));
-  return row && Array.isArray(row.tokens) ? [...row.tokens] : [];
+  if (!row) return [];
+  const own = Array.isArray(row.tokens) ? row.tokens : [];
+  const also = row.also && Array.isArray(row.also.tokens) ? row.also.tokens : [];
+  return [...own, ...also];
+}
+
+/**
+ * Every key set in the rule table above, one entry per position, tagged with WHICH POSITION it
+ * occupies. The PERMITTED key sets deliberately live in the test and not here: a table that
+ * published its own permitted keys would be graded against its own opinion, and the thing worth
+ * catching is a key nobody taught the walk to read.
+ *
+ * FOUR KINDS, NOT TWO, because the same key name means different things depending on where it is
+ * written, and a check total over NAMES is not total over POSITIONS. Each kind is named for the
+ * set of readers that reach it:
+ *   - `row`        a plain top-level row. Every reader reaches it.
+ *   - `dispatcher` a top-level row carrying `byTier`. `rowFor` returns the CELL, so `file`,
+ *                  `tokens`, `content` and `also` written here are never read -- and a `file`
+ *                  written here is a requirement the guard grants without checking.
+ *   - `cell`       a `byTier` cell. `appliesAtTier` reads `tiers` off the RAW top-level row, so
+ *                  a `tiers` written on a cell is never read.
+ *   - `also`       a second-requirement sub-row. Its arity ceiling is two, so a nested `also`
+ *                  here is the third requirement nothing enforces.
+ * Every inert position named above was driven through the CLI rather than reasoned about, and
+ * `tiers` on a DISPATCHER is the one key that survives that test: it IS read, so it stays in the
+ * dispatcher's permitted set. Excluding a key the guard honours is the same error pointed the
+ * other way.
+ *
+ * EACH ENTRY CARRIES ITS RAW POSITION OBJECT as `node`, because a key set cannot see a SIBLING
+ * relation: `tokens` and `content` are read only inside `checkOne`, which a vacuous primary
+ * skips, so they mean nothing unless the `file` beside them is truthy -- and `{ file: null,
+ * tokens: [] }` and `{ file: null, tokens: ["0.5"] }` have the IDENTICAL key set. The raw object
+ * is published rather than a verdict about it for the same reason the permitted sets live in the
+ * test: a table that graded its own values would be graded against its own opinion.
+ */
+export function rowShapes() {
+  const out = [];
+  // The kind is a property of the POSITION, not of the contents: a `byTier` nested inside a cell
+  // is tagged `cell` and its `byTier` key is a stray, which is what it deserves -- it disarms the
+  // row it is written on. Tagging by contents would re-admit it as another dispatcher.
+  const walk = (at, kind, obj) => {
+    out.push({ path: at, kind, keys: Object.keys(obj).sort(), node: obj });
+    if (obj.byTier) {
+      for (const [cellTier, cell] of Object.entries(obj.byTier)) {
+        walk(`${at}.byTier.${cellTier}`, "cell", cell);
+      }
+    }
+    if (obj.also) walk(`${at}.also`, "also", obj.also);
+  };
+  for (const [phase, raw] of Object.entries(PREREQUISITES)) {
+    walk(phase, raw.byTier ? "dispatcher" : "row", raw);
+  }
+  return out;
 }
 
 function contentSatisfies(artifactPath, row) {
@@ -325,15 +434,56 @@ function eventsSatisfy(events, tokens) {
  *
  * Returns WHICH SOURCE decided as well as the outcome, because the two refusals need different
  * messages: telling an operator that a file they are looking at is not present, and telling them
- * to re-run the phase that already produced it, are both false on a content failure.
+ * to re-run the phase that already produced it, are both false on a content failure. It also
+ * returns WHICH HALF decided, so the message names the file that actually failed.
+ */
+function checkOne(issueDir, subRow, events) {
+  const artifactPath = path.join(issueDir, subRow.file);
+  if (existsSync(artifactPath)) {
+    return { ok: contentSatisfies(artifactPath, subRow), artifact: "present" };
+  }
+  return { ok: eventsSatisfy(events, subRow.tokens), artifact: "absent" };
+}
+
+/**
+ * PRIMARY FIRST, and the short circuit is load-bearing for the MESSAGE rather than for the
+ * decision: a row is satisfied only when both halves are, in either order, so the ba-approved
+ * obligation cannot be swapped away by re-ordering. What the ordering buys is that a doubly
+ * failing row names ONE file, which is the single-route shape the refusal template and its test
+ * both depend on. The cost is that an operator who fails both halves at once returns for a
+ * second refusal after fixing the first; both refusals are correct and both are actionable.
+ *
+ * A VACUOUS PRIMARY IS A VALUE, NEVER AN EARLY RETURN. A row with no `file` owes nothing on its
+ * primary half, and it is tempting to answer `ok` and stop -- but stopping there skips `also`
+ * entirely, so a second requirement written on such a row would be reported by
+ * `satisfyingTokens` and never enforced: the guard claiming more than it knows, which is the
+ * one failure this row's own arity ceiling exists to prevent. The fall-through makes that a fact
+ * about THIS FUNCTION for `also`, whatever the table later holds.
+ *
+ * IT DOES NOT EXTEND TO THE OTHER TWO FIELDS, and reading it as if it did is how the same defect
+ * survives one key over. `tokens` and `content` are read only inside `checkOne`, which a vacuous
+ * primary still skips, so on a `file: null` row they are consulted by NO reader on the decision
+ * path -- while `satisfyingTokens` reports the tokens to the drift suite regardless. That today
+ * harms nothing IS a fact about the table's current contents (`0.5-map` carries `tokens: []`),
+ * and it is the shape walk that keeps it one: it refuses a falsy `file` sitting beside a live
+ * `tokens` or `content`. Do not add that pair here -- a table graded by its own reader is graded
+ * against its own opinion.
  */
 function prerequisiteSatisfied(issueDir, row, events) {
-  if (!row.file) return { ok: true, artifact: "none" };
-  const artifactPath = path.join(issueDir, row.file);
-  if (existsSync(artifactPath)) {
-    return { ok: contentSatisfies(artifactPath, row), artifact: "present" };
+  const primary = row.file ? checkOne(issueDir, row, events) : { ok: true, artifact: "none" };
+  if (!primary.ok) return { ...primary, file: row.file, content: row.content || null };
+  if (row.also) {
+    const secondary = checkOne(issueDir, row.also, events);
+    if (!secondary.ok) {
+      return { ...secondary, file: row.also.file, content: row.also.content || null };
+    }
   }
-  return { ok: eventsSatisfy(events, row.tokens), artifact: "absent" };
+  return {
+    ok: true,
+    artifact: primary.artifact,
+    file: row.file || null,
+    content: row.content || null,
+  };
 }
 
 /**
@@ -410,17 +560,20 @@ function decideForDir(issueDir, now) {
   if (prereq.ok) {
     return decided("granted", `${at}: its prerequisite is satisfied.`);
   }
+  // The FAILING half's file and content, not the row's: a row can hold two requirements, and a
+  // message naming the half that passed would send the operator after a file already in front of
+  // them. Both values are table literals either way, so nothing from status.json reaches stderr.
   const reason =
     prereq.artifact === "present"
-      ? `${at} (${tier}) has a \`${row.file}\` that does not satisfy this row, and a present artifact is not rescued by events[].`
-      : `${at} (${tier}) has no \`${row.file}\` and no events[] entry recording that phase closing.`;
+      ? `${at} (${tier}) has a \`${prereq.file}\` that does not satisfy this row, and a present artifact is not rescued by events[].`
+      : `${at} (${tier}) has no \`${prereq.file}\` and no events[] entry recording that phase closing.`;
   return {
     ...decided("refused", reason),
     phase,
-    file: row.file,
+    file: prereq.file,
     tier,
     artifact: prereq.artifact,
-    content: row.content || null,
+    content: prereq.content,
   };
 }
 
