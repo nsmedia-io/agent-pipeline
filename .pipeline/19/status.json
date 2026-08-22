@@ -1,8 +1,8 @@
 {
   "issue_number": 19,
-  "current_phase": "2-review-convergence-decision",
+  "current_phase": "1-ba",
   "started_at": "2026-08-22T19:06:32Z",
-  "updated_at": "2026-08-22T20:31:32Z",
+  "updated_at": "2026-08-22T20:35:27Z",
   "branch": "claude/lane-4-a521bf",
   "ask_text": "#19: Phase 4 panelists share one worktree, so mutation batteries corrupt each other. Live evidence gathered during #40 and #21.",
   "events": [
@@ -33,6 +33,12 @@
       "verdict": "REQUEST_CHANGES",
       "at": "2026-08-22T20:31:32Z",
       "note": "round 2; convergence budget reached"
+    },
+    {
+      "phase": "2-review",
+      "verdict": "PROCEED_NARROWED",
+      "at": "2026-08-22T20:35:27Z",
+      "note": "owner chose option 1 at the convergence budget"
     }
   ],
   "flags": [
@@ -93,5 +99,12 @@
       "at": "2026-08-22T20:31:32Z"
     }
   ],
-  "risk_tier": "architectural"
+  "risk_tier": "architectural",
+  "convergence_decision": {
+    "at": "2026-08-22T20:35:27Z",
+    "answered_by": "owner",
+    "question": "ship #19 narrowed to the prose half, deferring the schema attestation?",
+    "answer": "proceed narrowed",
+    "detail": "add the trigger and commit-hygiene criteria; ship the prose rules plus the --absolute-git-dir fix; defer tracked_writes to #76 with its measurement block intact"
+  }
 }
