@@ -1,8 +1,8 @@
 {
   "issue_number": 56,
-  "current_phase": "2-review-complete",
+  "current_phase": "2.5-design",
   "started_at": "2026-08-22T18:10:00Z",
-  "updated_at": "2026-08-22T22:22:42Z",
+  "updated_at": "2026-08-22T22:24:41Z",
   "branch": "claude/pipeline-resume-56-a82065",
   "ask_text": "voice-lint: scope the voice obligation to the turn that produced the record",
   "risk_tier": "architectural",
