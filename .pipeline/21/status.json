@@ -1,8 +1,8 @@
 {
   "issue_number": 21,
-  "current_phase": "2-review",
+  "current_phase": "2.5-design",
   "started_at": "2026-08-22T12:13:26Z",
-  "updated_at": "2026-08-22T14:09:52Z",
+  "updated_at": "2026-08-22T14:39:41Z",
   "branch": "claude/lane-4-a521bf",
   "ask_text": "#21: pipeline.md claims a config-path tier trigger in bold that nothing evaluates. Make the claim honest; mechanical seat filed as #76.",
   "risk_tier": "architectural",
@@ -10,8 +10,8 @@
     {
       "phase": "0.5-map",
       "verdict": "MAP_WRITTEN",
-      "at": "2026-08-22T12:13:26Z",
-      "note": "map.json produced inside the BA intake dispatch, not as a separate 0.5 dispatch; recording the closing event that folding omitted"
+      "at": "2026-08-22T07:27:16Z",
+      "note": "map.json produced inside the BA intake dispatch, not as a separate 0.5 dispatch; at = the map artifact OBSERVED mtime, not the checkpoint time"
     },
     {
       "phase": "1-ba",
@@ -27,6 +27,12 @@
       "phase": "1-ba",
       "verdict": "SPEC_REWORKED",
       "at": "2026-08-22T14:09:52Z"
+    },
+    {
+      "phase": "2-review",
+      "verdict": "APPROVE_WITH_NOTES",
+      "at": "2026-08-22T14:39:41Z",
+      "note": "round 2: three approvals, notes folded into the spec"
     }
   ],
   "flags": [
@@ -64,6 +70,27 @@
       "verdict": "SPEC_REWORKED",
       "summary": "floor literal written into ba.md; 12-cell cross product; AC pinned to a named SHA; #76 deferral fixed and re-read",
       "at": "2026-08-22T14:09:52Z"
+    },
+    {
+      "phase": "2-secops-r2",
+      "agent": "secops",
+      "verdict": "APPROVE_WITH_NOTES",
+      "summary": "all four round-1 findings closed; found a dead axis check whose obvious relaxation is worse",
+      "at": "2026-08-22T14:39:41Z"
+    },
+    {
+      "phase": "2-dba-r2",
+      "agent": "dba",
+      "verdict": "APPROVE_WITH_NOTES",
+      "summary": "audited the 0.5-map fix with a 7-cell probe, 4 refused 3 granted; removing the event still refuses",
+      "at": "2026-08-22T14:39:41Z"
+    },
+    {
+      "phase": "2-devops-r2",
+      "agent": "devops",
+      "verdict": "APPROVE_WITH_NOTES",
+      "summary": "re-derived all 34 suites at HEAD, 2561/0; raised its own round-1 bar after the concurrency incident",
+      "at": "2026-08-22T14:39:41Z"
     }
   ]
 }
