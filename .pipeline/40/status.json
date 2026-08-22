@@ -2,7 +2,7 @@
   "issue_number": 40,
   "current_phase": "4-review-complete",
   "started_at": "2026-08-21T18:53:19Z",
-  "updated_at": "2026-08-22T05:34:00Z",
+  "updated_at": "2026-08-22T06:10:00Z",
   "branch": "claude/lane-4-a521bf",
   "ask_text": "#40: reviewers state properties, not implementations; only QA and Dev propose how. Typed required_property across agents/*.md, both review schemas, Phase 4 preamble.",
   "events": [
@@ -82,6 +82,13 @@
       "verdict": "APPROVE_WITH_NOTES",
       "at": "2026-08-22T05:34:00Z",
       "note": "delta round 4: all six roles approve"
+    },
+    {
+      "phase": "4-nit-pass",
+      "agent": "dev",
+      "verdict": "APPROVE_WITH_NOTES",
+      "summary": "nits fixed before merge (no panel re-run). Five closed: QA-N1 exposure-note inversion (class scan + negated-protection leg), QA-N2 IN-case literal derived from the block and required in the eleventh copy, SecOps-N1 propagation sentence names four loci, QA-N3 locator message stops claiming the note is absent, QA-N4 QM5 recorded as AC3.pairsort expected survivor. Block unchanged, span digest still 14b65c48479dfceefb780689adccfbd53656b21e.",
+      "at": "2026-08-22T06:10:00Z"
     }
   ],
   "flags": [
