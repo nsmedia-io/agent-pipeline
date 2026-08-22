@@ -1,8 +1,8 @@
 {
   "issue_number": 21,
-  "current_phase": "2.5-design",
+  "current_phase": "3-impl",
   "started_at": "2026-08-22T12:13:26Z",
-  "updated_at": "2026-08-22T14:39:41Z",
+  "updated_at": "2026-08-22T14:56:19Z",
   "branch": "claude/lane-4-a521bf",
   "ask_text": "#21: pipeline.md claims a config-path tier trigger in bold that nothing evaluates. Make the claim honest; mechanical seat filed as #76.",
   "risk_tier": "architectural",
@@ -33,6 +33,11 @@
       "verdict": "APPROVE_WITH_NOTES",
       "at": "2026-08-22T14:39:41Z",
       "note": "round 2: three approvals, notes folded into the spec"
+    },
+    {
+      "phase": "2.5-design",
+      "verdict": "DESIGN_LOCKED",
+      "at": "2026-08-22T14:56:19Z"
     }
   ],
   "flags": [
@@ -91,6 +96,13 @@
       "verdict": "APPROVE_WITH_NOTES",
       "summary": "re-derived all 34 suites at HEAD, 2561/0; raised its own round-1 bar after the concurrency incident",
       "at": "2026-08-22T14:39:41Z"
+    },
+    {
+      "phase": "2.5-design",
+      "agent": "dev-judge",
+      "verdict": "DESIGN_LOCKED",
+      "summary": "Sketch B wins with 3 grafts from A; both sketches had AC16 backwards; owner_decision required=false",
+      "at": "2026-08-22T14:56:19Z"
     }
   ]
 }
