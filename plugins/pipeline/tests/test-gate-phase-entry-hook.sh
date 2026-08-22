@@ -376,13 +376,43 @@ suite "AC27: the two suites that already own this hook are UNCHANGED consumers"
 # Recorded at f6ba1c4, BEFORE this contract was authored. Exact counts, not just failed=0: a
 # suite that silently stopped running half its cases also reports failed=0.
 #
-# RE-BASELINED ONCE, deliberately, and the reason is recorded because a number bumped without
-# one turns this assertion into a rubber stamp: test-voice-lint.sh went 41 -> 48 when #27 gave
-# voice-lint.mjs the validator's exported ISSUE_DIR_RE, closing the gap where an `exp-<slug>`
-# experiment run resolved to no active issue and was therefore never voice-checked at all. The
-# +7 is one new suite block ("exp-<slug> runs are LINTED, not exempt"): 4 behavioural cases and
-# 3 controls. Nothing existing was removed or renumbered, which is the property this cell is
-# actually guarding -- verify that by diffing the suite, not by trusting this note.
+# RE-BASELINED TWICE, each time deliberately, and each reason is recorded because a number
+# bumped without one turns this assertion into a rubber stamp.
+#
+# 41 -> 48 (#27): voice-lint.mjs got the validator's exported ISSUE_DIR_RE, closing the gap
+# where an `exp-<slug>` experiment run resolved to no active issue and was therefore never
+# voice-checked at all. The +7 is one new suite block ("exp-<slug> runs are LINTED, not
+# exempt"): 4 behavioural cases and 3 controls. Nothing existing was removed or renumbered,
+# which is the property this cell is actually guarding -- verify that by diffing the suite, not
+# by trusting this note.
+#
+# 48 -> 71 (#53): the same property VERIFIED THE SAME WAY, and it does NOT hold in its pure
+# form this time, so it is stated rather than claimed. Diffed by label set (run the suite at
+# 13e40e9 and at this commit, strip the ANSI codes, sort the `ok`/`FAIL` labels, `comm`): 26
+# labels ADDED, 3 REMOVED, net +23. Each of the three is named here with where its substance
+# went, because "removed" and "replaced by something stronger" are the two readings this number
+# cannot tell apart:
+#   - "every phase pipeline.md writes is accounted for in voice-lint.mjs" was RENAMED, not
+#     dropped: it now reads "... in voice-lint.mjs's own tables (SET MEMBERSHIP, never a source
+#     grep)". Same subject, same direction; the instrument moved from `grep -q "\"$phase\""`
+#     over the source -- which a phase named in a COMMENT satisfies -- to membership over the
+#     module's newly exported tables.
+#   - "CONTROL: the phase derivation is non-empty (found 26)" was RETIRED into the pinned
+#     26-label SET assertion plus the tri-partition's "UNCLASSIFIED is EMPTY". A count floor
+#     with the count in its own label is strictly weaker than the set (#33).
+#   - "CONTROL: the drift grep can report a miss" was RETIRED WITH ITS INSTRUMENT. Its
+#     successor is the discrimination pair over the new one: "with `0-setup` removed from the
+#     tables, the accounting names it", the cell asserting the string is still present in the
+#     source while that happens, and the injection control that dropping a phase the tables
+#     never held moves nothing.
+#
+# AND THE IRONY, recorded as a pointer rather than acted on here: this cell is a bare exact-count
+# pin over another suite's whole population, which is the class #33 retired elsewhere in Lane 1.
+# It would be better as a LABEL-SET assertion -- pin the sorted label list, and an addition then
+# forces the editor to paste the label while a REMOVAL or a rename reddens by name instead of
+# arriving as an unexplained delta that a re-baseline can absorb. Filed as a pointer for whoever
+# revisits this file; #53 only re-baselined the number it broke, and deliberately touched
+# nothing else here.
 run_suite_counts() {  # <suite-file> -> SUITE_PASSED, SUITE_FAILED
   local out
   out="$(cd "$TESTS_DIR" && bash "$1" 2>&1 | sed 's/\x1b\[[0-9;]*m//g')"
@@ -393,7 +423,7 @@ run_suite_counts test-stop-hook.sh
 assert_eq "test-stop-hook.sh still passes exactly its 18 pre-existing assertions" "${SUITE_PASSED:-<none>}" "18"
 assert_eq "  with none failing" "${SUITE_FAILED:-<none>}" "0"
 run_suite_counts test-voice-lint.sh
-assert_eq "test-voice-lint.sh still passes exactly its 48 assertions (41 pre-existing + 7 from #27)" "${SUITE_PASSED:-<none>}" "48"
+assert_eq "test-voice-lint.sh still passes exactly its 71 assertions (41 pre-existing + 7 from #27 + 26 from #53, less 3 retired by #53 -- see the note above)" "${SUITE_PASSED:-<none>}" "71"
 assert_eq "  with none failing" "${SUITE_FAILED:-<none>}" "0"
 
 # ---------------------------------------------------------------------------
