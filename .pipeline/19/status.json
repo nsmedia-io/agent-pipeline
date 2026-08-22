@@ -1,8 +1,8 @@
 {
   "issue_number": 19,
-  "current_phase": "2.5-design",
+  "current_phase": "3-impl",
   "started_at": "2026-08-22T19:06:32Z",
-  "updated_at": "2026-08-22T20:50:58Z",
+  "updated_at": "2026-08-22T21:19:25Z",
   "branch": "claude/lane-4-a521bf",
   "ask_text": "#19: Phase 4 panelists share one worktree, so mutation batteries corrupt each other. Live evidence gathered during #40 and #21.",
   "events": [
@@ -50,6 +50,11 @@
       "phase": "1-ba",
       "verdict": "SPEC_NARROWED",
       "at": "2026-08-22T20:50:58Z"
+    },
+    {
+      "phase": "2.5-design",
+      "verdict": "DESIGN_LOCKED",
+      "at": "2026-08-22T21:19:25Z"
     }
   ],
   "flags": [
@@ -122,6 +127,13 @@
       "verdict": "SPEC_NARROWED",
       "summary": "schema leg dropped to #76; trigger and commit-hygiene criteria added; git commit -a disqualified as a literal at 9/9",
       "at": "2026-08-22T20:50:58Z"
+    },
+    {
+      "phase": "2.5-design",
+      "agent": "dev-judge",
+      "verdict": "DESIGN_LOCKED",
+      "summary": "Sketch A wins; both sketches mis-measured their own costs in opposite directions; AC9 found unsatisfiable by running it",
+      "at": "2026-08-22T21:19:25Z"
     }
   ],
   "risk_tier": "architectural",
