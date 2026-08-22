@@ -1741,7 +1741,12 @@ suite "#61 AC7: the re-derivation command commands/pipeline.md publishes stays T
 # asserts it returns exactly one hit, on the `1-ba` row. An exact equality pinned to an identity,
 # not a decaying floor. The second-key evasion a grep cannot catch is #61-N1's job, deliberately.
 reg61 "#61-G1"
-assert_eq "#61-G1 \`tiers: [\` appears exactly once in the guard" \
+# A SPELLING PIN, NOT A COVERAGE GUARD, and this round measured the difference: at the previous
+# head, planting `tiers: ["architectural"]` on a byTier CELL reddened this cell, while the same
+# plant spelled `tiers:["architectural"]` -- one space fewer -- survived the whole suite at
+# 451/0. The two-file agreement with pipeline.md is what this pins; the coverage it looked like
+# it was providing is #61-S1's job, which grades the POSITION and catches both spellings.
+assert_eq "#61-G1 \`tiers: [\` appears exactly once in the guard -- a SPELLING pin held jointly with commands/pipeline.md, not a coverage guard: \`tiers:[\` evades it and #61-S1 is what catches that" \
   "$(grep -o 'tiers: \[' "$GUARD" | wc -l | tr -d ' ')" "1"
 reg61 "#61-G2"
 assert_contains "#61-G2 and the one hit is on the 1-ba row" "$(grep 'tiers: \[' "$GUARD")" '"1-ba"'
@@ -1972,11 +1977,21 @@ suite "#61 the rule table's ROW SHAPE, which is what makes the arity ceiling LOU
 # `tiers: ["architectural"]` written on the `3-impl` dispatcher turned a standard-tier refusal
 # into `not-applicable`, so excluding it would refuse a key the guard honours.
 #
-# WHAT THIS STILL DOES NOT GRADE, so nobody reads it as more than it is. The walk descends into
-# `byTier` and `also` and nowhere else: a key holding a nested object under any OTHER name is
-# reported as a stray at its parent, which is the right failure, but its interior is never
-# visited. And a NEW position whose keys are all permitted is invisible here BY CONSTRUCTION --
-# #61-S4's count is the only leg that sees one, which is why that count carries its own expiry.
+# WHAT THIS STILL DOES NOT GRADE, so nobody reads it as more than it is.
+#   - The walk descends into `byTier` and `also` and nowhere else: a key holding a nested object
+#     under any OTHER name is reported as a stray at its parent, which is the right failure, but
+#     its interior is never visited.
+#   - A NEW position whose keys are all permitted is invisible to the SUBSET check by
+#     construction; #61-S4's count and #61-S7's census are the legs that see one, which is why
+#     both carry their own expiry.
+#   - A MISSING key is never a stray, because a subset check has nothing to compare against.
+#     Two live consequences, both measured, both left to the behavioural suite this round:
+#     a `byTier` cell key that no `KNOWN_TIERS` spelling selects (`archtiectural`) makes `rowFor`
+#     return undefined and the guard fall SILENT for every record at that phase and tier (400/59
+#     when planted, all behavioural); and a cell carrying no `file` at all demands nothing, which
+#     the guard grants. #61-S8/S9 below close the sub-case that speaks -- a live `tokens` or
+#     `content` with no `file` to hang on, and an `also` whose `file` is missing or empty -- and
+#     they close it by VALUE, which is the one thing a key set cannot see.
 AC61_ROW_KEYS="file tokens content tiers also"
 AC61_CELL_KEYS="file tokens content also"
 AC61_DISPATCH_KEYS="byTier tiers"
@@ -2009,6 +2024,13 @@ assert_eq "#61-S1 every position's key set is a subset of the keys a reader actu
 # row keys and exactly ONE stray comes back, naming the row that carries it. That pins three
 # things at once -- the checker can go red, the `also` key is really on the table, and it is on
 # ONE row (the spec forbids a belt-and-braces second siting).
+#
+# READ THE RED SETS OF S2/S3/S5/S6 AS TABLE-GLOBAL, NOT AS POSITION-LOCAL. Each withholds a
+# different key and asserts one exact stray string, but `ac61_shape_strays` returns the WHOLE
+# sorted stray list, so a stray planted ANYWHERE reddens all four together -- measured: one stray
+# on the unrelated `2-constraints` row reddens S1, S2, S3, S5 and S6 at once. What each control
+# discriminates is the PAIR it was built around (a cell mis-tagged as a row reddens exactly S6
+# and S7 and nothing else). The red set is evidence that something moved, never evidence of WHERE.
 reg61 "#61-S2"
 assert_eq "#61-S2 NON-ZERO CONTROL: with \`also\` removed from the permitted set the check reddens, on exactly one row, and it is the re-sited one" \
   "$(ac61_shape_strays "file tokens content tiers" "file tokens content" "$AC61_DISPATCH_KEYS" "$AC61_ALSO_KEYS")" "2-review:also"
@@ -2048,7 +2070,7 @@ assert_eq "#61-S7 the walk tags 14 plain rows, 1 byTier dispatcher, 3 byTier cel
   "also:1 cell:3 dispatcher:1 row:14"
 # 19 = 15 rows + 3 byTier cells + 1 also sub-row.
 reg61 "#61-S4"
-assert_eq "#61-S4 VACUITY CONTROL: the shape walk visited one entry per guarded row, plus the sub-structures, rather than a subset it happened to remember -- EXPIRY: a new row or a new sub-structure is EXPECTED to redden this, and that failure is the point. #61-S1 grades KEYS and is blind BY CONSTRUCTION to a new POSITION whose keys are all permitted; this count is the only leg that sees one. Read the new entry, decide whether satisfyingTokens AND the decision path both reach it, and move the number in that same commit -- never alone to make the suite green" \
+assert_eq "#61-S4 VACUITY CONTROL: the shape walk visited one entry per guarded row, plus the sub-structures, rather than a subset it happened to remember -- EXPIRY: a new row or a new sub-structure is EXPECTED to redden this, and that failure is the point. #61-S1 grades KEYS and is blind BY CONSTRUCTION to a new POSITION whose keys are all permitted; this count and #61-S7's census are the only legs that see one -- and they cannot move apart, because this total is the sum of that census's per-kind counts. Read the new entry, decide whether satisfyingTokens AND the decision path both reach it, and move the number in that same commit -- never alone to make the suite green" \
   "$(node --input-type=module -e '
      const m = await import(process.argv[1]);
      const s = m.rowShapes();
@@ -2058,6 +2080,84 @@ assert_eq "#61-S4 VACUITY CONTROL: the shape walk visited one entry per guarded 
      process.stdout.write(s.filter((r) => !sub(r.path)).length + "/" + s.length);
    ' "$GUARD" 2>&1)" \
   "${#GUARDED_ROWS[@]}/19"
+
+# A KEY IS ONLY LIVE WHEN THE SIBLING IT HANGS ON IS, and the checks above cannot see that. They
+# grade key NAMES per position, independently of each other, so a shape whose every key is
+# permitted at its position can still be silently inert: `tokens` and `content` are read only
+# inside `checkOne`, which a vacuous primary skips, so on a `file: null` row they are consulted by
+# nothing on the decision path while `satisfyingTokens` reports the tokens anyway. `{ file: null,
+# tokens: [] }` and `{ file: null, tokens: ["0.5"] }` are the SAME key set, so no subset check can
+# separate them -- which is why `rowShapes()` publishes each position's raw object and the rule
+# lives here. Both directions were driven through the real CLI before these cells were written:
+#   - CLAIM-MORE. `"0.5-map": { file: null, tokens: ["0.5"] }` -> `satisfyingTokens` REPORTS
+#     ["0.5"] while the CLI GRANTS rc 0 on an empty events[] with no map.json anywhere. A written
+#     requirement, published on the reporting surface, enforced by nobody -- byte for byte the
+#     class the suite below closes for `also`, one key over.
+#   - FAIL-OPEN SILENCE. An `also` with no usable `file` makes `path.join(dir, undefined)` throw,
+#     and the guard's fail-OPEN catch swallows it: no stdout, no stderr, rc 0. That is not merely
+#     a lost grant. With two resolvable issue dirs it swallows the OTHER dir's genuine rc 2 --
+#     measured: signal names a record that refuses, mtime names a record parked at the malformed
+#     row, previous head rc 2 with the refusal intact, patched head rc 0 and stdout EMPTY.
+#     Through hooks/stop.sh, which branches only on rc 2 and discards stdout, that reads as a pass.
+#
+# `also` IS EXEMPT FROM THE FIRST RULE, DELIBERATELY, and this is the half a key-name reading of
+# it would get wrong: an `also` on a `file: null` row is LIVE -- #61-V3 below drives exactly that
+# shape and the guard REFUSES. Refusing it here would build-fail a shape the guard honours, which
+# is the same error pointed the other way.
+ac61_sibling_inert() {  # -> "<path>:<field>" per live field with no truthy `file` beside it
+  node --input-type=module -e '
+    const m = await import(process.argv[1]);
+    const bad = [];
+    for (const s of m.rowShapes()) {
+      if (s.node.file) continue;
+      if (Array.isArray(s.node.tokens) && s.node.tokens.length) bad.push(s.path + ":tokens");
+      if (s.node.content) bad.push(s.path + ":content");
+    }
+    process.stdout.write(bad.sort().join(" "));
+  ' "$GUARD" 2>&1
+}
+reg61 "#61-S8"
+assert_eq "#61-S8 no position states a requirement that nothing can read: a \`tokens\` or \`content\` whose sibling \`file\` is falsy is skipped with the vacuous primary and still REPORTED by satisfyingTokens -- EXPIRY: if this fails, either give that requirement a \`file\` or delete it; making \`checkOne\` run on a vacuous primary would path.join on null and silence the guard, and widening this rule to accept it would publish a requirement the decision path never consults" \
+  "$(ac61_sibling_inert)" ""
+# The SECOND rule, and it is about SILENCE rather than about a wrongful grant: every `also`
+# sub-row's `file` must be a usable string. Missing -> path.join throws; empty -> path.join
+# returns the ISSUE DIR, which exists, so the second requirement passes on the directory's own
+# existence and grants. Neither is visible to #61-S1: `file` is a permitted `also` key, and the
+# subset check sees a permitted key whether it is absent or holds junk.
+ac61_also_files() {  # -> "<path>:<file-as-JSON>" for every `also` whose file is not a usable string
+  node --input-type=module -e '
+    const m = await import(process.argv[1]);
+    const bad = [];
+    for (const s of m.rowShapes()) {
+      if (s.kind !== "also") continue;
+      if (typeof s.node.file !== "string" || s.node.file.trim() === "") {
+        bad.push(s.path + ":" + JSON.stringify(s.node.file === undefined ? "<absent>" : s.node.file));
+      }
+    }
+    process.stdout.write(bad.sort().join(" "));
+  ' "$GUARD" 2>&1
+}
+reg61 "#61-S9"
+assert_eq "#61-S9 every \`also\` sub-row names a real file: an absent or empty \`file\` there is not a wrong answer but NO answer -- the guard throws inside its own fail-OPEN catch and exits rc 0 with both streams empty, swallowing any OTHER issue dir's refusal in the same run -- EXPIRY: if this fails, give the \`also\` a filename; an events-only second requirement is not expressible in this table and adding one means teaching checkOne, in the same commit" \
+  "$(ac61_also_files)" ""
+# NON-ZERO CONTROL FOR BOTH, and it discriminates VALUES from KEYS, which is the whole point of
+# the two cells above: `0.5-map` HAS a `file` key and its value is null, so a walk that graded
+# key names would place it in neither list and both rules would be vacuously true forever. This
+# census is read off the same `node` objects, so it is also what fails loudly if `rowShapes()`
+# ever stops publishing them. EXPIRY: it moves when the TABLE moves -- a row that stops demanding
+# a file, or a second `also` -- and never to make the suite green.
+reg61 "#61-S10"
+assert_eq "#61-S10 NON-ZERO CONTROL: the vacuous positions and the \`also\` filename, read off the VALUES the two rules above are about -- \`0.5-map\` carries a \`file\` KEY whose VALUE is null, so a key-name walk would report neither and both rules would be vacuously green" \
+  "$(node --input-type=module -e '
+     const m = await import(process.argv[1]);
+     const vac = [], als = [];
+     for (const s of m.rowShapes()) {
+       if (!s.node.file) vac.push(s.path);
+       if (s.kind === "also") als.push(s.path + "=" + s.node.file);
+     }
+     process.stdout.write("falsy-file: " + vac.sort().join(" ") + " | also-file: " + als.sort().join(" "));
+   ' "$GUARD" 2>&1)" \
+  "falsy-file: 0.5-map 3-impl | also-file: 2-review.also=map.json"
 
 # ---------------------------------------------------------------------------
 suite "#61 a row with no primary \`file\` still owes its \`also\` -- on the DECISION path, not only in the report"

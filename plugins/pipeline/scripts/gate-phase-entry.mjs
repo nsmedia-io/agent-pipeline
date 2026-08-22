@@ -350,6 +350,13 @@ export function satisfyingTokens(phase, tier) {
  * `tiers` on a DISPATCHER is the one key that survives that test: it IS read, so it stays in the
  * dispatcher's permitted set. Excluding a key the guard honours is the same error pointed the
  * other way.
+ *
+ * EACH ENTRY CARRIES ITS RAW POSITION OBJECT as `node`, because a key set cannot see a SIBLING
+ * relation: `tokens` and `content` are read only inside `checkOne`, which a vacuous primary
+ * skips, so they mean nothing unless the `file` beside them is truthy -- and `{ file: null,
+ * tokens: [] }` and `{ file: null, tokens: ["0.5"] }` have the IDENTICAL key set. The raw object
+ * is published rather than a verdict about it for the same reason the permitted sets live in the
+ * test: a table that graded its own values would be graded against its own opinion.
  */
 export function rowShapes() {
   const out = [];
@@ -357,7 +364,7 @@ export function rowShapes() {
   // is tagged `cell` and its `byTier` key is a stray, which is what it deserves -- it disarms the
   // row it is written on. Tagging by contents would re-admit it as another dispatcher.
   const walk = (at, kind, obj) => {
-    out.push({ path: at, kind, keys: Object.keys(obj).sort() });
+    out.push({ path: at, kind, keys: Object.keys(obj).sort(), node: obj });
     if (obj.byTier) {
       for (const [cellTier, cell] of Object.entries(obj.byTier)) {
         walk(`${at}.byTier.${cellTier}`, "cell", cell);
@@ -450,9 +457,17 @@ function checkOne(issueDir, subRow, events) {
  * primary half, and it is tempting to answer `ok` and stop -- but stopping there skips `also`
  * entirely, so a second requirement written on such a row would be reported by
  * `satisfyingTokens` and never enforced: the guard claiming more than it knows, which is the
- * one failure this row's own arity ceiling exists to prevent. No shipped row is shaped that way,
- * and the fall-through is what keeps that a fact about the table rather than a fact about the
- * table's current contents.
+ * one failure this row's own arity ceiling exists to prevent. The fall-through makes that a fact
+ * about THIS FUNCTION for `also`, whatever the table later holds.
+ *
+ * IT DOES NOT EXTEND TO THE OTHER TWO FIELDS, and reading it as if it did is how the same defect
+ * survives one key over. `tokens` and `content` are read only inside `checkOne`, which a vacuous
+ * primary still skips, so on a `file: null` row they are consulted by NO reader on the decision
+ * path -- while `satisfyingTokens` reports the tokens to the drift suite regardless. That today
+ * harms nothing IS a fact about the table's current contents (`0.5-map` carries `tokens: []`),
+ * and it is the shape walk that keeps it one: it refuses a falsy `file` sitting beside a live
+ * `tokens` or `content`. Do not add that pair here -- a table graded by its own reader is graded
+ * against its own opinion.
  */
 function prerequisiteSatisfied(issueDir, row, events) {
   const primary = row.file ? checkOne(issueDir, row, events) : { ok: true, artifact: "none" };
