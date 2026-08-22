@@ -1,0 +1,10 @@
+{
+  "issue_number": 19,
+  "current_phase": "1-ba",
+  "started_at": "2026-08-22T19:06:32Z",
+  "updated_at": "2026-08-22T19:06:32Z",
+  "branch": "claude/lane-4-a521bf",
+  "ask_text": "#19: Phase 4 panelists share one worktree, so mutation batteries corrupt each other. Live evidence gathered during #40 and #21.",
+  "events": [],
+  "flags": []
+}
