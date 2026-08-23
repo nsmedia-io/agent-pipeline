@@ -1,0 +1,209 @@
+{
+  "issue_number": 19,
+  "current_phase": "4-review",
+  "started_at": "2026-08-22T19:06:32Z",
+  "updated_at": "2026-08-23T01:00:19Z",
+  "branch": "claude/lane-4-a521bf",
+  "ask_text": "#19: Phase 4 panelists share one worktree, so mutation batteries corrupt each other. Live evidence gathered during #40 and #21.",
+  "events": [
+    {
+      "phase": "0.5-map",
+      "verdict": "MAP_WRITTEN",
+      "at": "2026-08-22T19:22:06Z",
+      "note": "map.json produced inside the BA intake dispatch; recording the closing event that folding omits (see #25)"
+    },
+    {
+      "phase": "1-ba",
+      "verdict": "SPEC_WRITTEN",
+      "at": "2026-08-22T19:22:06Z"
+    },
+    {
+      "phase": "2-review",
+      "verdict": "REQUEST_CHANGES",
+      "at": "2026-08-22T19:51:36Z",
+      "note": "round 1"
+    },
+    {
+      "phase": "1-ba",
+      "verdict": "SPEC_REWORKED",
+      "at": "2026-08-22T20:07:16Z"
+    },
+    {
+      "phase": "2-review",
+      "verdict": "REQUEST_CHANGES",
+      "at": "2026-08-22T20:31:32Z",
+      "note": "round 2; convergence budget reached"
+    },
+    {
+      "phase": "2-review",
+      "verdict": "PROCEED_NARROWED",
+      "at": "2026-08-22T20:35:27Z",
+      "note": "owner chose option 1 at the convergence budget"
+    },
+    {
+      "phase": "1-ba",
+      "verdict": "SPEC_NARROWED",
+      "at": "2026-08-22T20:50:00Z",
+      "note": "owner PROCEED_NARROWED applied: schema leg (R8, tracked_writes) deleted and deferred to #76 issuecomment-5382489901; both review schemas out of the editable surface; DBA blocker closed by two new criteria (AC6 trigger, AC7 commit hygiene); SecOps HIGH closed by --absolute-git-dir plus new AC9"
+    },
+    {
+      "phase": "1-ba",
+      "verdict": "SPEC_NARROWED",
+      "at": "2026-08-22T20:50:58Z"
+    },
+    {
+      "phase": "2.5-design",
+      "verdict": "DESIGN_LOCKED",
+      "at": "2026-08-22T21:19:25Z"
+    },
+    {
+      "phase": "3a-qa",
+      "verdict": "CONTRACT_AUTHORED",
+      "at": "2026-08-22T22:10:25Z"
+    },
+    {
+      "phase": "3-impl",
+      "verdict": "IMPL_COMPLETE",
+      "at": "2026-08-22T23:01:59Z"
+    },
+    {
+      "phase": "4-review",
+      "verdict": "REQUEST_CHANGES",
+      "at": "2026-08-22T23:40:49Z",
+      "note": "round 1; QA binding blocker on a machine-dependent PASS example"
+    },
+    {
+      "phase": "3-impl",
+      "verdict": "FIX_ROUND_COMPLETE",
+      "at": "2026-08-23T01:00:19Z"
+    }
+  ],
+  "flags": [
+    {
+      "phase": "1-ba",
+      "agent": "ba",
+      "verdict": "SPEC_WRITTEN",
+      "summary": "architectural forced; recommends a synthesis of all three options; git-completeness is the discriminator, not location",
+      "at": "2026-08-22T19:22:06Z"
+    },
+    {
+      "phase": "2-dba",
+      "agent": "dba",
+      "verdict": "REQUEST_CHANGES",
+      "summary": "property name already occupied in 5 archives with mixed types; a tar copy keeping .git measures as isolated but shares the index",
+      "at": "2026-08-22T19:51:36Z"
+    },
+    {
+      "phase": "2-secops",
+      "agent": "secops",
+      "verdict": "REQUEST_CHANGES",
+      "summary": "AC5 passes at 8==8 while qa.md carries neither sentence; staging instructs, it does not prevent",
+      "at": "2026-08-22T19:51:36Z"
+    },
+    {
+      "phase": "2-devops",
+      "agent": "devops",
+      "verdict": "APPROVE_WITH_NOTES",
+      "summary": "discriminator table reproduces exactly incl. control; map.json claims a carrier in pipeline.md that has 0 occurrences",
+      "at": "2026-08-22T19:51:36Z"
+    },
+    {
+      "phase": "1-ba-rework",
+      "agent": "ba",
+      "verdict": "SPEC_REWORKED",
+      "summary": "property renamed to tracked_writes (0 archived blocks invalidated); fence-aware boundary 627-806 minus frozen 770-784",
+      "at": "2026-08-22T20:07:16Z"
+    },
+    {
+      "phase": "2-dba-r2",
+      "agent": "dba",
+      "verdict": "REQUEST_CHANGES",
+      "summary": "R3 trigger and R6 commit hygiene have no criterion that fails on omission; all three round-1 blockers closed",
+      "at": "2026-08-22T20:31:32Z"
+    },
+    {
+      "phase": "2-secops-r2",
+      "agent": "secops",
+      "verdict": "APPROVE_WITH_NOTES",
+      "summary": "rev-parse --git-dir spelling falsely admits a subdir of the dispatch tree; conditional VETO at Phase 4 if unfixed",
+      "at": "2026-08-22T20:31:32Z"
+    },
+    {
+      "phase": "2-devops-r2",
+      "agent": "devops",
+      "verdict": "APPROVE_WITH_NOTES",
+      "summary": "0 blockers; reproduced every measurement incl. the discriminator control",
+      "at": "2026-08-22T20:31:32Z"
+    },
+    {
+      "phase": "1-ba-narrow",
+      "agent": "ba",
+      "verdict": "SPEC_NARROWED",
+      "summary": "16 criteria, 3 new (AC6 trigger, AC7 hygiene, AC16 privacy); AC9 carves out the topology-independent spelling; schema leg verified written to #76",
+      "at": "2026-08-22T20:50:00Z"
+    },
+    {
+      "phase": "1-ba-narrow",
+      "agent": "ba",
+      "verdict": "SPEC_NARROWED",
+      "summary": "schema leg dropped to #76; trigger and commit-hygiene criteria added; git commit -a disqualified as a literal at 9/9",
+      "at": "2026-08-22T20:50:58Z"
+    },
+    {
+      "phase": "2.5-design",
+      "agent": "dev-judge",
+      "verdict": "DESIGN_LOCKED",
+      "summary": "Sketch A wins; both sketches mis-measured their own costs in opposite directions; AC9 found unsatisfiable by running it",
+      "at": "2026-08-22T21:19:25Z"
+    },
+    {
+      "phase": "3a-qa",
+      "agent": "qa",
+      "verdict": "CONTRACT_AUTHORED",
+      "summary": "56 cells, 30 red contract; proved passable on a throwaway reference impl (67/0); 11 kill-mutations caught, 3 survivors",
+      "at": "2026-08-22T22:10:25Z"
+    },
+    {
+      "phase": "3b-dev",
+      "agent": "dev",
+      "verdict": "IMPL_COMPLETE",
+      "summary": "67/0 battery, all controls fire; ran the suite in a tree built by the rule it ships; registry 18 to 18",
+      "at": "2026-08-22T23:01:59Z"
+    },
+    {
+      "phase": "3-fix",
+      "agent": "dev",
+      "verdict": "FIX_ROUND_COMPLETE",
+      "summary": "outcome-stated location rule; caught its own non-portable stat -f and left it named as a warning; 67/0 under both TMPDIR values",
+      "at": "2026-08-23T01:00:19Z"
+    }
+  ],
+  "risk_tier": "architectural",
+  "convergence_decision": {
+    "at": "2026-08-22T20:35:27Z",
+    "answered_by": "owner",
+    "question": "ship #19 narrowed to the prose half, deferring the schema attestation?",
+    "answer": "proceed narrowed",
+    "detail": "add the trigger and commit-hygiene criteria; ship the prose rules plus the --absolute-git-dir fix; defer tracked_writes to #76 with its measurement block intact"
+  },
+  "phase3_qa_battery": ".pipeline/19/verify-19.sh",
+  "panel_roles": [
+    "ba",
+    "dba",
+    "devops",
+    "secops",
+    "dev",
+    "qa"
+  ],
+  "review_rounds": 2,
+  "reviewed_head": "76f5e2bdd08957690b6ce31b8c14fdf284a9af3c",
+  "final_verdict": "REQUEST_CHANGES",
+  "peer_review_verdict_counts": {
+    "approve": 0,
+    "approve_with_notes": 4,
+    "request_changes": 2,
+    "request_refactor": 0,
+    "veto": 0
+  },
+  "first_round_head": "16438ee"
+}
