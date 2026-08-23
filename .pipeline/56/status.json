@@ -2,7 +2,7 @@
   "issue_number": 56,
   "current_phase": "4-review",
   "started_at": "2026-08-22T18:10:00Z",
-  "updated_at": "2026-08-23T02:01:17Z",
+  "updated_at": "2026-08-23T02:25:12Z",
   "phase3_qa_test_commit": "e9da93700cbb3075c4cc5f9150ebaa8ecfc36acd",
   "branch": "claude/pipeline-resume-56-a82065",
   "ask_text": "voice-lint: scope the voice obligation to the turn that produced the record",
@@ -98,6 +98,12 @@
       "verdict": "REQUEST_CHANGES",
       "at": "2026-08-23T02:01:17Z",
       "note": "Full six-agent architectural panel returned on commit 573bb38: ba, dba, devops, secops, dev all APPROVE_WITH_NOTES (dba carried 1 non-blocking major, the others carried nits/notes, none gating). qa REQUEST_CHANGES: a test-only coverage gap (QA-B1) it verified itself by literal mutation and a live behavioral probe -- paraphrasing scanTranscript's assistant-text accept condition survives all 257 pre-existing cells but silently changes real behavior on a whitespace-only trailing text block (direction SILENCE, the one direction the module's own header forbids), and 0 of 225,136 real records exercise that shape so nothing catches it by chance. QA explicitly did not fix this mid-panel, out of respect for the other 5 reviewers voting on a fixed commit. Two panel members independently root-caused the run.sh anomaly via two DIFFERENT real mechanisms, neither a defect in this diff: devops reproduced a mid-write-file-read race in isolation (plausible, not confirmed as THIS incident's cause); qa found the actual exact cause -- test-issue17-integration.sh's AC41(c) clones the repo and runs the suite inside that clone, which is blind to anything uncommitted, so Dev's mid-implementation state got tested and failed exactly as its own commit-time tally would predict. final_verdict: REQUEST_CHANGES per the rubric (QA's verdict governs). Delta fix dispatched: QA authors its own missing cell first (test-only), then Dev adds DBA's residual-(ix) header declaration plus its pinning test cell, sequenced so they do not conflict on the same test file."
+    },
+    {
+      "phase": "4-review",
+      "verdict": "DELTA",
+      "at": "2026-08-23T02:25:12Z",
+      "note": "Dev fixed dba's major (residual (ix): a stat failure on the mtime-fallback branch now silences a refusal it used to produce, EACCES/EPERM/EIO scope only, ENOENT-race correctly left as intended-silent) and the dev-reviewer's nit (residual (v)'s missing DIRECTION/EXPIRY), in 3 commits (319f8f0 docs, 5670007 test pin, 8751a58 mutation battery). Production diff verified comment-only (logic diff empty after stripping comments). test-voice-lint.sh 260->267, test-gate-phase-entry-hook.sh count re-derived to match, full run.sh clean. True final HEAD: 8751a58, four commits past what the original 6-agent panel reviewed at 573bb38. Dispatching a delta re-review: qa and secops unconditionally, plus dba (its own finding is what got fixed). ba, devops, and the dev code-quality reviewer are NOT re-seated -- their concerns did not depend on this fix and their standing APPROVE_WITH_NOTES verdicts hold."
     }
   ],
   "flags": [
