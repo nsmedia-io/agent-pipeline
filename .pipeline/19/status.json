@@ -1,6 +1,6 @@
 {
   "issue_number": 19,
-  "current_phase": "4-review",
+  "current_phase": "5-archived",
   "started_at": "2026-08-22T19:06:32Z",
   "updated_at": "2026-08-23T01:00:19Z",
   "branch": "claude/lane-4-a521bf",
@@ -76,6 +76,42 @@
       "phase": "3-impl",
       "verdict": "FIX_ROUND_COMPLETE",
       "at": "2026-08-23T01:00:19Z"
+    },
+    {
+      "phase": "4-review",
+      "verdict": "delta-dispatched",
+      "at": "2026-08-23T00:55:00Z",
+      "note": "delta re-review: qa (binding), secops (veto), dba. ba, dev and devops carry forward; none objected and all had their notes marked resolved. panel_roles unchanged. Timestamp grain is the minute: the dispatch itself writes no file, so this is read from the orchestrator turn that issued it, not synthesized."
+    },
+    {
+      "phase": "4-review",
+      "verdict": "REQUEST_CHANGES",
+      "at": "2026-08-23T01:33:00Z",
+      "note": "QA blocked at eb040ee on a walk the nine contracts ship: joined with ';', a failed cd left the path variable empty, dirname cycled on '.' forever, and the killed tail of that hang read as a mode-0700 chain for the CURRENT directory, which the same paragraph's install -d -m 700 makes common. A claim-MORE defect: a SAFE answer about a path never measured. SecOps and DBA APPROVE_WITH_NOTES in the same round, DBA finding the same defect independently. Grain is the minute; the shard was later overwritten in place by the re-render."
+    },
+    {
+      "phase": "3-impl",
+      "verdict": "FIX_ROUND_COMPLETE",
+      "at": "2026-08-23T02:21:31Z",
+      "note": "cfffc69. One character class in ten files, ten insertions and ten deletions: the ';' joining the pwd assignment to the walk becomes '&&', so a failed cd short-circuits instead of entering the loop with an empty variable. pipeline.md carried the other half of the same defect, the words 'stat the components', the spelling the nine contracts disqualify by name; it now points at the contract's own loop."
+    },
+    {
+      "phase": "4-review",
+      "verdict": "APPROVE_WITH_NOTES",
+      "at": "2026-08-23T02:40:42Z",
+      "note": "QA re-rendered at cfffc69 on its own byte-level extraction, not on the orchestrator's numbers: diff scope 10 files / 10 insertions / 10 deletions, one change signature per contract, nothing rode in beside the join. Six roles APPROVE_WITH_NOTES, no veto. Outstanding as notes, not conditions: C8 (the dispatch tree was written to during QA's review window, by the orchestrator, in the round that ships the rule against it), C9, N1-N6."
+    },
+    {
+      "phase": "4-review",
+      "verdict": "merged",
+      "at": "2026-08-23T02:41:21Z",
+      "note": "PR #86 squash-merged to main as c337579; #19 closed. Suite green on main at cfffc69 before merge (sync SUCCESS, suite SUCCESS), verified by the orchestrator against the PR's own check rollup rather than relayed. Shipped in 0.26.0."
+    },
+    {
+      "phase": "5-archive",
+      "verdict": "dispatched",
+      "at": "2026-08-23T02:55:00Z",
+      "note": "Librarian dispatched non-blocking; the run is terminal at dispatch time, not on its return. verify-19.sh is gitignored and must be preserved into knowledge/issue-archive/ the way 40-verify-40.sh and 21-verify-21.sh were."
     }
   ],
   "flags": [
@@ -197,7 +233,7 @@
   ],
   "review_rounds": 2,
   "reviewed_head": "76f5e2bdd08957690b6ce31b8c14fdf284a9af3c",
-  "final_verdict": "REQUEST_CHANGES",
+  "final_verdict": "APPROVE_WITH_NOTES",
   "peer_review_verdict_counts": {
     "approve": 0,
     "approve_with_notes": 4,
@@ -205,5 +241,6 @@
     "request_refactor": 0,
     "veto": 0
   },
-  "first_round_head": "16438ee"
+  "first_round_head": "16438ee",
+  "pr_url": "https://github.com/nsmedia-io/agent-pipeline/pull/86"
 }
