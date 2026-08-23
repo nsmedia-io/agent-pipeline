@@ -117,8 +117,13 @@ export function buildRecord(spec, globalOps) {
     if (record.timestamp === undefined) delete record.timestamp;
     // The assistant record is the MESSAGE UNDER TEST and is not a provenance fixture, so the
     // global drift ops (which model a vendor renaming a field the predicate reads on USER
-    // records) are not applied to it. lastAssistantText's own accept condition is untouched by
-    // this change and AC6 is what holds it.
+    // records) are not applied to it.
+    //
+    // CORRECTED AT PHASE 4. This comment used to claim the assistant-text accept condition "is
+    // untouched by this change and AC6 is what holds it". The first half is true; the second was
+    // FALSE, and believing it is what left the condition unpinned. AC6 replays the pre-existing
+    // fixtures, and not one of them carries a text block that is present-but-blank, so the whole
+    // suite went green under a paraphrase of that condition. AC5b is what actually holds it now.
     return applyOps(record, spec.ops);
   }
   if (spec.k === "literal") {

@@ -1000,6 +1000,70 @@ assert_contains "AC5: and the second message is what is graded, quoting the rule
 record "REPORTED: AC5's fixture cannot witness the PRODUCTION failure it is named for, because it carries no intervening refusal record. Under the first design voice-lint's own refusal ended the turn before the rewrite arrived, and this synthetic fixture stayed green anyway. The cell that makes AC5 mean in production what it means here is AC13"
 
 # ---------------------------------------------------------------------------------------------
+suite "#56 AC5b: WHICH assistant record is graded -- the accept condition is the JOINED STRING, not the block count"
+# ---------------------------------------------------------------------------------------------
+# A PHASE-4 GAP CLOSED, not a criterion carried down from the spec, and it is recorded as such so
+# nobody reads it as an eighteenth AC. scanTranscript accepts an assistant record when the JOINED
+# text is non-blank (`joined.trim() !== ""`), which is byte-for-byte the pre-#56 condition.
+# Paraphrasing that as "a non-empty ARRAY of text blocks" survived ALL 257 cells of this suite:
+# measured at 573bb38, the paraphrase reports passed=257 failed=0 while changing behaviour on the
+# fixture below from rc 2 (1,217 bytes of stderr) to rc 0 (ZERO bytes). Found by Dev's own
+# 11-mutation battery against the shipped module, escalated rather than closed by editing this
+# file, and independently re-run at Phase 4 before this cell was written.
+#
+# WHY IT IS A CELL AND NOT A DECLARED RESIDUAL. The paraphrase's fail DIRECTION is SILENCE, which
+# the module header's governing rule forbids outright ("THIS CHANGE MUST NEVER BE THE REASON FOR
+# SILENCE"). Every other silence-direction residual in this spec that could actually be BUILT got
+# pinned rather than declared -- AC16(d) is the precedent -- and the declared-residual idiom is
+# reserved for classes no fixture can construct (the chronological inversion; the operator's
+# restore shell). This one is three records.
+#
+# THIS IS NOT A VENDOR-DRIFT CELL, and the population says so: measured over 1,867 transcript
+# files and 225,136 assistant records, ZERO carry a text block whose joined text is blank. So
+# nothing is broken in production today, no fixture here can be CAPTURED, and this record is
+# hand-built by necessity rather than by preference. What the cell defends against is an EDIT:
+# the header calls scanTranscript's two-responsibility fusion "the wart" and names de-fusion as a
+# likely future refactor, and that refactor is the event this cell is watching for. Edits are
+# certain in a way vendor shapes are not.
+#
+# ASSERTED AS A PAIR THAT DISCRIMINATES rather than one that merely agrees. Both halves exit 2
+# today, so "both went silent" cannot pass them; under the paraphrase the with-the-blank-record
+# half flips to 0 while its twin stays at 2, which is what makes the pair a separator instead of
+# two restatements of one fact.
+VL56_BLANK_TEXT="$(printf '   \n  ')"
+
+vl56_fixture "$(vl56_dirs 4244 5-archived "$VL56_FRESH_MS")" \
+  '['"$(vl56_owner)"','"$(vl56_asst "$Q_DEFECT")"','"$(vl56_asst "$(vl56_q "$VL56_BLANK_TEXT")")"']'
+# ANTI-VACUITY, and this cell is worthless without it: the whole criterion turns on the fixture
+# actually constructing the ONE input on which the two conditions disagree -- a text-block array
+# that is NON-EMPTY as an array while its joined text trims to nothing. A fixture that quietly
+# built an empty content array, or dropped the blank block, would satisfy the pair below while
+# witnessing nothing, and it would do so silently.
+VL56_AC5B_SHAPE="$(node -e '
+  const fs = require("fs");
+  const lines = fs.readFileSync(process.argv[1], "utf8").split("\n").filter((l) => l.trim() !== "");
+  const last = JSON.parse(lines[lines.length - 1]);
+  const blocks = (last?.message?.content || []).filter((c) => c && c.type === "text" && typeof c.text === "string");
+  process.stdout.write("type=" + last?.type + "/blocks=" + blocks.length + "/joinedTrimmed=" + JSON.stringify(blocks.map((c) => c.text).join("\n").trim()));
+' "$VL56_TRANSCRIPT" 2>&1)"
+assert_eq "AC5b PREMISE: the LAST record really is an assistant record carrying a non-empty array of text blocks whose JOINED text trims to empty -- the exact and only input on which 'non-blank joined string' and 'non-empty block array' disagree" \
+  "$VL56_AC5B_SHAPE" 'type=assistant/blocks=1/joinedTrimmed=""'
+
+vl56_lint "$VL56_TRANSCRIPT" none
+VL56_AC5B_WITH="$RC"
+VL56_AC5B_WITH_ERR="$ERR"
+
+vl56_fixture "$(vl56_dirs 4244 5-archived "$VL56_FRESH_MS")" \
+  '['"$(vl56_owner)"','"$(vl56_asst "$Q_DEFECT")"']'
+vl56_lint "$VL56_TRANSCRIPT" none
+VL56_AC5B_WITHOUT="$RC"
+
+assert_eq "AC5b: a trailing assistant record whose only text block is WHITESPACE is SKIPPED, so the earlier real report is still the message that gets graded -- and the identical transcript without that record reaches the same verdict. Mutation: accept on a non-empty ARRAY of text blocks instead of a non-blank JOINED string and the with-the-record half flips to 0 while its twin stays at 2, which no other cell in this suite can see" \
+  "with=$VL56_AC5B_WITH/without=$VL56_AC5B_WITHOUT" "with=2/without=2"
+assert_contains "AC5b: and the refusal names the section the EARLIER report is missing, which is what proves that report is what got graded rather than the blank record somehow satisfying the lint" \
+  "$VL56_AC5B_WITH_ERR" "See it yourself"
+
+# ---------------------------------------------------------------------------------------------
 suite "#56 AC10: the freshness predicate applies on the EXPLICIT-SIGNAL branch too"
 # ---------------------------------------------------------------------------------------------
 # Measured at this checkout: 0 files under plugins/ assign CLAUDE_PIPELINE_ACTIVE_ISSUE outside

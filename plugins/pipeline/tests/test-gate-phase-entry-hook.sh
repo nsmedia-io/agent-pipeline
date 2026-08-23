@@ -418,8 +418,18 @@ suite "AC27: the two suites that already own this hook are UNCHANGED consumers"
 # THOSE 186, and that is the point rather than an oversight: they are a FAILING behavioural
 # contract, authored ahead of the code, and 57 of them are red until the implementation lands.
 # This cell is what makes that visible from outside the suite that owns it. If it is still red
-# after #56 ships, the fix is incomplete; if it is green with a passed= other than 257, a cell
+# after #56 ships, the fix is incomplete; if it is green with a passed= other than 260, a cell
 # was added or removed and the label-set diff above is how to find out which.
+#
+# 257 -> 260 (#56 Phase 4): the panel's binding QA verdict was REQUEST_CHANGES on a gap the
+# implementation battery found and reported rather than closed -- voice-lint's assistant-text
+# accept condition (a non-blank JOINED string) had no cell, so paraphrasing it as a non-empty
+# ARRAY of text blocks passed all 257 while going SILENT on a transcript whose last assistant
+# record carries a whitespace-only text block. Three cells added under the label AC5b: a shape
+# PREMISE proving the fixture builds the one input the two conditions disagree on, the
+# discriminating pair, and the graded-message assertion. Test-only; no production file changed,
+# because the shipped condition was already correct. THIS COUNT IS RE-DERIVED FROM A RUN, never
+# incremented by hand -- measured passed=260 failed=0 at the commit that adds it.
 #
 # AND THE IRONY, recorded as a pointer rather than acted on here: this cell is a bare exact-count
 # pin over another suite's whole population, which is the class #33 retired elsewhere in Lane 1.
@@ -440,7 +450,7 @@ run_suite_counts test-stop-hook.sh
 assert_eq "test-stop-hook.sh still passes exactly its 18 pre-existing assertions" "${SUITE_PASSED:-<none>}" "18"
 assert_eq "  with none failing" "${SUITE_FAILED:-<none>}" "0"
 run_suite_counts test-voice-lint.sh
-assert_eq "test-voice-lint.sh still passes exactly its 257 assertions (41 pre-existing + 7 from #27 + 26 from #53, less 3 retired by #53, + 186 from #56 -- see the note above)" "${SUITE_PASSED:-<none>}" "257"
+assert_eq "test-voice-lint.sh still passes exactly its 260 assertions (41 pre-existing + 7 from #27 + 26 from #53, less 3 retired by #53, + 186 from #56's authored contract, + 3 from #56's Phase-4 gap closure -- see the note above)" "${SUITE_PASSED:-<none>}" "260"
 assert_eq "  with none failing" "${SUITE_FAILED:-<none>}" "0"
 
 # ---------------------------------------------------------------------------
