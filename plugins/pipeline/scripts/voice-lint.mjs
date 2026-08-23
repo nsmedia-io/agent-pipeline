@@ -39,6 +39,206 @@
  * FAIL-OPEN by contract, exactly like validate-pipeline-artifact.mjs: any missing input,
  * unreadable transcript, unparseable payload or thrown error exits 0 silently. A voice lint
  * that wedges a legitimate stop is worse than no voice lint.
+ *
+ * ===========================================================================================
+ * TURN SCOPING (#56): THE OBLIGATION IS SCOPED TO THE TURN THAT PRODUCED THE RECORD
+ * ===========================================================================================
+ *
+ * THE DEFECT, IN ONE SENTENCE. The decision to impose voice.md's shape came from ONE input, the
+ * current_phase of whichever .pipeline/<issue>/status.json is newest by mtime, and a phase
+ * carries no notion of WHEN and no notion of WHOSE. So `5-archived` is terminal and graded every
+ * later message in the session as the completion report (the in-run half), and when the current
+ * run's record was REMOVED at archival the mtime scan fell through to some other lane's parked
+ * record and graded this session's message against a run this session does not own (the
+ * cross-run half, reproduced live).
+ *
+ * THE FIX, AS AN OUTCOME PROPERTY RATHER THAN A MECHANISM: no message is refused on account of a
+ * record that has not been touched since the last OWNER-AUTHORED turn began. Nothing is
+ * remembered; both halves are DERIVED from inputs the Stop hook already has. The predicate is
+ * phase-INDEPENDENT, so 5-archived, halted-error and the whole <phase>-error family inherit it.
+ *
+ * THE GOVERNING DIRECTION, and everything below is subordinate to it: THIS CHANGE MUST NEVER BE
+ * THE REASON FOR SILENCE. An unresolvable boundary never suppresses a refusal the old code would
+ * have produced. Where a record's provenance cannot be POSITIVELY established the boundary does
+ * not advance, which leaves the record looking fresh, which leaves the lint loud. The one input
+ * that was already silent (an unreadable or wholly unparseable transcript, which exits 0 because
+ * there is no assistant text to grade) STAYS silent deliberately: that path predates #56, sits
+ * ahead of every boundary question in run(), and making it refuse would be a NEW false-refusal
+ * class fired by a malformed hook payload.
+ *
+ * WHERE `origin` LIVES, stated plainly because the misreading is fatal and looks like success.
+ * `origin` is a RECORD-LEVEL object, a sibling of type / isSidechain / isMeta / timestamp /
+ * message. It is NOT message.origin. Measured over 1,817 transcript files and 398,088 records
+ * (main-session and subagent, 2026-08-22): 2,742 record-level origin objects and ZERO under
+ * message, in every client version observed. An implementation reading record.message?.origin
+ * ?.kind finds zero human turns on every transcript ever written, the unresolvable-boundary
+ * fallback fires every time, and the change ships as a PERMANENT, TOTAL, SILENT no-op that looks
+ * exactly like the control working.
+ *
+ * THE origin.kind VALUE SPACE IS OPEN, NOT AN ENUM, and it is deliberately not a table in this
+ * file. Census over every project under ~/.claude/projects on one machine, clients 2.1.85 to
+ * 2.1.237, taken 2026-08-22: `human` 977, `task-notification` 1,396, `coordinator` 342 (found
+ * only on a second pass, in subagent transcripts), `peer` 31. That is what one machine has SEEN,
+ * not what the vendor may write. isHumanTurnRecord only ever tests for `human`, so an unlisted
+ * future value is excluded exactly like every listed value except `human`, and no code here
+ * validates against the list. A frozen four-value constant would be dead surface that a reader
+ * could mistake for a validated enum, which is this file's own recorded defect (the first
+ * VOICE_MOMENTS table was written from memory and invented four phases nothing writes).
+ *
+ * THE BOUNDARY IS THE LAST HUMAN RECORD IN FILE POSITION, not the maximum human timestamp, and
+ * that is a DIRECTION CHOICE made in advance of an observation rather than an accident of the
+ * loop. The two differ only under a chronological inversion; a running max is later-or-equal to
+ * the last-in-position value, a later boundary silences more, and silence is the one thing this
+ * change may never cause. Measured: 0 inversions in 971 human records, so no fixture can
+ * currently falsify the choice, and asserting it with a test that cannot fail would be worse
+ * than writing it down. PROMOTION CONDITION: a corpus that produces an inversion.
+ *
+ * THE RULING ON `updated_at` (it may only WIDEN freshness, never narrow it). recordMs is
+ * max(mtimeMs, Date.parse(updated_at) where that is finite); an absent, non-string or
+ * unparseable updated_at contributes nothing and cannot poison the comparison. MEASURED BASIS:
+ * mtime is the record's write time exactly when nothing has touched the file since, and a
+ * CHECKOUT timestamp otherwise -- across 9 live records the three written in place by the
+ * orchestrator agree with updated_at to under a second while six disagree by 3.0 hours to 13.7
+ * days. And updated_at cannot be trusted alone: it appears ONCE in commands/pipeline.md against
+ * 33 occurrences of current_phase, so its refresh is a writer convention restated at 1 of 33
+ * write sites, and preferring it would trade a loud failure for a silent one. WHAT max() BOUNDS
+ * AND WHAT IT DOES NOT, in one sentence, because the half-truth shipped twice in review: it
+ * bounds an mtime moved BACKWARDS while the bytes were freshly written (residual iii-a), and it
+ * does NOT bound an mtime-PRESERVING RESTORE (residual iii-b), because updated_at is file
+ * CONTENT and travels with the copy, leaving both terms stale together. The widening term has
+ * NO observed input: 0 of 9 live records carry an updated_at later than their mtime.
+ *
+ * ctime WAS CONSIDERED AND IS REJECTED, recorded so it is not re-proposed cold. ctime does read
+ * fresh after cp -p, tar -x and rsync -a alike, so it would close (iii-b). But ctime is set by
+ * ANY inode change including the utimesSync that is the sanctioned way to stale a fixture, so a
+ * ctime-inclusive composition would force every deliberately-stale fixture in the suite to be
+ * rebuilt by write-ordering against real elapsed time (~1.1 s per fixture, measured), trading a
+ * deterministic cross-platform stamp for a wall-clock-dependent suite. The objection is FIXTURE
+ * COST, not impossibility; an earlier draft claimed such fixtures "cannot be built at all" and
+ * that was false.
+ *
+ * RESIDUAL LIMITS, in label order, each with its FAIL DIRECTION and its expiry. Half of them are
+ * places this fix does not reach; naming them is what stops a future reader treating R1's
+ * absolute phrasing as universal.
+ *
+ *   (i)    A mid-turn operation that rewrites a FOREIGN status.json's mtime (a git checkout,
+ *          clone, worktree add or sync) makes that record look fresh and capture the turn.
+ *          DIRECTION: FALSE REFUSAL, which is exactly today's behaviour. The sibling module's
+ *          tie-abstention does not cover it: measured on this APFS worktree, four bulk-written
+ *          records share one wall-clock second and differ only at sub-millisecond resolution
+ *          across a ~2 ms spread, so resolveStatus picks a strict winner rather than abstaining.
+ *          EXPIRY: a record identity that survives a checkout.
+ *   (ii)   The owner sends a message BETWEEN the archive checkpoint and the completion report,
+ *          so the report is no longer in the same turn and the genuine moment goes unchecked.
+ *          DIRECTION: SILENCE. This is the one true positive the fix trades away and it is the
+ *          accepted cost. EXPIRY: a signal that ties a message to the checkpoint that provoked
+ *          it rather than to the turn it lands in.
+ *   (iii-a) An NTP step backwards or an explicit utimes, with the BYTES freshly written. Such a
+ *          record still carries a recent updated_at, so max() reads it fresh and the lint fires.
+ *          BOUNDED by the composition above. DIRECTION: none left open.
+ *   (iii-b) OPEN, AND BOUNDED BY NOTHING SHIPPED HERE: an mtime-PRESERVING RESTORE (cp -p,
+ *          rsync -a, tar -x). Both terms of the max() are stale together, so a record placed in
+ *          THIS turn reads 72.00 hours old (measured, identically, for all three tools; the
+ *          non-preserving control, a plain cp, reads 0.00 h). DIRECTION: SILENCE, a missed
+ *          check. EXPIRY: a mechanism that dates the record by something a verbatim copy cannot
+ *          carry. THE ENVIRONMENT is an operator's shell restoring a tree, which is an
+ *          environment no check in this repo runs in, so a green CI run is not evidence that
+ *          this class is closed.
+ *   (iv)   THE IRREDUCIBLE ONE. The predicate TRUSTS THE VENDOR'S OWN PROVENANCE LABEL. If a
+ *          client ever stamps a harness-injected record origin.kind 'human', that record
+ *          advances the boundary and the control goes silent with no error anywhere. DIRECTION:
+ *          SILENCE. This is the declared expected survivor of the drift battery rather than
+ *          something papered over. EXPIRY: re-run the origin.kind census over a fresh corpus and
+ *          check that no non-owner class carries 'human'.
+ *   (v)    A same-machine cross-session message is EXCLUDED TWICE OVER rather than bounded: all
+ *          31 observed carry BOTH origin.kind 'peer' AND isMeta true. sessionId is NOT a third
+ *          guard, and that is measured rather than assumed: all 31 are stamped with the
+ *          RECEIVING session's own id, so an equality test cannot see them. DIRECTION: none left
+ *          open (excluded twice over, by origin.kind and by isMeta independently); no residual
+ *          EXPIRY applies.
+ *   (vi)   On clients predating the origin field the predicate finds no human turn, the boundary
+ *          is unresolvable, and the lint fires unconditionally, which is today's behaviour.
+ *          Measured: 8 of 84 transcripts (9.5%) contain no origin.kind 'human' record at all,
+ *          all on clients 2.1.170 and older; on 2.1.209 and newer the predicate catches 968 of
+ *          968 owner records. DIRECTION: a LOUD no-op, not a disarm. The line main() attaches to
+ *          a refusal with an unresolved boundary is what makes that condition VISIBLE, because a
+ *          loud failure is a nuisance nobody reports as a bug.
+ *   (vii)  A turn the owner did not START does not advance the boundary, so a record written
+ *          after the last owner message still reads fresh and that turn's message is still
+ *          graded. The boundary advances only on an owner-TYPED record, so an auto-compaction
+ *          continuation, a task-completion notice handing control back, a queued message, a
+ *          session resume or a peer message all leave it where it was. DIRECTION: FALSE
+ *          REFUSAL, i.e. exactly today's behaviour, so a COVERAGE LIMIT and not a regression.
+ *          THE BOUND is tighter than "the bug is still live": it bites only in the WINDOW
+ *          between a status write and the NEXT owner-typed message, because that message moves
+ *          the boundary past the record permanently. Population, not a rate: of 2,572 assistant
+ *          episodes, 1,562 (60.7%) are not owner-started once voice-lint's own refusals are
+ *          excluded, but the residual only fires where such a turn ALSO follows a voice-moment
+ *          status write inside that window, and this corpus carries no status.json history to
+ *          join against. EXPIRY: a structural "a new turn began" signal independent of
+ *          authorship, at which point the boundary can advance on turn starts without reopening
+ *          the self-disarm.
+ *   (viii) THE SHAPE CHECK REFUSES BEFORE THE TRANSCRIPT IS READ. phaseShapeFailure returns a
+ *          refusal ahead of every boundary question, so a STALE or FOREIGN record whose
+ *          current_phase violates status.schema.json's pattern still refuses this session's
+ *          message. The outcome property above is therefore true WITH AN EXCEPTION. DIRECTION:
+ *          FALSE REFUSAL, i.e. today's behaviour, so a coverage limit like (vii). It is NOT
+ *          closed by moving the gate earlier: the boundary scan is bound to sit AFTER the two
+ *          unusable-transcript returns so no unusable input acquires new behaviour, and hoisting
+ *          the freshness check would make the shape-failure path pay a transcript read it does
+ *          not pay today. EXPIRY: a freshness signal available before the record's phase is
+ *          validated.
+ *   (ix)   A STAT FAILURE ON THE MTIME-SCAN BRANCH NOW SILENCES A REFUSAL IT USED TO PRODUCE. The
+ *          scan drops a candidate it cannot read at EITHER of two adjacent lines -- the
+ *          `if (!existsSync(f)) continue;` guard and the `catch { continue; }` just below it --
+ *          and #56 changes neither; what it inverts is what dropping COSTS. Before, dropping this
+ *          session's own record left some FOREIGN record resolved and the lint refused loudly
+ *          against it; now the surviving candidate is BY CONSTRUCTION older than the turn
+ *          boundary, so the refusal is silenced instead. Measured, one variable moved, one
+ *          fixture (dir 99 = this session's fresh 5-archived record, dir 7 = a foreign 72 h-stale
+ *          4-review-complete, no env signal, an em-dash message, statSync forced to throw EACCES
+ *          on 99/status.json alone): stat ok -> exit 2 naming 5-archived; stat throws -> exit 0
+ *          with ZERO bytes on stderr; the same throw against the pre-#56 code -> exit 2 naming
+ *          4-review-complete. DIRECTION: SILENCE.
+ *          SCOPE, and the distinction carries most of the severity: the LIKELY cause is an ENOENT
+ *          race against the archival unlink, where silence is #56's intended and correct outcome;
+ *          the exposure is the narrower EACCES/EPERM/EIO class, where the record EXISTS and
+ *          cannot be read. WHICH OF THE TWO LINES DROPS IT DEPENDS ON THE FAULT, so a fix applied
+ *          to one alone leaves the other silent: a TRANSIENT failure takes the catch, while a
+ *          PERSISTENT permission fault takes existsSync, which returns FALSE rather than throwing
+ *          when the containing directory is unsearchable -- statSync never runs and the catch is
+ *          never reached. Measured with no shim of any kind, uid 501, chmod 000 on the issue
+ *          directory: existsSync false, statSync EACCES, readFileSync EACCES, readdir still
+ *          enumerating, and end to end exit 0 with ZERO bytes on stderr -- the same outcome as
+ *          the shimmed measurement above, against exit 2 / 479 bytes for that fixture with the
+ *          directory readable. NOT closed by handing the unstattable candidate POSITIVE_INFINITY
+ *          the way statMs does on the named-signal branch: it would then WIN, readJson would fail
+ *          on that same unreadable file, status would be null and run() would fail open silently
+ *          anyway, which trades one silence for another -- and on the PERSISTENT half it is not
+ *          even that but a plain no-op, still exit 0 / zero bytes with that fix applied
+ *          (measured), because the catch it edits never runs. WHAT THE LOUD ALTERNATIVE REFUSES,
+ *          which is why it is not taken: forcing a refusal whenever any candidate was dropped
+ *          makes an unreadable FOREIGN lane's status.json (a root-owned file left by a container
+ *          run) refuse every message in this session, i.e. correct work refused on account of a
+ *          run this session does not own. EXPIRY, and it is NOT the discrimination: telling an
+ *          unreadable record from an absent one is available today and costs about four lines
+ *          (drop existsSync, let statSync throw, branch on err.code). What is missing is
+ *          ATTRIBUTION -- the signal this scan uses to decide whose record a candidate is IS that
+ *          record's own mtime, which is exactly what the failure withholds, so a dropped
+ *          candidate cannot be told from a foreign lane's. The containing directory's mtime is
+ *          not the substitute it looks like: still takeable at mode 000, but it moves when an
+ *          entry is created, removed or renamed and NOT when status.json is rewritten in place
+ *          (both measured), so it dates a different event than the record write the scan grades.
+ *          EXPIRY is therefore a way to attribute an UNREADABLE candidate to a session, at which
+ *          point the EACCES/EPERM/EIO half can go loud without the ENOENT half following it.
+ *          PINNED in tests/test-voice-lint.sh, with its two one-variable controls, so the
+ *          asymmetry sits on the record rather than being rediscovered.
+ *
+ * WHAT THE SELF-DISARM WAS, kept because the shape of the mistake is more instructive than the
+ * fix. Deciding "has a person weighed in" by SUBTRACTING known machine spellings from the set of
+ * user records is the wrong side of the transformation: it inherits every future spelling the
+ * vendor adds, and it admitted voice-lint's OWN blocking refusal record, so the control disarmed
+ * itself the instant it first fired and the identical bad message passed on resend.
  */
 
 import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
@@ -129,6 +329,20 @@ function errorMoment(phase) {
 // voice.md, "Language rules": these phrases all assume the reader was in the thread.
 const BANNED_PHRASES = ["as discussed", "as noted above", "per the spec", "as you know"];
 
+// Attached to a refusal when no owner-typed record could be found in the transcript, so the
+// turn-scoping check could not run and this refusal was decided the old way.
+//
+// WHY IT EXISTS. The fail direction for an unresolvable boundary is LOUD, and a loud failure is a
+// nuisance nobody reports as a bug, so a fix that has degraded to a permanent no-op -- on a client
+// predating the origin field (8 of 84 transcripts), or under any future vendor change -- looks
+// exactly like the control working. Naming the condition where output already happens costs
+// nothing on the runs where it does not apply.
+//
+// A FIXED LITERAL, and that is a requirement rather than a style: no byte of the transcript may
+// appear in it, per the standing rule that nothing from the transcript reaches stderr.
+const BOUNDARY_UNRESOLVED_LINE =
+  "Note: no owner-typed message was recognisable in this transcript, so this refusal was NOT scoped to the current turn. That is the documented fallback (an older client, or a changed transcript format), not a second failure, but if you see this line routinely the turn check has quietly stopped working.";
+
 function readJson(file) {
   try {
     return JSON.parse(readFileSync(file, "utf8"));
@@ -138,21 +352,42 @@ function readJson(file) {
 }
 
 /**
- * Newest issue dir holding a status.json, or null.
+ * The issue dir this session owns, as { status, dir, mtimeMs }, or null.
  *
- * Mirrors the validator's resolution ORDER (explicit signal, then newest mtime, then null),
- * including its rule that a TIE at the newest mtime resolves to null rather than to either
- * candidate -- see activeIssueDir in validate-pipeline-artifact.mjs for why (#27: readdirSync
- * order is hash order on ext4 and insertion order on APFS, so a tie picked the subject by
- * filesystem), and its issue-dir VOCABULARY, which is now the validator's exported
- * ISSUE_DIR_RE imported above rather than a second copy that could drift from it.
+ * RESOLUTION ORDER, unchanged: explicit signal, then STRICT newest mtime, then null. A TIE at
+ * the newest mtime resolves to null rather than to either candidate -- see activeIssueDir in
+ * validate-pipeline-artifact.mjs for why (#27: readdirSync order is hash order on ext4 and
+ * insertion order on APFS, so a tie picked the subject by filesystem) -- and the issue-dir
+ * VOCABULARY is the validator's exported ISSUE_DIR_RE imported above rather than a second copy
+ * that could drift from it.
+ *
+ * IT DOES NOT MIRROR THE VALIDATOR, and the older claim here that it did was already false. The
+ * two agree on the newest-mtime FALLBACK branch and DIVERGE on the named-signal branch, in four
+ * measured ways: this function falls through when the named RECORD is missing or unparseable
+ * while activeIssueDir falls through only when the DIRECTORY is absent, and run() passes only
+ * the CLAUDE_PIPELINE_ACTIVE_ISSUE spelling while activeIssueName also reads input.active_issue
+ * and the bare PIPELINE_ACTIVE_ISSUE. tests/test-voice-lint.sh carries the divergence as an
+ * asserted 9-run table, each cell naming its own cause, rather than as a mirror claim nobody
+ * re-derived.
+ *
+ * THE RETURN IS A WRAPPER, and only the wrapper is new: the caller needs the record's mtime to
+ * date it against the turn boundary, and needs the SELECTED DIR because that is the outcome the
+ * divergence table compares (the two derivations return different types, so comparing their
+ * return values directly would be vacuous). Precedence, the strict-mtime winner and the tie
+ * abstention are byte-for-byte what they were.
  */
 export function resolveStatus(projectDir, envIssue) {
   const base = path.join(projectDir, ".pipeline");
   if (!existsSync(base)) return null;
   if (envIssue && ISSUE_DIR_RE.test(envIssue)) {
-    const s = readJson(path.join(base, envIssue, "status.json"));
-    if (s) return s;
+    const f = path.join(base, envIssue, "status.json");
+    const s = readJson(f);
+    // The stat is GUARDED and its failure direction is the ruling, not a detail: this branch did
+    // readJson only, so taking an mtime here adds a throw site whose exception would land in
+    // main()'s blanket catch and exit 0 SILENTLY, which is this control's exact inversion. A
+    // tooling failure in new code may only ever make the record read maximally fresh, which
+    // leaves the lint loud.
+    if (s) return { status: s, dir: path.dirname(f), mtimeMs: statMs(f) };
   }
   let newest = null;
   let newestMs = -1;
@@ -166,11 +401,15 @@ export function resolveStatus(projectDir, envIssue) {
   for (const d of entries) {
     if (!d.isDirectory() || !ISSUE_DIR_RE.test(d.name)) continue;
     const f = path.join(base, d.name, "status.json");
+    // Dropping the candidate here is residual (ix) too, DIRECTION: SILENCE. This is the line a
+    // PERSISTENT permission fault takes -- existsSync returns false, so the catch below never runs.
     if (!existsSync(f)) continue;
     let ms;
     try {
       ms = statSync(f).mtimeMs;
     } catch {
+      // Dropping the candidate is residual (ix), DIRECTION: SILENCE. Declared, not fixed; read
+      // it before "fixing" this to POSITIVE_INFINITY the way statMs does.
       continue;
     }
     if (ms > newestMs) {
@@ -185,18 +424,94 @@ export function resolveStatus(projectDir, envIssue) {
   // decide whose run gets voice-checked. The caller treats a null status as "no phase", which
   // is already its fail-open path.
   if (tiedAtNewest) return null;
-  return newest ? readJson(newest) : null;
+  if (!newest) return null;
+  return { status: readJson(newest), dir: path.dirname(newest), mtimeMs: newestMs };
 }
 
-/** Last assistant text block in a Claude Code JSONL transcript, or "" if none found. */
-export function lastAssistantText(transcriptPath) {
+/** A file's mtime, or POSITIVE_INFINITY when it cannot be taken. See resolveStatus for why. */
+function statMs(file) {
+  try {
+    return statSync(file).mtimeMs;
+  } catch {
+    return Number.POSITIVE_INFINITY;
+  }
+}
+
+/**
+ * Was this record TYPED BY THE OWNER? Six clauses, all positive, all ANDed.
+ *
+ * IDENTIFICATION IS POSITIVE, NEVER BY EXCLUSION, and that is the whole design rather than a
+ * preference. Subtracting known machine spellings from the set of user records inherits every
+ * future spelling the vendor adds, and it admitted this script's own refusal record, which
+ * disarmed the control the instant it first fired. So a record the owner did not type must not
+ * advance the boundary, and where provenance cannot be POSITIVELY established the boundary does
+ * not advance at all, which keeps the lint loud.
+ *
+ * NO MESSAGE CONTENT IS READ, and that is a ruling. Reading content produced two of the three
+ * silent drift classes found in review (a renamed tool_result block type; tool results relocated
+ * out of message.content[]), and dropping the read removes both at once. It also stops the
+ * predicate rejecting the 12 measured owner messages whose content is an array carrying an image
+ * block, and the 957 of 969 whose content is a bare string.
+ *
+ * `origin` IS RECORD-LEVEL, never message.origin. See the header: the misreading finds zero
+ * human turns on every transcript ever written and ships as a silent no-op.
+ *
+ * EVERY ACCESS IS GUARDED and a malformed-but-parseable record is FALSE rather than a throw: a
+ * throw from here reaches main()'s blanket catch and exits 0 silently, which is fail-OPEN and
+ * the exact inversion of this control's direction.
+ *
+ * EXPORTED so the suite can drive one record in and read one verdict out. A process exit code is
+ * moved by four other things (the phase table, the shape check, the transcript read, lintVoice),
+ * so a cell reading only rc cannot say which of them moved.
+ */
+export function isHumanTurnRecord(record) {
+  return (
+    record !== null &&
+    typeof record === "object" &&
+    record.type === "user" &&
+    record.isSidechain !== true &&
+    record.isMeta !== true &&
+    record.message?.role === "user" &&
+    record.origin?.kind === "human" &&
+    typeof record.timestamp === "string" &&
+    Number.isFinite(Date.parse(record.timestamp))
+  );
+}
+
+/** How fresh a status record reads. updated_at may only WIDEN this; see the header's ruling. */
+function recordFreshnessMs(mtimeMs, updatedAt) {
+  const stated = typeof updatedAt === "string" ? Date.parse(updatedAt) : NaN;
+  return Number.isFinite(stated) ? Math.max(mtimeMs, stated) : mtimeMs;
+}
+
+/**
+ * ONE reverse pass over a Claude Code JSONL transcript, yielding both things the Stop hook needs:
+ * { text, humanTurnMs }.
+ *
+ *   text        the last assistant text block, or "" if none was found
+ *   humanTurnMs the timestamp of the last owner-typed record IN FILE POSITION, or null when no
+ *               such record is recognisable (see the header for why position and not max)
+ *
+ * ONE READ AND ONE TRAVERSAL, DELIBERATELY, AND THE FUSION IS THE WART. A second pass for the
+ * boundary would double a cost measured at 620 ms on the largest transcript on this machine
+ * (69.8 MB, 26,460 records), and a Stop hook slow enough to be timed out by the harness is a
+ * silent disarm in the same direction as everything else here. The price is one function with
+ * two responsibilities, paid knowingly.
+ *
+ * A READ FAILURE RETURNS { text: "", humanTurnMs: null }, which is the pre-#56 behaviour
+ * unchanged: run() returns on the empty text before any boundary question is asked, so an
+ * unreadable transcript stays silent rather than acquiring a new refusal.
+ */
+export function scanTranscript(transcriptPath) {
   let raw;
   try {
     raw = readFileSync(transcriptPath, "utf8");
   } catch {
-    return "";
+    return { text: "", humanTurnMs: null };
   }
   const lines = raw.split("\n").filter((l) => l.trim() !== "");
+  let text = "";
+  let humanTurnMs = null;
   for (let i = lines.length - 1; i >= 0; i--) {
     let rec;
     try {
@@ -204,16 +519,23 @@ export function lastAssistantText(transcriptPath) {
     } catch {
       continue;
     }
-    if (rec?.type !== "assistant") continue;
-    const content = rec?.message?.content;
-    if (!Array.isArray(content)) continue;
-    const text = content
-      .filter((c) => c && c.type === "text" && typeof c.text === "string")
-      .map((c) => c.text)
-      .join("\n");
-    if (text.trim() !== "") return text;
+    if (text === "" && rec?.type === "assistant") {
+      const content = rec?.message?.content;
+      if (Array.isArray(content)) {
+        const joined = content
+          .filter((c) => c && c.type === "text" && typeof c.text === "string")
+          .map((c) => c.text)
+          .join("\n");
+        // The JOINED string is what has to be non-blank, not the block count. A record whose only
+        // text block is whitespace is SKIPPED, exactly as before, and the two conditions pick
+        // different messages on that input.
+        if (joined.trim() !== "") text = joined;
+      }
+    }
+    if (humanTurnMs === null && isHumanTurnRecord(rec)) humanTurnMs = Date.parse(rec.timestamp);
+    if (text !== "" && humanTurnMs !== null) break;
   }
-  return "";
+  return { text, humanTurnMs };
 }
 
 /**
@@ -290,8 +612,8 @@ function phaseShapeFailure(phase, scriptDir) {
 export function run(payload, projectDir, scriptDir = SCRIPT_DIR) {
   // Already inside a stop-hook continuation: never block twice, or a stubborn message loops.
   if (payload?.stop_hook_active) return { failures: [], phase: null };
-  const status = resolveStatus(projectDir, process.env.CLAUDE_PIPELINE_ACTIVE_ISSUE);
-  const phase = status?.current_phase;
+  const resolved = resolveStatus(projectDir, process.env.CLAUDE_PIPELINE_ACTIVE_ISSUE);
+  const phase = resolved?.status?.current_phase;
   if (!phase) return { failures: [], phase: null };
   const shapeFailure = phaseShapeFailure(phase, scriptDir);
   if (shapeFailure) return { failures: [shapeFailure], phase };
@@ -299,9 +621,17 @@ export function run(payload, projectDir, scriptDir = SCRIPT_DIR) {
   if (!moment) return { failures: [], phase }; // a declared non-voice checkpoint
   const transcript = payload?.transcript_path;
   if (!transcript) return { failures: [], phase };
-  const text = lastAssistantText(transcript);
+  const { text, humanTurnMs } = scanTranscript(transcript);
   if (text.trim() === "") return { failures: [], phase };
-  return { failures: lintVoice(text, moment), phase, moment };
+  // TURN SCOPING, and it sits HERE for two reasons. It is downstream of resolution, so it applies
+  // identically to both resolution branches and there is no second behaviour to keep in sync. And
+  // it is downstream of the two unusable-transcript returns above, so no input that is silent
+  // today acquires a new refusal. A null boundary skips the block entirely: an unresolvable
+  // boundary can never silence a refusal this code would otherwise have produced.
+  if (humanTurnMs !== null && recordFreshnessMs(resolved.mtimeMs, resolved.status?.updated_at) < humanTurnMs) {
+    return { failures: [], phase };
+  }
+  return { failures: lintVoice(text, moment), phase, moment, boundaryUnresolved: humanTurnMs === null };
 }
 
 function main() {
@@ -322,6 +652,10 @@ function main() {
     `Stop hook: this message accompanies pipeline phase "${result.phase}", which voice.md treats as a full voice mode moment, and the required shape is not there.`,
     "",
     ...result.failures.map((f) => `- ${f}`),
+    // ATTACHED TO A REFUSAL THAT ALREADY EXISTS, never a refusal of its own, and that holds
+    // STRUCTURALLY rather than by convention: it sits after the exit-0 guard above and outside
+    // the failures.map, so it cannot create a refusal and cannot change the named-failure count.
+    ...(result.boundaryUnresolved ? ["", BOUNDARY_UNRESOLVED_LINE] : []),
     "",
     "Read ${CLAUDE_PLUGIN_ROOT}/voice.md and rewrite the message for someone who did not read the diff.",
     "This checks SHAPE only; a message can pass this and still be written for a machine.",

@@ -406,6 +406,43 @@ suite "AC27: the two suites that already own this hook are UNCHANGED consumers"
 #     source while that happens, and the injection control that dropping a phase the tables
 #     never held moves nothing.
 #
+# 71 -> 257 (#56): voice-lint's obligation is scoped to the turn that produced the status
+# record, and the behavioural contract for it was authored BEFORE the implementation. Verified
+# the same way the two re-baselines above were, and this time the property DOES hold in its pure
+# form: diffed by label set (run the suite from the parent commit and from this one, strip the
+# ANSI codes, sort the `ok`/`FAIL` labels, `comm`) -- 186 labels ADDED, 0 REMOVED, 0 RENAMED.
+# Purely additive, so there is no "removed or replaced by something stronger" reading to
+# disambiguate here. Re-derive it rather than trusting this note.
+#
+# THE SISTER ASSERTION BELOW (`with none failing`) IS RED ON PURPOSE AT THE COMMIT THAT ADDS
+# THOSE 186, and that is the point rather than an oversight: they are a FAILING behavioural
+# contract, authored ahead of the code, and 57 of them are red until the implementation lands.
+# This cell is what makes that visible from outside the suite that owns it. If it is still red
+# after #56 ships, the fix is incomplete; if it is green with a passed= other than 260, a cell
+# was added or removed and the label-set diff above is how to find out which.
+#
+# 257 -> 260 (#56 Phase 4): the panel's binding QA verdict was REQUEST_CHANGES on a gap the
+# implementation battery found and reported rather than closed -- voice-lint's assistant-text
+# accept condition (a non-blank JOINED string) had no cell, so paraphrasing it as a non-empty
+# ARRAY of text blocks passed all 257 while going SILENT on a transcript whose last assistant
+# record carries a whitespace-only text block. Three cells added under the label AC5b: a shape
+# PREMISE proving the fixture builds the one input the two conditions disagree on, the
+# discriminating pair, and the graded-message assertion. Test-only; no production file changed,
+# because the shipped condition was already correct. THIS COUNT IS RE-DERIVED FROM A RUN, never
+# incremented by hand -- measured passed=260 failed=0 at the commit that adds it.
+#
+# 260 -> 267 (#56 Phase 4, the DBA's major): a stat failure on voice-lint's mtime-SCAN branch --
+# the branch production actually takes -- drops the candidate, and #56 inverted what dropping
+# costs, so a tooling failure that used to refuse loudly against a foreign record now SILENCES the
+# refusal on the session's own. Declared as residual (ix) rather than fixed (the loud alternative
+# refuses correct work: an unreadable FOREIGN lane's status.json would refuse every message in the
+# session), and pinned the AC16(d) way -- assert the documented silence, plus two one-variable
+# controls and a reported pre-#56 contrast. SEVEN cells, and the label-set diff is what says that:
+# 9 labels added, 2 "removed", and both of those two are the SAME population-report lines carrying
+# their own count in the label (95 -> 101 mtime stamps, 81 -> 84 exit codes), re-baselined by the
+# three extra lint runs. 0 real removals, 0 renames. THIS COUNT IS RE-DERIVED FROM A RUN, never
+# incremented by hand -- measured passed=267 failed=0 at the commit that adds it.
+#
 # AND THE IRONY, recorded as a pointer rather than acted on here: this cell is a bare exact-count
 # pin over another suite's whole population, which is the class #33 retired elsewhere in Lane 1.
 # It would be better as a LABEL-SET assertion -- pin the sorted label list, and an addition then
@@ -425,7 +462,7 @@ run_suite_counts test-stop-hook.sh
 assert_eq "test-stop-hook.sh still passes exactly its 18 pre-existing assertions" "${SUITE_PASSED:-<none>}" "18"
 assert_eq "  with none failing" "${SUITE_FAILED:-<none>}" "0"
 run_suite_counts test-voice-lint.sh
-assert_eq "test-voice-lint.sh still passes exactly its 71 assertions (41 pre-existing + 7 from #27 + 26 from #53, less 3 retired by #53 -- see the note above)" "${SUITE_PASSED:-<none>}" "71"
+assert_eq "test-voice-lint.sh still passes exactly its 267 assertions (41 pre-existing + 7 from #27 + 26 from #53, less 3 retired by #53, + 186 from #56's authored contract, + 3 from #56's Phase-4 gap closure, + 7 from #56's Phase-4 residual (ix) pin -- see the note above)" "${SUITE_PASSED:-<none>}" "267"
 assert_eq "  with none failing" "${SUITE_FAILED:-<none>}" "0"
 
 # ---------------------------------------------------------------------------

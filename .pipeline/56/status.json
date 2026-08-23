@@ -1,0 +1,330 @@
+{
+  "issue_number": 56,
+  "current_phase": "4-review-complete",
+  "started_at": "2026-08-22T18:10:00Z",
+  "updated_at": "2026-08-23T03:25:37Z",
+  "phase3_qa_test_commit": "e9da93700cbb3075c4cc5f9150ebaa8ecfc36acd",
+  "branch": "claude/pipeline-resume-56-a82065",
+  "ask_text": "voice-lint: scope the voice obligation to the turn that produced the record",
+  "risk_tier": "architectural",
+  "veto_reason": "SecOps VETO on Phase 2 review: the proposed human-turn freshness predicate (R5) classifies voice-lint's own blocking refusal record as a human turn, so the Stop-hook control disarms itself the moment it first fires -- a resent identical message then passes (rc 0). DBA independently returned REQUEST_CHANGES on the same defect family: R7 states its own residual's fail direction backwards, R5's human-turn definition silently disarms on ordinary auto-compaction continuations (18.8% of corpus), and AC9's mirror-property claim is already false on two measured inputs. DevOps APPROVE_WITH_NOTES flagged a related fail-open in main()'s blanket try/catch. Spec returns to BA for rework.",
+  "events": [
+    {
+      "phase": "0.5-map",
+      "verdict": "COMPLETE",
+      "at": "2026-08-22T18:10:00Z",
+      "note": "Deep three-layer map written, seeded from 3 living-context consumer catalogs."
+    },
+    {
+      "phase": "1-ba",
+      "verdict": "APPROVE",
+      "at": "2026-08-22T18:10:00Z",
+      "note": "spec.json written, risk_tier architectural, 3 open_questions all non-blocking and resolved (ba_default)."
+    },
+    {
+      "phase": "2-review",
+      "verdict": "VETO",
+      "at": "2026-08-22T19:05:00Z",
+      "note": "RECONSTRUCTED: this status.json checkpoint was never committed by the originating session (no .pipeline/56/status.json existed anywhere, worktree or main checkout, on --resume). Rebuilt from spec.json/map.json/review.json, which were present and internally consistent. secops VETO, dba REQUEST_CHANGES, devops APPROVE_WITH_NOTES; no design_review (spec is not frontend-scoped)."
+    },
+    {
+      "phase": "1-ba",
+      "verdict": "REWORKED",
+      "at": "2026-08-22T21:05:00Z",
+      "note": "BA round-2 rework: requirements 8->12, criteria 12->18. Re-derived on an 84-transcript/134,438-record corpus (wider than either reviewer's). Did not adopt SecOps's remediation verbatim: it still admitted 1,439 non-owner records including the 22 auto-compaction summaries that were DBA's own second blocker. Added origin.kind (a field SecOps's own not_reached flagged as unchecked) to reach 1 non-owner admission and flip all 10 drift classes loud. Also: corrected R7's fail-direction (false refusal, not silence, per DBA), replaced AC9's mirror claim with an asserted-divergence table (found a 3rd outcome neither reviewer's two covered), ruled explicitly on updated_at vs mtime (max, widen-only), corrected DBA's own AC6 coverage number (5/65, not 0), named the existing utimesSync idiom for R8's fixture construction, and extended AC7 to the fail-open tail DevOps flagged. review.json backed up to review.round1.json before this round's Phase 2 re-dispatch."
+    },
+    {
+      "phase": "2-review",
+      "verdict": "REQUEST_CHANGES",
+      "at": "2026-08-22T21:25:12Z",
+      "note": "Round 2, all three reviewers re-dispatched fresh (not a delta merge; Phase 2 has no shard-preservation mechanic). secops APPROVE_WITH_NOTES (VETO lifted; all 4 round-1 findings independently reproduced closed via a live reference-implementation patch, plus 1 major and 3 lows). devops APPROVE_WITH_NOTES (round-1 fail-open concern resolved by new R11/extended AC7; 1 nit). dba REQUEST_CHANGES: all 3 of ITS OWN round-1 blockers independently reverified closed, and it confirmed BA's two counter-corrections against its own round-1 work were right, but found ONE NEW blocker: R9's max(mtimeMs, Date.parse(updated_at)) does not cover cp -p / rsync -a / tar -x, which carry a stale updated_at value along with a stale mtime; demonstrated live (a cp -p just now on a 72h-old record still reads 72.0h stale). This is the SECOND consecutive Phase 2 round to return REQUEST_CHANGES, which trips the round-budget rule in commands/pipeline.md's Convergence budget section: do not auto-loop a third BA rework; stop and let the owner choose split / defer / proceed-with-constraints."
+    },
+    {
+      "phase": "2-review-round-budget",
+      "verdict": "PROCEED_A",
+      "at": "2026-08-22T21:38:52Z",
+      "note": "Owner chose option A from the round-budget decision block: one more targeted round, scoped to exactly two items (dba's R9 cp-p/rsync-a/tar-x gap, secops's one-line AC7/R3 unreadable-transcript contradiction), not a full rework. Everything else DBA/DevOps/SecOps already approved stands. Round 3 will re-dispatch only dba and secops; devops is not re-seated (its round-2 APPROVE_WITH_NOTES is preserved unchanged, since neither targeted fix touches its lens)."
+    },
+    {
+      "phase": "1-ba-rework-required",
+      "verdict": "SCOPE_WIDENED",
+      "at": "2026-08-22T21:52:48Z",
+      "note": "Orchestrator error caught before dispatch: the round-budget report only surfaced dba's 1 blocker, omitting dba's 4 open majors and 3 nits and secops's 3 lows from round 2. Corrected with the owner: BA's first round-3 pass (items 1-2) is done and confirmed scope-clean (spec.json already reflects it) -- item 1 (R9 freshness gap) was NOT patched as claimed in round 2; BA re-measured, found no clean mechanical fix (a candidate third signal, ctime, is reset by the very utimesSync mechanism R8 mandates for building test fixtures, so it would make real fixtures indistinguishable from the bug), and instead converted it into an explicit bounded residual (R7 iii-b) with a measured production frequency of zero in this repo's own history. Item 2 (secops's AC7/R3 contradiction) fixed cleanly (today's silent behavior on an unreadable transcript is preserved; R6 now says explicitly that this spec only ever removes refusals, never adds one). Owner then chose to ALSO fold dba's 4 majors into this same round rather than risk them resurfacing as a fresh round-budget trip at round 4."
+    },
+    {
+      "phase": "1-ba",
+      "verdict": "REWORKED",
+      "at": "2026-08-22T22:03:38Z",
+      "note": "BA round-3 part 2 (same continued session as part 1): re-derived all 4 majors independently before fixing, at up to 3x DBA's corpus. AC9 (major 1): ran all 6 cells live, found DBA exactly right about cell (d) (ordering flips the verdict) and only half right about cell (c) (both orderings diverge; round-2 BA's and round-1 DBA's each described a different, real arrangement); ran (e)/(f), which round 2 had left with no measured expectation. AC8 (major 2): confirmed at 398,088 records -- 0 co-occurrences of origin.kind:human with isSidechain/isMeta/role-mismatch; narrowed the falsifiability entry to the one mutation that can redden, declared the other three expected survivors, forbade fabricating a fixture to force a red. R5/origin nesting (major 3): confirmed record-level, 0 under message, across 2,742 objects; added AC8(f), a nesting-discrimination pair, since a wrong-level read would have inverted both an implementation bug and its own fixture at once. R7 residual (major 4): booked as R7(vii), direction false refusal, bounded to the window between a status write and the next owner-typed message (not all of problem (a)); population given at two grains (60.7% of turn-episodes vs 41.4% of assistant-text records) because they disagree, with the rate itself declared unmeasured. Also independently found a 5th origin.kind value (coordinator, 340 subagent-only records) nobody had named; correctly excluded, flagged as an enumeration gap for the header, not a predicate defect. Counts held: 12 requirements, 18 acceptance criteria; measured_state 17->20. DBA's 3 nits and SecOps's 3 lows remain open, not blocking. Ready for Phase 2 round 3: re-dispatching dba and secops only (devops's round-2 APPROVE_WITH_NOTES stands; none of these four majors touch its lens)."
+    },
+    {
+      "phase": "2-review",
+      "verdict": "APPROVE_WITH_NOTES",
+      "at": "2026-08-22T22:17:08Z",
+      "note": "Round 3, dba and secops re-dispatched on continued sessions (full context of rounds 1-2); devops's round-2 APPROVE_WITH_NOTES preserved unchanged in the merge (not re-reviewed). ALL THREE now APPROVE_WITH_NOTES, 0 blockers anywhere. Phase 2 CLEARS after 3 rounds. dba: blocker + all 4 majors independently reverified resolved (was half-wrong about itself on AC9 cell (c), corrected; confirmed BA's other 3 corrections). secops: its 1 major (AC7/R3) verified closed live. Both reviewers ALSO independently found a new, non-blocking major apiece in the round-3 WRITTEN JUSTIFICATIONS (not the live behavior): dba found R7(iii-b)'s stated reason for rejecting a ctime-based fix is factually wrong (the ruling to reject ctime survives; the given reason does not -- a real stale fixture CAN be built without utimesSync, just via a timing-dependent method BA didn't consider). secops found the expected_survivor note's claim about which record the AC14 relabel would silence is backwards for the Stop-hook's own refusal record specifically (claims silenced, measured LOUD) -- the exact record the original veto was about -- and that isMeta is actually falsifiable (not a true survivor) on fixtures the spec already builds. Both are text slated to ship into the module header/knowledge store; getting BA to correct them now, no re-review required per the APPROVE_WITH_NOTES rubric."
+    },
+    {
+      "phase": "2-review-complete",
+      "verdict": "APPROVE_WITH_NOTES",
+      "at": "2026-08-22T22:22:42Z",
+      "note": "BA's final round-3 pass: re-derived all three notes before fixing, confirmed both reviewers right and itself wrong in each case. R7(iii-b) now gives the real reason ctime was rejected (forces every stale fixture to become timing-dependent instead of instantly stamped via utimesSync, not that it 'cannot be built at all', which was false). expected_survivor corrected to name task-notification and auto-compaction as the classes an origin.kind relabel would silence (not the Stop-hook refusal, which stays loud via isMeta -- BA had it backwards). isMeta moved out of the survivor list into its own falsifiable mutation entry (2 of 4 classes flip when dropped); exactly two genuine survivors remain (isSidechain, message.role). No acceptance-criterion text changed; counts held at 12 requirements / 18 ACs / 20 measured_state / 18 mutations / 4 unmutable. Phase 2 is now fully complete, no further review round needed. Proceeding to Phase 2.5 (design bake-off)."
+    },
+    {
+      "phase": "2.5-design",
+      "verdict": "APPROVE",
+      "at": "2026-08-22T22:39:21Z",
+      "note": "Two blind opposing-stance sketches (A: smallest-blast-radius, two files, one new internal helper, fuses R5 into the existing scan function; B: cleanest-seam, extracts isHumanTurnRecord/scanTranscript/RESIDUAL_LIMITS/ORIGIN_KINDS as named units, +90-130/+40-60 estimated lines) judged by an opus dispatch. Winner: A, on three MEASURED points, not preference: (1) B's forward-scan running-max picks the quiet side of a fail-direction fork SecOps had already flagged (a later boundary silences more); (2) B's R10 placement was built as a real patch and run through the live CLI -- it reddens a PRE-EXISTING test cell (6 named_failures against the suite's asserted 5 on a byte-identical fixture), which AC6 forbids; A's placement does not; (3) cost measured on a 56.6MB/26,460-record transcript: A never slower than today's shipped code (85.1ms both), B ~1.7x on every invocation (143.9ms) for no coverage gained. Grafted from B into A: resolveStatus's `dir` field (load-bearing -- A's original plan read a status field, `issue`, that status.schema.json does not declare), isHumanTurnRecord exported (AC8(f) is the only cell catching R5's fatal nesting misreading, and both DBA and SecOps needed their own reference predicate to verify it -- Phase 4 needs the real one), and the origin.kind census content as header prose (not B's frozen RESIDUAL_LIMITS/ORIGIN_KINDS structures, declined on correctness grounds B's own residual_risks conceded). The judge ALSO independently found two things NEITHER sketch had, now binding in design.json: a previously-undiscovered residual (viii) where phaseShapeFailure refuses before the transcript is even read (a stale/foreign record's malformed current_phase still refuses this session's message; false-refusal direction, a coverage limit not a regression) that needs to reach spec.json's own R7 list eventually; and an unguarded statSync call the design newly introduces, which would silently fail into main()'s existing blanket catch (exit 0) -- the exact R3-inversion class DevOps already flagged for Phase 4 -- ruled to be guarded so a stat failure can only read fresh-and-loud (mtimeMs = +Infinity on throw), never an excuse to go silent. owner_decision.required: false, with reasoning recorded in design.json (blast radius identical outside voice-lint.mjs under both sketches per B's own admission; once the declined manifest is subtracted, the real cost delta is single digits; the remaining differences are measured correctness, not preference). No design-lock halt triggered. NOT yet proceeding to Phase 3: the original owner authorization ('proceed with A') was explicitly scoped through review, 'before anything is built' -- pausing here to report the design outcome and get an explicit go before dispatching QA/Dev."
+    },
+    {
+      "phase": "2.5-design-complete",
+      "verdict": "APPROVED",
+      "at": "2026-08-22T22:45:18Z",
+      "note": "Owner approved proceeding to implementation ('approved, lets execute on the plan'). This is a NEW, distinct authorization from the earlier 'proceed with A', which was explicitly scoped to stop before anything was built. Entering Phase 3, architectural-tier shape: QA-first. Worktree note: this session's cwd (.claude/worktrees/harddrive-space-review-4c7a9e, branch claude/pipeline-resume-56-a82065) has served as both PIPELINE_BASE and the Phase 3 implementation worktree throughout this run -- there is no separate orchestrator-only checkout in this session's topology, so no new worktree is pre-created and no artifact seeding/copy is needed; spec.json/review.json/map.json/design.json are already at the one ARTIFACT_DIR this whole run has used."
+    },
+    {
+      "phase": "3-impl",
+      "verdict": "QA_CONTRACT",
+      "at": "2026-08-22T23:53:17Z",
+      "note": "QA authored the Phase 3a failing behavioral contract, committed at e9da937 (test-only; production files confirmed byte-identical to parent by the orchestrator's own diff, not just QA's claim). 186 new cells (71->257), 0 removed/renamed. Orchestrator independently re-ran the suite: passed=200 failed=57, matching QA's report exactly -- a real red, not a silent harness zero (QA had already flagged that risk from two earlier incidents this session). QA additionally ran a 31-mutation + 5-vacuous-form falsifiability battery against a throwaway reference implementation (257/257, then reverted, nothing committed): found 2 legitimate declared survivors (isSidechain, boundary-as-max-timestamp) and, more notably, found 2 defects in its OWN first-draft mutations (a no-op edit, and a mutation landing where no cell was watching) and fixed both before handing off, adding a call-site cell that closes a real gap in the process. Covers all 18 ACs plus every design.json commitment: the nesting-discrimination pair, the self-disarm pair, AC9's full nine-run divergence table, the AC16 restore-residual cells (asserting the DECLARED limitation reads stale, not a fix that doesn't exist), and the two judge-discovered items (a statSync-guard pair, a residual-viii cell). Handled two collateral consumers (test-status-schema-contract.sh's needle match, test-gate-phase-entry-hook.sh's count pin) without weakening either. Dev's explicit marching orders for design.json's disputed placements: origin is record-level (record.origin?.kind), guard statSync to return +Infinity on failure, and the R10 line goes in main()'s lines array outside failures.map (matching the Phase 2.5 judge's live-measured ruling exactly). Dispatching Dev now that the commit is confirmed and recorded."
+    },
+    {
+      "phase": "3-impl",
+      "verdict": "APPROVE",
+      "at": "2026-08-23T01:00:12Z",
+      "note": "Dev implemented against QA's committed contract, one production file (voice-lint.mjs, +309/-26), one commit 8436ecf. Local: test-voice-lint.sh 257/257 (up from 200/57 at QA's contract), run.sh (project checkCommand) clean, self-test 22/0 unchanged. Dev ran an 11-mutation battery against the SHIPPED module (not a throwaway copy): 9 reddened in exactly their named cells; 2 survived and were proved to have actually applied -- the declared isSidechain survivor, and a NEW coverage gap Dev found and reported rather than silently fixing: paraphrasing the assistant-text accept condition as 'a non-empty array of text blocks' instead of today's exact joined.trim() !== '' survives all 257 cells but changes behavior on a whitespace-only text block (fail direction SILENCE), because no fixture builds that shape. Flagged for QA at Phase 4, not edited by Dev. Dev also flagged an anomaly rather than hiding it: a run.sh execution concurrent with an in-flight git commit reported one unnamed suite FAILED with a truncated log; Dev's dirty-tree hypothesis did not explain it. Orchestrator independently reran run.sh on the clean, fully-committed tree (no concurrent git operations): 'All test suites passed', voice-lint at 257/257, matching Dev's two clean runs. Treated as very likely a git-timing artifact of Dev's own dev-loop rather than a defect (Phase 4 and any future run only ever sees a stable committed tree), but explicitly flagged for DevOps to dig into rather than closed unilaterally. gate-pre-phase4.mjs and the frontend gate (self-skip, no frontend surface) both passed. No migration, so the live-verification gate does not apply. PR #87 opened against main, not merged. Panel: the full architectural six (ba dba devops secops dev qa); no design_review (no frontend surface) and no art_director (no visual-contract.json)."
+    },
+    {
+      "phase": "4-review",
+      "verdict": "REQUEST_CHANGES",
+      "at": "2026-08-23T02:01:17Z",
+      "note": "Full six-agent architectural panel returned on commit 573bb38: ba, dba, devops, secops, dev all APPROVE_WITH_NOTES (dba carried 1 non-blocking major, the others carried nits/notes, none gating). qa REQUEST_CHANGES: a test-only coverage gap (QA-B1) it verified itself by literal mutation and a live behavioral probe -- paraphrasing scanTranscript's assistant-text accept condition survives all 257 pre-existing cells but silently changes real behavior on a whitespace-only trailing text block (direction SILENCE, the one direction the module's own header forbids), and 0 of 225,136 real records exercise that shape so nothing catches it by chance. QA explicitly did not fix this mid-panel, out of respect for the other 5 reviewers voting on a fixed commit. Two panel members independently root-caused the run.sh anomaly via two DIFFERENT real mechanisms, neither a defect in this diff: devops reproduced a mid-write-file-read race in isolation (plausible, not confirmed as THIS incident's cause); qa found the actual exact cause -- test-issue17-integration.sh's AC41(c) clones the repo and runs the suite inside that clone, which is blind to anything uncommitted, so Dev's mid-implementation state got tested and failed exactly as its own commit-time tally would predict. final_verdict: REQUEST_CHANGES per the rubric (QA's verdict governs). Delta fix dispatched: QA authors its own missing cell first (test-only), then Dev adds DBA's residual-(ix) header declaration plus its pinning test cell, sequenced so they do not conflict on the same test file."
+    },
+    {
+      "phase": "4-review",
+      "verdict": "DELTA",
+      "at": "2026-08-23T02:25:12Z",
+      "note": "Dev fixed dba's major (residual (ix): a stat failure on the mtime-fallback branch now silences a refusal it used to produce, EACCES/EPERM/EIO scope only, ENOENT-race correctly left as intended-silent) and the dev-reviewer's nit (residual (v)'s missing DIRECTION/EXPIRY), in 3 commits (319f8f0 docs, 5670007 test pin, 8751a58 mutation battery). Production diff verified comment-only (logic diff empty after stripping comments). test-voice-lint.sh 260->267, test-gate-phase-entry-hook.sh count re-derived to match, full run.sh clean. True final HEAD: 8751a58, four commits past what the original 6-agent panel reviewed at 573bb38. Dispatching a delta re-review: qa and secops unconditionally, plus dba (its own finding is what got fixed). ba, devops, and the dev code-quality reviewer are NOT re-seated -- their concerns did not depend on this fix and their standing APPROVE_WITH_NOTES verdicts hold."
+    },
+    {
+      "phase": "4-review",
+      "verdict": "APPROVE_WITH_NOTES",
+      "at": "2026-08-23T02:53:50Z",
+      "note": "Delta re-review against true final HEAD 8751a58: qa APPROVE_WITH_NOTES (confirmed its own prior APPROVE holds mechanically -- the 3 new commits are comment-only, proven by grep-stripping comment lines from the diff; independently reproduced Dev's mutation battery number-for-number including the declared survivor; verified the one claim the suite can only record, not assert -- the pre-#56 contrast -- against an origin/main archive copy). secops APPROVE_WITH_NOTES (no veto; proved the comment-only claim with an AST-aware stripper; built and compared THREE alternative fixes side by side to confirm the shipped declared-residual approach is genuinely the least-bad; explicit non-veto reasoning: local dev-tool, no auth/data/privilege/compliance dimension, grants no new adversary capability since the same access already permits a cheaper disarm route -- categorically distinct from its round-1 self-disarm veto). dba APPROVE_WITH_NOTES (confirmed its own major properly discharged as a declared residual with every number reproducing independently, but found residual (ix)'s scope names only ONE of TWO code paths reaching the same silent outcome -- existsSync at :384 vs the statSync catch at :388 -- for the exact persistent-permission-fault scenario the residual's own example invokes; SecOps independently converged on the identical finding via a different method). All three ALSO independently confirmed a comment's backwards reasoning about the mutation battery's declared expected-survivor (DBA and QA both found this). final_verdict: APPROVE_WITH_NOTES (rubric: no REQUEST_CHANGES/VETO in this round). Dispatching ONE final text-only fix (no behavior change) for the converged scope gap, the backwards comment, and two smaller QA labeling/citation nits. Per the APPROVE_WITH_NOTES rubric, no further review round is planned after it."
+    },
+    {
+      "phase": "4-review",
+      "verdict": "APPROVE_WITH_NOTES",
+      "at": "2026-08-23T03:25:37Z",
+      "note": "Final text-only fix landed (d7455bc, 1245f03, 4429ab2): residual (ix)'s scope now names both drop sites (existsSync AND the statSync catch), with Dev catching and correcting an overclaim in secops's own suggested wording along the way (directory mtime is readable at mode 000 but doesn't move on an in-place file rewrite, so it can't substitute as the discriminator); the survivor comment's backwards reasoning fixed and PROVEN by building the reversing-readdir wrapper, not just asserting it; QA's two smaller nits closed. Orchestrator independently reconfirmed: production diff against 8751a58 is comment-only (grep-verified empty), test-voice-lint.sh 267/267. No further review round -- per the APPROVE_WITH_NOTES rubric and the cumulative weight of independent verification already applied (3 Phase 2 rounds, a 6-agent Phase 4 panel, a delta fix, a 3-agent delta re-review, this final pass). Phase 4 is complete. finding: PR #87's remote head (8436ecf) is now 8 commits behind local HEAD (4429ab2) -- QA's fix, Dev's DBA-major fix, and this final pass were all committed locally but never pushed, so remote CI has only ever validated Dev's original implementation commit, not the reviewed final state. Pushing requires explicit owner confirmation per this session's standing rules; halting to ask before this can be presented as verified-ready-to-merge."
+    }
+  ],
+  "flags": [
+    {
+      "phase": "2-review",
+      "agent": "dba",
+      "verdict": "REQUEST_CHANGES",
+      "summary": "3 blockers, one family: R7 states its residual's fail direction backwards; R5 disarms on auto-compact continuations; AC9 mirror false.",
+      "at": "2026-08-22T18:40:00Z"
+    },
+    {
+      "phase": "2-review",
+      "agent": "devops",
+      "verdict": "APPROVE_WITH_NOTES",
+      "summary": "Major: main()'s try/catch fail-opens on any new predicate exception, opposite of R3's direction. Flags SecOps to confirm AC7 exhaustive.",
+      "at": "2026-08-22T19:05:00Z"
+    },
+    {
+      "phase": "2-review",
+      "agent": "secops",
+      "verdict": "VETO",
+      "summary": "Critical: predicate classifies voice-lint's own refusal as a human turn, so the Stop-hook control self-disarms after firing once.",
+      "at": "2026-08-22T19:05:00Z"
+    },
+    {
+      "phase": "0-setup",
+      "agent": "orchestrator",
+      "summary": "Checkpoint discipline broken upstream: no status.json existed. Reconstructed this record from spec.json/map.json/review.json on --resume 56.",
+      "at": "2026-08-22T20:33:26Z"
+    },
+    {
+      "phase": "1-ba",
+      "agent": "ba",
+      "verdict": "REWORKED",
+      "summary": "Round 2: reqs 8->12, ACs 12->18. Rejected SecOps's fix as still admitting DBA's auto-compact blocker; added origin.kind instead.",
+      "at": "2026-08-22T21:05:00Z"
+    },
+    {
+      "phase": "2-review",
+      "agent": "dba",
+      "verdict": "REQUEST_CHANGES",
+      "summary": "Round 1's 3 blockers genuinely closed (reverified live). 1 new blocker: max(mtime,updated_at) misses cp -p/rsync -a/tar -x.",
+      "at": "2026-08-22T21:17:00Z"
+    },
+    {
+      "phase": "2-review",
+      "agent": "devops",
+      "verdict": "APPROVE_WITH_NOTES",
+      "summary": "Round-1 fail-open concern resolved via new R11 + extended AC7. 0 blockers, 1 nit. Still zero deploy/secret/queue impact.",
+      "at": "2026-08-22T21:08:00Z"
+    },
+    {
+      "phase": "2-review",
+      "agent": "secops",
+      "verdict": "APPROVE_WITH_NOTES",
+      "summary": "VETO lifted: origin.kind is real, reproduces live, closes all 4 round-1 findings. 1 major: AC7 contradicts R3 on unreadable transcripts.",
+      "at": "2026-08-22T21:23:00Z"
+    },
+    {
+      "phase": "1-ba",
+      "agent": "ba",
+      "verdict": "REWORKED",
+      "summary": "Round 3: all 4 majors re-derived (up to 3x DBA's corpus), 3 confirmed/refined, 1 fully confirmed. Found a 5th origin.kind value too.",
+      "at": "2026-08-22T22:03:38Z"
+    },
+    {
+      "phase": "2-review",
+      "agent": "dba",
+      "verdict": "APPROVE_WITH_NOTES",
+      "summary": "Blocker + all 4 majors reverified resolved (half-wrong about own AC9 cell c, corrected). New major: ctime-rejection reason is wrong.",
+      "at": "2026-08-22T22:12:00Z"
+    },
+    {
+      "phase": "2-review",
+      "agent": "secops",
+      "verdict": "APPROVE_WITH_NOTES",
+      "summary": "AC7/R3 verified closed live. New major: expected_survivor claim backwards for the Stop-hook's own refusal record specifically.",
+      "at": "2026-08-22T22:08:00Z"
+    },
+    {
+      "phase": "3-impl",
+      "agent": "dev",
+      "verdict": "APPROVE",
+      "summary": "257/257 local, PR #87 open. Self-found a new coverage gap (flagged, not fixed) and an unexplained run.sh flake (also flagged).",
+      "at": "2026-08-23T01:00:12Z"
+    },
+    {
+      "phase": "4-review",
+      "agent": "qa-delta",
+      "verdict": "APPROVE",
+      "summary": "QA-B1 closed at 34c2753 (test-only, +83/-4). Cell verified to actually bite (mutation now reddens exactly 2 cells). 260/260.",
+      "at": "2026-08-23T02:01:17Z"
+    }
+  ],
+  "telemetry": {
+    "phase_elapsed_ms": {
+      "1": 8686000,
+      "2": 6476000,
+      "3": 4079000,
+      "2.5": 1356000
+    },
+    "total_lead_time_ms": 20597000,
+    "unattributed_ms": 0,
+    "unattributed_events": 0,
+    "untimed_events": 0,
+    "review_rounds": 0,
+    "events_counted": 13,
+    "attribution": "exit"
+  },
+  "effective_config": {
+    "migration_globs_tripwire": [
+      "**/migrations/**",
+      "**/Migrations/**",
+      "**/db/migrate/**",
+      "**/db/migration/**",
+      "**/db/changelog/**",
+      "**/alembic/versions/**",
+      "**/schema.prisma",
+      "**/prisma/schema/**",
+      "**/drizzle/**",
+      "**/db/schema.ts",
+      "**/db/schema/**",
+      "**/supabase/schemas/**",
+      "**/policies/**.sql",
+      "**/supabase/policies/**",
+      "**/schema.sql"
+    ],
+    "migration_globs_gate": [
+      "**/migrations/**",
+      "**/Migrations/**",
+      "**/db/migrate/**",
+      "**/db/migration/**",
+      "**/db/changelog/**",
+      "**/alembic/versions/**",
+      "**/schema.prisma",
+      "**/prisma/schema/**",
+      "**/drizzle/**",
+      "**/db/schema.ts",
+      "**/db/schema/**",
+      "**/supabase/schemas/**",
+      "**/policies/**.sql",
+      "**/supabase/policies/**",
+      "**/schema.sql"
+    ],
+    "data_layer_globs": [
+      "**/migrations/**",
+      "**/Migrations/**",
+      "**/db/migrate/**",
+      "**/db/migration/**",
+      "**/db/changelog/**",
+      "**/alembic/versions/**",
+      "**/schema.prisma",
+      "**/prisma/schema/**",
+      "**/drizzle/**",
+      "**/db/schema.ts",
+      "**/db/schema/**",
+      "**/supabase/schemas/**",
+      "**/policies/**.sql",
+      "**/supabase/policies/**",
+      "**/schema.sql",
+      "**/db/**",
+      "**/queries/**",
+      "**/policies/**",
+      "**/repositories/**",
+      "**/prisma/**",
+      "**/supabase/**",
+      "**/alembic/**",
+      "**/schema.ts",
+      "**/database.types.ts",
+      "**/*.generated.types.ts"
+    ],
+    "infra_globs": [
+      "**/.github/workflows/**",
+      ".github/**",
+      "**/infra/**",
+      "**/terraform/**",
+      "**/k8s/**",
+      "**/helm/**",
+      "**/deploy/**",
+      "**/deploy.sh",
+      "**/deploy.config",
+      "**/*.tf",
+      "**/*.tfvars",
+      "**/Dockerfile",
+      "**/docker-compose.yml",
+      "**/docker-compose.yaml"
+    ],
+    "models": {
+      "ba": "sonnet",
+      "dev": "sonnet"
+    },
+    "rejected_absolute_globs": 0
+  },
+  "pr_url": "https://github.com/nsmedia-io/agent-pipeline/pull/87",
+  "panel_roles": [
+    "ba",
+    "dba",
+    "devops",
+    "secops",
+    "dev",
+    "qa"
+  ],
+  "review_rounds": 1,
+  "final_verdict": "APPROVE_WITH_NOTES",
+  "peer_review_verdict_counts": {
+    "approve": 0,
+    "approve_with_notes": 6,
+    "request_changes": 0,
+    "request_refactor": 0,
+    "veto": 0
+  }
+}

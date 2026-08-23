@@ -1,0 +1,246 @@
+{
+  "_README": [
+    "CAPTURED transcript records, one per provenance class R5 rules on. NOT hand-written.",
+    "A hand-copied fixture restates the contract instead of observing it, so it tracks whoever",
+    "last remembered to update it; these were read out of live Claude Code JSONL transcripts.",
+    "",
+    "WHAT WAS CHANGED AT CAPTURE, and why each change is safe for what these fixtures assert:",
+    "  - message.content values are REPLACED with a fixed marker (the class-identifying prefix",
+    "    is kept). R5's predicate reads NO message content at all, deliberately, so the value",
+    "    is not an input to anything under test. The SHAPE is preserved verbatim: a string",
+    "    stays a string, an array keeps its block types and their order.",
+    "  - cwd / gitBranch / sessionId / uuid / parentUuid / promptId / toolUseResult and every",
+    "    unrecognised key are replaced with a placeholder. Their KEYS are preserved, because",
+    "    the record's key set is part of what a vendor drift would change.",
+    "  - origin.kind is VERBATIM. Every other origin key keeps its name and loses its value.",
+    "  - timestamp is the captured one and is OVERWRITTEN per cell by the fixture builder.",
+    "",
+    "RE-DERIVE (author machine, records are the owner's own transcripts and are not in the repo):",
+    "  python3 plugins/pipeline/tests/fixtures/voice-lint-56/capture.py",
+    "",
+    "STALENESS: every field these fixtures are pinned on is asserted as a present-tense fact",
+    "by test-voice-lint.sh (see the PINNED FACTS suite). If the vendor changes a record shape,",
+    "the pin reddens rather than the fixture quietly satisfying the cell it sits in."
+  ],
+  "captured_at": "2026-08-22T22:49:52Z",
+  "corpus": {
+    "files": 86,
+    "scope": "main-session transcripts under ~/.claude/projects on the author's machine"
+  },
+  "records": {
+    "owner_string": {
+      "captured_from_client_version": "2.1.229",
+      "captured_timestamp": "2026-08-17T14:44:52.177Z",
+      "population_in_corpus": 971,
+      "record": {
+        "parentUuid": "00000000-0000-4000-8000-000000000000",
+        "isSidechain": false,
+        "promptId": "00000000-0000-4000-8000-000000000000",
+        "type": "user",
+        "message": {
+          "role": "user",
+          "content": "[content redacted at capture; the predicate reads no message content]"
+        },
+        "uuid": "00000000-0000-4000-8000-000000000000",
+        "timestamp": "2026-08-17T14:44:52.177Z",
+        "permissionMode": "default",
+        "origin": {
+          "kind": "human"
+        },
+        "promptSource": "sdk",
+        "userType": "external",
+        "entrypoint": "claude-desktop",
+        "cwd": "REDACTED",
+        "sessionId": "00000000-0000-4000-8000-000000000000",
+        "version": "2.1.229",
+        "gitBranch": "REDACTED"
+      }
+    },
+    "owner_image_array": {
+      "captured_from_client_version": "2.1.219",
+      "captured_timestamp": "2026-08-04T02:38:44.281Z",
+      "population_in_corpus": 12,
+      "record": {
+        "parentUuid": "00000000-0000-4000-8000-000000000000",
+        "isSidechain": false,
+        "promptId": "00000000-0000-4000-8000-000000000000",
+        "type": "user",
+        "message": {
+          "role": "user",
+          "content": [
+            {
+              "type": "image",
+              "source": {
+                "type": "base64",
+                "media_type": "image/png",
+                "data": "UkVEQUNURUQ="
+              }
+            },
+            {
+              "type": "text",
+              "text": "[content redacted at capture; the predicate reads no message content]"
+            }
+          ]
+        },
+        "uuid": "00000000-0000-4000-8000-000000000000",
+        "timestamp": "2026-08-04T02:38:44.281Z",
+        "permissionMode": "bypassPermissions",
+        "origin": {
+          "kind": "human"
+        },
+        "promptSource": "sdk",
+        "userType": "external",
+        "entrypoint": "claude-desktop",
+        "cwd": "REDACTED",
+        "sessionId": "00000000-0000-4000-8000-000000000000",
+        "version": "2.1.219",
+        "gitBranch": "REDACTED"
+      }
+    },
+    "task_notification": {
+      "captured_from_client_version": "2.1.237",
+      "captured_timestamp": "2026-08-22T22:15:26.120Z",
+      "population_in_corpus": 1402,
+      "record": {
+        "parentUuid": "00000000-0000-4000-8000-000000000000",
+        "isSidechain": false,
+        "promptId": "00000000-0000-4000-8000-000000000000",
+        "type": "user",
+        "message": {
+          "role": "user",
+          "content": "<task-notification>\n[content redacted at capture; the predicate reads no message content]"
+        },
+        "uuid": "00000000-0000-4000-8000-000000000000",
+        "timestamp": "2026-08-22T22:15:26.120Z",
+        "permissionMode": "bypassPermissions",
+        "origin": {
+          "kind": "task-notification"
+        },
+        "promptSource": "sdk",
+        "userType": "external",
+        "entrypoint": "claude-desktop",
+        "cwd": "REDACTED",
+        "sessionId": "00000000-0000-4000-8000-000000000000",
+        "version": "2.1.237",
+        "gitBranch": "REDACTED"
+      }
+    },
+    "auto_compaction": {
+      "captured_from_client_version": "2.1.219",
+      "captured_timestamp": "2026-08-04T03:49:23.751Z",
+      "population_in_corpus": 22,
+      "record": {
+        "parentUuid": "00000000-0000-4000-8000-000000000000",
+        "isSidechain": false,
+        "promptId": "00000000-0000-4000-8000-000000000000",
+        "type": "user",
+        "message": {
+          "role": "user",
+          "content": "This session is being continued from a previous conversation that ran out of context.\n[content redacted at capture; the predicate reads no message content]"
+        },
+        "isVisibleInTranscriptOnly": true,
+        "isCompactSummary": true,
+        "uuid": "00000000-0000-4000-8000-000000000000",
+        "timestamp": "2026-08-04T03:49:23.751Z",
+        "userType": "external",
+        "entrypoint": "claude-desktop",
+        "cwd": "REDACTED",
+        "sessionId": "00000000-0000-4000-8000-000000000000",
+        "version": "2.1.219",
+        "gitBranch": "REDACTED",
+        "slug": "REDACTED"
+      }
+    },
+    "cross_session_peer": {
+      "captured_from_client_version": "2.1.237",
+      "captured_timestamp": "2026-08-22T13:53:23.913Z",
+      "population_in_corpus": 31,
+      "record": {
+        "parentUuid": "00000000-0000-4000-8000-000000000000",
+        "isSidechain": false,
+        "promptId": "00000000-0000-4000-8000-000000000000",
+        "type": "user",
+        "message": {
+          "role": "user",
+          "content": "Another Claude session sent a message:\n[content redacted at capture; the predicate reads no message content]"
+        },
+        "isMeta": true,
+        "uuid": "00000000-0000-4000-8000-000000000000",
+        "timestamp": "2026-08-22T13:53:23.913Z",
+        "permissionMode": "bypassPermissions",
+        "origin": {
+          "kind": "peer",
+          "from": "REDACTED",
+          "verifiedPeerPid": "REDACTED",
+          "msg_id": "REDACTED",
+          "name": "REDACTED",
+          "fromMode": "REDACTED",
+          "body": "REDACTED"
+        },
+        "promptSource": "sdk",
+        "userType": "external",
+        "entrypoint": "claude-desktop",
+        "cwd": "REDACTED",
+        "sessionId": "00000000-0000-4000-8000-000000000000",
+        "version": "2.1.237",
+        "gitBranch": "REDACTED"
+      }
+    },
+    "voice_lint_refusal": {
+      "captured_from_client_version": "2.1.234",
+      "captured_timestamp": "2026-08-19T11:55:02.226Z",
+      "population_in_corpus": 52,
+      "record": {
+        "parentUuid": "00000000-0000-4000-8000-000000000000",
+        "isSidechain": false,
+        "promptId": "00000000-0000-4000-8000-000000000000",
+        "type": "user",
+        "message": {
+          "role": "user",
+          "content": "Stop hook feedback:\n[content redacted at capture; the predicate reads no message content]"
+        },
+        "isMeta": true,
+        "uuid": "00000000-0000-4000-8000-000000000000",
+        "timestamp": "2026-08-19T11:55:02.226Z",
+        "userType": "external",
+        "entrypoint": "claude-desktop",
+        "cwd": "REDACTED",
+        "sessionId": "00000000-0000-4000-8000-000000000000",
+        "version": "2.1.234",
+        "gitBranch": "REDACTED"
+      }
+    },
+    "tool_result": {
+      "captured_from_client_version": "2.1.229",
+      "captured_timestamp": "2026-08-17T14:45:02.430Z",
+      "population_in_corpus": 26489,
+      "record": {
+        "parentUuid": "00000000-0000-4000-8000-000000000000",
+        "isSidechain": false,
+        "promptId": "00000000-0000-4000-8000-000000000000",
+        "type": "user",
+        "message": {
+          "role": "user",
+          "content": [
+            {
+              "tool_use_id": "toolu_REDACTED",
+              "type": "tool_result",
+              "content": "[content redacted at capture; the predicate reads no message content]",
+              "is_error": false
+            }
+          ]
+        },
+        "uuid": "00000000-0000-4000-8000-000000000000",
+        "timestamp": "2026-08-17T14:45:02.430Z",
+        "toolUseResult": "REDACTED",
+        "sourceToolAssistantUUID": "00000000-0000-4000-8000-000000000000",
+        "userType": "external",
+        "entrypoint": "claude-desktop",
+        "cwd": "REDACTED",
+        "sessionId": "00000000-0000-4000-8000-000000000000",
+        "version": "2.1.229",
+        "gitBranch": "REDACTED"
+      }
+    }
+  }
+}
