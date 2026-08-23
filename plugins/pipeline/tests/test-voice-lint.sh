@@ -1480,6 +1480,52 @@ VL56_NODE_ARGS=""; VL56_ENV1=""
 assert_eq "STAT GUARD, half 2: with statSync forced to throw on the resolved record, the SAME fixture exits 2. A stat failure may only ever make the record read maximally fresh, so the silencing branch cannot fire on a tooling failure. Mutation: leave the new statSync unguarded and the exception reaches main()'s blanket catch, flipping this to 0 -- silently, with no output anywhere" "$RC" "2"
 
 # ---------------------------------------------------------------------------------------------
+suite "#56 RESIDUAL (ix): the SAME stat failure on the mtime-SCAN branch is SILENT, and that is DECLARED"
+# ---------------------------------------------------------------------------------------------
+# The guard above covers the NAMED-SIGNAL branch only, and that is not the branch production takes:
+# 0 files under plugins/ set CLAUDE_PIPELINE_ACTIVE_ISSUE outside tests, so the mtime SCAN is the
+# live path. The scan drops an unstattable candidate (`catch { continue; }`), that line is
+# unchanged by #56, and #56 INVERTS WHAT DROPPING COSTS: before, dropping this session's own record
+# left a FOREIGN record resolved and the lint refused loudly against it; now the surviving
+# candidate is BY CONSTRUCTION older than the turn boundary, so the refusal is SILENCED.
+#
+# THIS CELL ASSERTS THE DECLARED LIMITATION, NOT A FIX -- the AC16(d) idiom, for the same reason:
+# no fix is shipped, so a cell asserting one would be asserting a world that does not exist.
+# Residual (ix) in voice-lint.mjs's header carries the DIRECTION (SILENCE), the SCOPE (the likely
+# cause of the throw is an ENOENT race against the archival unlink, where silence is the intended
+# outcome; the exposure is the narrower EACCES/EPERM/EIO class, where the file EXISTS and cannot
+# be stat'd) and the reason the loud alternative is refused (it would make an unreadable FOREIGN
+# lane's status.json refuse every message in this session).
+#
+# THE STDERR BYTE COUNT IS READ FROM THE FILE, not from $ERR, because $ERR is a command
+# substitution and strips trailing newlines -- a refusal of nothing but newlines would read as an
+# empty string there and pass this cell for the wrong reason.
+VL56_IX_DIRS='[{"name":"99","phase":"5-archived","mtimeMs":'"$VL56_FRESH_MS"'},{"name":"7","phase":"4-review-complete","mtimeMs":'"$VL56_STALE_MS"'}]'
+vl56_ix() {  # <path-substring statSync throws EACCES on> -> RC/ERR/VL56_IX_BYTES
+  vl56_fixture "$VL56_IX_DIRS" '['"$(vl56_owner)"','"$(vl56_asst "$Q_REWRITE")"']'
+  VL56_ENV1="VL56_STAT_FAIL=$1"
+  VL56_NODE_ARGS="-r $VL56_PRELOAD_CJS"
+  vl56_lint "$VL56_TRANSCRIPT" none
+  VL56_NODE_ARGS=""; VL56_ENV1=""
+  VL56_IX_BYTES="$(wc -c < "$VL56_PROJECT/err.txt" | tr -d ' ')"
+}
+
+vl56_ix "/99/status.json"
+assert_eq "RESIDUAL (ix) DECLARED OPEN RESIDUAL, DIRECTION: SILENCE, a missed check on the session's OWN record. With statSync forced to throw EACCES on 99/status.json ALONE (99 = this session's fresh 5-archived record, 7 = a foreign 72h-stale 4-review-complete, no env signal, an em-dash message), 99 is dropped from the scan, stale 7 wins, and the refusal the same fixture produces with the stat working vanishes: exit 0, ZERO bytes on stderr. EXPIRY, and read residual (ix) before assuming this is a bug: if this cell ever exits 2, either the drop can now tell an unreadable record from an absent one, or the fixture stopped constructing the failure -- and this cell needs a new subject or deletion" \
+  "rc=$RC/stderr_bytes=$VL56_IX_BYTES" "rc=0/stderr_bytes=0"
+
+vl56_ix "/nosuchissuedir/status.json"
+assert_eq "(ix) CONTROL 1, one variable moved and the PRELOAD STILL LOADED: with the forced failure aimed at a path no candidate has, the identical fixture exits 2. So (ix)'s silence is caused by the dropped stat and not by the preload's mere presence" "$RC" "2"
+assert_contains "  and CONTROL 1's refusal names the session's OWN record, which is what (ix) suppresses" "$ERR" 'phase "5-archived"'
+
+vl56_ix "/7/status.json"
+assert_eq "(ix) CONTROL 2, the same failure aimed at the FOREIGN candidate: exit 2. Dropping a foreign lane's unreadable record is harmless today, and this is the pair that shows WHY the loud alternative is refused rather than merely asserting that it is" "$RC" "2"
+assert_contains "  and CONTROL 2 still names 5-archived, i.e. this session's own record wins after the foreign one is dropped" "$ERR" 'phase "5-archived"'
+assert_not_contains "  and CONTROL 2 never names the FOREIGN lane's phase -- which is exactly what the rejected fix (force an unstattable candidate to POSITIVE_INFINITY, as statMs does) would make it do: 7 would win with an infinite mtime and this session would be refused on account of a run it does not own" "$ERR" "4-review-complete"
+
+record "REPORTED, because this suite cannot run another commit: the same forced throw on 99 measured against the PRE-#56 code exits 2 naming 4-review-complete, so (ix) is an INVERSION introduced by #56 rather than a limitation inherited from it. That contrast is a measurement, not a claim this suite can keep green"
+
+# ---------------------------------------------------------------------------------------------
 suite "#56 RESIDUAL (viii): the shape check refuses BEFORE the transcript is read, and that is declared"
 # ---------------------------------------------------------------------------------------------
 # R1's outcome property -- no message may be refused on account of an untouched record -- is true
