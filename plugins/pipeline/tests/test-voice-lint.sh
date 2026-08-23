@@ -1500,6 +1500,24 @@ suite "#56 RESIDUAL (ix): the SAME stat failure on the mtime-SCAN branch is SILE
 # THE STDERR BYTE COUNT IS READ FROM THE FILE, not from $ERR, because $ERR is a command
 # substitution and strips trailing newlines -- a refusal of nothing but newlines would read as an
 # empty string there and pass this cell for the wrong reason.
+#
+# WHAT THIS BLOCK CATCHES AND THE ONE MUTATION IT IS EXPECTED TO MISS, measured rather than
+# predicted, because a battery where everything reddens cannot tell coverage from a rubber stamp:
+#   CAUGHT, by 3 of the 4 cells -- the REJECTED fix, `catch { ms = Number.POSITIVE_INFINITY; }`
+#   here. The primary cell flips to 2 and BOTH halves of control 2's discrimination redden, the
+#   second naming 4-review-complete, which is the foreign lane the header says that fix would
+#   start refusing on. The label's claim is falsified by the mutation rather than asserted.
+#   CAUGHT, by control 2 -- `catch { break; }`, i.e. abandoning the scan instead of the candidate.
+#   SURVIVES, and this is the DOCUMENTED EXPECTED SURVIVOR: `catch { newest = null; newestMs = -1;
+#   tiedAtNewest = false; continue; }`, i.e. a stat failure that discards every candidate found so
+#   far rather than the one that threw. All 267 cells stay green. THE REASON: these cells pin the
+#   OUTCOME of a single-candidate failure, which is what residual (ix) declares, and not the drop's
+#   BLAST RADIUS across the candidate set; the two coincide on any fixture where the throwing
+#   candidate is scanned last, and readdir returns 7 before 99 here. FALSIFYING IT needs a fixture
+#   whose FRESH dir is scanned BEFORE the throwing one, which would make the cell's premise a
+#   readdir ORDER this suite does not control on either platform -- the same portability objection
+#   that keeps `touch -t` out of R8. Left open deliberately, and named here so it is a known gap
+#   rather than a silent one.
 VL56_IX_DIRS='[{"name":"99","phase":"5-archived","mtimeMs":'"$VL56_FRESH_MS"'},{"name":"7","phase":"4-review-complete","mtimeMs":'"$VL56_STALE_MS"'}]'
 vl56_ix() {  # <path-substring statSync throws EACCES on> -> RC/ERR/VL56_IX_BYTES
   vl56_fixture "$VL56_IX_DIRS" '['"$(vl56_owner)"','"$(vl56_asst "$Q_REWRITE")"']'
