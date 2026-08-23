@@ -1512,12 +1512,22 @@ suite "#56 RESIDUAL (ix): the SAME stat failure on the mtime-SCAN branch is SILE
 #   tiedAtNewest = false; continue; }`, i.e. a stat failure that discards every candidate found so
 #   far rather than the one that threw. All 267 cells stay green. THE REASON: these cells pin the
 #   OUTCOME of a single-candidate failure, which is what residual (ix) declares, and not the drop's
-#   BLAST RADIUS across the candidate set; the two coincide on any fixture where the throwing
-#   candidate is scanned last, and readdir returns 7 before 99 here. FALSIFYING IT needs a fixture
-#   whose FRESH dir is scanned BEFORE the throwing one, which would make the cell's premise a
-#   readdir ORDER this suite does not control on either platform -- the same portability objection
-#   that keeps `touch -t` out of R8. Left open deliberately, and named here so it is a known gap
-#   rather than a silent one.
+#   BLAST RADIUS across the candidate set. In the cell that decides survival -- control 2, which
+#   throws on 7 -- readdir returns 7 BEFORE 99, so the discard fires with nothing yet collected and
+#   is a no-op; the primary cell is a silence under either behaviour. FALSIFYING IT needs a fixture
+#   whose FRESH dir is scanned BEFORE the throwing one, so that the discard throws away a winner
+#   already in hand.
+#   THAT ORDER IS IMPOSABLE, AND WE CHOSE NOT TO IMPOSE IT -- the honest statement, because the
+#   suite is not at the filesystem's mercy here: fixtures/voice-lint-56/preload.cjs already patches
+#   fs for these very cells, and a readdirSync wrapper beside its statSync one is about ten lines.
+#   Built and run rather than asserted: under a forced [99,7] the survivor DIES, control 2 flipping
+#   rc 2 -> 0. Left open deliberately anyway, because closing it without declaring a replacement
+#   survivor leaves an all-red battery, and a battery where every mutation reddens cannot tell real
+#   coverage from a harness that reddens indiscriminately.
+#   AND THE CELLS THEMSELVES DO NOT DEPEND ON THAT ORDER, which is the portability question that
+#   actually matters, since CI is not this filesystem: against the SHIPPED module all three (ix)
+#   scenarios are byte-identical under natural [7,99] and forced [99,7] (rc 2/479 B, rc 0/0 B,
+#   rc 2/479 B). Only the survivor's justification was ever order-dependent.
 VL56_IX_DIRS='[{"name":"99","phase":"5-archived","mtimeMs":'"$VL56_FRESH_MS"'},{"name":"7","phase":"4-review-complete","mtimeMs":'"$VL56_STALE_MS"'}]'
 vl56_ix() {  # <path-substring statSync throws EACCES on> -> RC/ERR/VL56_IX_BYTES
   vl56_fixture "$VL56_IX_DIRS" '['"$(vl56_owner)"','"$(vl56_asst "$Q_REWRITE")"']'
