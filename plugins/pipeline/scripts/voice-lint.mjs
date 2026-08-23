@@ -189,27 +189,47 @@
  *          not pay today. EXPIRY: a freshness signal available before the record's phase is
  *          validated.
  *   (ix)   A STAT FAILURE ON THE MTIME-SCAN BRANCH NOW SILENCES A REFUSAL IT USED TO PRODUCE. The
- *          scan's `catch { continue; }` DROPS an unstattable candidate; that line is unchanged,
- *          but #56 inverts what dropping costs. Before, dropping this session's own record left
- *          some FOREIGN record resolved and the lint refused loudly against it; now the surviving
- *          candidate is BY CONSTRUCTION older than the turn boundary, so the refusal is silenced
- *          instead. Measured, one variable moved, one fixture (dir 99 = this session's fresh
- *          5-archived record, dir 7 = a foreign 72 h-stale 4-review-complete, no env signal, an
- *          em-dash message, statSync forced to throw EACCES on 99/status.json alone): stat ok ->
- *          exit 2 naming 5-archived; stat throws -> exit 0 with ZERO bytes on stderr; the same
- *          throw against the pre-#56 code -> exit 2 naming 4-review-complete. DIRECTION: SILENCE.
- *          SCOPE, and the distinction carries most of the severity: the LIKELY cause of the throw
- *          is an ENOENT race against the archival unlink, where silence is #56's intended and
- *          correct outcome; the exposure is the narrower EACCES/EPERM/EIO class, where the file
- *          EXISTS and cannot be stat'd. NOT closed by handing the unstattable candidate
- *          POSITIVE_INFINITY the way statMs does on the named-signal branch: it would then WIN,
- *          readJson would fail on that same unreadable file, status would be null and run() would
- *          fail open silently anyway, which trades one silence for another. WHAT THE LOUD
- *          ALTERNATIVE REFUSES, which is why it is not taken: forcing a refusal whenever any
- *          candidate was dropped makes an unreadable FOREIGN lane's status.json (a root-owned
- *          file left by a container run) refuse every message in this session, i.e. correct work
- *          refused on account of a run this session does not own. EXPIRY: a way to tell an
- *          unreadable record from an absent one at the point the candidate is dropped, at which
+ *          scan drops a candidate it cannot read at EITHER of two adjacent lines -- the
+ *          `if (!existsSync(f)) continue;` guard and the `catch { continue; }` just below it --
+ *          and #56 changes neither; what it inverts is what dropping COSTS. Before, dropping this
+ *          session's own record left some FOREIGN record resolved and the lint refused loudly
+ *          against it; now the surviving candidate is BY CONSTRUCTION older than the turn
+ *          boundary, so the refusal is silenced instead. Measured, one variable moved, one
+ *          fixture (dir 99 = this session's fresh 5-archived record, dir 7 = a foreign 72 h-stale
+ *          4-review-complete, no env signal, an em-dash message, statSync forced to throw EACCES
+ *          on 99/status.json alone): stat ok -> exit 2 naming 5-archived; stat throws -> exit 0
+ *          with ZERO bytes on stderr; the same throw against the pre-#56 code -> exit 2 naming
+ *          4-review-complete. DIRECTION: SILENCE.
+ *          SCOPE, and the distinction carries most of the severity: the LIKELY cause is an ENOENT
+ *          race against the archival unlink, where silence is #56's intended and correct outcome;
+ *          the exposure is the narrower EACCES/EPERM/EIO class, where the record EXISTS and
+ *          cannot be read. WHICH OF THE TWO LINES DROPS IT DEPENDS ON THE FAULT, so a fix applied
+ *          to one alone leaves the other silent: a TRANSIENT failure takes the catch, while a
+ *          PERSISTENT permission fault takes existsSync, which returns FALSE rather than throwing
+ *          when the containing directory is unsearchable -- statSync never runs and the catch is
+ *          never reached. Measured with no shim of any kind, uid 501, chmod 000 on the issue
+ *          directory: existsSync false, statSync EACCES, readFileSync EACCES, readdir still
+ *          enumerating, and end to end exit 0 with ZERO bytes on stderr -- the same outcome as
+ *          the shimmed measurement above, against exit 2 / 479 bytes for that fixture with the
+ *          directory readable. NOT closed by handing the unstattable candidate POSITIVE_INFINITY
+ *          the way statMs does on the named-signal branch: it would then WIN, readJson would fail
+ *          on that same unreadable file, status would be null and run() would fail open silently
+ *          anyway, which trades one silence for another -- and on the PERSISTENT half it is not
+ *          even that but a plain no-op, still exit 0 / zero bytes with that fix applied
+ *          (measured), because the catch it edits never runs. WHAT THE LOUD ALTERNATIVE REFUSES,
+ *          which is why it is not taken: forcing a refusal whenever any candidate was dropped
+ *          makes an unreadable FOREIGN lane's status.json (a root-owned file left by a container
+ *          run) refuse every message in this session, i.e. correct work refused on account of a
+ *          run this session does not own. EXPIRY, and it is NOT the discrimination: telling an
+ *          unreadable record from an absent one is available today and costs about four lines
+ *          (drop existsSync, let statSync throw, branch on err.code). What is missing is
+ *          ATTRIBUTION -- the signal this scan uses to decide whose record a candidate is IS that
+ *          record's own mtime, which is exactly what the failure withholds, so a dropped
+ *          candidate cannot be told from a foreign lane's. The containing directory's mtime is
+ *          not the substitute it looks like: still takeable at mode 000, but it moves when an
+ *          entry is created, removed or renamed and NOT when status.json is rewritten in place
+ *          (both measured), so it dates a different event than the record write the scan grades.
+ *          EXPIRY is therefore a way to attribute an UNREADABLE candidate to a session, at which
  *          point the EACCES/EPERM/EIO half can go loud without the ENOENT half following it.
  *          PINNED in tests/test-voice-lint.sh, with its two one-variable controls, so the
  *          asymmetry sits on the record rather than being rediscovered.
@@ -381,6 +401,8 @@ export function resolveStatus(projectDir, envIssue) {
   for (const d of entries) {
     if (!d.isDirectory() || !ISSUE_DIR_RE.test(d.name)) continue;
     const f = path.join(base, d.name, "status.json");
+    // Dropping the candidate here is residual (ix) too, DIRECTION: SILENCE. This is the line a
+    // PERSISTENT permission fault takes -- existsSync returns false, so the catch below never runs.
     if (!existsSync(f)) continue;
     let ms;
     try {
