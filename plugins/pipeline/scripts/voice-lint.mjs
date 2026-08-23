@@ -153,7 +153,9 @@
  *   (v)    A same-machine cross-session message is EXCLUDED TWICE OVER rather than bounded: all
  *          31 observed carry BOTH origin.kind 'peer' AND isMeta true. sessionId is NOT a third
  *          guard, and that is measured rather than assumed: all 31 are stamped with the
- *          RECEIVING session's own id, so an equality test cannot see them.
+ *          RECEIVING session's own id, so an equality test cannot see them. DIRECTION: none left
+ *          open (excluded twice over, by origin.kind and by isMeta independently); no residual
+ *          EXPIRY applies.
  *   (vi)   On clients predating the origin field the predicate finds no human turn, the boundary
  *          is unresolvable, and the lint fires unconditionally, which is today's behaviour.
  *          Measured: 8 of 84 transcripts (9.5%) contain no origin.kind 'human' record at all,
@@ -186,6 +188,31 @@
  *          the freshness check would make the shape-failure path pay a transcript read it does
  *          not pay today. EXPIRY: a freshness signal available before the record's phase is
  *          validated.
+ *   (ix)   A STAT FAILURE ON THE MTIME-SCAN BRANCH NOW SILENCES A REFUSAL IT USED TO PRODUCE. The
+ *          scan's `catch { continue; }` DROPS an unstattable candidate; that line is unchanged,
+ *          but #56 inverts what dropping costs. Before, dropping this session's own record left
+ *          some FOREIGN record resolved and the lint refused loudly against it; now the surviving
+ *          candidate is BY CONSTRUCTION older than the turn boundary, so the refusal is silenced
+ *          instead. Measured, one variable moved, one fixture (dir 99 = this session's fresh
+ *          5-archived record, dir 7 = a foreign 72 h-stale 4-review-complete, no env signal, an
+ *          em-dash message, statSync forced to throw EACCES on 99/status.json alone): stat ok ->
+ *          exit 2 naming 5-archived; stat throws -> exit 0 with ZERO bytes on stderr; the same
+ *          throw against the pre-#56 code -> exit 2 naming 4-review-complete. DIRECTION: SILENCE.
+ *          SCOPE, and the distinction carries most of the severity: the LIKELY cause of the throw
+ *          is an ENOENT race against the archival unlink, where silence is #56's intended and
+ *          correct outcome; the exposure is the narrower EACCES/EPERM/EIO class, where the file
+ *          EXISTS and cannot be stat'd. NOT closed by handing the unstattable candidate
+ *          POSITIVE_INFINITY the way statMs does on the named-signal branch: it would then WIN,
+ *          readJson would fail on that same unreadable file, status would be null and run() would
+ *          fail open silently anyway, which trades one silence for another. WHAT THE LOUD
+ *          ALTERNATIVE REFUSES, which is why it is not taken: forcing a refusal whenever any
+ *          candidate was dropped makes an unreadable FOREIGN lane's status.json (a root-owned
+ *          file left by a container run) refuse every message in this session, i.e. correct work
+ *          refused on account of a run this session does not own. EXPIRY: a way to tell an
+ *          unreadable record from an absent one at the point the candidate is dropped, at which
+ *          point the EACCES/EPERM/EIO half can go loud without the ENOENT half following it.
+ *          PINNED in tests/test-voice-lint.sh, with its two one-variable controls, so the
+ *          asymmetry sits on the record rather than being rediscovered.
  *
  * WHAT THE SELF-DISARM WAS, kept because the shape of the mistake is more instructive than the
  * fix. Deciding "has a person weighed in" by SUBTRACTING known machine spellings from the set of
@@ -359,6 +386,8 @@ export function resolveStatus(projectDir, envIssue) {
     try {
       ms = statSync(f).mtimeMs;
     } catch {
+      // Dropping the candidate is residual (ix), DIRECTION: SILENCE. Declared, not fixed; read
+      // it before "fixing" this to POSITIVE_INFINITY the way statMs does.
       continue;
     }
     if (ms > newestMs) {
