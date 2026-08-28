@@ -2,7 +2,7 @@
 # validate-pipeline-artifact.mjs — the deliberately fail-OPEN SubagentStop validator.
 #
 # Two layers are covered here, and they are different jobs:
-#   (1) The script's own 56-case --self-test, WIRED IN rather than re-implemented. It already
+#   (1) The script's own --self-test, WIRED IN rather than re-implemented. It already
 #       covers the pure functions (schema walk, active-issue resolution, grounding); copying
 #       those assertions into bash would duplicate them badly and let the two drift. Until this
 #       change it ran under nothing: not CI, not the Stop hook, not an adopting project.
@@ -54,7 +54,7 @@ VALID_REPORT='{
 
 PAYLOAD_DEV="{\"agent_type\":\"dev\",\"cwd\":\"$TEMP_PROJECT\",\"active_issue\":\"$ISSUE\"}"
 
-suite "validate-pipeline-artifact: the shipped 56-case self-test runs under checkCommand"
+suite "validate-pipeline-artifact: the shipped self-test runs under checkCommand"
 
 ( cd "$TEMP_PROJECT" && CLAUDE_PROJECT_DIR="$TEMP_PROJECT" node "$VALIDATOR" --self-test ) \
   > "$TEMP_PROJECT/selftest.out" 2>&1
