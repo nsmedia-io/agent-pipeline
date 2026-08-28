@@ -361,7 +361,23 @@ Apply the verdict gate, most-blocking first:
       ```
       **[Orchestrator]:** SecOps VETO. Spec returns to BA for rework. Reason: <text>. Remediation: <text>.
       ```
-   3. Halt. Await `/pipeline --resume <issue>` after BA addresses the veto.
+   3. **Re-open the design decision before authorising another implementation attempt.** A veto
+      says the chosen approach failed a compliance or safety property under measurement, and
+      every gate after Phase 2.5 asks "is this fix correct", never "is this the right fix". The
+      runner-up sketch is sitting in `design.json` under `rejected_alternatives` with the reason
+      it lost, and that reason was written BEFORE the evidence this run has now accumulated. So
+      re-dispatch the bake-off JUDGE with the veto, the fix rounds so far, and the accumulated
+      findings, and have it rule on whether the chosen approach still wins. This is the same
+      re-materialization the owner-picks-the-runner-up loop-back already performs (keep the
+      grafts that still apply; the sketches stand and are NOT re-run), reached by a different
+      trigger. It is cheap, it happens once, and the alternative is what it was measured
+      replacing: three consecutive rounds hardening an approach whose losing rival had already
+      been called vindicated by the judge, with nowhere for that evidence to go.
+
+      The SAME re-decision fires on the second fix round even without a veto -- see the
+      fix-round budget in the convergence section. Two remediation rounds on one issue is the
+      cheapest honest moment to ask whether the design, rather than the code, is what is wrong.
+   4. Halt. Await `/pipeline --resume <issue>` after BA addresses the veto.
 2. **Any `REQUEST_CHANGES`** (from any of the three): halt Phase 2, collect every blocker into one summary, return to the owner, and loop back to BA for spec rework. Do not advance to Phase 3.
 3. **All `APPROVE` or `APPROVE_WITH_NOTES`**: update `status.json` with `current_phase: "2-review-complete"` and proceed to Phase 2.5 (this phase only runs at the architectural tier, which always continues into the bake-off). Notes carry forward as constraints in `review.json` for Dev to honor.
 
@@ -734,11 +750,13 @@ rm -f "$CHANGED_PATHS"
 
 The frontend probe is on the same three-outcome shape as the data-layer and infra ones, and it got there late: it shipped as `process.exit(m.diffTouchesFrontend(...)?0:1)` with no `.catch()` and no exit-status branch, four hundred lines below a paragraph in this file titled "Three outcomes, never two". A stale `${CLAUDE_PLUGIN_ROOT}` made it exit 1 with zero bytes on both streams, byte-identical to "no frontend file changed", and Design was dropped from a panel reviewing a frontend diff while `status.json` recorded a panel. That was issue #20; the seat now goes to the specialist on any exit that is not the reserved 20.
 
-Record the resolved `PANEL_ROLES` in `status.json` so the merge, the rubric, and a `--resume` all agree on who was on the panel. At the same checkpoint, increment `review_rounds` (1 on the first full panel, +1 per delta round; events[] carries no round field, so this cannot be inferred later) and refresh the derived telemetry and the effective-config audit record:
+Record the resolved `PANEL_ROLES` in `status.json` so the merge, the rubric, and a `--resume` all agree on who was on the panel. At the same checkpoint, increment `review_rounds` (1 on the first full panel, +1 per delta round) and refresh the derived telemetry and the effective-config audit record:
 
 ```bash
 node -e 'Promise.all([import(process.env.CLAUDE_PLUGIN_ROOT+"/scripts/pipeline-telemetry.mjs"),import("node:fs")]).then(([t,fs])=>{const f=process.argv[1];const st=JSON.parse(fs.readFileSync(f,"utf8"));st.telemetry=t.telemetry(st);let cfg={};try{cfg=JSON.parse(fs.readFileSync(process.argv[2],"utf8"))}catch{};st.effective_config=t.effectiveConfig(cfg);fs.writeFileSync(f,JSON.stringify(st,null,2))})' "$PIPELINE_BASE/<issue>/status.json" "$CLAUDE_PROJECT_DIR/pipeline.config.json"
 ```
+
+**`review_rounds` IS CROSS-CHECKED NOW, so a mis-maintained counter is visible instead of silent.** `telemetry()` also reports `review_rounds_observed` (the panel rounds it can see in `events[]`: entries labelled `4-review` whose verdict is one a panel returns) and `review_rounds_recorded_delta`, which is `review_rounds` minus that observation. **After refreshing telemetry, read the delta. Non-zero means you got the counter wrong** -- fix `review_rounds` and re-run the refresh rather than leaving the disagreement in an archived record. On the committed corpus this was non-zero on 5 of 7 records in BOTH directions (+2 on #43, -2 on #56, +1 on #17 and #39 which never entered phase 4 at all), and the two it got right were both single-round runs, so hand-maintenance was reliable exactly where nothing depended on it. Note that not every `4-review` event is a round: a delta dispatch writes an ENTRY marker (`delta-dispatched`, `DELTA`) and the merge writes a `merged` TERMINUS under the same phase label, and neither is a panel returning a verdict.
 
 Both records are NUMBERS and glob strings only, and that is a rule rather than a habit: `status.json` is committed AND archived verbatim by the Librarian, so it must never carry an absolute filesystem path, a command string, or a credential. An absolute glob in a project config is recorded as the literal token `<absolute-glob-rejected>` rather than written through. The two migration sets are recorded separately (`migration_globs_tripwire`, `migration_globs_gate`) because they genuinely differ and an auditor who cannot tell which set was live for which control has learned nothing. When `design_review` is in the panel, dispatch the `design` reviewer with the shared Phase 4 preamble plus its lens line (it writes a bare `peer-review.design_review.json` shard), and fold that shard into `peer-review.json` under the `design_review` key in the merge loop with the same `unwrap` defense the other roles use. A standard-tier panel reviewer additionally verifies the diff against `<ARTIFACT_DIR>/constraints.md` (the injected constraints Dev was held to).
 
@@ -847,7 +865,9 @@ Recoverability is bought by making the fallback a path the merge actually READS,
 
 ### Delta re-review (a REQUEST_CHANGES / REQUEST_REFACTOR re-run, not a fresh panel)
 
-**Assume the remediation introduced a new defect, and say so in the delta prompts.** This is the empirical default, not pessimism: on one three-round remediation, EVERY round introduced a fresh defect while correctly closing the previous one. Round 1 bound a summary to its payload and thereby leaked internal identifiers into a customer-facing document; round 2 stripped them with a rule a live input could defeat; round 3 fixed the rule's cause. Each round's fix was correct and each round's fix was incomplete. Instruct every delta reviewer to rule on its own prior findings AND to look for what the fix brought with it, and tell it explicitly that prior rounds have introduced defects, so "the thing I asked for is done" is not the end of its review.
+**Assume the remediation introduced a new defect, and say so in EVERY panel prompt, the first one included.** This used to live only in the delta section, which quietly assumed the first panel is not reviewing a fix. It is: the first panel reviews the fix for the REPORTED BUG, and the introduced-defect class is exactly what that framing surfaces -- on the run this rule came from, four independent lenses found introduced defects in the round they were told to look for them. Telling only the delta reviewers means the class is hunted from round two onward, so a defect the first panel could have caught costs a whole remediation cycle to find. Put the sentence in the round-one prompts too.
+
+**In the delta prompts specifically.** This is the empirical default, not pessimism: on one three-round remediation, EVERY round introduced a fresh defect while correctly closing the previous one. Round 1 bound a summary to its payload and thereby leaked internal identifiers into a customer-facing document; round 2 stripped them with a rule a live input could defeat; round 3 fixed the rule's cause. Each round's fix was correct and each round's fix was incomplete. Instruct every delta reviewer to rule on its own prior findings AND to look for what the fix brought with it, and tell it explicitly that prior rounds have introduced defects, so "the thing I asked for is done" is not the end of its review.
 
 When a fix is proposed for a defect the panel found, the reviewer's question is not "does this close it" but "**what does this open**". And when a residual is argued down to a note, apply the ship-or-block line from `evidence.md`: a control a LIVE INPUT can defeat is a gap; a control only a FUTURE EDIT can defeat is a ratchet. Do not grade the identical defect two ways one round apart because the second time it arrived with a mitigation attached.
 
@@ -1077,7 +1097,32 @@ said to.
 The same evidence that justifies each round justifies the split: if round two's findings are in a
 different part of the spec from round one's, the spec is too big to review as a unit.
 
-**2. Spec size tripwire.** When a spec crosses **10 requirements or 12 acceptance criteria**, BA must
+**2. Fix-round budget (the one that binds where the cost actually is).** The round budget above
+covers Phase 2 only. **Post-panel remediation is uncounted, and that is where the budget goes.**
+Measured on this repo's own records, phase 4 is the largest single consumer of active pipeline
+time -- 29% across seven runs, against 24% for implementation -- and every one of those rounds
+was individually justified by a real finding, which is precisely the trap the section above
+describes.
+
+After the SECOND fix round on one issue (a delta re-review that again returns `REQUEST_CHANGES`),
+do NOT dispatch a third by default. Stop and present the owner: **re-open the design** (see the
+veto/second-round re-decision below), **defer** the unresolved finding to a follow-up issue, or
+**proceed** with a third round. Say which you recommend and why.
+
+**Count introduced defects, not rounds, wherever you can.** A round that closes its target
+cleanly is the gate working. A round whose fix CREATES a new user-visible defect, a regression,
+or a race is evidence that the design shape is wrong rather than the code -- and three
+consecutive such rounds, each individually justified, is the signal this budget exists to catch.
+When the delta shards let you tell those apart, trip on the introduced-defect count; when they do
+not, the round count is the honest fallback.
+
+**Read `review_rounds_observed`, never `review_rounds` alone.** The hand-maintained counter
+disagreed with the events on 5 of 7 committed records, in both directions, and was reliable only
+on single-round runs -- exactly the runs no budget binds on. `telemetry()` reports the observed
+count and a signed `review_rounds_recorded_delta`; a non-zero delta means the counter is wrong
+and the budget would bind on a number nobody measured.
+
+**3. Spec size tripwire.** When a spec crosses **10 requirements or 12 acceptance criteria**, BA must
 either justify the size in `spec.json` or propose a split. These are not hard limits; they are the
 point at which "is this one issue?" stops being rhetorical. On the run above, BA recommended a
 three-way split the first time it was asked directly — and was right — but nothing had asked.
@@ -1115,6 +1160,7 @@ The flow is adaptive: a later phase can invalidate an earlier decision. When one
 | Any `REQUEST_CHANGES` | Phase 2 | BA (spec rework) | Re-run Phase 2 |
 | Mis-tier tripwire: the MECHANICAL data-layer path predicate (migration, declarative schema, SQL data-access policy source) at the gate, or Dev's self-reported constraint tripwire (auth, crypto, webhook verification, a shared contract's shape) in Phase 3 | Phase 3 (Dev self-halt) or the Phase 3 to 4 gate | BA (re-tier to architectural) | Run the skipped phases (Phase 2 fan-out, Phase 2.5 if design-shaped) against the existing worktree, then re-enter the gate |
 | Owner answers a blocking open question | Phase 1 (gate) | Phase 1 (BA only) | Re-dispatch BA to fold every `resolution` into requirements, acceptance criteria, out-of-scope, and the tier. The orchestrator never edits the spec itself; `open_questions` and its resolutions stay in the artifact as the record |
+| SecOps `VETO`, or a SECOND fix round on one issue | Phase 4 | Phase 2.5 (judge only) | Re-open the design decision: re-dispatch the JUDGE with the veto or the accumulated fix-round findings and have it rule on whether the chosen approach still wins over the runner-up in `rejected_alternatives`. Keep the grafts that still apply; the sketches stand and are NOT re-run. Runs BEFORE the next implementation attempt is authorised |
 | Owner picks the runner-up (or a variant) at design-lock | Phase 2.5 (owner answer) | Phase 2.5 (judge only) | Re-dispatch the JUDGE to re-materialize `design.json` around the chosen approach, keeping the grafts that still apply; the sketches stand and are NOT re-run. Record `owner_decision.resolution`, then forward to Phase 3 |
 | Scope drift / wrong spec assumption | Phase 3 | BA (ruling) | If requirements/acceptance criteria change materially: architectural re-runs affected Phase 2 reviewer(s) then Phase 3 from 3a (QA re-authors tests); standard re-extracts constraints then re-dispatches the single Dev thread |
 | Live-verification suite skipped, not recorded (data-migration / security-sensitive change) | Phase 3 to 4 gate | Phase 3 (Dev/QA) | Produce a recorded local pass against a real backing service, then re-run the gate |
