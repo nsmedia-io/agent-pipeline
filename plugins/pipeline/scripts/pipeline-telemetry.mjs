@@ -143,7 +143,28 @@ const ATTRIBUTION = "exit";
  * `review_rounds` is an EXPLICIT counter rather than an inference, and that is not a
  * preference: events[] items carry only `phase` and `at`, with no round field, so a round
  * count cannot be derived from them. When the caller has not maintained the counter, the
- * number of times the run ENTERED phase 4 is the honest floor, and it is reported as such.
+ * number of PANEL ROUNDS observed on phase 4 is the honest floor, and it is reported as such.
+ *
+ * NOT EVERY `4-review` EVENT IS A ROUND, which is why the floor counts VERDICTS and not
+ * entries. The committed corpus writes three different kinds of record under that one phase
+ * label: a panel returning a verdict (`REQUEST_CHANGES`, `APPROVE_WITH_NOTES`), an ENTRY
+ * marker for a delta dispatch (`delta-dispatched`, `DELTA`), and a TERMINUS (`merged`) that
+ * belongs to the merge, not to a review. Counting entries credits all three, and on the real
+ * #43 record that reports 4 rounds against 2 actual panels. The floor therefore counts only
+ * events carrying a verdict a PANEL can return; everything else is a marker.
+ *
+ * AND THE RECORDED COUNTER IS NOT TRUSTED OVER THE OBSERVATION, it is reported BESIDE it.
+ * `review_rounds` is maintained by hand by the orchestrator (commands/pipeline.md instructs an
+ * increment at the phase-4 checkpoint), and on the committed corpus it disagrees with the
+ * observed count on 5 of 7 records, in BOTH directions: #43 records 4 against 2 observed, #56
+ * records 1 against 3, and #17 and #39 both record 1 having never entered phase 4 at all. The
+ * two records it gets right are both single-round runs. So the counter is reliable exactly
+ * where nothing depends on it and wrong wherever remediation happened, which is the only case
+ * a round budget would ever bind on. Silently preferring it is how a stopping rule ends up
+ * binding on a number nobody measured, so `review_rounds_observed` is always reported and
+ * `review_rounds_recorded_delta` is non-zero on any disagreement. This is the same move as
+ * `untimed_events` below: make the unreadable LOUD rather than let it evaporate into a figure
+ * that still looks like an answer.
  *
  * THE PARTITION PROPERTY, which is what makes an unreadable label loud instead of silent:
  *
@@ -169,7 +190,8 @@ const ATTRIBUTION = "exit";
  *
  * @returns {{phase_elapsed_ms: Record<string, number>, total_lead_time_ms: number|null,
  *            unattributed_ms: number, unattributed_events: number, untimed_events: number,
- *            review_rounds: number, events_counted: number}}
+ *            review_rounds: number, review_rounds_observed: number,
+ *            review_rounds_recorded_delta: number, events_counted: number}}
  */
 export function telemetry(status) {
   const s = status && typeof status === "object" ? status : {};
@@ -198,8 +220,33 @@ export function telemetry(status) {
   const total_lead_time_ms =
     timed.length >= 2 ? timed[timed.length - 1].at - timed[0].at : null;
 
-  const entries = timed.filter((e) => /^4-review$/.test(e.phase)).length;
-  const review_rounds = Number.isInteger(s.review_rounds) ? s.review_rounds : entries;
+  // A verdict a PANEL can return. Anything else on a `4-review` event is a marker: an entry
+  // marker for a delta dispatch, or the `merged` terminus. Compared case-insensitively only
+  // in the sense that the corpus writes these tokens exactly; an unrecognized verdict is a
+  // marker by default, which keeps the floor a FLOOR rather than letting a typo inflate it.
+  const PANEL_VERDICTS = new Set([
+    "APPROVE",
+    "APPROVE_WITH_NOTES",
+    "REQUEST_CHANGES",
+    "REQUEST_REFACTOR",
+    "VETO",
+  ]);
+  const review_rounds_observed = events.filter(
+    (e) =>
+      e &&
+      typeof e.phase === "string" &&
+      /^4-review$/.test(e.phase) &&
+      PANEL_VERDICTS.has(e.verdict),
+  ).length;
+  const recorded = Number.isInteger(s.review_rounds) ? s.review_rounds : null;
+  const review_rounds = recorded !== null ? recorded : review_rounds_observed;
+  // A NUMBER, not a boolean: this record is archived verbatim under a numbers-only contract,
+  // and `recorded - observed` carries strictly more than a flag would. Zero means the counter
+  // agrees with the observation (and is also what an absent counter yields, since
+  // `review_rounds` then IS the observation). Any non-zero value is the counter disagreeing
+  // with the events it claims to summarize, signed so the direction survives: +2 on the real
+  // #43 record, -2 on #56. No `minimum`, for the same reason `unattributed_ms` has none.
+  const review_rounds_recorded_delta = review_rounds - review_rounds_observed;
 
   return {
     phase_elapsed_ms,
@@ -208,6 +255,8 @@ export function telemetry(status) {
     unattributed_events,
     untimed_events,
     review_rounds,
+    review_rounds_observed,
+    review_rounds_recorded_delta,
     events_counted: timed.length,
     attribution: ATTRIBUTION,
   };

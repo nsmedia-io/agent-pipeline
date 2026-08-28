@@ -186,6 +186,42 @@ T2=$(MOD="$TELEMETRY" node --input-type=module -e '
   console.log(m.telemetry({events:[{phase:"4-review",verdict:"REQUEST_CHANGES",at:"2026-08-01T00:00:00Z"},{phase:"4-review-complete",verdict:"APPROVE",at:"2026-08-01T01:00:00Z"},{phase:"4-review",verdict:"REQUEST_CHANGES",at:"2026-08-02T00:00:00Z"},{phase:"4-review-complete",verdict:"APPROVE",at:"2026-08-02T01:00:00Z"}]}).review_rounds);
 ')
 assert_eq "with no counter recorded, the phase-4 entries are counted instead" "$T2" "2"
+
+# -----------------------------------------------------------------------------
+# The hand-maintained counter, checked against the events it claims to summarize.
+# NOT EVERY 4-review EVENT IS A ROUND: the committed corpus writes delta-dispatch ENTRY markers
+# (delta-dispatched, DELTA) and a `merged` TERMINUS under the same phase label. The shape below
+# is the real #43 record's verdict sequence, which counts 4 entries against 2 actual panels --
+# the exact overcount that made a wrong counter look right.
+FIX_MARKERS='{"review_rounds":4,"events":[
+  {"phase":"4-review","verdict":"REQUEST_CHANGES","at":"2026-08-01T00:00:00Z"},
+  {"phase":"4-review","verdict":"delta-dispatched","at":"2026-08-01T01:00:00Z"},
+  {"phase":"4-review","verdict":"APPROVE_WITH_NOTES","at":"2026-08-01T02:00:00Z"},
+  {"phase":"4-review","verdict":"merged","at":"2026-08-01T03:00:00Z"}]}'
+rr() { MOD="$TELEMETRY" FIX="$1" node --input-type=module -e '
+  const m = await import(process.env.MOD);
+  console.log(String(m.telemetry(JSON.parse(process.env.FIX))[process.env.F]));
+'; }
+F=review_rounds_observed
+assert_eq "a delta-dispatch marker and a merge terminus are NOT panel rounds"   "$(F=review_rounds_observed rr "$FIX_MARKERS")" "2"
+assert_eq "and the recorded counter's disagreement is reported as a signed number"   "$(F=review_rounds_recorded_delta rr "$FIX_MARKERS")" "2"
+# THE OTHER DIRECTION, which is the one a round budget would silently pass: the real #56 record
+# records 1 while three panels returned verdicts. A budget reading review_rounds alone binds on
+# 1 and never trips.
+FIX_UNDER='{"review_rounds":1,"events":[
+  {"phase":"4-review","verdict":"REQUEST_CHANGES","at":"2026-08-01T00:00:00Z"},
+  {"phase":"4-review","verdict":"DELTA","at":"2026-08-01T01:00:00Z"},
+  {"phase":"4-review","verdict":"APPROVE_WITH_NOTES","at":"2026-08-01T02:00:00Z"},
+  {"phase":"4-review","verdict":"APPROVE_WITH_NOTES","at":"2026-08-01T03:00:00Z"}]}'
+assert_eq "an undercounting counter reports a NEGATIVE delta, so the direction survives"   "$(F=review_rounds_recorded_delta rr "$FIX_UNDER")" "-2"
+# A run that never entered phase 4 while carrying a counter -- the real #17 and #39 shape.
+assert_eq "a counter on a run that never reached a panel is caught too"   "$(F=review_rounds_recorded_delta rr '{"review_rounds":1,"events":[{"phase":"3-impl","verdict":"APPROVE","at":"2026-08-01T00:00:00Z"}]}')" "1"
+# CONTROL: the delta is not non-zero for everything. An agreeing counter reports exactly 0, so
+# a non-zero reading is a disagreement rather than an artifact of the arithmetic.
+assert_eq "CONTROL: a counter that agrees with the events reports a delta of exactly 0"   "$(F=review_rounds_recorded_delta rr '{"review_rounds":2,"events":[{"phase":"4-review","verdict":"REQUEST_CHANGES","at":"2026-08-01T00:00:00Z"},{"phase":"4-review","verdict":"APPROVE","at":"2026-08-01T01:00:00Z"}]}')" "0"
+# CONTROL: and an unrecognized verdict is a MARKER, not a round, so a typo cannot inflate the
+# floor into agreeing with a counter that is wrong.
+assert_eq "CONTROL: an unrecognized verdict counts as a marker, keeping the floor a floor"   "$(F=review_rounds_observed rr '{"events":[{"phase":"4-review","verdict":"APROVE_TYPO","at":"2026-08-01T00:00:00Z"}]}')" "0"
 assert_eq "an empty status yields a null lead time, not a fabricated zero" \
   "$(MOD="$TELEMETRY" node --input-type=module -e 'const m=await import(process.env.MOD);console.log(String(m.telemetry({}).total_lead_time_ms))')" "null"
 # The numbers-only rule, checked against a CLOSED allowlist rather than a shape regex. The
