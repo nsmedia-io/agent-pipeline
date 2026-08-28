@@ -5,14 +5,14 @@
   },
   "metadata": {
     "description": "A risk-tiered multi-agent development pipeline for Claude Code, with a file-based knowledge store and no external service dependencies.",
-    "version": "0.27.0"
+    "version": "0.28.0"
   },
   "plugins": [
     {
       "name": "pipeline",
       "source": "./plugins/pipeline",
       "description": "Risk-tiered multi-agent pipeline: spec and tier, single-writer implementation with tests, adversarial review panel. Ships BA, DBA, DevOps, SecOps, Dev, QA, Design, Art Director, and Librarian agents plus /pipeline, /phase, and /warmup.",
-      "version": "0.27.0",
+      "version": "0.28.0",
       "category": "development"
     }
   ]
