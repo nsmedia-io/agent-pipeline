@@ -1,5 +1,6 @@
 BOUNDARY: a MySQL conditional-execution opener counts as an up section
 CONTROL: a real paraphrase of the same long criterion still covers it
+CONTROL: the identical report with a flat commits array passes
 CONTROL: the same criterion passes once one check names AC23
 CONTROL: the same statements unwrapped ARE an up section
 GUARANTEE: an executable (uncommented) down region now halts
@@ -7,6 +8,7 @@ NOT as commented-out: a `*/` past the marker must not vouch for the region
 a block that opens before the marker and closes after it halts
 a block-comment PREAMBLE above live statements is still an up section
 a block-commented up region is NOT an up section
+a commits object is REFUSED rather than crashing the gate
 a custom glob matches ONLY what it names
 a custom glob matches what it names
 a file using only the configured custom marker passes
@@ -39,6 +41,7 @@ an unterminated block comment before the marker is NOT an up section
 an up section plus a -- DOWN marker passes
 and does not claim the down section is missing
 and is reported by name
+and it is named as a shape error, not a TypeError
 and it reports the up-section failure
 and it reports the up-section failure
 and it reports the up-section failure
@@ -59,6 +62,7 @@ migrationGlobs: [] does NOT disarm an explicitly-named migration
 naming the unanswered label
 naming the unterminated block and where it opened
 neither marker present still halts
+no TypeError reaches the operator
 nor an incidental schema error
 one labelled check out of three does NOT arm the strict rule
 the builtin -- DOWN still passes while a custom marker is configured
