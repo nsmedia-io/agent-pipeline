@@ -686,4 +686,40 @@ write_report_checks '[
 gate --issue "$ISSUE"
 assert_eq "a short criterion still matches on three tokens, exactly as before" "$RC" "0"
 
+# =============================================================================
+# Multi-repo impl-report: the shape check runs BEFORE any inference reads it.
+# A service estate keys `commits` BY REPOSITORY. Inference walked it as an array, so that shape
+# threw `TypeError: object is not iterable` out of the migration helper -- before the schema
+# check that names the problem in one line. The fix is ORDER, not shape-acceptance: `commits`
+# is an array by contract, and a report that disagrees should be TOLD SO.
+# =============================================================================
+new_project multirepo-commits-object
+write_spec "a criterion"
+cat > "$PROJ_ISSUE_DIR/impl-report.json" <<EOF
+{
+  "issue_number": $ISSUE,
+  "branch": "feat/multi-repo",
+  "commits": {"svc-a": [{"sha": "a1", "message": "m"}], "svc-b": []},
+  "checks_passed": {"typecheck": true, "test": true, "lint": true},
+  "completed_at": "2026-01-01T00:00:00Z",
+  "requirement_checks": [
+    {"requirement_index": 0, "requirement_text": "a criterion", "status": "PASS", "notes": "recorded by the fixture"}
+  ]
+}
+EOF
+gate --issue "$ISSUE"
+assert_eq "a commits object is REFUSED rather than crashing the gate" "$RC" "1"
+assert_eq "and it is named as a shape error, not a TypeError" \
+  "$(printf '%s' "$ERR" | grep -c 'commits: expected type "array", got object')" "1"
+# The whole point of ordering it here: the raw TypeError must be GONE, not merely accompanied.
+assert_eq "no TypeError reaches the operator" \
+  "$(printf '%s' "$ERR" | grep -ci 'not iterable')" "0"
+# CONTROL: the same report with a flat commits array PASSES, so the assertions above measure
+# the shape and not a fixture that was broken for some other reason.
+new_project multirepo-commits-array-control
+write_spec "a criterion"
+write_report "a criterion" '[{"sha": "a1", "message": "m"}]'
+gate --issue "$ISSUE"
+assert_eq "CONTROL: the identical report with a flat commits array passes" "$RC" "0"
+
 finish

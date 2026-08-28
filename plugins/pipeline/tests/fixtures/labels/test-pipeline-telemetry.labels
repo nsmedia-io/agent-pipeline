@@ -8,6 +8,7 @@ AC16(b) CRAFTED: and the other three land in their own counters
 AC16(b) CRAFTED: and the partition still balances on the record that could be read
 AC16(b) CRAFTED: so all four are accounted for, none fell through
 CONTROL: README.md is not in the trigger list
+CONTROL: a counter that agrees with the events reports a delta of exactly 0
 CONTROL: a field that IS required reads as required, so the check discriminates
 CONTROL: a label NOT in KNOWN_PHASES is not attributable, so the check above discriminates
 CONTROL: a record with no dropped events reports untimed_events 0
@@ -15,6 +16,7 @@ CONTROL: a sibling object in the same schema is NOT closed, so 'false' means som
 CONTROL: a truncated record is COUNTED unreadable rather than silently exempted
 CONTROL: an invented role is still rejected by the enum
 CONTROL: an ordinary glob is recorded verbatim
+CONTROL: an unrecognized verdict counts as a marker, keeping the floor a floor
 CONTROL: and PASSES a well-formed repo-relative path, so it is not refusing everything
 CONTROL: and on /var/folders/... at depth, inside an array
 CONTROL: and on the English sentence that was actually written into it
@@ -28,11 +30,14 @@ CONTROL: the same grep DOES find the field being read somewhere, so the zero is 
 CONTROL: the same grep reports 0 for an artifact that is NOT archived
 CONTROL: the same walk reddens on /Users/...
 CONTROL: the same walk reddens on an absolute path
+a counter on a run that never reached a panel is caught too
+a delta-dispatch marker and a merge terminus are NOT panel rounds
 a present shard merges (exit 0), so the halt below is not the script refusing everything
 a shard that exists nowhere HALTS with exit 2
 an UNDECLARED phase label still balances the partition
 an empty status yields a null lead time, not a fabricated zero
 an event with a NON-STRING phase is counted as dropped too, not only a bad timestamp
+an undercounting counter reports a NEGATIVE delta, so the direction survives
 and .pipeline/exp-script-test-coverage/status.json is the record that carries it
 and events_counted says how many survived, so the two numbers can be compared
 and it falls back to that directory before declaring a shard missing
@@ -48,6 +53,7 @@ and the corpus is more than one file, so it is a population rather than an examp
 and the description says design_review is APPENDED to this array
 and the gate's set is the narrowed one
 and the orchestrator states the rule where the tier is decided
+and the recorded counter's disagreement is reported as a signed number
 and the rejection is counted, so it is reportable rather than silent
 and told the only legal alternative is a repo-relative path
 at least one real record carries a suffixed phase key (3a/3b), the shape that used to vanish

@@ -586,6 +586,116 @@ export function groundOpenQuestions(data, failures = []) {
   return failures;
 }
 
+// spec.falsifiability_pass is the can-this-redden audit, and commands/pipeline.md has claimed
+// for its whole life that "the table is machine-checked against the criterion list so the two
+// cannot drift". NOTHING CHECKED IT. `falsifiability_pass` appeared in zero scripts, and it is
+// absent from spec.schema.json's top-level `required`, so a spec could omit the block entirely
+// and still validate. This is that claim, made true.
+//
+// WHAT IS ENFORCED IS COVERAGE, AND ONLY COVERAGE: every acceptance criterion carries at least
+// one row, in `one_mutation_per_criterion` or in `unmutable`. That is exactly the property
+// pipeline.md states, and the reason it matters is that a criterion with no row is one Dev will
+// implement to and QA will write a test for while nobody has asked whether it can fail.
+//
+// THREE THINGS ARE DELIBERATELY NOT FAILURES, because the nine archived specs show each one
+// being used as considered work rather than as drift:
+//
+//   - EXTRA rows naming something that is not an acceptance criterion. Four archived specs
+//     carry these and they are the good kind: #56 records four "R7/R12 residual limit" rows,
+//     #61 records a premise annotated "deliberately not an acceptance criterion", #63 records
+//     one half of AC12 whose other half is covered above. Refusing them would refuse the BA for
+//     doing MORE than the contract asks.
+//   - DUPLICATE labels across the two lists. #19's AC4 sits in both, on purpose and with the
+//     reason written down: one half of the criterion has a real mutation (collapse two harms
+//     into one sentence), the other half is a reading judgement with no mechanical failure
+//     state. A criterion that is partially unmutable is a true thing to record, not a
+//     contradiction to reject.
+//   - The block being ABSENT below the architectural tier, where pipeline.md does not require
+//     it. (#34 carries one at standard tier voluntarily; that is welcome, not mandatory.)
+//
+// So this gate is a RATCHET, not a retrofit: run against all nine archived specs it reports
+// nothing, because their coverage is already complete. It exists for the case the corpus cannot
+// show, since every archived spec is a FINAL state -- a spec REVISION that adds AC17 and no row
+// for it. Specs revise often (eight times on one recorded run), the criterion list and the
+// table are edited separately, and the revision is exactly when the two drift apart.
+//
+// IT ABSTAINS RATHER THAN GUESSING when it cannot read labels. Criteria are matched by their
+// leading `AC<n>` label, which is the convention every archived spec follows on both sides. If
+// no criterion carries a parseable label the matcher has nothing to match on, so it says so and
+// enforces nothing, instead of reporting every criterion as uncovered. A gate that cannot
+// measure must not return the answer that looks like measurement.
+const AC_LABEL = /^\s*(AC\d+)\b/;
+
+/** The leading AC label of a criterion string, or null. Applied to BOTH sides so a row that
+ *  spells out the full criterion text normalizes the same way a bare "AC4" does. */
+export function acLabel(value) {
+  if (typeof value !== "string") return null;
+  const m = AC_LABEL.exec(value);
+  return m ? m[1] : null;
+}
+
+export function groundFalsifiability(data, failures = []) {
+  if (!data || typeof data !== "object") return failures;
+  const fp = data.falsifiability_pass;
+  const architectural = data.risk_tier === "architectural";
+
+  if (fp === undefined || fp === null) {
+    // Required at the architectural tier by commands/pipeline.md and by the schema's own
+    // description; below it, absent is the normal case and this fails open.
+    if (architectural) {
+      failures.push(
+        "spec.json falsifiability_pass is absent at the architectural tier; every acceptance criterion needs a named mutation that reddens it or an `unmutable` entry with its reason, and a criterion that cannot fail is one Dev implements to and QA tests for while nobody has asked whether it can fail",
+      );
+    }
+    return failures;
+  }
+  if (typeof fp !== "object" || Array.isArray(fp)) {
+    failures.push("spec.json falsifiability_pass is present but is not an object");
+    return failures;
+  }
+
+  const criteria = Array.isArray(data.acceptance_criteria) ? data.acceptance_criteria : [];
+  if (criteria.length === 0) return failures; // nothing to cover; the schema's minItems owns this
+
+  const labels = criteria.map(acLabel);
+  if (labels.every((l) => l === null)) {
+    // ABSTAIN. Reported, never silent: a reader who sees no failures here would otherwise
+    // conclude the table was checked.
+    failures.push(
+      `spec.json falsifiability_pass could not be checked: none of the ${criteria.length} acceptance criteria carry a leading AC<n> label, so criteria and mutation rows cannot be matched. Label them (\"AC1. ...\") or check the table by hand -- this gate enforced NOTHING on this spec`,
+    );
+    return failures;
+  }
+
+  const rowsOf = (key) => (Array.isArray(fp[key]) ? fp[key] : []);
+  const covered = new Set();
+  for (const key of ["one_mutation_per_criterion", "unmutable"]) {
+    for (const row of rowsOf(key)) {
+      if (!row || typeof row !== "object") continue;
+      const label = acLabel(row.criterion);
+      if (label) covered.add(label);
+    }
+  }
+
+  criteria.forEach((text, i) => {
+    const label = labels[i];
+    if (label === null) {
+      // A single unlabeled criterion among labeled ones cannot be matched, and silently
+      // skipping it is how a criterion goes uncovered without anyone being told.
+      failures.push(
+        `spec.json acceptance_criteria[${i}] carries no leading AC<n> label, so falsifiability_pass cannot be checked against it: ${JSON.stringify(String(text).slice(0, 80))}`,
+      );
+      return;
+    }
+    if (!covered.has(label)) {
+      failures.push(
+        `spec.json falsifiability_pass covers no mutation for ${label}; every acceptance criterion needs a named mutation that reddens it or an \`unmutable\` entry with its reason`,
+      );
+    }
+  });
+  return failures;
+}
+
 export function groundImplReport(data, ev, failures = []) {
   if (!data || typeof data !== "object") return failures;
   groundFilesChanged(data, ev, failures);
@@ -720,6 +830,7 @@ export function checkArtifacts(agentType, input, now = Date.now(), rootsOverride
         if (rule.artifact === "spec.json" && rule.dataPtr === "") {
           try {
             groundOpenQuestions(data, failures);
+            groundFalsifiability(data, failures);
           } catch {
             // same contract as groundImplReport: never wedge a stop
           }
@@ -817,6 +928,57 @@ function selfTest() {
   };
 
   // files_changed grounding
+  // ---- falsifiability coverage. The gate pipeline.md always claimed existed. ----
+  // The fixture is the shape every archived spec uses: criteria carrying a leading AC<n>
+  // label, rows naming the bare label.
+  const fpSpec = (acs, fp, tier = "architectural") => ({
+    risk_tier: tier,
+    acceptance_criteria: acs,
+    ...(fp === undefined ? {} : { falsifiability_pass: fp }),
+  });
+  const twoACs = ["AC1. the first criterion.", "AC2. the second criterion."];
+  const bothCovered = {
+    one_mutation_per_criterion: [{ criterion: "AC1", mutation: "break it" }],
+    unmutable: [{ criterion: "AC2", why: "no mechanical failure state", discharged_by: "a human read" }],
+  };
+  check("falsifiability: every criterion carries a row (pass)",
+    groundFalsifiability(fpSpec(twoACs, bothCovered), []), false);
+  // THE CASE THE ARCHIVE CANNOT SHOW, because every archived spec is a FINAL state: a spec
+  // revision adds a criterion and nobody adds a row for it.
+  check("falsifiability: a revision-added criterion with no row (fail)",
+    groundFalsifiability(fpSpec([...twoACs, "AC3. added by a later revision."], bothCovered), []), true);
+  check("falsifiability: the block absent at the architectural tier (fail)",
+    groundFalsifiability(fpSpec(twoACs, undefined), []), true);
+  // FAIL OPEN below architectural, where pipeline.md does not require the block.
+  check("falsifiability: the block absent at the standard tier (pass, fails open)",
+    groundFalsifiability(fpSpec(twoACs, undefined, "standard"), []), false);
+  // NOT failures, and each is a real shape from the archive: #56/#61/#63 record rows naming a
+  // residual or a premise rather than an AC, and #19's AC4 sits in BOTH lists on purpose
+  // because one half of it has a mutation and the other half is a reading judgement.
+  check("falsifiability: an extra row naming a residual is not a failure (pass)",
+    groundFalsifiability(fpSpec(twoACs, {
+      ...bothCovered,
+      unmutable: [...bothCovered.unmutable, { criterion: "R7 residual limit (i)", why: "recorded on purpose", discharged_by: "a human read" }],
+    }), []), false);
+  check("falsifiability: a criterion in BOTH lists is not a failure (pass)",
+    groundFalsifiability(fpSpec(twoACs, {
+      one_mutation_per_criterion: [{ criterion: "AC1", mutation: "break it" }, { criterion: "AC2", mutation: "break its first half" }],
+      unmutable: [{ criterion: "AC2", why: "its second half is a reading judgement", discharged_by: "a human read" }],
+    }), []), false);
+  // ABSTAIN, LOUDLY. With nothing to match on it must SAY it enforced nothing rather than
+  // report every criterion as uncovered -- or, worse, report clean.
+  check("falsifiability: unlabeled criteria abstain rather than pass silently (fail)",
+    groundFalsifiability(fpSpec(["no label", "nor here"], bothCovered), []), true);
+  check("falsifiability: one unlabeled criterion among labeled ones is named (fail)",
+    groundFalsifiability(fpSpec([...twoACs, "a third, unlabeled"], bothCovered), []), true);
+  // CONTROL ON THE MATCHER ITSELF: a row that spells the criterion out in full normalizes to
+  // the same label as a bare "AC1", so the gate is not merely string-equality in disguise.
+  check("falsifiability: CONTROL a row spelling out the full criterion text still matches (pass)",
+    groundFalsifiability(fpSpec(twoACs, {
+      one_mutation_per_criterion: [{ criterion: "AC1. the first criterion.", mutation: "break it" }],
+      unmutable: [{ criterion: "AC2. the second criterion.", why: "w", discharged_by: "d" }],
+    }), []), false);
+
   check("grounding: all claimed files exist (pass)", groundImplReport(groundedReport, evAllExist), false);
   check("grounding: claimed file missing (fail)", groundImplReport(groundedReport, evNothingExists), true);
   check("grounding: no evidence surface skips file check (pass)", groundImplReport(groundedReport, evNoSurface), false);

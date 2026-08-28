@@ -182,13 +182,25 @@ UPGRADE=$(awk '/^### Upgrading$/{f=1} f{print} /^Four more customization points:
 BULLETS=$(printf '%s\n' "$UPGRADE" | grep -cE '^[0-9]+\. ' | tr -d ' ')
 assert_eq "AC29 CONTROL: the Upgrading section was found and has numbered bullets" \
   "$([[ "${BULLETS:-0}" -ge 3 ]] && echo ok || echo "bullets=$BULLETS")" "ok"
-# There are TWO count words in that lead paragraph today ("Three changes ... there are three
-# things to know"). Both must move, or the section contradicts itself one sentence later.
-COUNT_WORDS=$(printf '%s\n' "$UPGRADE" | grep -oiE '\b(one|two|three|four|five|six|seven)\b' | tr 'A-Z' 'a-z' | sort -u | tr '\n' ' ')
-WORD_FOR=$(node -e 'const w=["zero","one","two","three","four","five","six","seven","eight","nine"];console.log(w[Number(process.argv[1])]||"?")' "$BULLETS")
+# There are TWO count words in that lead paragraph ("Three changes ... there are three things
+# to know"). Both must move, or the section contradicts itself one sentence later.
+#
+# THIS CHECK WAS VACUOUS FOR EVERY RELEASE ABOVE SEVEN, and that is why it is written this way
+# now. The vocabulary was `one|two|three|four|five|six|seven` and the bullet->word map was a
+# ten-element array, so once the section passed nine, `WORD_FOR` returned "?" and the scan
+# matched no word at all: an empty set minus "?" is empty, and the assertion reported green over
+# a population of ZERO. Measured on the shipped 0.27.0 README -- 20 bullets, lead word "Twenty",
+# words matched: none. It only reddened when a later count word happened to CONTAIN a vocabulary
+# token ("Twenty-five" -> "five"), which is a tripwire nobody designed.
+#
+# The parse is compound-aware and returns NUMBERS, so the comparison is against $BULLETS itself
+# rather than against a spelling. The anti-vacuity control below is the half that was missing:
+# a lead paragraph the parser reads NOTHING out of must be a failure, not a pass.
+COUNT_NUMS=$(printf '%s\n' "$UPGRADE" | sed -n '1,4p' | tr '\n' ' ' | xargs -0 node "$TESTS_DIR/fixtures/count-words.mjs")
+assert_eq "AC29 CONTROL: the lead paragraph actually yields a spelled count (an unparsed lead is not a pass)" \
+  "$([[ -n "$COUNT_NUMS" ]] && echo found || echo "NOTHING PARSED: the assertion below would range over an empty set")" "found"
 assert_eq "AC29: every count word in the lead paragraph matches the bullet count" \
-  "$(printf '%s\n' "$UPGRADE" | sed -n '1,4p' | grep -oiE '\b(one|two|three|four|five|six|seven)\b' | tr 'A-Z' 'a-z' | sort -u | grep -v "^$WORD_FOR$" | tr '\n' ',')" \
-  ""
+  "$COUNT_NUMS" "$BULLETS"
 # The two new bullets, asserted INDEPENDENTLY of the count so each can redden alone.
 assert_contains "AC29: a bullet names the gate's new refusal" "$UPGRADE" "executable SQL"
 assert_contains "AC29: a bullet names the telemetry relabel" "$UPGRADE" "phase_elapsed_ms"

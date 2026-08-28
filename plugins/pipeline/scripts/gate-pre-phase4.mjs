@@ -724,6 +724,25 @@ async function main() {
   const cfg = readPipelineConfig();
   const globs = migrationGlobsForGate(cfg);
   const downMarker = downMarkerFromConfig(cfg);
+
+  // SCHEMA-VALIDATE THE REPORT BEFORE INFERRING ANYTHING FROM ITS SHAPE. Inference walks
+  // `report.commits` as an array, so a report that keys its commits BY REPOSITORY -- ordinary
+  // in a multi-repo change, and the shape a service estate produces -- threw
+  // `TypeError: object is not iterable` from inside the inference helper, BEFORE the schema
+  // check that says `commits: expected array` in one actionable line. The crash was never the
+  // defect; the ORDER was. Guarding the loop instead would have been worse: it would infer no
+  // migrations from a report whose commits it could not read, and report a clean gate.
+  //
+  // Ordering it this way also collapses a whole class at once. The same run carried the
+  // identical mismatch on two OTHER fields, and a crash-site fix would have surfaced them one
+  // TypeError at a time; a schema pass names all three in a single failure list.
+  const shapeErrs = validate(report, schema, schema, "");
+  if (shapeErrs.length > 0) {
+    process.stderr.write("FAIL: pre-Phase-4 gate blocked the panel.\n");
+    for (const e of shapeErrs) process.stderr.write(`  - impl-report schema: ${e}\n`);
+    process.exit(1);
+  }
+
   const migrationSources = collectMigrationSources(args, report, globs);
 
   const { failures } = runGate({ report, spec: specData, schema, migrationSources, downMarker });
