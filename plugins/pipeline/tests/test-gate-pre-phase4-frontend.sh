@@ -129,6 +129,73 @@ EOF
 gate --issue 4245 --changed "$FRONTEND_PATH"
 assert_eq "the Phase 2 review Design shard is accepted as evidence" "$RC" "0"
 
+suite "frontend gate: an undeterminable change list HALTS, never skips"
+
+# THE fail-open this section exists for: with no --changed paths the impl-report is the only
+# source for what the diff touched, and an ABSENT one used to leave the list empty, so
+# diffTouchesFrontend([]) was false and the gate printed SKIP and exited 0. A control designed to
+# halt no-opped into a pass in exactly the state where design evidence is most likely absent.
+# "I could not determine what changed" is a different state from "nothing frontend changed", and
+# only the second may pass. Reproduced against a real run by SecOps.
+gate --issue 4250
+assert_eq "an --issue whose dir holds no impl-report halts" "$RC" "1"
+assert_contains "the halt names the missing report" "$ERR" "not found"
+assert_not_contains "and it does NOT report the legitimate skip" "$OUT" "SKIP"
+
+gate --impl-report "$TEMP_PROJECT/nowhere/impl-report.json"
+assert_eq "an --impl-report path with no file there halts" "$RC" "1"
+assert_not_contains "and it does NOT report the legitimate skip" "$OUT" "SKIP"
+
+printf '%s' '{ not json' > "$TEMP_PROJECT/impl-unparseable.json"
+gate --impl-report "$TEMP_PROJECT/impl-unparseable.json"
+assert_eq "an unparseable impl-report halts" "$RC" "1"
+assert_contains "the halt says the report is not valid JSON" "$ERR" "not valid JSON"
+
+# A report that PARSES but records no file list anywhere is the same defect one layer in:
+# files_changed is optional per commit, so deriving [] from it and skipping would be the same
+# no-op reached by a different route.
+printf '%s' '{"commits":[{"sha":"a","message":"m"}]}' > "$TEMP_PROJECT/impl-fileless.json"
+gate --impl-report "$TEMP_PROJECT/impl-fileless.json"
+assert_eq "an impl-report recording no file list halts" "$RC" "1"
+assert_contains "the halt says the change list is undeterminable" "$ERR" "cannot determine"
+assert_not_contains "and it does NOT report the legitimate skip" "$OUT" "SKIP"
+
+gate
+assert_eq "no --changed and nothing to resolve a report from halts" "$RC" "1"
+assert_contains "the halt says so plainly" "$ERR" "cannot determine the changed-path list"
+
+# CONTROLS. The halts above must not have been bought by making the gate refuse everything:
+# a CONCLUSIVE change list with no frontend surface still skips, and a real frontend diff with
+# real evidence still passes. If either of these goes red the gate is stuck closed and blocks
+# every backend PR, which is the failure mode on the other side of this fix.
+mkdir -p "$TEMP_PROJECT/.pipeline/4251"
+cat > "$TEMP_PROJECT/.pipeline/4251/impl-report.json" <<'EOF'
+{"commits":[{"sha":"a","message":"m","files_changed":["scripts/tool.mjs"]}]}
+EOF
+gate --issue 4251
+assert_eq "a conclusive backend-only report still skips" "$RC" "0"
+assert_contains "and says why it skipped" "$OUT" "SKIP: no frontend surface in the diff"
+
+mkdir -p "$TEMP_PROJECT/.pipeline/4252"
+cat > "$TEMP_PROJECT/.pipeline/4252/impl-report.json" <<'EOF'
+{"commits":[{"sha":"a","message":"m","files_changed":["app/components/Button.tsx"]}],
+ "design_gate":{"verdict":"APPROVE","lint_pass":true,"a11y_pass":true}}
+EOF
+gate --issue 4252
+assert_eq "a conclusive frontend report with full evidence still passes" "$RC" "0"
+assert_contains "and says the gate passed" "$OUT" "OK: frontend visual-verification gate passed."
+
+# A delete-only diff stays CONCLUSIVE (files_removed is a recorded file list) and the deletion
+# exemption still empties the changed set, so it skips rather than halting. This is the case a
+# naive "empty derived list means undeterminable" rule would false-halt.
+mkdir -p "$TEMP_PROJECT/.pipeline/4253"
+cat > "$TEMP_PROJECT/.pipeline/4253/impl-report.json" <<'EOF'
+{"commits":[{"sha":"a","message":"m","files_changed":["app/components/Gone.tsx"],
+             "files_removed":["app/components/Gone.tsx"]}]}
+EOF
+gate --issue 4253
+assert_eq "a delete-only frontend diff is conclusive and skips" "$RC" "0"
+
 suite "frontend gate: screenshot containment (AC18)"
 
 # A legitimate screenshot inside the gitignored issue tree passes. This is the control that
