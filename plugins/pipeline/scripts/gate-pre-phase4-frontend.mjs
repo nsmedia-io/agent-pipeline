@@ -19,6 +19,12 @@
  *     to verify, nothing to gate. Absence of a trigger is never read as missing evidence.
  *   - A frontend file DID change -> require recorded evidence (a design_review verdict
  *     present + a lint pass + an accessibility (a11y) pass). Missing evidence HALTS (exit 1).
+ *   - The changed-path list could NOT be determined (no --changed paths AND the impl-report is
+ *     absent, unreadable, unparseable, or records no file list at all) -> HARD ERROR (exit 1),
+ *     never a skip. "I could not determine what changed" is a DIFFERENT state from "nothing
+ *     frontend changed", and only the latter may pass. Conflating them let a wrong
+ *     --impl-report path silently no-op this control into a pass, in exactly the state where
+ *     design evidence is most likely absent.
  *
  * Evidence is RECORDED by the Design agent inside its dispatch (it runs the accessibility
  * snapshot and the lint + a11y pass) and lands in peer-review.design_review.json /
@@ -194,6 +200,34 @@ export function changedFilesFromReport(report) {
   return [...out];
 }
 
+// True when the report records ANY file list at all (changed or removed, on any commit or at the
+// top level). A report that records none is INCONCLUSIVE about what changed: deriving [] from it
+// and skipping would be the same fail-open as reading no report at all. files_removed counts, so a
+// delete-only diff stays conclusive and is still evaluated.
+export function reportRecordsAnyFiles(report) {
+  if (!report || typeof report !== "object") return false;
+  if ((report.files_removed || []).some((f) => typeof f === "string")) return true;
+  for (const commit of report.commits || []) {
+    if (!commit || typeof commit !== "object") continue;
+    if ((commit.files_changed || []).some((f) => typeof f === "string")) return true;
+    if ((commit.files_removed || []).some((f) => typeof f === "string")) return true;
+  }
+  return false;
+}
+
+// Same derivation as changedFilesFromReport, but REFUSES to return an inconclusive empty list.
+// Throwing here routes into main()'s fail-closed catch (exit 1) instead of falling through to
+// diffTouchesFrontend([]) === false, which prints SKIP and exits 0.
+export function changedFilesFromReportStrict(report, label = "impl-report.json") {
+  if (!reportRecordsAnyFiles(report)) {
+    throw new Error(
+      `${label} records no files_changed/files_removed on any commit: cannot determine what the ` +
+        `diff touched. Refusing to infer an empty diff (that would skip this gate).`,
+    );
+  }
+  return changedFilesFromReport(report);
+}
+
 function resolveImplReportPath(args, issueDir) {
   if (args.implReport) return args.implReport;
   if (!issueDir) return null;
@@ -223,9 +257,23 @@ async function main() {
   const issueDir = args.issue ? path.join(PROJECT_ROOT, ".pipeline", String(args.issue)) : null;
   const implReportPath = resolveImplReportPath(args, issueDir);
 
+  // Explicit --changed paths are authoritative. Otherwise the impl-report is the ONLY source for
+  // what the diff touched, so an absent/unreadable/unparseable/fileless report is a hard error,
+  // NOT an empty change list: loadJsonOrThrow and changedFilesFromReportStrict both throw into the
+  // fail-closed catch below. Do not reintroduce an existsSync short-circuit here; that is the
+  // fail-open this replaced.
   let changed = args.changed;
-  if (changed.length === 0 && implReportPath && existsSync(implReportPath)) {
-    changed = changedFilesFromReport(loadJsonOrThrow(implReportPath, "impl-report.json"));
+  if (changed.length === 0) {
+    if (!implReportPath) {
+      throw new Error(
+        "cannot determine the changed-path list: no --changed paths given and neither --issue " +
+          "nor --impl-report resolved an impl-report.json path",
+      );
+    }
+    changed = changedFilesFromReportStrict(
+      loadJsonOrThrow(implReportPath, "impl-report.json"),
+      implReportPath,
+    );
   }
   const touchesFrontend = diffTouchesFrontend(changed);
 
