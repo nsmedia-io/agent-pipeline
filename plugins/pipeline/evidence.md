@@ -754,6 +754,74 @@ one family that moved was the one the measurement depended on.
 
 ---
 
+## 22. A classifier validated only on a corpus its own author derived is circular
+
+Rule 3b says a battery where every mutation reddens cannot tell coverage from a rubber stamp. This
+is the version that bites when the artifact under test IS a rule: **a corpus assembled by the person
+who wrote the rule contains the cases that person already thought of, which is precisely the set the
+rule was built to handle.** The fixtures do not test the rule, they restate it.
+
+Origin: a claim-scanner shipped with the note "validated against all 18 fixtures", and its own
+specification prescribed the regex rather than the property. Two reviewers, working independently
+with different probe strings, each found bypasses. The decisive one was a ONE-WORD variant of the
+exact string the whole change existed to retire: the scanner caught `Safety flag detected on this
+clip.` and passed `Safety flag detected on this motion clip.` None of the 18 fixtures mixed a
+sanctioned token with a banned claim in one sentence, because the author did not conceive of that
+shape, which is the same reason the rule failed on it.
+
+Then it recurred inside the remediation. The tightened rule was validated against 33 fixtures and
+shipped with a residual that survived: a coordinated subject (`Safety flags and motion were
+detected.`) still evaded it. Found the same way, by someone who had not written the rule.
+
+**The corpus grows from the rule's inverse, not from its examples.** Ask what this rule must catch
+that it might not, and derive cases from the failure mode rather than from the intent. A fixture set
+enumerating the strings you wrote the rule for measures your memory, not the rule's reach.
+
+**How to satisfy it.**
+
+- The set of cases a classifier is validated on must include entries authored by someone other than
+  the rule's author, or the validation records that it does not and the number of fixtures is
+  reported as a count and never as a coverage claim.
+- State the corpus's blind spot in the same breath as its size. "33 fixtures, none of which
+  coordinate a sanctioned noun with a banned one" is evidence; "33 fixtures, all passing" is a
+  restatement of the rule.
+- A residual that survives is documented as a pinned limit inside the rule's own suite, with the
+  named design change that would close it, rather than as a backlog item. A limit nobody can find
+  is indistinguishable from a limit nobody knows about.
+
+## 23. A claim that code never runs is a measurement, not a reading
+
+Rule 14 says run the command, do not read it. The same failure wears a second costume, and this one
+narrows scope rather than breaking a runbook: **an assertion that some code is unreachable, dead, or
+excluded gets used to justify NOT fixing it, and it is almost always derived by reading configuration
+instead of by running anything.**
+
+Origin: three stale file references surfaced from one corpus move. Two failed loudly. The third was
+left unfixed on the reading that its test project excluded files of that name, so it "never runs".
+That reading was correct about the file it was read from and wrong about the world: a SECOND project
+config existed specifically to include those files under a different runtime, and the package's test
+script ran both. The claim propagated through three roles without anyone executing it. When it was
+finally run, it failed immediately, and fixing it restored 24 tests that had silently stopped
+executing altogether.
+
+The same session produced the benign twin, which is why the rule is about evidence and not about
+suspicion: a planted mutation that produced NO failure correctly established that a branch really
+was unreachable, because a guard upstream made it so. That is a demonstration. The difference
+between the two is not confidence, it is whether anything ran.
+
+**How to satisfy it.**
+
+- "This never runs" is satisfied by running it and showing the absence, never by citing the config
+  that appears to prevent it. Config is one input to a behavior; there can always be another.
+- Before concluding a path is dead, ask what would EXECUTE it and enumerate those entry points from
+  the system rather than from the file in front of you. A second config, a second script target, a
+  different runner, or a filter that is narrower than it looks are all ordinary.
+- A plant that fails to fire is a RESULT and gets reported as one. It is the cheapest available
+  proof of unreachability, and discarding it as a nuisance throws away the only demonstration in
+  reach.
+- Reviewers: an unreachability claim used to narrow scope carries the same burden as a claim used to
+  widen it. Absence of a caller is not absence of a call.
+
 ## Applying this
 
 **Authors** state, for every mechanism they ship, its **vacuous form**: the specific circumstance
