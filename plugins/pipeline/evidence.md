@@ -822,6 +822,71 @@ between the two is not confidence, it is whether anything ran.
 - Reviewers: an unreachability claim used to narrow scope carries the same burden as a claim used to
   widen it. Absence of a caller is not absence of a call.
 
+## 24. A spec with two copies has two states, and agents read the one nobody updates
+
+An artifact and its human-facing render are two copies of one document. Rulings get made in the place
+a human is looking, which is the render, and every downstream agent reads the artifact. The
+divergence is silent because both copies are individually well formed and nothing compares them.
+
+Origin: a spec was reworked across four review rounds. `spec.json` was left at round 3 while the
+tracker issue body was regenerated at round 4, so exactly two criteria differed: a corrected capacity
+figure, and a ruling that a copy-inspection rule had to be narrowed. That narrowing had been decided,
+argued and published where the owner would see it. Every agent dispatched afterwards read the
+artifact, found no such ruling, and implemented nothing. It surfaced two rounds later when a reviewer
+searched the artifact for the ruling's own terms and got zero hits, and it was then re-derived from
+scratch as a new criterion. The cost was not the edit. It was two rounds of agents building on a spec
+that was missing a decision everyone believed had been made.
+
+The failure is directional, and that is what lets it survive: a human reading the render sees the
+current state and has no reason to doubt it, while an agent reading the artifact sees a coherent
+earlier state and has no reason to doubt that either. Neither party is looking at something wrong.
+
+**How to satisfy it.**
+
+- ONE copy is the source. The artifact is the source and the render is a projection of it. A ruling
+  made anywhere else is not made until it is written back, and "I stated it in my summary to the
+  orchestrator" is not written back.
+- The check is mechanical and cheap: render the artifact's criteria and diff them against the
+  published body at each phase transition. Two well formed copies of one document will never tell you
+  they disagree.
+- Any role that rules on scope mid-run writes that ruling into the artifact in the same turn it makes
+  it. A ruling that lives only in a report reaches nobody who acts on it.
+- Reviewers: when a spec cites a decision you cannot find in the artifact, that is a finding, not a
+  failed search.
+
+## 25. A claim about what the product does is a measurement, not a premise
+
+The grounding gate makes a fail-direction directive cite the field's real persisted shape. The same
+discipline is missing one axis over. A reviewer ruling on what a product may CLAIM is asserting
+something about what the product DOES, and that assertion is checkable in the code that implements
+it.
+
+Origin: a reviewer flagged customer-facing copy describing a capability as a compliance violation, on
+the reading that the product did not do the thing described. The product did. The vision prompt
+defined the event mechanically, a dedicated flag carried it, and the dispatcher emitted it, all in
+tracked code and all reachable in one grep. The false premise then hardened. It became an acceptance
+criterion; the criterion demanded the offending string not survive; and the implementation satisfied
+that by deleting the whole control, which removed a live customer alert's only off switch while the
+alert kept sending. Three roles acted correctly on one unverified assertion.
+
+The direction is what makes it expensive. A guardrail built on a false premise about the product is
+not merely useless. It is enforced, it propagates into criteria, and each downstream role treats it
+as settled precisely because the role upstream did.
+
+**How to satisfy it.**
+
+- Before ruling that copy overstates a capability, establish what the capability IS from the code
+  that implements it, and cite that. A prompt, a flag, a dispatcher or a schema defines the thing
+  being claimed; one of them is findable.
+- The distinction that usually decides these is prediction versus observation. A product may describe
+  what it recorded. It may not predict what will happen to a person. Both live in the same sentence
+  and a bare term list cannot tell them apart, which is why such a list rejects a denial of a claim
+  as readily as the claim itself.
+- A guardrail that would refuse the product's own accurate vocabulary is refusing correct work, which
+  rule 6 already forbids. Run it over the shipped strings before proposing it, not after.
+- Orchestrators especially: your assertion about the product becomes an input to other roles' work.
+  Verify it, or label it a claim and invite contradiction.
+
 ## Applying this
 
 **Authors** state, for every mechanism they ship, its **vacuous form**: the specific circumstance
@@ -834,3 +899,24 @@ remediation, every single round introduced a new defect while closing the last o
 
 **The orchestrator** verifies rather than relays. An agent's report of a passing gate is a claim; the
 gate's output on your own run is evidence. Confirm the two match before merging on either.
+
+**And it holds its OWN actions to that standard, because nothing else here does.** Every role in this
+pipeline is reviewed by another role except the one that dispatches them. Gate overrides, merge
+sequencing, artifact handling and the facts an orchestrator supplies to agents are unreviewed by
+construction, and they are supplied with exactly the authority of a finding. This is the same
+asymmetry the Librarian carried until its own claims were brought under the rule it applied to
+everyone else's.
+
+Recorded in one architectural run: an orchestrator measured a row count at the wrong grain and passed
+it to three agents as verified ground truth, where it became an acceptance criterion before a
+reviewer re-derived it at the reader's grain and found the defect unreachable; it re-seeded a stale
+artifact during a crash recovery and let a role review against it; it committed its own checkpoints
+onto a feature branch twice while reporting they had gone elsewhere; and it merged two pull requests
+back to back, so the first one's CI was cancelled and its deploy never ran while both merges showed
+green. Agents caught the errors that touched their surfaces. Nothing caught the rest.
+
+So: record every consequential action in `status.json` flags with the evidence that supports it,
+state supplied facts as claims and invite contradiction, and when you override a gate, say so in the
+panel dispatch and name the property you verified by hand, so a reviewer rules on the override rather
+than inheriting it. An orchestrator that never reports an error of its own is not running clean; it
+is the only role whose errors have nowhere to surface.
