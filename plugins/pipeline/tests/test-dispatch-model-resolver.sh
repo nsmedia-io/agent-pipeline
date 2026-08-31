@@ -51,23 +51,47 @@ PLUGIN_DIR="$PLUGIN_ROOT"
 PIPELINE_MD="$PLUGIN_DIR/commands/pipeline.md"
 
 # ---- resolver discovery, from the rewired dispatch sites --------------------
-RESOLVER=""
+#
+# #104: this used to `break` on the FIRST post-denylist survivor, which is `sort -u` ORDER, a
+# positional accident with no identity check behind it -- nothing here said WHICH script it
+# meant. Adding dispatch-effort.mjs (it sorts before dispatch-model.mjs) silently handed this
+# suite the wrong resolver until the exclusion above was added by hand. That fixed THIS
+# collision; it did not fix the CLASS, because the next early-sorting scripts/*.mjs reference
+# in pipeline.md walks into the identical trap, silently, with a red suite pointing at whoever
+# the wrong script happened to be that day rather than at the real cause.
+#
+# So: collect every survivor instead of stopping at the first, and require EXACTLY one. Zero
+# survivors is the pre-existing "not wired" state (NO_RESOLVER below, unchanged). More than one
+# is now a LOUD, self-diagnosing failure naming every candidate, never a silent wrong pick.
+CANDIDATES=()
 for cand in $(grep -oE 'scripts/[a-zA-Z0-9_-]+\.mjs' "$PIPELINE_MD" | sort -u); do
   base="${cand#scripts/}"
   case "$base" in
     frontend-surface.mjs|gate-pre-phase4.mjs|gate-pre-phase4-frontend.mjs|merge-peer-review.mjs) continue ;;
     archive-pipeline.mjs|knowledge-store.mjs|validate-pipeline-artifact.mjs|voice-lint.mjs) continue ;;
     pipeline-status.mjs|config-doctor.mjs|lib.mjs|sync-manifests.mjs) continue ;;
-    # The EFFORT resolver is a different table with a different contract, and it sorts BEFORE
-    # dispatch-model.mjs, so without this line `sort -u` hands this suite the wrong script and
-    # every model assertion below silently tests the effort resolver instead.
+    # The EFFORT resolver is a different table with a different contract; excluded by NAME
+    # (an identity check), not relied on to sort elsewhere, now that ambiguity halts below too.
     dispatch-effort.mjs) continue ;;
+    # #104's own discriminating find: these two ALREADY survived the pre-fix denylist and were
+    # ALREADY ambiguous with dispatch-model.mjs. The single-survivor `break` this suite used to
+    # take silently picked dispatch-model.mjs only because "d" sorts before "g" and "p" -- an
+    # alphabetical accident, not a check that ever confirmed it was the right script. Requiring
+    # exactly one survivor (below) is what turned that from invisible into a red suite.
+    gate-phase-entry.mjs|pipeline-telemetry.mjs) continue ;;
   esac
   # The data-layer surface module is referenced from the same file by R3; it is not this.
   grep -q 'migrationGlobsForTripwire' "$PLUGIN_DIR/$cand" 2>/dev/null && continue
-  RESOLVER="$PLUGIN_DIR/$cand"
-  break
+  CANDIDATES+=("$PLUGIN_DIR/$cand")
 done
+
+RESOLVER=""
+if [[ "${#CANDIDATES[@]}" -eq 1 ]]; then
+  RESOLVER="${CANDIDATES[0]}"
+elif [[ "${#CANDIDATES[@]}" -gt 1 ]]; then
+  echo "AMBIGUOUS RESOLVER DISCOVERY: ${#CANDIDATES[@]} candidates survived the denylist, and this suite has no identity check to pick between them: ${CANDIDATES[*]}" >&2
+  echo "Add the new script to this suite's denylist (with a reason, as dispatch-effort.mjs was), or give it its own identity check, before this suite can tell which one it means." >&2
+fi
 
 new_root() { # <name> [config-json] -> echoes the dir
   local dir="$TEMP_PROJECT/$1"
@@ -130,6 +154,9 @@ suite "the resolver is wired in at all (the harness's own precondition)"
 
 assert_eq "commands/pipeline.md names a model-resolver script at its dispatch sites" \
   "$([[ -n "$RESOLVER" ]] && echo yes || echo "$NO_RESOLVER")" "yes"
+# #104: discovery found EXACTLY one candidate, not merely "a" candidate off sort-order luck.
+assert_eq "AC (#104): resolver discovery is unambiguous -- exactly one candidate survived" \
+  "${#CANDIDATES[@]}" "1"
 # NON-ZERO CONTROL for every "omit" and "prints nothing" assertion in this file: a healthy
 # resolver must be OBSERVED emitting a token first, or the whole omit column is satisfied by a
 # resolver that can never emit anything at all.

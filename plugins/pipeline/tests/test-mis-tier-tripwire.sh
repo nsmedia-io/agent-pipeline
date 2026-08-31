@@ -361,7 +361,13 @@ suite "AC38: with BOTH modules absent, the tripwire HALTS and the dispatch OMITS
 # filename: whatever script commands/pipeline.md tells the orchestrator to run is the script
 # under test. If nothing new is referenced there, the resolver has not been wired in and every
 # assertion below reports that.
-RESOLVER_REL=""
+# #104: collect every survivor rather than `break`ing on the first. A single `break` is
+# `sort -u` ORDER with no identity check behind it -- adding dispatch-effort.mjs (it sorts
+# before dispatch-model.mjs) silently handed this suite the wrong resolver until the exclusion
+# below was added by hand, and the next early-sorting scripts/*.mjs reference walks into the
+# identical trap. Zero survivors stays the pre-existing "not wired" state; more than one is now
+# a loud, self-diagnosing failure naming every candidate, never a silent wrong pick.
+CANDIDATES_REL=()
 for cand in $(grep -oE 'scripts/[a-zA-Z0-9_-]+\.mjs' "$PIPELINE_MD" | sort -u); do
   base="${cand#scripts/}"
   case "$base" in
@@ -372,15 +378,31 @@ for cand in $(grep -oE 'scripts/[a-zA-Z0-9_-]+\.mjs' "$PIPELINE_MD" | sort -u); 
     # The EFFORT resolver sorts BEFORE dispatch-model.mjs, and its agent surface emits nothing
     # BY DESIGN (the Agent tool has no effort parameter), so without this line `sort -u` hands
     # this suite the wrong script and the AC37 "the resolver EMITS a token" rows below fail
-    # against a resolver that was never supposed to emit on that surface. #101.
+    # against a resolver that was never supposed to emit on that surface. #101. Excluded by
+    # NAME (an identity check), not relied on to sort elsewhere, now that ambiguity halts too.
     dispatch-effort.mjs) continue ;;
+    # #104's own discriminating find: these two ALREADY survived the pre-fix denylist and were
+    # ALREADY ambiguous with dispatch-model.mjs, masked only because "d" sorts before "g" and
+    # "p" in the single-survivor `break` this suite used to take. See the twin comment in
+    # test-dispatch-model-resolver.sh.
+    gate-phase-entry.mjs|pipeline-telemetry.mjs) continue ;;
   esac
-  RESOLVER_REL="$cand"
-  break
+  CANDIDATES_REL+=("$cand")
 done
+
+RESOLVER_REL=""
+if [[ "${#CANDIDATES_REL[@]}" -eq 1 ]]; then
+  RESOLVER_REL="${CANDIDATES_REL[0]}"
+elif [[ "${#CANDIDATES_REL[@]}" -gt 1 ]]; then
+  echo "AMBIGUOUS RESOLVER DISCOVERY: ${#CANDIDATES_REL[@]} candidates survived the denylist: ${CANDIDATES_REL[*]}" >&2
+  echo "Add the new script to this suite's denylist (with a reason), or give it its own identity check, before this suite can tell which one it means." >&2
+fi
 
 assert_eq "commands/pipeline.md names a model-resolver script at its dispatch sites" \
   "$([[ -n "$RESOLVER_REL" ]] && echo yes || echo "no: only the pre-existing scripts are referenced")" "yes"
+# #104: discovery found EXACTLY one candidate, not merely "a" candidate off sort-order luck.
+assert_eq "AC (#104): resolver discovery is unambiguous -- exactly one candidate survived" \
+  "${#CANDIDATES_REL[@]}" "1"
 
 # One environment, both modules gone: ROOT_STALE contains neither the surface module nor the
 # resolver, which is exactly the stale-plugin-cache condition that is LIVE in this worktree.
