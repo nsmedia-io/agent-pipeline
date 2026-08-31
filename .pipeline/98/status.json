@@ -1,8 +1,8 @@
 {
   "issue_number": 98,
-  "current_phase": "3-impl",
+  "current_phase": "4-review",
   "started_at": "2026-08-31T18:00:00Z",
-  "updated_at": "2026-08-31T18:25:00Z",
+  "updated_at": "2026-08-31T19:00:00Z",
   "branch": "main",
   "ask_text": "Add a dispatch-effort.mjs mirroring dispatch-model.mjs for tier-aware subagent effort; re-scoped after BA found the Agent tool has no per-invocation effort override.",
   "risk_tier": "standard",
@@ -23,6 +23,12 @@
       "phase": "2-constraints",
       "verdict": "COMPLETE",
       "at": "2026-08-31T18:25:00Z"
+    },
+    {
+      "phase": "3-impl",
+      "verdict": "COMPLETE",
+      "at": "2026-08-31T19:00:00Z",
+      "note": "Orchestrator ran Phase 3 directly (Dev has no Agent/Workflow tool access, cannot execute this spike's own ACs). AC1-AC3, AC5 met; AC4 inconclusive, recorded honestly. Finding posted to issue #98 comment."
     }
   ],
   "flags": [
@@ -40,5 +46,12 @@
       "summary": "Re-scoped to a 5-AC spike proving whether Workflow's opts.effort overrides frontmatter; the resolver/table/config work deferred to a follow-on issue gated on this answer.",
       "at": "2026-08-31T18:18:00Z"
     }
-  ]
+  ],
+  "panel_roles": [
+    "ba",
+    "dev",
+    "qa",
+    "secops"
+  ],
+  "review_rounds": 1
 }
