@@ -21,6 +21,8 @@
 
   "migrationDownMarker": "-- DOWN",
 
+  "_dispatchEfforts_comment": "NOT SET ON PURPOSE. Per-role reasoning effort (low/medium/high/xhigh/max) for the WORKFLOW dispatch surface only. The Agent tool has no effort parameter, so on today's dispatches agents/<role>.md frontmatter governs and this key changes nothing; it is here for the pending Workflow migration. `secops` and `qa` are pinned in code and ignore this key entirely, at every tier, phase and surface. Example: { \"librarian\": \"high\" }.",
+
   "architecturalTriggers": {
     "_comment": "Domains/keywords that force the architectural tier (deep review). Tailor to your stack.",
     "paths": ["pipeline.config.json"],

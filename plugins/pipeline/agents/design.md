@@ -75,10 +75,25 @@ Your `concerns[]` rows are bound by the block above. The visual contract the Art
 Run three sub-lenses and partition them by bindingness:
 
 1. **Token conformance (binding, deterministic).** Confirm the project's lint is green with the token-lint rule active (it bans arbitrary color utilities and raw hex/rgb/hsl in class or style literals). A token-lint failure MAY back `REQUEST_CHANGES`. Record `token_lint: "pass" | "fail"`. `# CUSTOMIZE: your token-lint rule + enforced paths`
-2. **Accessibility (axe deterministic + human residual).** Run axe-core against at least one seeded route via the preview snapshot path: `preview_start`, then inject the axe-core bundle via `preview_eval` and run it against masked, mock-data-only content. An axe VIOLATION MAY back `REQUEST_CHANGES`. The pass message MUST state verbatim: "axe-core passed. This covers ~30-40% of WCAG 2.1 AA; alt-text accuracy, heading logic, focus order, and custom-widget keyboard operability remain human-verified. Green axe does not equal accessible." Also run `design:accessibility-review` for the human-judgment WCAG items; those findings are advisory.
+2. **Accessibility (axe deterministic + human residual).** Run axe-core against at least one seeded route via the preview snapshot path: `preview_start`, then inject the axe-core bundle via `preview_eval` and run it against masked, mock-data-only content. An axe VIOLATION MAY back `REQUEST_CHANGES`. The pass message MUST state verbatim: "axe-core passed. This covers ~30-40% of WCAG 2.1 AA; alt-text accuracy, heading logic, focus order, and custom-widget keyboard operability remain human-verified. Green axe does not equal accessible." Also run `design:accessibility-review` for the human-judgment WCAG items; those findings are advisory. If no render loop is available to run it against, see "When the render loop is unavailable" below; the one thing you may NOT do is record a pass.
 3. **Critique and copy (advisory only).** Run `design:design-critique` (rubric-driven, chain-of-thought to dampen LLM-judge position/length/self-enhancement bias) and `design:ux-copy`. Treat every verdict as triage, not truth. These land in `advisory_notes`/`concerns` at `severity: nit` and can NEVER block a merge.
 
 Write your bare block to `<ARTIFACT_DIR>/peer-review.design_review.json`.
+
+## When the render loop is unavailable
+
+The preview tools in this file's frontmatter are one option, not a guarantee. This plugin declares no MCP server of its own, so on an installation where no preview/browser MCP is configured, `preview_start` and `preview_eval` are simply ABSENT from your tool list. Lens 1 (token-lint) still runs, because it goes through `Bash`. Lens 2 (axe) cannot run at all.
+
+**A skip is not a pass, and this is the exact shape evidence.md names.** `a11y_pass: true` is a claim that axe RAN and came back clean. Recording it because you found nothing to report, or because you read the JSX and it looked fine, ships a falsehood into a gate built to trust it: `gate-pre-phase4-frontend.mjs` never re-runs a11y tooling, it only checks that your recorded evidence says pass.
+
+So when there is no render loop:
+
+- **Do NOT record an a11y pass.** Write `"a11y": { "status": "unavailable", "reason": "<which tool was missing>" }` into your shard. That is not `"pass"`, so `gate-pre-phase4-frontend.mjs:85` halts the run, and that halt is CORRECT: this is "I cannot tell", which is a different state from "verified clean" and only the latter may pass. It is the same distinction that gate already draws for its changed-path list.
+- **Do NOT convert the absence into a `REQUEST_CHANGES`.** You have no deterministic failure to cite; you have missing evidence. The bindingness split above is unchanged, and an absent tool is not an axe violation.
+- **Say it in `notes`, naming the missing tool**, so the operator reads "the preview MCP is not installed" instead of hunting an accessibility defect that was never observed. A halt whose cause is undiagnosable costs more than the run it stopped.
+- Code reading is not a substitute. Report the WCAG items you could reason about statically as advisory `nit` findings, marked as unverified-by-tooling, never as a11y evidence.
+
+`# CUSTOMIZE: your preview/browser MCP tools. See the plugin README's prerequisites note.`
 
 ## Standard-tier constraints (you own this block; the orchestrator injects it)
 

@@ -369,6 +369,11 @@ for cand in $(grep -oE 'scripts/[a-zA-Z0-9_-]+\.mjs' "$PIPELINE_MD" | sort -u); 
     archive-pipeline.mjs|knowledge-store.mjs|validate-pipeline-artifact.mjs|voice-lint.mjs) continue ;;
     pipeline-status.mjs|config-doctor.mjs|lib.mjs|sync-manifests.mjs) continue ;;
     "$DL_BASENAME") continue ;;
+    # The EFFORT resolver sorts BEFORE dispatch-model.mjs, and its agent surface emits nothing
+    # BY DESIGN (the Agent tool has no effort parameter), so without this line `sort -u` hands
+    # this suite the wrong script and the AC37 "the resolver EMITS a token" rows below fail
+    # against a resolver that was never supposed to emit on that surface. #101.
+    dispatch-effort.mjs) continue ;;
   esac
   RESOLVER_REL="$cand"
   break
