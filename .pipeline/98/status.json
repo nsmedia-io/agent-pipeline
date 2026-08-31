@@ -1,0 +1,70 @@
+{
+  "issue_number": 98,
+  "current_phase": "4-review",
+  "started_at": "2026-08-31T18:00:00Z",
+  "updated_at": "2026-08-31T19:45:00Z",
+  "branch": "main",
+  "ask_text": "Add a dispatch-effort.mjs mirroring dispatch-model.mjs for tier-aware subagent effort; re-scoped after BA found the Agent tool has no per-invocation effort override.",
+  "risk_tier": "standard",
+  "events": [
+    {
+      "phase": "1-ba",
+      "verdict": "COMPLETE",
+      "at": "2026-08-31T18:05:00Z",
+      "note": "Initial spec: 11 requirements, 13 ACs, architectural tier. Original mechanism assumed a per-invocation effort override on the Agent tool, mirroring model."
+    },
+    {
+      "phase": "1-ba-rework",
+      "verdict": "COMPLETE",
+      "at": "2026-08-31T18:18:00Z",
+      "note": "Orchestrator found (via code.claude.com/docs/en/sub-agents) that effort has no per-invocation override on the Agent tool, unlike model. BA re-verified independently, corrected a fabricated WebFetch quote, found the real mechanism (Workflow's agent() opts.effort does override a named agent's frontmatter, confirmed via static read of the running 2.1.247 binary), and re-scoped the issue down to a 5-AC empirical spike. Tier dropped architectural to standard since the deliverable is now a recorded observation, not a code/contract change."
+    },
+    {
+      "phase": "2-constraints",
+      "verdict": "COMPLETE",
+      "at": "2026-08-31T18:25:00Z"
+    },
+    {
+      "phase": "3-impl",
+      "verdict": "COMPLETE",
+      "at": "2026-08-31T19:00:00Z",
+      "note": "Orchestrator ran Phase 3 directly (Dev has no Agent/Workflow tool access, cannot execute this spike's own ACs). AC1-AC3, AC5 met; AC4 inconclusive, recorded honestly. Finding posted to issue #98 comment."
+    },
+    {
+      "phase": "4-review-round-2",
+      "verdict": "REQUEST_CHANGES",
+      "at": "2026-08-31T19:45:00Z",
+      "note": "Full remediation of round-1's REQUEST_CHANGES (5 blocking, 6 major from BA/Dev/QA/SecOps). Re-derived AC1-AC5 with repeat controls, an upward non-floor override, live SubagentStop payload captures (Agent-tool + Workflow paths, via a reverted/sha256-verified temporary hook instrumentation), root-caused AC4 to the AGENT_RULES namespace bug -- fixed and merged as #100. Filed the real wiring issue #101. Republished a corrected #98 (body + comment 2; comment 2 had never actually posted due to a gh --body/@file mistake). Dispatched a round-2 Phase 4 re-review panel: BA REQUEST_CHANGES (2 narrow publication-layer items), QA REQUEST_CHANGES (1 blocker: checks_passed:{} tripped the real gate), Dev APPROVE_WITH_NOTES, SecOps APPROVE_WITH_NOTES/no veto. All round-2 items addressed: impl-report.json's checks_passed backed by a real full-suite run (2853 passed/0 failed), #98's body and comment fully corrected (deployment-vs-source gap now prominent, literal Workflow scripts pasted, overclaim narrowed), #101 updated with q2/q3 recommendations plus new q5/q6, #66 updated noting #100 is merged-but-undeployed. Per the round-budget convention (2nd REQUEST_CHANGES round), no round-3 panel was auto-dispatched; returning to the owner for a decision on closing."
+    }
+  ],
+  "flags": [
+    {
+      "phase": "1-ba",
+      "agent": "ba",
+      "verdict": "COMPLETE",
+      "summary": "Initial spec: dispatch-effort.mjs mirroring dispatch-model.mjs, architectural tier.",
+      "at": "2026-08-31T18:05:00Z"
+    },
+    {
+      "phase": "1-ba-rework",
+      "agent": "ba",
+      "verdict": "COMPLETE",
+      "summary": "Re-scoped to a 5-AC spike proving whether Workflow's opts.effort overrides frontmatter; the resolver/table/config work deferred to a follow-on issue gated on this answer.",
+      "at": "2026-08-31T18:18:00Z"
+    },
+    {
+      "phase": "4-review-round-2",
+      "agent": "orchestrator",
+      "verdict": "REMEDIATED",
+      "summary": "Round-2 panel: BA/QA REQUEST_CHANGES (all addressed), Dev/SecOps APPROVE_WITH_NOTES. Live deployment gap found: #100 fixed source, not yet installed anywhere.",
+      "at": "2026-08-31T19:45:00Z"
+    }
+  ],
+  "panel_roles": [
+    "ba",
+    "dev",
+    "qa",
+    "secops"
+  ],
+  "review_rounds": 2
+}
