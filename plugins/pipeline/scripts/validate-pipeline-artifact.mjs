@@ -761,7 +761,13 @@ function evidenceFor(issueDir, now, data) {
 // to exactly those roots so a self-test can never escape to the real .pipeline of the checkout
 // running it. Production callers never pass it.
 export function checkArtifacts(agentType, input, now = Date.now(), rootsOverride) {
-  const rules = AGENT_RULES[String(agentType || "").toLowerCase()];
+  // A dispatch from the installed-plugin path (the shipping default) carries a NAMESPACED
+  // agent_type ("pipeline:secops"), not the bare role name AGENT_RULES is keyed on. Take the
+  // segment after the LAST colon before lowercasing, so "pipeline:secops" and "secops" resolve
+  // identically. Without this, every namespaced dispatch missed AGENT_RULES entirely and this
+  // validator silently checked nothing -- see #66 and #98's Phase 4 panel, which proved it live.
+  const bareAgentType = String(agentType || "").split(":").pop();
+  const rules = AGENT_RULES[bareAgentType.toLowerCase()];
   const failures = [];
   if (!rules) return { failures };
 
@@ -1196,6 +1202,20 @@ function selfTest() {
       // decoy is genuinely defective (so the isolation case is meaningful).
       const rDecoy = checkArtifacts("secops", { cwd: decoyCheckout });
       check("scoping: the decoy ambient defect is genuinely detectable without the override (control)", rDecoy.failures, true);
+
+      // NAMESPACED agent_type resolution (#98, #66). Every installed-plugin dispatch (the
+      // shipping default) carries agent_type "pipeline:<role>", not the bare role name
+      // AGENT_RULES is keyed on. Reuse the active-issue defect fixture above.
+      writeFileSync(path.join(active, "peer-review.secops.json"), JSON.stringify(brokenPanel));
+      const rBare = checkArtifacts("secops", { cwd: root, active_issue: "1965" }, Date.now(), pin);
+      check("namespacing: bare 'secops' catches the active-issue defect (control)", rBare.failures, true);
+      const rNamespaced = checkArtifacts("pipeline:secops", { cwd: root, active_issue: "1965" }, Date.now(), pin);
+      check("namespacing: 'pipeline:secops' catches the SAME defect the bare name catches", rNamespaced.failures, true);
+      const rMixedCase = checkArtifacts("Pipeline:SecOps", { cwd: root, active_issue: "1965" }, Date.now(), pin);
+      check("namespacing: mixed-case 'Pipeline:SecOps' still resolves", rMixedCase.failures, true);
+      writeFileSync(path.join(active, "peer-review.secops.json"), JSON.stringify(validPanel));
+      const rNamespacedValid = checkArtifacts("pipeline:secops", { cwd: root, active_issue: "1965" }, Date.now(), pin);
+      check("namespacing: 'pipeline:secops' does not false-positive on a VALID artifact", rNamespacedValid.failures, false);
     } finally {
       process.chdir(prevCwd);
       rmSync(root, { recursive: true, force: true });
