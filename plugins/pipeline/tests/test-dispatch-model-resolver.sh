@@ -58,6 +58,10 @@ for cand in $(grep -oE 'scripts/[a-zA-Z0-9_-]+\.mjs' "$PIPELINE_MD" | sort -u); 
     frontend-surface.mjs|gate-pre-phase4.mjs|gate-pre-phase4-frontend.mjs|merge-peer-review.mjs) continue ;;
     archive-pipeline.mjs|knowledge-store.mjs|validate-pipeline-artifact.mjs|voice-lint.mjs) continue ;;
     pipeline-status.mjs|config-doctor.mjs|lib.mjs|sync-manifests.mjs) continue ;;
+    # The EFFORT resolver is a different table with a different contract, and it sorts BEFORE
+    # dispatch-model.mjs, so without this line `sort -u` hands this suite the wrong script and
+    # every model assertion below silently tests the effort resolver instead.
+    dispatch-effort.mjs) continue ;;
   esac
   # The data-layer surface module is referenced from the same file by R3; it is not this.
   grep -q 'migrationGlobsForTripwire' "$PLUGIN_DIR/$cand" 2>/dev/null && continue

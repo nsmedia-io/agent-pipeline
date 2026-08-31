@@ -100,6 +100,13 @@ const CODE_KEYS = {
     degrades:
       "per-role model overrides are ignored and every dispatch runs the built-in assignment. secops and qa are pinned in code and ignore this key entirely.",
   },
+  dispatchEfforts: {
+    type: "object",
+    reader: "scripts/dispatch-effort.mjs",
+    fallback: "the built-in default effort table",
+    degrades:
+      "per-role effort overrides are ignored and every dispatch runs the built-in assignment. secops and qa are pinned in code and ignore this key entirely. NOTE this key only reaches the Workflow dispatch surface: the Agent tool carries no effort parameter, so on today's Agent-tool dispatches agents/<role>.md frontmatter governs whatever this says.",
+  },
   migrationDownMarker: {
     type: "string",
     reader: "scripts/gate-pre-phase4.mjs",
