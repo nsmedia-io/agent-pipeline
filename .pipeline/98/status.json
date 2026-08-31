@@ -1,0 +1,17 @@
+{
+  "issue_number": 98,
+  "current_phase": "2-constraints",
+  "started_at": "2026-08-31T18:00:00Z",
+  "updated_at": "2026-08-31T18:22:00Z",
+  "branch": "main",
+  "ask_text": "Add a dispatch-effort.mjs mirroring dispatch-model.mjs for tier-aware subagent effort; re-scoped after BA found the Agent tool has no per-invocation effort override.",
+  "risk_tier": "standard",
+  "events": [
+    {"phase": "1-ba", "verdict": "COMPLETE", "at": "2026-08-31T18:05:00Z", "note": "Initial spec: 11 requirements, 13 ACs, architectural tier. Original mechanism assumed a per-invocation effort override on the Agent tool, mirroring model."},
+    {"phase": "1-ba-rework", "verdict": "COMPLETE", "at": "2026-08-31T18:18:00Z", "note": "Orchestrator found (via code.claude.com/docs/en/sub-agents) that effort has no per-invocation override on the Agent tool, unlike model. BA re-verified independently, corrected a fabricated WebFetch quote, found the real mechanism (Workflow's agent() opts.effort does override a named agent's frontmatter, confirmed via static read of the running 2.1.247 binary), and re-scoped the issue down to a 5-AC empirical spike. Tier dropped architectural to standard since the deliverable is now a recorded observation, not a code/contract change."}
+  ],
+  "flags": [
+    {"phase": "1-ba", "agent": "ba", "verdict": "COMPLETE", "summary": "Initial spec: dispatch-effort.mjs mirroring dispatch-model.mjs, architectural tier.", "at": "2026-08-31T18:05:00Z"},
+    {"phase": "1-ba-rework", "agent": "ba", "verdict": "COMPLETE", "summary": "Re-scoped to a 5-AC spike proving whether Workflow's opts.effort overrides frontmatter; the resolver/table/config work deferred to a follow-on issue gated on this answer.", "at": "2026-08-31T18:18:00Z"}
+  ]
+}
