@@ -1,0 +1,559 @@
+{
+  "issue_number": 106,
+  "current_phase": "4-review-delta-fix-dispatched",
+  "started_at": "2026-08-31T23:50:00Z",
+  "updated_at": "2026-09-01T14:50:00Z",
+  "branch": "main",
+  "ask_text": "Add a PreToolUse hook that mechanically enforces the Phase 4 tracked-write isolation rule already documented in commands/pipeline.md, closing the self-documented gap the file admits nothing mechanically enforces.",
+  "review_rounds": 1,
+  "review_rounds_note": "This field tracks PHASE 4 panel rounds per its schema description (events[] entries labelled 4-review with a panel verdict), not Phase 2 rounds. It was carrying 6 -- the Phase 2 spec-review round count -- through Phase 3; corrected to 1 on entering the first real Phase 4 round. Phase 2's 6 rounds remain fully recorded in events[]/flags[] under the 2-review/1-ba-rework labels, just not double-counted here.",
+  "panel_roles": [
+    "ba",
+    "dba",
+    "devops",
+    "secops",
+    "dev",
+    "qa"
+  ],
+  "events": [
+    {
+      "phase": "0-setup",
+      "verdict": "OK",
+      "at": "2026-08-31T23:50:00Z"
+    },
+    {
+      "phase": "1-ba",
+      "verdict": "SPEC_CREATED",
+      "at": "2026-08-31T23:55:00Z"
+    },
+    {
+      "phase": "1-ba-size-ruling",
+      "verdict": "ONE_ISSUE_NO_SPLIT",
+      "at": "2026-08-31T23:58:00Z"
+    },
+    {
+      "phase": "2-review",
+      "verdict": "REQUEST_CHANGES",
+      "at": "2026-09-01T00:05:00Z"
+    },
+    {
+      "phase": "1-ba-rework",
+      "verdict": "SPEC_REWORKED",
+      "at": "2026-09-01T02:05:00Z"
+    },
+    {
+      "phase": "2-review",
+      "verdict": "REQUEST_CHANGES_ROUND_2",
+      "at": "2026-09-01T02:20:00Z"
+    },
+    {
+      "phase": "2-review-convergence-budget",
+      "verdict": "OWNER_DECISION_PENDING",
+      "at": "2026-09-01T02:20:00Z"
+    },
+    {
+      "phase": "2-review-convergence-budget",
+      "verdict": "OWNER_CHOSE_ROUND_3",
+      "at": "2026-09-01T02:25:00Z"
+    },
+    {
+      "phase": "1-ba-rework",
+      "verdict": "SPEC_REWORKED_ROUND_3",
+      "at": "2026-09-01T03:10:00Z"
+    },
+    {
+      "phase": "2-review",
+      "verdict": "REQUEST_CHANGES_ROUND_3",
+      "at": "2026-09-01T03:35:00Z"
+    },
+    {
+      "phase": "2-review-convergence-budget",
+      "verdict": "OWNER_DECISION_PENDING_2",
+      "at": "2026-09-01T03:35:00Z"
+    },
+    {
+      "phase": "2-review-convergence-budget",
+      "verdict": "OWNER_CHOSE_ROUND_4",
+      "at": "2026-09-01T03:40:00Z"
+    },
+    {
+      "phase": "1-ba-rework",
+      "verdict": "SPEC_REWORKED_ROUND_4",
+      "at": "2026-09-01T04:20:00Z"
+    },
+    {
+      "phase": "2-review",
+      "verdict": "REQUEST_CHANGES_ROUND_4",
+      "at": "2026-09-01T04:40:00Z"
+    },
+    {
+      "phase": "2-review-convergence-budget",
+      "verdict": "OWNER_DECISION_PENDING_3",
+      "at": "2026-09-01T04:40:00Z"
+    },
+    {
+      "phase": "2-review-convergence-budget",
+      "verdict": "OWNER_CHOSE_ROUND_5_QA_JOINS",
+      "at": "2026-09-01T04:45:00Z"
+    },
+    {
+      "phase": "1-ba-rework",
+      "verdict": "SPEC_REWORKED_ROUND_5",
+      "at": "2026-09-01T05:30:00Z"
+    },
+    {
+      "phase": "2-review",
+      "verdict": "REQUEST_CHANGES_ROUND_5",
+      "at": "2026-09-01T06:10:00Z"
+    },
+    {
+      "phase": "2-review-convergence-budget",
+      "verdict": "OWNER_CHOSE_ROUND_6",
+      "at": "2026-09-01T06:15:00Z"
+    },
+    {
+      "phase": "2-review",
+      "verdict": "REQUEST_CHANGES_ROUND_6",
+      "at": "2026-09-01T07:10:00Z"
+    },
+    {
+      "phase": "2-review-convergence-budget",
+      "verdict": "OWNER_DECISION_PENDING_4",
+      "at": "2026-09-01T07:10:00Z"
+    },
+    {
+      "phase": "2-review-convergence-budget",
+      "verdict": "OWNER_CHOSE_SCOPED_FIX",
+      "at": "2026-09-01T07:20:00Z"
+    },
+    {
+      "phase": "2-review",
+      "verdict": "SCOPED_FIX_VERIFIED",
+      "at": "2026-09-01T07:40:00Z"
+    },
+    {
+      "phase": "2-review-complete",
+      "verdict": "PASS",
+      "at": "2026-09-01T07:40:00Z"
+    },
+    {
+      "phase": "2.5-design",
+      "verdict": "SKIPPED_OWNER_DECISION",
+      "at": "2026-09-01T07:42:00Z"
+    },
+    {
+      "phase": "2.5-design",
+      "verdict": "SKIPPED_OWNER_DECISION_CONFIRMED",
+      "at": "2026-09-01T07:45:00Z"
+    },
+    {
+      "phase": "3-impl",
+      "verdict": "WORKTREE_CREATED",
+      "at": "2026-09-01T08:10:00Z"
+    },
+    {
+      "phase": "3-impl",
+      "verdict": "QA_3A_DISPATCHED",
+      "at": "2026-09-01T08:15:00Z"
+    },
+    {
+      "phase": "3-impl",
+      "verdict": "QA_CONTRACT_AUTHORED",
+      "at": "2026-09-01T09:20:00Z"
+    },
+    {
+      "phase": "1-ba-rework",
+      "verdict": "AC33_SELF_CHECK_FIXED",
+      "at": "2026-09-01T09:35:00Z"
+    },
+    {
+      "phase": "3-impl",
+      "verdict": "DEV_IMPL_COMPLETE_PR113",
+      "at": "2026-09-01T09:50:00Z"
+    },
+    {
+      "phase": "3-impl-disposition",
+      "verdict": "AC34_AC18_AC33_DISPATCHED",
+      "at": "2026-09-01T09:55:00Z"
+    },
+    {
+      "phase": "3-impl-disposition",
+      "verdict": "QA_AC34_FIXED_VERIFIED_UNPUSHED",
+      "at": "2026-09-01T13:05:00Z"
+    },
+    {
+      "phase": "3-impl-disposition",
+      "verdict": "BA_AC18_AC33_RULED_SPEC_UPDATED",
+      "at": "2026-09-01T13:05:00Z"
+    },
+    {
+      "phase": "3-impl-disposition",
+      "verdict": "DEV_APPLYING_AC18_AC33_EDITS",
+      "at": "2026-09-01T13:10:00Z"
+    },
+    {
+      "phase": "retrospective",
+      "verdict": "ISSUE_114_FILED",
+      "at": "2026-09-01T13:20:00Z"
+    },
+    {
+      "phase": "4-review",
+      "verdict": "REQUEST_CHANGES",
+      "at": "2026-09-01T14:35:00Z"
+    },
+    {
+      "phase": "4-review-delta-fix",
+      "verdict": "DEV_DISPATCHED_5_ITEMS",
+      "at": "2026-09-01T14:50:00Z"
+    }
+  ],
+  "flags": [
+    {
+      "phase": "1-ba",
+      "agent": "ba",
+      "verdict": "SPEC_CREATED",
+      "summary": "architectural (forced by config triggers hook/gate/agent contract); 15 req/17 AC; 4 non-blocking open questions, all resolved to defaults",
+      "at": "2026-08-31T23:55:00Z"
+    },
+    {
+      "phase": "2-review",
+      "agent": "dba",
+      "verdict": "REQUEST_CHANGES",
+      "summary": "round 1: AC2 control ungraded; activeIssueDir race, both fail directions live (real: #98)",
+      "at": "2026-09-01T00:05:00Z"
+    },
+    {
+      "phase": "2-review",
+      "agent": "secops",
+      "verdict": "REQUEST_CHANGES",
+      "summary": "round 1: AC3/AC6 mutually unsatisfiable; R14 keyed on wrong field (agent_id not agent_type); AC13 disarm leaks to denied agent",
+      "at": "2026-09-01T00:05:00Z"
+    },
+    {
+      "phase": "1-ba-rework",
+      "agent": "ba",
+      "verdict": "SPEC_REWORKED",
+      "summary": "origin rekeyed to agent_id; race abstains (new q5, repo is a live two-run host); AC3/AC6 fixed structurally; 20 req/29 AC",
+      "at": "2026-09-01T02:05:00Z"
+    },
+    {
+      "phase": "2-review",
+      "agent": "devops",
+      "verdict": "APPROVE_WITH_NOTES",
+      "summary": "round 2: round-1 major closed (two-stage split), hashed-span framing verified correct (two distinct spans, not one); 1 new major: no bounded timeout on the new hook, highest-frequency hook this plugin will ship",
+      "at": "2026-09-01T02:20:00Z"
+    },
+    {
+      "phase": "2-review",
+      "agent": "dba",
+      "verdict": "REQUEST_CHANGES",
+      "summary": "round 2: round-1 closed/verified by re-derivation; 1 new blocker (forbidden-set matches text not invocation, denies mentioning the spelling in a commit message); 6 new majors incl. git add -u missing from table, third copy of in-flight predicate",
+      "at": "2026-09-01T02:20:00Z"
+    },
+    {
+      "phase": "2-review",
+      "agent": "secops",
+      "verdict": "REQUEST_CHANGES",
+      "summary": "round 2: round-1 closed/verified by re-derivation; 3 new blockers: R4/R14 mutually unsatisfiable (activeIssueDir has no 24h/final_verdict term), disarm leaks via 3 of 4 stdout channels not 1, retired-sentence claim omits the concurrency residual live on this repo today. Not a VETO -- all fixable at spec level.",
+      "at": "2026-09-01T02:20:00Z"
+    },
+    {
+      "phase": "1-ba-rework",
+      "agent": "ba",
+      "verdict": "SPEC_REWORKED_ROUND_3",
+      "summary": "ruled option A: additive seam extension (R6), SubagentStop behavior asserted unchanged (AC27/AC28); mention-vs-invoke fixed (R7/AC9); disarm widened to whole emitted object; 24 req/35 AC",
+      "at": "2026-09-01T03:10:00Z"
+    },
+    {
+      "phase": "2-review",
+      "agent": "devops",
+      "verdict": "APPROVE_WITH_NOTES",
+      "summary": "round 3: round-2 major closed (bounded timeout, falsifiable); 0 blockers, 0 majors, 1 nit on module-load blast radius to SubagentStop",
+      "at": "2026-09-01T03:35:00Z"
+    },
+    {
+      "phase": "2-review",
+      "agent": "secops",
+      "verdict": "REQUEST_CHANGES",
+      "summary": "round 3: all round-2 blockers closed, seam-extension ruling confirmed correct; 3 new narrower findings: marker-path half of the seam uncovered by the ruling's reasoning, disarm's cited authority doesn't cover halting controls, undatable-record-as-sole-owner edge case. Not a VETO.",
+      "at": "2026-09-01T03:35:00Z"
+    },
+    {
+      "phase": "2-review",
+      "agent": "dba",
+      "verdict": "REQUEST_CHANGES",
+      "summary": "round 3: real reproduced circular-import risk (gate-phase-entry.mjs:71 already imports activeIssueDir from validate-pipeline-artifact.mjs, confirmed live); hooks.json timeout field is SECONDS not ms per re-derived platform code, so all 3 existing hook timeouts are ~1000x oversized and bound nothing today",
+      "at": "2026-09-01T03:35:00Z"
+    },
+    {
+      "phase": "1-ba-rework",
+      "agent": "ba",
+      "verdict": "SPEC_REWORKED_ROUND_4",
+      "summary": "cycle reproduced+fixed on REAL module graph (16->17 modules, cycle detector 0->1->0, byte-identical stdout post-fix); self-caught a measurement error, encoded as R26; corrected own ruling clause (ii), filed #109; 27 req/40 AC",
+      "at": "2026-09-01T04:20:00Z"
+    },
+    {
+      "phase": "2-review",
+      "agent": "devops",
+      "verdict": "APPROVE_WITH_NOTES",
+      "summary": "round 4: cycle fix verified real; 1 major, cycle test only covers the entry direction that crashes, never the direction the real shipped SubagentStop hook uses",
+      "at": "2026-09-01T04:40:00Z"
+    },
+    {
+      "phase": "2-review",
+      "agent": "dba",
+      "verdict": "REQUEST_CHANGES",
+      "summary": "round 4: cycle fix verified independently and holds; 1 blocker -- shared resolver R16 mandates is in-flight-blind and NO fixture in the whole spec constructs a case where resolver and narrowing logic disagree, so deleting the narrowing entirely would pass the suite; 4 majors incl. measured_state byte counts don't reproduce in a realistic environment",
+      "at": "2026-09-01T04:40:00Z"
+    },
+    {
+      "phase": "2-review",
+      "agent": "secops",
+      "verdict": "REQUEST_CHANGES",
+      "summary": "round 4: all 3 round-3 blockers closed and verified, #109 verified real and correctly framed; 4 new blockers -- the marker-path fix creates an untested second bypass channel equivalent to the just-closed disarm, contradicts this issue's own q5 fallback AND an existing shipped ruling elsewhere; AC30 says 4 residuals where AC29/AC31/R21 say 5 (same finding DBA independently made)",
+      "at": "2026-09-01T04:40:00Z"
+    },
+    {
+      "phase": "1-ba-rework",
+      "agent": "ba",
+      "verdict": "SPEC_REWORKED_ROUND_5",
+      "summary": "reversed round-4 marker ruling, adopted shipped gate-phase-entry.mjs:30-33 precedent (marker cannot suppress deny, can turn abstention into deny); fixed R5 order, AC30/31 count, AC36 measured_state fragility; QA joins Phase 2 to audit fixture population; 27 req/41 AC",
+      "at": "2026-09-01T05:30:00Z"
+    },
+    {
+      "phase": "2-review",
+      "agent": "devops",
+      "verdict": "APPROVE",
+      "summary": "round 5: CLEAN. 0 blockers/majors/nits. Cycle entry-point gap closed, measured_state relation-only framing correct.",
+      "at": "2026-09-01T06:10:00Z"
+    },
+    {
+      "phase": "2-review",
+      "agent": "dba",
+      "verdict": "REQUEST_CHANGES",
+      "summary": "round 5: 2 blockers -- AC41 discrimination cell asserts DENY where 4 other places assert ABSTAIN for the same state; R5's exclusion-order justification falsified by real history (issue #19 itself had a live final_verdict during a fix round, commit c337579)",
+      "at": "2026-09-01T06:10:00Z"
+    },
+    {
+      "phase": "2-review",
+      "agent": "secops",
+      "verdict": "REQUEST_CHANGES",
+      "summary": "round 5: marker reversal verified correct and closes both round-4 vulns; 2 high blockers -- #109 still carried the REVERSED ruling (now fixed directly), and the widen-only design is provably a theorem given R25(a)+R4 so AC38's own control can never fire (empty cell set). Self-audit found AC38's reachability matrix has the same structural blindness QA was hunting.",
+      "at": "2026-09-01T06:10:00Z"
+    },
+    {
+      "phase": "2-review",
+      "agent": "qa",
+      "verdict": "REQUEST_CHANGES",
+      "summary": "round 5 (first Phase 2 pass, fixture-population audit): 5 blockers, most severe is an mtime-TIE case (activeIssueDir returns null) reproduced against real code -- gate ships completely INERT on a fresh Linux clone, the platform R5's grounding measurement never tested. Also: empty negative population on forbidden-command matcher, mixed stage+commit command untested, 2 of 3 Phase-4 phase literals untested.",
+      "at": "2026-09-01T06:10:00Z"
+    },
+    {
+      "phase": "2-review-convergence-budget",
+      "verdict": "ISSUES_109_110_FILED_R6",
+      "at": "2026-09-01T06:15:00Z"
+    },
+    {
+      "phase": "1-ba-rework",
+      "verdict": "SPEC_REWORKED_ROUND_6",
+      "at": "2026-09-01T06:40:00Z"
+    },
+    {
+      "phase": "4-review",
+      "agent": "ba",
+      "verdict": "REQUEST_CHANGES",
+      "summary": "cwd-leak in test fixture made 2 suites read red when invoked from repo root; real bug, but framed as prod-inert -- orchestrator repro shows run.sh (real path) is clean",
+      "at": "2026-09-01T10:19:00Z"
+    },
+    {
+      "phase": "4-review",
+      "agent": "dba",
+      "verdict": "REQUEST_CHANGES",
+      "summary": "2 blockers: candidates deduped by realpath not issue-dir name (worktree+main both=106 inflate set); marker-rescue path dead (already #111). 2nd half re-litigates accepted R4 residual",
+      "at": "2026-09-01T10:12:00Z"
+    },
+    {
+      "phase": "4-review",
+      "agent": "devops",
+      "verdict": "APPROVE_WITH_NOTES",
+      "summary": "clean, 0 blockers. Noted early 64/83 reads were CPU contention from 5+ concurrent panelist run.sh processes, not a defect -- reran clean and repeatable",
+      "at": "2026-09-01T10:14:00Z"
+    },
+    {
+      "phase": "4-review",
+      "agent": "secops",
+      "verdict": "REQUEST_CHANGES",
+      "summary": "HIGH: trailing redirection/comment (git add -A > /dev/null, # note) not recognized as separator, misclassifies as narrow pathspec, DENY becomes ALLOW. Live bypass, not a ratchet",
+      "at": "2026-09-01T10:20:00Z"
+    },
+    {
+      "phase": "4-review",
+      "agent": "dev",
+      "verdict": "APPROVE_WITH_NOTES",
+      "summary": "2 trivial nits (unused catch binding, no-op default). Independently re-verified digest, core deny/allow mechanism, AC18/AC33 rework in isolated /tmp repro",
+      "at": "2026-09-01T10:59:00Z"
+    },
+    {
+      "phase": "4-review",
+      "agent": "qa",
+      "verdict": "REQUEST_CHANGES",
+      "summary": "BLOCKER: _scan is super-quadratic, a ~2500-char commit msg exceeds the 5s hook timeout and the gate produces nothing -> call ALLOWED. Also: vacuous AC25 mutation, non-hermetic suites (fixture leaks cwd)",
+      "at": "2026-09-01T10:19:00Z"
+    }
+  ],
+  "orchestrator_process_notes": [
+    "Round 5's review.json merge was skipped by the orchestrator (four shards existed, dba/devops/secops/qa, but the merge command still only handled three from the round-1-4 era). review.json sat at round-4 content, missing the qa key entirely, from 2026-09-01T06:10 until caught by BA reading the shards directly and flagging it at round 6 (2026-09-01T06:40). Fixed by re-running the merge with all four shards once the gap was found; no findings were lost since BA and the orchestrator both worked from the individual shard files, not the stale merge, in the interim.",
+    "Phase 0.5 (deep map) was not run as a separate dispatch. The blast radius for this issue (activeIssueDir, gate-phase-entry.mjs, hooks.json, the ten replicated doc files) was established organically through six rounds of adversarial Phase 2 review, each citing and re-deriving the actual shared code -- arguably more thoroughly than a single map pass would have. Recorded as a deviation, not silently skipped.",
+    "Phase 2.5 (design bake-off) was skipped by explicit owner decision. After six rounds of adversarial spec iteration there was one viable design left (R4 as finally stated), not two genuinely different approaches to bake off; running the phase would have meant manufacturing a second sketch that did not need to exist.",
+    "Phase 4 round 1: BA's and DBA's REQUEST_CHANGES prose reads as 'the shipped gate is deterministically inert in production,' citing a suite run at passed=64/83 failed=3/83. The orchestrator independently reproduced this before accepting it: running the exact suite from plugins/pipeline/tests/ (the actual documented invocation, which run.sh's own line 9 cd's into regardless of caller cwd) gives clean 147/0 and 67/0; running the SAME file from the worktree root reproduces BA's exact numbers. DevOps independently diagnosed the same phenomenon as transient CPU contention from 5+ concurrent panelist run.sh processes on one host, not present on isolated CI runners, and got clean repeatable results once contention eased. QA independently ran both cwds, confirmed the split (147/0 vs 83/147), correctly characterized it as a non-hermetic test fixture (fixtures/*.mjs leaks process.cwd() into the synthetic payload) rather than a production defect, and separately, explicitly evaluated and REJECTED 'the gate abstains because #106 and #98 are both in-flight right now' as a finding at all -- it is the R4 design six rounds of Phase 2 review deliberately arrived at (abstain, unconditionally, on 2+ ambiguous candidates with no marker), already recorded in spec.json's open_questions[4]/R4(3)/AC42(i), with the marker's own missing producer already tracked as #111. DBA's realpath-vs-issue-dir-name dedup finding (a worktree and its main checkout both resolving to a directory named '106' inflating the candidate set) is judged a separate, real, NOT-previously-litigated gap and is carried into the delta round on that narrower ground, not on the 'gate is inert' framing. None of this discards BA's or DBA's verdicts -- both remain REQUEST_CHANGES and are owed a real response in the delta round -- but the round is NOT being treated as proof the shipped suite fails as documented, because directly re-running the documented command shows it does not."
+  ],
+  "round_6_flags": [
+    {
+      "phase": "2-review",
+      "agent": "devops",
+      "verdict": "APPROVE",
+      "summary": "round 6: clean, re-verified rather than carried forward. Confirmed mtime-tie fix is not a deploy risk and closes a real portability gap.",
+      "at": "2026-09-01T07:10:00Z"
+    },
+    {
+      "phase": "2-review",
+      "agent": "dba",
+      "verdict": "REQUEST_CHANGES",
+      "summary": "round 6: 2 blockers -- R4 clause (4) reverses R4's own opening sentence, reintroducing newest-mtime-decides-ownership for non-tied multi-candidate roots (reproduced, live-reachable); AC41's mutation now reddens 6 criteria not 1",
+      "at": "2026-09-01T07:10:00Z"
+    },
+    {
+      "phase": "2-review",
+      "agent": "secops",
+      "verdict": "REQUEST_CHANGES",
+      "summary": "round 6: 1 high blocker -- AC38's re-pinned control is STILL unfireable under both readings, one level deeper than round 5, with an escape clause that could misattribute a fixture bug as a mechanism bug; 1 medium -- R21(c) claims a remedy that doesn't close the zero-in-flight branch",
+      "at": "2026-09-01T07:10:00Z"
+    },
+    {
+      "phase": "2-review",
+      "agent": "qa",
+      "verdict": "REQUEST_CHANGES",
+      "summary": "round 6: 2 blockers -- SAME R4(4) finding as DBA, independently, proven LIVE on this repo's actual current state (2 records in flight right now); the fresh-clone-not-inert claim is false with 2+ in-flight records and AC31's catcher can never observe it. 5 majors incl. a real quoted-string command-splitting false-deny in this issue's OWN doc-retirement commit message, and 14 citations using a path that doesn't exist from repo root.",
+      "at": "2026-09-01T07:10:00Z"
+    }
+  ],
+  "worktree_created": ".claude/worktrees/106-phase3-20260901-061352",
+  "phase3_qa_test_commit": "148fdd198c1840952f748bef3330eed8ebc5a61c",
+  "phase3_dev_pr": "https://github.com/nsmedia-io/agent-pipeline/pull/113",
+  "phase3_dev_flags": [
+    {
+      "phase": "3-impl",
+      "agent": "dev",
+      "verdict": "PARTIAL",
+      "summary": "PR #113, 5 commits. 40/42 AC pass, 27/27 req pass, 275/275 QA assertions green, none weakened. AC18/AC34/AC33 are test-contract issues, not gate defects; disposed via QA/BA scoped dispatch, not by editing QA's tests.",
+      "at": "2026-09-01T09:50:00Z"
+    }
+  ],
+  "phase3_hashed_span_digest_change": {
+    "from": "14b65c48479dfceefb780689adccfbd53656b21e",
+    "to": "847cd28217115c41dc8628cb8e35a4f9162c5bfe",
+    "reason": "AC33 citation-path correctness required fixing one citation that sits inside the ten-file replicated span; verified independently by orchestrator (old digest 0 occurrences remaining, new digest present in exactly the 10 expected files). Flagging for explicit Phase 4 panel awareness, not blocking -- first genuine change to this span all session."
+  },
+  "telemetry": {
+    "phase_elapsed_ms": {
+      "1": 16380000,
+      "2": 12720000,
+      "3": 18600000,
+      "4": 4500000,
+      "2.5": 300000
+    },
+    "total_lead_time_ms": 53100000,
+    "unattributed_ms": 600000,
+    "unattributed_events": 1,
+    "untimed_events": 0,
+    "review_rounds": 1,
+    "review_rounds_observed": 1,
+    "review_rounds_recorded_delta": 0,
+    "events_counted": 37,
+    "attribution": "exit"
+  },
+  "effective_config": {
+    "migration_globs_tripwire": [
+      "**/migrations/**",
+      "**/Migrations/**",
+      "**/db/migrate/**",
+      "**/db/migration/**",
+      "**/db/changelog/**",
+      "**/alembic/versions/**",
+      "**/schema.prisma",
+      "**/prisma/schema/**",
+      "**/drizzle/**",
+      "**/db/schema.ts",
+      "**/db/schema/**",
+      "**/supabase/schemas/**",
+      "**/policies/**.sql",
+      "**/supabase/policies/**",
+      "**/schema.sql"
+    ],
+    "migration_globs_gate": [
+      "**/migrations/**",
+      "**/Migrations/**",
+      "**/db/migrate/**",
+      "**/db/migration/**",
+      "**/db/changelog/**",
+      "**/alembic/versions/**",
+      "**/schema.prisma",
+      "**/prisma/schema/**",
+      "**/drizzle/**",
+      "**/db/schema.ts",
+      "**/db/schema/**",
+      "**/supabase/schemas/**",
+      "**/policies/**.sql",
+      "**/supabase/policies/**",
+      "**/schema.sql"
+    ],
+    "data_layer_globs": [
+      "**/migrations/**",
+      "**/Migrations/**",
+      "**/db/migrate/**",
+      "**/db/migration/**",
+      "**/db/changelog/**",
+      "**/alembic/versions/**",
+      "**/schema.prisma",
+      "**/prisma/schema/**",
+      "**/drizzle/**",
+      "**/db/schema.ts",
+      "**/db/schema/**",
+      "**/supabase/schemas/**",
+      "**/policies/**.sql",
+      "**/supabase/policies/**",
+      "**/schema.sql",
+      "**/db/**",
+      "**/queries/**",
+      "**/policies/**",
+      "**/repositories/**",
+      "**/prisma/**",
+      "**/supabase/**",
+      "**/alembic/**",
+      "**/schema.ts",
+      "**/database.types.ts",
+      "**/*.generated.types.ts"
+    ],
+    "infra_globs": [
+      "**/.github/workflows/**",
+      ".github/**",
+      "**/infra/**",
+      "**/terraform/**",
+      "**/k8s/**",
+      "**/helm/**",
+      "**/deploy/**",
+      "**/deploy.sh",
+      "**/deploy.config",
+      "**/*.tf",
+      "**/*.tfvars",
+      "**/Dockerfile",
+      "**/docker-compose.yml",
+      "**/docker-compose.yaml"
+    ],
+    "models": {
+      "ba": "sonnet",
+      "dev": "sonnet"
+    },
+    "rejected_absolute_globs": 0
+  }
+}
