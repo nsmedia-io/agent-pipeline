@@ -475,6 +475,17 @@ _lit1() {
 # `set -f` and an explicit IFS are load-bearing, not tidiness: without `-f` the split would
 # PATHNAME-EXPAND a run containing `*` or `?` against the caller's working directory, and IFS is
 # pinned to space and tab because a run cannot contain a newline (a newline is structural).
+#
+# WHAT THIS DOES NOT CLOSE, AND WHERE TO READ THE REST OF IT: issue #116, filed with its curve and
+# its re-takeable command BEFORE this shipped, because a residual recorded only in the file that
+# has it is readable only by someone already looking at the defect. Once per structural character
+# is not once per COMMAND, so a string carrying MANY of them is still (structural characters) x
+# (length), and a multi-line command is the reachable instance -- every line-ending newline is
+# structural. Measured on darwin 25.5.0 for a heredoc document written and staged in one call:
+# 654 ms at 19.5 KB, 2984 at 78 KB, 4148 at 97 KB, and 5382 at 117 KB, which is past the declared
+# timeout and so an allow. Closing it needs a BOUNDED scan window refilled from an untouched
+# remainder, with refill points inside both quote loops and the backslash arm, which is a redesign
+# rather than a fix.
 _run_words() { # the run is in _run, already cut from _sc
   # A word left OPEN before this run either closes here or absorbs the run's first field --
   # `foo"bar"baz` is one word, and the quoted middle is why the field cannot simply be re-split.
