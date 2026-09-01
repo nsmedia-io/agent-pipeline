@@ -6,8 +6,8 @@
   "updated_at": "2026-09-01T15:05:00Z",
   "branch": "main",
   "ask_text": "Add a PreToolUse hook that mechanically enforces the Phase 4 tracked-write isolation rule already documented in commands/pipeline.md, closing the self-documented gap the file admits nothing mechanically enforces.",
-  "review_rounds": 2,
-  "review_rounds_note": "This field tracks PHASE 4 panel rounds per its schema description (events[] entries labelled 4-review with a panel verdict), not Phase 2 rounds. It was carrying 6 -- the Phase 2 spec-review round count -- through Phase 3; corrected to 1 on entering the first real Phase 4 round, now 2 for the delta round entered after round 1's REQUEST_CHANGES fixes. Phase 2's 6 rounds remain fully recorded in events[]/flags[] under the 2-review/1-ba-rework labels, just not double-counted here.",
+  "review_rounds": 3,
+  "review_rounds_note": "This field tracks PHASE 4 panel rounds per its schema description (events[] entries labelled 4-review with a panel verdict), not Phase 2 rounds. It was carrying 6 -- the Phase 2 spec-review round count -- through Phase 3; corrected to 1 on entering the first real Phase 4 round, 2 for the round-1-fix delta, now 3 for the round-2-fix delta (owner explicitly chose one more scoped round over a scanner redesign). Phase 2's 6 rounds remain fully recorded in events[]/flags[] under the 2-review/1-ba-rework labels, just not double-counted here.",
   "panel_roles": [
     "ba",
     "dba",
@@ -229,7 +229,7 @@
     },
     {
       "phase": "4-review",
-      "verdict": "PAUSED_FOR_OWNER_R3_DECISION",
+      "verdict": "PAUSED_FOR_OWNER_ROUND_3_DECISION",
       "at": "2026-09-01T15:55:00Z"
     },
     {
@@ -241,6 +241,16 @@
       "phase": "4-review-delta-fix",
       "verdict": "DEV_DISPATCHED_ROUND_3",
       "at": "2026-09-01T16:05:00Z"
+    },
+    {
+      "phase": "4-review-delta-fix",
+      "verdict": "ROUND_3_FIXED_VERIFIED",
+      "at": "2026-09-01T16:20:00Z"
+    },
+    {
+      "phase": "4-review",
+      "verdict": "delta-dispatched",
+      "at": "2026-09-01T16:25:00Z"
     }
   ],
   "flags": [
@@ -477,6 +487,14 @@
       "verdict": "REQUEST_CHANGES",
       "summary": "round 2: all 4 round-1 findings closed and reverified. NEW blocker: backslash-newline creates a phantom operand, real bypass (staged+committed in a real repo). NEW blocker: the disclosed quadratic residual is a live bypass, reproduced, and was never actually filed as an issue",
       "at": "2026-09-01T14:34:00Z"
+    },
+    {
+      "phase": "4-review-delta-fix",
+      "agent": "dev",
+      "verdict": "ROUND_3_FIXED",
+      "summary": "Fixed backslash-newline phantom operand (POSIX splice) + empty-pathspec twin. Fixed cost to be linear regardless of shape (3 separate quadratics found+fixed: list rebuild, per-word fn-call overhead, unescaper). 100 new assertions, all independently verified red-before/green-after. Residual (multiline >~110KB) filed as #116, not fixed, per owner's scoped-fix choice. DBA's 2 notes closed as tests, no new mechanism invented",
+      "summary_note": "orchestrator independently reproduced both key fixes directly against the real hook (backslash-newline: now denies; 5000-word bypass: 0.39s and denies, was 6+s and allowed) before accepting this report",
+      "at": "2026-09-01T16:20:00Z"
     }
   ],
   "orchestrator_process_notes": [
@@ -537,17 +555,17 @@
       "1": 16380000,
       "2": 12720000,
       "3": 18600000,
-      "4": 9300000,
+      "4": 11100000,
       "2.5": 300000
     },
-    "total_lead_time_ms": 57900000,
+    "total_lead_time_ms": 59700000,
     "unattributed_ms": 600000,
     "unattributed_events": 1,
     "untimed_events": 0,
-    "review_rounds": 2,
+    "review_rounds": 3,
     "review_rounds_observed": 2,
-    "review_rounds_recorded_delta": 0,
-    "events_counted": 43,
+    "review_rounds_recorded_delta": 1,
+    "events_counted": 47,
     "attribution": "exit"
   },
   "effective_config": {
