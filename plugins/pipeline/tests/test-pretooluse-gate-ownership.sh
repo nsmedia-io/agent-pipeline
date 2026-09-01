@@ -400,7 +400,12 @@ assert_eq "AC34: review_rounds=5 with an empty events[] (+2 shape) -> denied, pe
 assert_eq "AC34: review_rounds=0 with an empty events[] (-2 shape) -> denied just the same" \
   "$(sub_verdict "$R_RR_LO")" "deny"
 GATE_SRC_FILE="$(gate_resolved_command "$GATE_PLUGIN_DIR" | awk '{print $1}')"
-record "AC34 grep: review_rounds occurs $( { grep -c 'review_rounds' "$GATE_SRC_FILE" 2>/dev/null || echo 0; } | tr -d ' ') time(s) in the declared gate command's own file"
+# `head -1` is load-bearing, not tidying. On ZERO matches `grep -c` prints `0` AND exits 1, so
+# `|| echo 0` fires too and the substitution yields TWO lines -- an embedded newline in a record()
+# message, which _ledger writes as two ledger lines against one counted assertion, tripping
+# _assert_count_guard (failed=0 rc=1) with nothing behaviourally wrong. The `|| echo 0` still has
+# a job: a MISSING/unreadable file exits 2 with no stdout at all. Three paths, exactly one line.
+record "AC34 grep: review_rounds occurs $( { grep -c 'review_rounds' "$GATE_SRC_FILE" 2>/dev/null || echo 0; } | head -1 | tr -d ' ') time(s) in the declared gate command's own file"
 
 # ===============================================================================================
 suite "AC41: the resolver's RAW answer and R5's narrowing are made to DISAGREE"
