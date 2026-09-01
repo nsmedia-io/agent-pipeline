@@ -289,6 +289,24 @@ assert_eq "NON-ZERO CONTROL: the scanner rejects BOTH planted shapes -- the bare
 # AND THE SPEC ITSELF, which AC33 names explicitly. Reported separately from the shipped artifacts
 # so a spec-side citation defect is not mistaken for a code-side one; it is still an assertion,
 # because "a citation whose path does not resolve at all is a failure, not a skip".
+# THE POPULATION IS DEPLOYMENT-DEPENDENT, AND THE ABSENT BRANCH IS NOT A SKIP. Every per-issue
+# artifact except the checkpoint is excluded from git by this repo's own rule (the `.pipeline/*/*`
+# line of .gitignore, with `!.pipeline/*/status.json` re-including only status.json), so in a fresh
+# clone -- which the issue-17 integration suite runs this entire suite inside -- the spec does not
+# exist and never will. Reporting that as a failure hard-fails every clone run independently of the
+# gate. Reporting it as a silent skip is worse: an absent corpus that passes is the empty-population
+# shape evidence.md refuses. So the absent branch asserts the REASON, read from git.
+spec_absence_is_by_design() {  # <repo-root> -> explained | why it is not
+  local root="$1" tracked nonstatus
+  git -C "$root" check-ignore -q ".pipeline/106/spec.json" 2>/dev/null || {
+    printf 'UNEXPLAINED: git does not report .pipeline/106/spec.json as ignored in this tree'; return 0; }
+  tracked="$(git -C "$root" ls-files .pipeline 2>/dev/null | wc -l | tr -d ' ')"
+  nonstatus="$(git -C "$root" ls-files .pipeline 2>/dev/null | grep -cv 'status\.json$' | tr -d ' ')"
+  [[ "${tracked:-0}" -ge 1 ]] || { printf 'UNEXPLAINED: git tracks NOTHING under .pipeline, so the status.json-only convention is unread here'; return 0; }
+  [[ "${nonstatus:-1}" -eq 0 ]] || { printf 'UNEXPLAINED: %s tracked file(s) under .pipeline are not status.json, so status.json-only is not this repo convention' "$nonstatus"; return 0; }
+  printf 'explained'
+}
+
 SPEC_JSON_FILE="$GATE_REPO_ROOT/.pipeline/106/spec.json"
 if [[ -f "$SPEC_JSON_FILE" ]]; then
   SPEC_CITE="$("$GATE_REAL_NODE" "$CITE_MJS" "$GATE_REPO_ROOT" "$SPEC_JSON_FILE" 2>/dev/null)"
@@ -297,7 +315,19 @@ if [[ -f "$SPEC_JSON_FILE" ]]; then
   assert_eq "AC33: every <path>:<n> citation in .pipeline/106/spec.json also opens" \
     "$("$GATE_REAL_NODE" -e 'process.stdout.write(JSON.parse(process.argv[1]).bad.join(" | "))' "$SPEC_CITE")" ""
 else
-  assert_eq "AC33: the spec is present to scan -- reported as a FAILURE, never a skip" "spec.json missing" "present"
+  record "AC33 SPEC SCAN: .pipeline/106/spec.json is absent in this deployment; the ABSENCE is what is asserted"
+  assert_eq "AC33: the spec is absent and git EXPLAINS the absence by this repo's own status.json-only exclusion -- an absence git cannot explain is a FAILURE, never a skip" \
+    "$(spec_absence_is_by_design "$GATE_REPO_ROOT")" "explained"
 fi
+
+# NON-ZERO CONTROL for the absent branch, run in EVERY deployment including the one where the spec
+# IS present, so the branch is never dead code in the tree that authored it.
+CTRL_REPO="$TEMP_PROJECT/no-exclusion-repo"
+mkdir -p "$CTRL_REPO/.pipeline/106"
+printf '{}' > "$CTRL_REPO/.pipeline/106/status.json"
+git -C "$CTRL_REPO" init -q . >/dev/null 2>&1
+git -C "$CTRL_REPO" add -A >/dev/null 2>&1
+assert_eq "NON-ZERO CONTROL: the same predicate reports UNEXPLAINED in a repo carrying no .pipeline exclusion rule (without this, the absent branch is a skip wearing an assertion)" \
+  "$([[ "$(spec_absence_is_by_design "$CTRL_REPO")" == explained ]] && echo "WRONGLY EXPLAINED" || echo unexplained)" "unexplained"
 
 finish

@@ -224,10 +224,12 @@ suite "AC18: cost, PARTITIONED -- a ratio only where the seam is not required"
 # ===============================================================================================
 #
 # BASELINES, recorded with the machine that produced them, because a threshold on a rendered
-# measurement measures the runner: 4.45 ms/call bash and 66.68 ms/call node over 20 sequential
-# calls, node v24.19.0, darwin 25.5.0 (spec R10/AC18). The RATIO is asserted only over the
-# no-seam classes; the seam-requiring class has its figure RECORDED and asserted non-zero, never
-# bounded -- bounding it would be pinning this host's node start time.
+# measurement measures the runner. Round 8 retired the absolute 3x-of-baseline bound this block
+# used to assert: a DO-NOTHING stub driven through this same path costs more than that bound, so
+# the bound was a threshold on the harness's own scaffolding rather than on the gate. What is
+# bounded now is the DIFFERENCE against that stub, measured in the same run; the seam-requiring
+# class is the live non-zero control for the comparison and is never itself bounded, because
+# bounding it would be pinning this host's node start time.
 
 now_ms() { "$GATE_REAL_NODE" -e 'process.stdout.write(String(Date.now()))'; }
 
@@ -252,6 +254,19 @@ cost_of() {  # <payload> -> ms/call, printed
   printf '%s' "$(( (b - a) / COST_N ))"
 }
 
+# THE HARNESS IS THE FLOOR, so the floor is measured and subtracted. No shebang and chmod +x on
+# purpose: the shipped hook has no shebang, so the invoking shell runs it after ENOEXEC with no
+# second exec; a stub WITH one would buy an exec the gate does not pay and bias the difference
+# downward. It does not read stdin either, so the difference charges the gate for its own read.
+COST_STUB_ROOT="$TEMP_PROJECT/cost-stub-root"
+mkdir -p "$COST_STUB_ROOT/hooks"
+printf 'exit 0\n' > "$COST_STUB_ROOT/hooks/pre-tool-use.sh"
+chmod +x "$COST_STUB_ROOT/hooks/pre-tool-use.sh"
+
+# gate_reset_env RESETS the override, so the override is set after it, never before.
+gate_reset_env "$SPY_PROJECT"; GATE_PLUGIN_ROOT_OVERRIDE="$COST_STUB_ROOT"
+COST_STUB="$(cost_of "$(gate_payload 'pnpm exec vitest run' agent_id=sub-cost agent_type=pipeline:qa)")"
+
 gate_reset_env "$SPY_PROJECT"
 COST_NONGIT="$(cost_of "$(gate_payload 'pnpm exec vitest run' agent_id=sub-cost agent_type=pipeline:qa)")"
 gate_reset_env "$SPY_PROJECT"
@@ -263,12 +278,24 @@ record "COST no-seam class 'non-git command':  ${COST_NONGIT} ms/call"
 record "COST no-seam class 'no agent_id':      ${COST_NOAGENT} ms/call"
 record "COST seam-requiring class 'escalation': ${COST_SEAM} ms/call (RECORDED, deliberately NOT bounded)"
 
-BOUND_MS=$(( BASH_BASELINE_MS * 3 ))
-[[ "$BOUND_MS" -ge 3 ]] || BOUND_MS=3   # a 0 ms baseline would make the bound unfalsifiable
-assert_eq "AC18: the 'non-git command' class stays within 3x the same-run bash baseline (${COST_NONGIT} <= ${BOUND_MS} ms)" \
-  "$([[ "${COST_NONGIT:-99999}" -le "$BOUND_MS" ]] && echo within || echo "OVER: ${COST_NONGIT} ms vs ${BOUND_MS} ms")" "within"
-assert_eq "AC18: the 'no agent_id' class stays within 3x the same-run bash baseline (${COST_NOAGENT} <= ${BOUND_MS} ms)" \
-  "$([[ "${COST_NOAGENT:-99999}" -le "$BOUND_MS" ]] && echo within || echo "OVER: ${COST_NOAGENT} ms vs ${BOUND_MS} ms")" "within"
+BOUND_MS=$(( BASH_BASELINE_MS * 2 ))
+[[ "$BOUND_MS" -ge 2 ]] || BOUND_MS=2
+D_NONGIT=$(( COST_NONGIT - COST_STUB )); A_NONGIT=$(( D_NONGIT < 0 ? -D_NONGIT : D_NONGIT ))
+D_NOAGENT=$(( COST_NOAGENT - COST_STUB )); A_NOAGENT=$(( D_NOAGENT < 0 ? -D_NOAGENT : D_NOAGENT ))
+D_SEAM=$(( COST_SEAM - COST_STUB ))
+record "COST HARNESS FLOOR (do-nothing stub, identical path): ${COST_STUB} ms/call -- the quantity the retired absolute 3x bound was measuring"
+record "COST MARGINAL (class minus floor): non-git ${D_NONGIT} ms, no-agent ${D_NOAGENT} ms, seam ${D_SEAM} ms; bound +-${BOUND_MS} ms"
+
+assert_eq "VACUITY: both reference figures are non-zero (a 0 ms baseline or floor makes every difference below unfalsifiable)" \
+  "$([[ "${BASH_BASELINE_MS:-0}" -gt 0 && "${COST_STUB:-0}" -gt 0 ]] && echo measured || echo "B=${BASH_BASELINE_MS} S=${COST_STUB}")" "measured"
+assert_eq "EXPIRY: the harness floor still dominates the bash baseline (${COST_STUB} ms > ${BASH_BASELINE_MS} ms). If this is FALSE the scaffolding is no longer the dominant term, AC18's retired absolute bound could be re-derived, and this methodology needs re-measuring rather than assuming" \
+  "$([[ "${COST_STUB:-0}" -gt "${BASH_BASELINE_MS:-0}" ]] && echo floor-dominates || echo "FLOOR COLLAPSED: stub ${COST_STUB} vs baseline ${BASH_BASELINE_MS}")" "floor-dominates"
+assert_eq "AC18: the 'non-git command' class's OWN marginal cost is within +-${BOUND_MS} ms of a do-nothing stub on the identical path (${D_NONGIT} ms)" \
+  "$([[ "$A_NONGIT" -le "$BOUND_MS" ]] && echo within || echo "OUT: ${D_NONGIT} ms vs +-${BOUND_MS} ms")" "within"
+assert_eq "AC18: the 'no agent_id' class's OWN marginal cost is within +-${BOUND_MS} ms of the same floor (${D_NOAGENT} ms)" \
+  "$([[ "$A_NOAGENT" -le "$BOUND_MS" ]] && echo within || echo "OUT: ${D_NOAGENT} ms vs +-${BOUND_MS} ms")" "within"
+assert_eq "AC18 NON-ZERO CONTROL, LIVE: the same instrument in the same run puts the seam class OVER the bound the no-seam classes sit under (${D_SEAM} ms > ${BOUND_MS} ms), so a green transcript has watched this comparison report a violation with nothing planted" \
+  "$([[ "$D_SEAM" -gt "$BOUND_MS" ]] && echo over || echo "NOT OVER: seam ${D_SEAM} ms vs bound ${BOUND_MS} ms")" "over"
 assert_eq "AC18: the seam-requiring class's figure is PRESENT and non-zero (recorded, not bounded)" \
   "$([[ "${COST_SEAM:-0}" -gt 0 ]] && echo present || echo "ABSENT-OR-ZERO: ${COST_SEAM}")" "present"
 
