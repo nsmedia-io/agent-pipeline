@@ -6,8 +6,8 @@
   "updated_at": "2026-09-01T15:05:00Z",
   "branch": "main",
   "ask_text": "Add a PreToolUse hook that mechanically enforces the Phase 4 tracked-write isolation rule already documented in commands/pipeline.md, closing the self-documented gap the file admits nothing mechanically enforces.",
-  "review_rounds": 1,
-  "review_rounds_note": "This field tracks PHASE 4 panel rounds per its schema description (events[] entries labelled 4-review with a panel verdict), not Phase 2 rounds. It was carrying 6 -- the Phase 2 spec-review round count -- through Phase 3; corrected to 1 on entering the first real Phase 4 round. Phase 2's 6 rounds remain fully recorded in events[]/flags[] under the 2-review/1-ba-rework labels, just not double-counted here.",
+  "review_rounds": 2,
+  "review_rounds_note": "This field tracks PHASE 4 panel rounds per its schema description (events[] entries labelled 4-review with a panel verdict), not Phase 2 rounds. It was carrying 6 -- the Phase 2 spec-review round count -- through Phase 3; corrected to 1 on entering the first real Phase 4 round, now 2 for the delta round entered after round 1's REQUEST_CHANGES fixes. Phase 2's 6 rounds remain fully recorded in events[]/flags[] under the 2-review/1-ba-rework labels, just not double-counted here.",
   "panel_roles": [
     "ba",
     "dba",
@@ -206,6 +206,21 @@
       "phase": "4-review-delta-fix",
       "verdict": "DEV_DISPATCHED_5_ITEMS",
       "at": "2026-09-01T14:50:00Z"
+    },
+    {
+      "phase": "4-review-delta-fix",
+      "verdict": "5_ITEMS_FIXED_VERIFIED",
+      "at": "2026-09-01T15:00:00Z"
+    },
+    {
+      "phase": "4-review-delta-fix",
+      "verdict": "ORCH_STATUS_BUGS_FIXED_VERIFIED",
+      "at": "2026-09-01T15:15:00Z"
+    },
+    {
+      "phase": "4-review",
+      "verdict": "delta-dispatched",
+      "at": "2026-09-01T15:20:00Z"
     }
   ],
   "flags": [
@@ -400,6 +415,20 @@
       "verdict": "REQUEST_CHANGES",
       "summary": "BLOCKER: _scan is super-quadratic, a ~2500-char commit msg exceeds the 5s hook timeout and the gate produces nothing -> call ALLOWED. Also: vacuous AC25 mutation, non-hermetic suites (fixture leaks cwd)",
       "at": "2026-09-01T10:19:00Z"
+    },
+    {
+      "phase": "4-review-delta-fix",
+      "agent": "dev",
+      "verdict": "5_ITEMS_FIXED",
+      "summary": "Fixed: quadratic _scan (720x speedup), redirection/comment bypass (36/30->66/0 deny/allow), vacuous AC25 mutation, non-hermetic fixtures, realpath-vs-name dedup. Own nits fixed. R4 abstain-on-ambiguity untouched as instructed",
+      "at": "2026-09-01T15:00:00Z"
+    },
+    {
+      "phase": "4-review-delta-fix",
+      "agent": "orchestrator",
+      "verdict": "SELF_FOUND_2_BUGS_FIXED",
+      "summary": "Own status.json had 7 verdict labels over the 32-char schema cap, and current_phase carried invented values outside gate-phase-entry.mjs's blessed vocabulary. Both fixed, verified via full suite: 3454 passed, 0 failed, clean",
+      "at": "2026-09-01T15:15:00Z"
     }
   ],
   "orchestrator_process_notes": [
@@ -460,17 +489,17 @@
       "1": 16380000,
       "2": 12720000,
       "3": 18600000,
-      "4": 4500000,
+      "4": 7200000,
       "2.5": 300000
     },
-    "total_lead_time_ms": 53100000,
+    "total_lead_time_ms": 55800000,
     "unattributed_ms": 600000,
     "unattributed_events": 1,
     "untimed_events": 0,
-    "review_rounds": 1,
+    "review_rounds": 2,
     "review_rounds_observed": 1,
-    "review_rounds_recorded_delta": 0,
-    "events_counted": 37,
+    "review_rounds_recorded_delta": 1,
+    "events_counted": 41,
     "attribution": "exit"
   },
   "effective_config": {
