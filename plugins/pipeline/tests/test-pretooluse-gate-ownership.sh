@@ -388,6 +388,62 @@ assert_eq "AC25 DISCRIMINATION: TWO DIFFERENT issues across the same two roots a
   "$GATE_DECISION" "none"
 
 # ===============================================================================================
+suite "AC25 DE-DUPLICATION: which copy wins, and where the key is claimed, are both ASSERTED"
+# ===============================================================================================
+#
+# THE TWO CELLS ABOVE USE IDENTICAL-CONTENT COPIES, SO ROOT ORDER IS INVISIBLE TO THEM. Reversing
+# the root list at pipelineDirs survives all of them, which means the collapse's two remaining
+# design choices -- which copy wins when the copies DISAGREE, and where in the loop the key is
+# claimed -- were carried by prose and by nothing else. Both are pinned here, on GENUINELY
+# DIFFERENT content, so a reversal or a re-ordering reddens a named row instead of passing.
+#
+# WHICH COPY WINS IS NOT A NEW TIEBREAK, it is pipelineDirs' existing documented precedence made
+# visible: "Most-specific root first: the stopping agent's own cwd is where ITS artifacts live."
+# The payload cwd is the tree the calling agent is actually working in, so its copy of the record
+# is the one describing the run it is part of. The row below and its ORDER TWIN assert exactly
+# that and nothing wider: swap which root carries which phase and the verdict swaps with it.
+ORD_4="$TEMP_PROJECT/order-4review"
+ORD_3="$TEMP_PROJECT/order-3impl"
+gate_inflight_status "$ORD_4/.pipeline/106/status.json" "4-review"
+gate_inflight_status "$ORD_3/.pipeline/106/status.json" "3-impl"
+assert_eq "VACUITY: the two same-named copies really DISAGREE (identical copies would make both rows below unfalsifiable)" \
+  "$(cmp -s "$ORD_4/.pipeline/106/status.json" "$ORD_3/.pipeline/106/status.json" && echo "IDENTICAL, so root order is invisible" || echo differ)" "differ"
+gate_reset_env "$ORD_4"
+GATE_PROJECT_DIR="$ORD_3"
+run_gate "$(gate_payload "$FORBIDDEN_CMD" agent_id=sub-order agent_type=pipeline:qa "cwd=$ORD_4")"
+assert_eq "AC25 ORDER: the PAYLOAD CWD's copy decides -- its record says '4-review' -> DENIED" \
+  "$GATE_DECISION" "deny"
+gate_reset_env "$ORD_3"
+GATE_PROJECT_DIR="$ORD_4"
+run_gate "$(gate_payload "$FORBIDDEN_CMD" agent_id=sub-order agent_type=pipeline:qa "cwd=$ORD_3")"
+assert_eq "AC25 ORDER TWIN: the same two roots swapped -- the payload cwd's record says '3-impl' -> NOT denied" \
+  "$GATE_DECISION" "none"
+
+# WHERE THE KEY IS CLAIMED. It is claimed only once a record has been READ and judged a candidate,
+# never on entering the directory, and the difference is only visible when the FIRST root's issue
+# directory carries nothing usable: claimed on entry, it would take the name and mask the live
+# record in the second root, and the gate would go silent on a run it can see. An empty
+# `.pipeline/106` is exactly what a checkout with a gitignored .pipeline leaves behind, so this is
+# the shape the repository produces for itself rather than a contrived one.
+for kind in empty unparseable; do
+  MASK_A="$TEMP_PROJECT/mask-$kind"
+  MASK_B="$TEMP_PROJECT/mask-live-$kind"
+  mkdir -p "$MASK_A/.pipeline/106"
+  [[ "$kind" == "unparseable" ]] && printf '{ "current_phase": ' > "$MASK_A/.pipeline/106/status.json"
+  gate_inflight_status "$MASK_B/.pipeline/106/status.json" "4-review"
+  assert_eq "VACUITY [$kind]: the masking root really carries no readable record for 106" \
+    "$("$GATE_REAL_NODE" -e '
+      const fs = require("node:fs");
+      try { JSON.parse(fs.readFileSync(process.argv[1], "utf8")); process.stdout.write("READABLE, so this row asserts nothing"); }
+      catch { process.stdout.write("unreadable"); }' "$MASK_A/.pipeline/106/status.json")" "unreadable"
+  gate_reset_env "$MASK_A"
+  GATE_PROJECT_DIR="$MASK_B"
+  run_gate "$(gate_payload "$FORBIDDEN_CMD" agent_id=sub-mask agent_type=pipeline:qa "cwd=$MASK_A")"
+  assert_eq "AC25 CLAIM SITE [$kind]: a first root whose .pipeline/106 holds no readable record does NOT claim the name, so the live record in the second root still owns the run -> DENIED" \
+    "$GATE_DECISION" "deny"
+done
+
+# ===============================================================================================
 suite "AC26/AC27: the seam extension is ADDITIVE, and the gate FOLLOWS it"
 # ===============================================================================================
 #

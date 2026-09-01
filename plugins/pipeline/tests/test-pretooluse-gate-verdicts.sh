@@ -110,6 +110,76 @@ assert_eq "ALLOW is preserved: git add foo#bar (a # INSIDE a word is not a comme
   "$(sub_verdict "$P4" 'git add foo#bar')" "none"
 
 # ===============================================================================================
+suite "AC7 METATEXT: a LINE CONTINUATION is deleted, not escaped"
+# ===============================================================================================
+#
+# THE SIXTH MEMBER OF THE SAME CLASS, AND THE TABLE ABOVE DID NOT CONTAIN IT. Round 2 closed
+# redirection and comment -- two SPELLINGS -- and shipped 66 rows as proof the class was closed.
+# `\<newline>` is the same defect: the tokenizer took it as an escaped literal newline, POSIX
+# DELETES the pair before tokenizing, and the manufactured character became a phantom operand.
+# One operand is the whole of the term that says an `-A`/`-u` stage was narrowed, so
+# `git add -A \<newline> && git commit -m "x"` -- the most ordinary way an agent writes a
+# multi-line command -- came back with NO decision at all while a real bash staged three files and
+# committed them. `git commit -a \` kept denying, because the commit branch never consults the
+# pathspec term, which is the same asymmetry that hid the redirection hole a round earlier.
+#
+# THE ROWS ARE POSITIONS, NOT EXAMPLES: after the final flag, between the subcommand and the flag,
+# and as a bare trailing backslash with nothing behind it. Every one is applied to all thirteen
+# commands, so a future spelling nobody enumerated inherits the coverage.
+NLC=$'\n'
+for c in "${FORBIDDEN[@]}" "${FLOOR_ROWS[@]}"; do
+  for tail in " \\${NLC}  && echo done" ' \' " \\${NLC}"; do
+    assert_eq "DENY (continuation appended): $(printf '%q' "$c$tail")" \
+      "$(sub_verdict "$P4" "$c$tail")" "deny"
+  done
+  assert_eq "DENY (continuation between the subcommand and the flag): $(printf '%q' "${c/git /git \\${NLC} }")" \
+    "$(sub_verdict "$P4" "${c/git /git \\${NLC} }")" "deny"
+done
+# The four ALLOW twins, so the fix cannot be "delete the pathspec term" or "deny any backslash".
+assert_eq "ALLOW is preserved: git add -u <path> \\<newline> && echo done" \
+  "$(sub_verdict "$P4" "git add -u plugins/pipeline/agents/dba.md \\${NLC} && echo done")" "none"
+assert_eq "ALLOW is preserved: git status --porcelain \\<newline> && echo done" \
+  "$(sub_verdict "$P4" "git status --porcelain \\${NLC} && echo done")" "none"
+assert_eq "ALLOW is preserved: git add \\<newline> <path> (the continuation does not invent an operand or remove one)" \
+  "$(sub_verdict "$P4" "git add \\${NLC} plugins/pipeline/agents/dba.md")" "none"
+assert_eq "ALLOW is preserved: git add foo#bar \\ (a trailing backslash is not a stage)" \
+  "$(sub_verdict "$P4" 'git add foo#bar \')" "none"
+# The pair is DELETED, so the words either side of it JOIN into one the way the shell joins them.
+assert_eq "DENY: git a\\<newline>dd -A (the continuation splices one word, it does not split two)" \
+  "$(sub_verdict "$P4" "git a\\${NLC}dd -A")" "deny"
+# THE GROUND TRUTH, recorded rather than assumed. Every command above was run through a REAL bash
+# against a REAL scratch repository holding one modified tracked file and two untracked ones, and
+# `git diff --cached --name-only` (plus the new commit's own file list, because a command that
+# COMMITS leaves an index that matches HEAD and looks empty) was read back:
+#   git add -A \<newline> && git commit -m "chore: x"  -> COMMITTED tracked.txt, untracked_a.txt,
+#                                                        untracked_b.txt and named.txt
+#   git add -A \  /  git add \<newline> -A  /  git a\<newline>dd -A  -> staged all four
+#   git add -u \                                       -> staged tracked.txt
+#   git add -u tracked.txt \<newline> && echo done     -> staged tracked.txt AND NOTHING ELSE
+# so every deny above is a command that really does stage what its author did not name, and the
+# allow twin really does stage only what it named.
+
+# ===============================================================================================
+suite "AC7 EMPTY OPERAND: a word that names nothing narrows nothing"
+# ===============================================================================================
+#
+# The same phantom, one layer down. `git add -A ''` read the empty string as a PATHSPEC and so as
+# a narrowing, which credited the command with a restriction the shell never handed it. Measured
+# against real git 2.x in a scratch repository: both spellings exit 128 with `fatal: empty string
+# is not a valid pathspec` and stage NOTHING, so refusing them refuses no correct work -- while
+# reading them as narrow is the same mistake that made a line continuation an operand.
+for q in "''" '""'; do
+  for c in 'git add -A' 'git add -u' 'git add --all' 'git stage -A'; do
+    assert_eq "DENY (an empty operand is not a pathspec): $c $q" \
+      "$(sub_verdict "$P4" "$c $q")" "deny"
+  done
+done
+assert_eq "ALLOW is preserved: git add -u '<path>' (a QUOTED real path still narrows)" \
+  "$(sub_verdict "$P4" "git add -u 'plugins/pipeline/agents/dba.md'")" "none"
+assert_eq "ALLOW is preserved: git add '' (no blanket flag, so nothing is staged blanket either)" \
+  "$(sub_verdict "$P4" "git add ''")" "none"
+
+# ===============================================================================================
 suite "AC7 LENGTH AXIS: a forbidden command stays forbidden however long its operand is"
 # ===============================================================================================
 #
@@ -157,6 +227,94 @@ done
 assert_eq "AC7 LENGTH: every probe above returned inside the ${LEN_TIMEOUT_S}s the declaration commits to (worst ${LEN_WORST_MS} ms). A hook killed at its declared timeout emits nothing and the call is ALLOWED, so a row over this bound is a bypass, not a slow test" \
   "$LEN_SLOW" ""
 record "LENGTH AXIS worst observed: ${LEN_WORST_MS} ms against a declared bound of ${LEN_BOUND_MS} ms, on $(uname -sr)"
+
+# ===============================================================================================
+suite "AC7 WORD-BOUNDARY AXIS: the cost is driven by boundary COUNT, and the block above cannot see it"
+# ===============================================================================================
+#
+# WHY THE LENGTH AXIS ABOVE IS NOT SUFFICIENT, STATED AS THE REASON THIS BLOCK EXISTS. Every pad
+# it builds is `"y".repeat(n)` -- one unbroken run of one character -- so its word-boundary count
+# is O(1) at every n. The scan cost is (number of cursor moves) x (remaining length), and a cursor
+# move happens per WORD BOUNDARY, not per character; so all eighteen probes above sit in the one
+# cell of the cost model that round 2 fixed, and the whole of the surviving quadratic lived where
+# they could not reach. Every fixture in that block was green while `echo <5000 short words> ;
+# git add -A` took 6273 ms in the scan alone -- with no git invocation needed to reach the cost --
+# crossed the declared timeout, was killed, and let the staging on the far side of the `;` through.
+#
+# Three shapes, because they are three different boundary sources and the fix had to be different
+# for each: many WORDS ahead of the staging invocation, many OPERANDS to one git invocation, and
+# many LINES (an agent writing a document with a heredoc and staging it in the same Bash call --
+# the shape SecOps reached without trying to, at 8399 ms).
+#
+# THE BOUND IS THE SAME DECLARED TIMEOUT and for the same reason: it is the value the runtime
+# actually kills at, not a ratio to a floor, which would be a threshold on this host. The growth
+# figures are RECORDED rather than asserted for that reason -- a multiple would measure the runner.
+WB_WORST_MS=0
+WB_SLOW=""
+wb_probe() {  # <label> <command> <expected-verdict>
+  local a b el v
+  a="$(len_now_ms)"
+  v="$(sub_verdict "$P4" "$2")"
+  b="$(len_now_ms)"
+  el=$(( b - a ))
+  [[ "$el" -gt "$WB_WORST_MS" ]] && WB_WORST_MS="$el"
+  [[ "$el" -lt "$LEN_BOUND_MS" ]] || WB_SLOW="$WB_SLOW
+$1 -> ${el} ms"
+  WB_LAST_MS="$el"
+  assert_eq "AC7 BOUNDARY: $1 -> $3" "$v" "$3"
+}
+# wb_pad <n> <mode> -> n whitespace-separated tokens (mode=words|paths|lines)
+wb_pad() {
+  "$GATE_REAL_NODE" -e '
+    const n = Number(process.argv[1]), mode = process.argv[2];
+    const w = Array.from({ length: n }, (_, i) => (mode === "paths" ? "p" + i + ".txt" : "w" + (i % 97)));
+    if (mode !== "lines") { process.stdout.write(w.join(" ")); }
+    else {
+      const out = [];
+      for (let i = 0; i < w.length; i += 12) out.push(w.slice(i, i + 12).join(" "));
+      process.stdout.write(out.join("\n"));
+    }
+  ' "$1" "$2"
+}
+WB_GROWTH=""
+for n in 500 2000 8000; do
+  WORDS="$(wb_pad "$n" words)"
+  # THE FIXTURE'S OWN CONTROL, and it is the one this block exists for: assert the pad really
+  # carries n boundaries. Without it a future edit could quietly turn this into another
+  # `"y".repeat(n)` axis and the suite would stay green over the defect it was written to catch.
+  assert_eq "AC7 BOUNDARY VACUITY: the ${n}-word pad really carries ${n} whitespace-separated tokens (a single-run pad would make every row below unfalsifiable)" \
+    "$(printf '%s' "$WORDS" | tr ' ' '\n' | grep -c .)" "$n"
+  wb_probe "echo <${n} short words> ; git add -A" "echo $WORDS ; git add -A" "deny"
+  [[ "$n" == 8000 ]] && WB_GROWTH="$WB_GROWTH words@8000=${WB_LAST_MS}ms"
+  [[ "$n" == 500 ]] && WB_GROWTH="$WB_GROWTH words@500=${WB_LAST_MS}ms"
+  # The paired ALLOW: the same boundary count in front of a command that names its paths.
+  wb_probe "echo <${n} short words> ; git add <path>" \
+    "echo $WORDS ; git add plugins/pipeline/agents/dba.md" "none"
+
+  PATHS="$(wb_pad "$n" paths)"
+  # Many OPERANDS to ONE git invocation. The blanket-pathspec row settles at the `.`; the explicit
+  # row has to walk all n and is the shape the staging discipline this gate enforces produces.
+  wb_probe "git add . <${n} operands>" "git add . $PATHS" "deny"
+  wb_probe "git add <${n} explicit paths> && git commit -a" \
+    "git add $PATHS && git commit -a -m 'chore: x'" "deny"
+  wb_probe "git add <${n} explicit paths>" "git add $PATHS" "none"
+
+  LINES="$(wb_pad "$n" lines)"
+  # Many LINES: an ordinary heredoc document written and staged in the same Bash call.
+  wb_probe "heredoc with a ${n}-word body, then git add -A" \
+    "cat > notes.md <<'EOF'
+$LINES
+EOF
+git add -A" "deny"
+  wb_probe "heredoc with a ${n}-word body, then git add <path>" \
+    "cat > notes.md <<'EOF'
+$LINES
+EOF
+git add plugins/pipeline/agents/dba.md" "none"
+done
+assert_eq "AC7 BOUNDARY: every probe above returned inside the ${LEN_TIMEOUT_S}s the declaration commits to (worst ${WB_WORST_MS} ms). This is the axis that was live at the reviewed commit: a hook killed at its declared timeout emits nothing and the call is ALLOWED" \
+  "$WB_SLOW" ""
+record "WORD-BOUNDARY AXIS worst observed: ${WB_WORST_MS} ms against a declared bound of ${LEN_BOUND_MS} ms, on $(uname -sr);${WB_GROWTH}"
 
 # ===============================================================================================
 suite "AC7 FLOOR: two spellings nobody enumerated, whose effect is identical"
