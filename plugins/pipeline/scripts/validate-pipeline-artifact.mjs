@@ -464,7 +464,16 @@ export function resolveRunOwner(pipelineDirsIn, input, now = Date.now(), ceiling
       // The key is claimed HERE and not at the top of the loop, because a directory that holds no
       // readable record must not claim it: an empty or unparseable `.pipeline/106` in the first
       // root would otherwise mask a live `.pipeline/106` in the second, and an empty directory is
-      // exactly what a checkout with a gitignored .pipeline leaves behind.
+      // exactly what a checkout with a gitignored .pipeline leaves behind. That sentence used to
+      // be an assertion and nothing else -- the entry-claim ordering survived the whole suite --
+      // so it is earned now by AC25 CLAIM SITE in tests/test-pretooluse-gate-ownership.sh, which
+      // reddens under it.
+      //
+      // WHICH COPY WINS when two same-named copies DISAGREE is pipelineDirs' order, and that is
+      // its documented "most-specific root first": the payload cwd is the tree the calling agent
+      // is working in, so its record describes the run the call belongs to. AC25 ORDER and its
+      // swap twin assert both directions, on copies with different content, so a reversal of that
+      // root list reddens instead of passing.
       const key = path.basename(dir);
       if (seen.has(key)) continue;
       seen.add(key);
