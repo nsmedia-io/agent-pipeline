@@ -1,8 +1,9 @@
 {
   "issue_number": 106,
-  "current_phase": "4-review-delta-fix-dispatched",
+  "current_phase": "4-review",
+  "current_phase_note": "Corrected 2026-09-01T15:05Z: was carrying invented descriptive values (3-impl-disposition, 4-review-request-changes, 4-review-delta-fix-dispatched) that are not in gate-phase-entry.mjs's blessed ENTRY/EXIT/UNGUARDED/TERMINAL vocabulary, found by Dev's test-gate-phase-entry.sh run failing on main. current_phase is a narrow guard-checked state machine field, not a free-text status; richer detail belongs in events[]/flags[], which carry no vocabulary restriction. Set to 4-review (blessed ENTRY) to reflect the actual state: an in-progress Phase 4 review cycle, delta round about to be dispatched.",
   "started_at": "2026-08-31T23:50:00Z",
-  "updated_at": "2026-09-01T14:50:00Z",
+  "updated_at": "2026-09-01T15:05:00Z",
   "branch": "main",
   "ask_text": "Add a PreToolUse hook that mechanically enforces the Phase 4 tracked-write isolation rule already documented in commands/pipeline.md, closing the self-documented gap the file admits nothing mechanically enforces.",
   "review_rounds": 1,
