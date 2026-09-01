@@ -39,6 +39,48 @@ _note() {
   printf 'agent-pipeline PreToolUse: %s; nothing enforced.\n' "$1" >&2
 }
 
+# ---- moving a cursor forward without paying for it twice ---------------------------------------
+#
+# `${s#"$long"}` -- drop a prefix by NAMING it -- and `${s%"${s#?}"}` -- read the first character
+# -- are the two idioms this file used to walk a string, and BOTH are quadratic in the shells that
+# run it. Measured on darwin 25.5.0 over a 32000-character subject, 10 calls each, against a
+# 72 ms empty-loop floor: `${s#"$pre"}` 22151 ms, `${s%"${s#?}"}` 20524 ms, `${s#*|}` 6423 ms --
+# against 75 ms for `${s#<512 literal ?>}` and 176 ms for `${s%%[|]*}`. The shell re-runs a whole
+# pattern match per candidate position, so a pattern that GROWS with the subject costs its square.
+#
+# THE COST WAS NOT THEORETICAL. A subagent's `git commit -a -m "<2.5 KB message>"` took 5.014 s
+# and was killed at this hook's own 5-second declared timeout, and a killed PreToolUse hook FAILS
+# OPEN -- so the identical forbidden staging was DENIED with a short message and ALLOWED with a
+# long one. Length is not a privilege, and it must not buy a bypass.
+#
+# So every cursor move below drops a prefix in FIXED-WIDTH steps whose patterns are compile-time
+# constants, and every first-character read is an ANCHORED `case` instead of a suffix subtraction.
+_Q8='????????'
+
+_cut() { # <prefix> : drop exactly as many leading characters from _CUR as <prefix> has
+  _ct=$1
+  while [ -n "$_ct" ]; do
+    case $_ct in
+      $_Q512*)
+        _ct=${_ct#$_Q512}
+        _CUR=${_CUR#$_Q512}
+        ;;
+      $_Q64*)
+        _ct=${_ct#$_Q64}
+        _CUR=${_CUR#$_Q64}
+        ;;
+      $_Q8*)
+        _ct=${_ct#$_Q8}
+        _CUR=${_CUR#$_Q8}
+        ;;
+      *)
+        _ct=${_ct#?}
+        _CUR=${_CUR#?}
+        ;;
+    esac
+  done
+}
+
 # ---- reading one JSON string value, without a JSON parser and without a fork -------------------
 #
 # Sets _JS_OK/_JS_VAL (the value, still JSON-escaped) and _JS_PRE/_JS_POST (the haystack with that
@@ -54,7 +96,9 @@ _js_get() { # <key> <haystack>
     *) return 1 ;;
   esac
   _JS_PRE=${2%%"\"$1\""*}
-  _js_t=${2#*"\"$1\""}
+  _CUR=$2
+  _cut "$_JS_PRE"
+  _js_t=${_CUR#"\"$1\""}
   case $_js_t in
     *'"'*) ;;
     *) return 1 ;;
@@ -63,7 +107,9 @@ _js_get() { # <key> <haystack>
   case $_js_lead in
     *[!\ :]*) return 1 ;; # the value is not a string (null, number, object): not ours to read
   esac
-  _js_t=${_js_t#*'"'}
+  _CUR=$_js_t
+  _cut "$_js_lead"
+  _js_t=${_CUR#'"'}
   _js_acc=''
   while :; do
     case $_js_t in
@@ -71,8 +117,9 @@ _js_get() { # <key> <haystack>
       *) return 1 ;; # unterminated string
     esac
     _js_seg=${_js_t%%'"'*}
-    _js_t=${_js_t#"$_js_seg"}
-    _js_t=${_js_t#'"'}
+    _CUR=$_js_t
+    _cut "$_js_seg"
+    _js_t=${_CUR#'"'}
     # An even-length run of backslashes before the quote leaves the quote unescaped, and the
     # string ends there. An odd run means the quote is part of the value.
     _js_bs=${_js_seg##*[!\\]}
@@ -102,21 +149,50 @@ _js_unescape() { # <escaped> -> _UNESC
     esac
     _ue_pre=${_ue_s%%\\*}
     _ue_o=$_ue_o$_ue_pre
-    _ue_s=${_ue_s#"$_ue_pre"\\}
-    _ue_c=${_ue_s%"${_ue_s#?}"}
-    _ue_s=${_ue_s#?}
-    case $_ue_c in
-      n) _ue_o=$_ue_o$_NL ;;
-      t) _ue_o=$_ue_o$_TAB ;;
-      r | b | f) ;;
-      u)
+    _CUR=$_ue_s
+    _cut "$_ue_pre"
+    _ue_s=${_CUR#\\}
+    # The escape character is read by ANCHORED match rather than by subtracting the tail, so the
+    # cost of one escape does not grow with the length of the text after it. The arms enumerate
+    # every escape RFC 8259 admits; the last one keeps the old reading of a malformed escape and
+    # is the only place a growing pattern survives, which is affordable because a runtime that
+    # emits this payload emits valid JSON, so nothing reaches it in production.
+    case $_ue_s in
+      n*)
+        _ue_o=$_ue_o$_NL
+        _ue_s=${_ue_s#?}
+        ;;
+      t*)
+        _ue_o=$_ue_o$_TAB
+        _ue_s=${_ue_s#?}
+        ;;
+      r* | b* | f*) _ue_s=${_ue_s#?} ;;
+      u*)
         # A \uXXXX escape cannot spell any token this matcher decides on, so it collapses to one
         # placeholder rather than being decoded: a decoder here would be a second, unreviewed
         # unescaper on the path that decides a refusal.
+        _ue_s=${_ue_s#?}
         _ue_s=${_ue_s#????}
         _ue_o=$_ue_o'?'
         ;;
-      *) _ue_o=$_ue_o$_ue_c ;;
+      '"'*)
+        _ue_o=$_ue_o'"'
+        _ue_s=${_ue_s#?}
+        ;;
+      \\*)
+        _ue_o=$_ue_o'\'
+        _ue_s=${_ue_s#?}
+        ;;
+      /*)
+        _ue_o=$_ue_o'/'
+        _ue_s=${_ue_s#?}
+        ;;
+      '') ;; # a trailing lone backslash: nothing follows it
+      *)
+        _ue_c=${_ue_s%"${_ue_s#?}"}
+        _ue_s=${_ue_s#?}
+        _ue_o=$_ue_o$_ue_c
+        ;;
     esac
   done
   _UNESC=$_ue_o
@@ -133,19 +209,31 @@ _js_unescape() { # <escaped> -> _UNESC
 # invocations at top-level operators, and EVERY git invocation is judged: staging narrowly and
 # then committing blanket is a deny, and a deny by any one invocation denies the whole call.
 
+# WHICH WORD NAMES THE COMMAND, decided in ONE place. `_eval_inv` needs the answer over a finished
+# word list and `_scan` needs it as each word closes, and two readings of "is this invocation a
+# git one" that drifted apart would silently stop the scanner hoarding words for an invocation
+# `_eval_inv` would still have judged. Exit status, not a variable, so no caller can forget it:
+#   0 a leading VAR=value assignment -- the command word is still ahead
+#   1 this word IS the git command
+#   2 this word names something else, so the invocation cannot stage anything
+_head_kind() { # <word>
+  case $1 in
+    [A-Za-z_]*=*) return 0 ;;
+    git | */git) return 1 ;;
+    *) return 2 ;;
+  esac
+}
+
 _eval_inv() { # <words of one invocation>
-  [ $# -ge 1 ] || return 0
   while [ $# -ge 1 ]; do
-    case $1 in
-      [A-Za-z_]*=*) shift ;; # a leading VAR=value assignment, not the command
-      *) break ;;
+    _head_kind "$1"
+    case $? in
+      0) shift ;;
+      1) break ;;
+      *) return 0 ;;
     esac
   done
   [ $# -ge 1 ] || return 0
-  case $1 in
-    git | */git) ;;
-    *) return 0 ;;
-  esac
   shift
   # git's own global options, before the subcommand. -C and -c take a value, separated or
   # attached; every other global is a flag. An unknown leading dash is skipped rather than
@@ -198,27 +286,29 @@ _eval_inv() { # <words of one invocation>
         # `-a` and `-A` and match no row.
         _cl=${_a#-}
         while [ -n "$_cl" ]; do
-          _l=${_cl%"${_cl#?}"}
-          _cl=${_cl#?}
           if [ "$_verb" = commit ]; then
-            case $_l in
-              a) _blanket=1 ;;
-              m | F | C | c | t)
+            case $_cl in
+              a*) _blanket=1 ;;
+              m* | F* | C* | c* | t*)
+                _cl=${_cl#?}
                 if [ -n "$_cl" ]; then
                   _cl=''
                 else
                   [ $# -ge 1 ] && shift
                 fi
+                continue
                 ;;
-              S | u) _cl='' ;; # optional attached value (-uno, -Skeyid); never the next word
-              *) ;;
+              S* | u*) # optional attached value (-uno, -Skeyid); never the next word
+                _cl=''
+                continue
+                ;;
             esac
           else
-            case $_l in
-              A | u) _blanket=1 ;;
-              *) ;;
+            case $_cl in
+              A* | u*) _blanket=1 ;;
             esac
           fi
+          _cl=${_cl#?}
         done
         ;;
       *)
@@ -240,75 +330,222 @@ _eval_inv() { # <words of one invocation>
   return 0
 }
 
+# EVERY CHARACTER THAT CAN END A WORD OR CHANGE THE PARSE STATE, as a bracket expression, so a run
+# of ordinary characters is taken in ONE parameter expansion instead of one per character. `>` and
+# `<` and `#` are in here because they are shell METATEXT and not operands: without them a trailing
+# ` > /dev/null` or ` # note` reached the operand walk below and was counted as a pathspec, which
+# is the term that decides a blanket stage is narrow -- so a redirection turned a deny into an
+# allow. The set has no `]`, no `-`, and no leading `!` or `^`, so it needs no bracket quoting.
+# `_META`/`_META_DQ` are assigned beside `_NL`/`_TAB` below, before the first call.
+
+# Consume the ONE leading character of _sc into the current word. Every arm but the last is a
+# member of `_META`, spelled out because an anchored `case` costs nothing while the general read
+# costs a pattern match over the whole remaining string. The last arm is that general read, and it
+# is what makes this total: a member missing from the list above is SLOW here, never wrong.
+_lit1() {
+  case $_sc in
+    "'"*) _w=$_w"'" ;;
+    '"'*) _w=$_w'"' ;;
+    '\'*) _w=$_w'\' ;;
+    ' '*) _w=$_w' ' ;;
+    ';'*) _w=$_w';' ;;
+    '&'*) _w=$_w'&' ;;
+    '|'*) _w=$_w'|' ;;
+    '('*) _w=$_w'(' ;;
+    ')'*) _w=$_w')' ;;
+    '<'*) _w=$_w'<' ;;
+    '>'*) _w=$_w'>' ;;
+    '#'*) _w=$_w'#' ;;
+    "$_TAB"*) _w=$_w$_TAB ;;
+    "$_NL"*) _w=$_w$_NL ;;
+    *) _w=$_w${_sc%"${_sc#?}"} ;;
+  esac
+  _sc=${_sc#?}
+}
+
+# What to do with the word that just closed. Sets _KEEP=1 when the caller must append it to the
+# invocation's word list and _RESET=1 when the invocation has been settled as one that cannot
+# stage anything, so every word hoarded for it can be dropped.
+#
+# THE DROP IS A COST FIX AND NOT A SHORTCUT PAST THE DECISION. `set -- "$@" "$_w"` rebuilds the
+# whole list per word, so hoarding N words costs N-squared: measured on darwin 25.5.0,
+# `echo <2500 short words> ; git add -A` took 10.1 s -- past this hook's 5-second timeout, and a
+# hook killed at its timeout emits nothing and the call is ALLOWED. The drop only ever discards
+# words belonging to an invocation `_head_kind` has already settled as non-git, which is the
+# same predicate `_eval_inv` would apply to return 0 over them.
+#
+# WHAT THIS DOES NOT COVER, STATED RATHER THAN LEFT LATENT. A single GIT invocation's own operands
+# still have to be hoarded, because `_eval_inv` decides `_pathspec` and `_blanketspec` over the
+# whole list, so the N-squared survives for that one shape: on the same host `git add . <N
+# operands>` measured 0.79 s at N=500, 2.4 s at 1000, 8.8 s at 2000 and 34.0 s at 4000, so past
+# roughly 1400 operands it crosses the timeout and that deny becomes an allow. Closing it means
+# hoisting the operand classification out of `_eval_inv` and into this loop, which is a redesign
+# rather than a fix, so it is recorded here and filed rather than done in this round.
+_word_done() { # <word>
+  _KEEP=0
+  _RESET=0
+  if [ "$_redir" = 1 ]; then
+    _redir=0 # a redirection TARGET is not an operand
+    return 0
+  fi
+  [ "$_skip" = 0 ] || return 0
+  _KEEP=1
+  [ "$_headseen" = 0 ] || return 0
+  _head_kind "$1"
+  case $? in
+    0) ;;
+    1) _headseen=1 ;;
+    *)
+      _headseen=1
+      _skip=1
+      _KEEP=0
+      _RESET=1
+      ;;
+  esac
+}
+
 _scan() { # <command string> -> _VERDICT
   _sc=$1
   _VERDICT=clear
-  _q=0
   _w=''
   _has=0
+  _redir=0
+  _skip=0
+  _headseen=0
   set --
   while [ -n "$_sc" ]; do
-    _c=${_sc%"${_sc#?}"}
-    _sc=${_sc#?}
-    if [ "$_q" = 1 ]; then
-      if [ "$_c" = "'" ]; then _q=0; else _w=$_w$_c; fi
-      continue
+    # THE BULK SLICE, and the reason this loop is no longer written character-at-a-time. Every
+    # ordinary character used to cost three pattern matches over the WHOLE remaining command, so
+    # the loop was quadratic in command length and the gate outran its own timeout on a long
+    # commit message. Here the loop turns once per METACHARACTER, and a 2500-character quoted
+    # operand is a handful of turns rather than 2500.
+    _seg=${_sc%%[$_META]*}
+    if [ -n "$_seg" ]; then
+      _w=$_w$_seg
+      _has=1
+      _CUR=$_sc
+      _cut "$_seg"
+      _sc=$_CUR
+      [ -n "$_sc" ] || break
     fi
-    if [ "$_q" = 2 ]; then
-      if [ "$_c" = '\' ]; then
-        _n=${_sc%"${_sc#?}"}
+    case $_sc in
+      "'"*)
         _sc=${_sc#?}
-        _w=$_w$_n
-      elif [ "$_c" = '"' ]; then
-        _q=0
-      else
-        _w=$_w$_c
-      fi
-      continue
-    fi
-    case $_c in
-      "'")
-        _q=1
         _has=1
+        _seg=${_sc%%\'*}
+        _w=$_w$_seg
+        _CUR=$_sc
+        _cut "$_seg"
+        _sc=${_CUR#\'}
         ;;
-      '"')
-        _q=2
-        _has=1
-        ;;
-      '\')
-        _n=${_sc%"${_sc#?}"}
+      '"'*)
         _sc=${_sc#?}
-        _w=$_w$_n
         _has=1
+        while [ -n "$_sc" ]; do
+          _seg=${_sc%%[$_META_DQ]*}
+          if [ -n "$_seg" ]; then
+            _w=$_w$_seg
+            _CUR=$_sc
+            _cut "$_seg"
+            _sc=$_CUR
+            [ -n "$_sc" ] || break
+          fi
+          case $_sc in
+            '\'*)
+              # The backslash is dropped and the character behind it is inert. Only `\"` and `\\`
+              # need taking here: any other escaped character is not in `_META_DQ`, so the next
+              # bulk slice absorbs it and the word comes out the same.
+              _sc=${_sc#?}
+              case $_sc in '"'* | '\'*) _lit1 ;; esac
+              ;;
+            *)
+              _sc=${_sc#?} # the closing quote
+              break
+              ;;
+          esac
+        done
         ;;
-      " " | "$_TAB")
+      '\'*)
+        _sc=${_sc#?}
+        _has=1
+        # Same reasoning outside quotes, over the wider set: an escaped ORDINARY character is
+        # picked up by the next bulk slice, an escaped METAcharacter has to be taken here or it
+        # would be read as the operator it is spelled like.
+        case $_sc in [$_META]*) _lit1 ;; esac
+        ;;
+      '#'*)
+        # `#` opens a comment only at a WORD START; inside a word it is an ordinary character, so
+        # `git add foo#bar` still stages one path. A comment runs to end of line, and its words
+        # are not operands: `git add -A # stage everything` is the same blanket stage as `git
+        # add -A`.
         if [ "$_has" = 1 ]; then
-          set -- "$@" "$_w"
+          _w=$_w'#'
+          _sc=${_sc#?}
+        else
+          _sc=${_sc#?}
+          _seg=${_sc%%"$_NL"*}
+          _CUR=$_sc
+          _cut "$_seg"
+          _sc=$_CUR
+        fi
+        ;;
+      '>'* | '<'*)
+        # A redirection operator ends the current word and claims the next one as its TARGET. A
+        # bare digit run immediately before it is an fd designator (`2>`), not an operand.
+        if [ "$_has" = 1 ]; then
+          case $_w in
+            '' | *[!0-9]*)
+              _word_done "$_w"
+              [ "$_KEEP" = 1 ] && set -- "$@" "$_w"
+              [ "$_RESET" = 1 ] && set --
+              ;;
+          esac
           _w=''
           _has=0
         fi
+        _sc=${_sc#?}
+        case $_sc in '>'* | '<'* | '&'* | '|'*) _sc=${_sc#?} ;; esac # >>, >|, >&, <<, <&, <>
+        _redir=1
         ;;
-      ";" | "&" | "|" | "$_NL" | "(" | ")")
+      ' '* | "$_TAB"*)
         if [ "$_has" = 1 ]; then
-          set -- "$@" "$_w"
+          _word_done "$_w"
+          [ "$_KEEP" = 1 ] && set -- "$@" "$_w"
+          [ "$_RESET" = 1 ] && set --
           _w=''
           _has=0
         fi
-        case $_sc in "$_c"*) _sc=${_sc#?} ;; esac # && and || are one separator, not two
+        _sc=${_sc#?}
+        ;;
+      *)
+        # `; & | newline ( )`: the top-level operators, by elimination -- everything else in
+        # `_META` has its own arm above.
+        if [ "$_has" = 1 ]; then
+          _word_done "$_w"
+          [ "$_KEEP" = 1 ] && set -- "$@" "$_w"
+          [ "$_RESET" = 1 ] && set --
+          _w=''
+          _has=0
+        fi
+        _redir=0
+        _skip=0
+        _headseen=0
+        case $_sc in # && and || are one separator, not two
+          ';;'* | '&&'* | '||'* | '(('* | '))'* | "$_NL$_NL"*) _sc=${_sc#??} ;;
+          *) _sc=${_sc#?} ;;
+        esac
         _eval_inv "$@"
         if [ "$_VERDICT" = blanket ]; then
           return 0
         fi
         set --
         ;;
-      *)
-        _w=$_w$_c
-        _has=1
-        ;;
     esac
   done
   if [ "$_has" = 1 ]; then
-    set -- "$@" "$_w"
+    _word_done "$_w"
+    [ "$_KEEP" = 1 ] && set -- "$@" "$_w"
+    [ "$_RESET" = 1 ] && set --
   fi
   _eval_inv "$@"
   return 0
@@ -319,6 +556,17 @@ _scan() { # <command string> -> _VERDICT
 _NL='
 '
 _TAB='	'
+# THE BACKSLASH IS DOUBLED ON PURPOSE, AND A SINGLE ONE IS A SILENT DENY-TO-ALLOW. These strings
+# are used as `[$_META]`, so their content is re-read AS A PATTERN, and there a backslash escapes
+# the character behind it instead of joining the set. With one backslash, `[ ...\;&|...]` holds no
+# backslash at all, `_scan` reads `\'` as an ordinary character, and `git mv \' $(git add -A)`
+# came back CLEAR where the old walk said blanket. `_META_DQ` fails harder still: `["\]` leaves the
+# bracket unterminated, and /bin/sh and dash then disagree with each other about what it matches.
+# Doubled, the pattern carries an escaped backslash, which is one member and nothing else.
+_META=" $_TAB$_NL'\"\\\\;&|()<>#"
+_META_DQ="\"\\\\"
+_Q64="$_Q8$_Q8$_Q8$_Q8$_Q8$_Q8$_Q8$_Q8"
+_Q512="$_Q64$_Q64$_Q64$_Q64$_Q64$_Q64$_Q64$_Q64"
 
 _INPUT=''
 while IFS= read -r _line || [ -n "$_line" ]; do
