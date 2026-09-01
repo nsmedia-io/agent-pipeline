@@ -83,6 +83,82 @@ for c in "${FORBIDDEN[@]}"; do
     "$(sub_verdict "$P4" "${c/git /git -c user.name=x }")" "deny"
 done
 
+# ===============================================================================================
+suite "AC7 METATEXT: a redirection or a comment is not a pathspec"
+# ===============================================================================================
+#
+# THE SECOND FLOOR, AND IT SHIPPED BROKEN. `git add -A` was denied and `git add -A > /dev/null`
+# was ALLOWED, along with ` 2>/dev/null`, ` >/dev/null 2>&1`, ` >>out.log` and ` # note` -- thirty
+# of the sixty-six rows below. The tokenizer knew only `; & | newline ( )` as separators, so the
+# redirection operator and its target, and every word of a trailing comment, arrived at the
+# operand walk as ordinary words; one of them read as a PATHSPEC, and a pathspec is exactly the
+# term that decides an `-A`/`-u` stage is narrow rather than blanket. The commit branch never
+# consulted that term, which is why `git commit -a > /dev/null` kept denying and hid the hole.
+#
+# The two allow rows at the end are what stop the fix being "delete the pathspec term": a REAL
+# narrowing operand must still narrow.
+for c in "${FORBIDDEN[@]}" "${FLOOR_ROWS[@]}"; do
+  for tail in ' > /dev/null' ' 2>/dev/null' ' >/dev/null 2>&1' ' >>out.log' ' # note'; do
+    assert_eq "DENY (metatext appended): $c$tail" "$(sub_verdict "$P4" "$c$tail")" "deny"
+  done
+done
+assert_eq "ALLOW is preserved: git add -u <path> > /dev/null (a real pathspec still narrows)" \
+  "$(sub_verdict "$P4" 'git add -u plugins/pipeline/agents/dba.md > /dev/null')" "none"
+assert_eq "ALLOW is preserved: git status --porcelain > /dev/null" \
+  "$(sub_verdict "$P4" 'git status --porcelain > /dev/null')" "none"
+assert_eq "ALLOW is preserved: git add foo#bar (a # INSIDE a word is not a comment)" \
+  "$(sub_verdict "$P4" 'git add foo#bar')" "none"
+
+# ===============================================================================================
+suite "AC7 LENGTH AXIS: a forbidden command stays forbidden however long its operand is"
+# ===============================================================================================
+#
+# THE BYPASS THIS PINS WAS LIVE. `git commit -a -m "chore: checkpoint"` was denied in 0.157 s;
+# the same command with 2500 characters appended to the message took 5.014 s, was killed at the
+# `timeout` hooks.json declares, produced nothing on stdout, and a PreToolUse hook that produces
+# nothing FAILS OPEN -- so the identical forbidden staging was ALLOWED. The tokenizer was
+# quadratic in command length, so a longer commit message, which is ordinary correct work, was
+# sufficient. Length is not a privilege and must not buy a bypass.
+#
+# The bound is the DECLARED timeout, read from hooks.json rather than transcribed, because that
+# is the value the runtime actually kills at -- not a ratio to a floor, which would be a threshold
+# on this host. The verdict rows are the real assertion; the elapsed row is what says WHY when
+# they go red, and it is asserted rather than only recorded.
+LEN_TIMEOUT_S="$(gate_declared_timeout)"
+[[ "$LEN_TIMEOUT_S" =~ ^[0-9]+$ ]] || LEN_TIMEOUT_S=0
+LEN_BOUND_MS=$(( LEN_TIMEOUT_S * 1000 ))
+assert_eq "VACUITY: hooks.json declares a positive PreToolUse timeout to bound against (read, not transcribed): ${LEN_TIMEOUT_S}s" \
+  "$([[ "$LEN_BOUND_MS" -gt 0 ]] && echo declared || echo "MISSING: [$LEN_TIMEOUT_S]")" "declared"
+
+len_now_ms() { "$GATE_REAL_NODE" -e 'process.stdout.write(String(Date.now()))'; }
+LEN_WORST_MS=0
+LEN_SLOW=""
+len_probe() {  # <label> <command> <expected-verdict>
+  local a b el
+  a="$(len_now_ms)"
+  local v; v="$(sub_verdict "$P4" "$2")"
+  b="$(len_now_ms)"
+  el=$(( b - a ))
+  [[ "$el" -gt "$LEN_WORST_MS" ]] && LEN_WORST_MS="$el"
+  [[ "$el" -lt "$LEN_BOUND_MS" ]] || LEN_SLOW="$LEN_SLOW
+$1 -> ${el} ms"
+  assert_eq "AC7 LENGTH: $1 -> $3" "$v" "$3"
+}
+
+for n in 200 1000 2000 4000 8000 32000; do
+  PAD="$("$GATE_REAL_NODE" -e 'process.stdout.write("y".repeat(Number(process.argv[1])))' "$n")"
+  len_probe "git commit -a with a ${n}-char -m operand" "git commit -a -m \"chore: checkpoint $PAD\"" "deny"
+  len_probe "git add -A with a ${n}-char trailing comment" "git add -A # $PAD" "deny"
+  # The paired ALLOW at the same length, so the rows above cannot be satisfied by a gate that
+  # denies everything once a command gets long.
+  len_probe "git add <path> with a ${n}-char -m operand" \
+    "git add plugins/pipeline/agents/dba.md && git commit -m \"chore: $PAD\"" "none"
+done
+assert_eq "AC7 LENGTH: every probe above returned inside the ${LEN_TIMEOUT_S}s the declaration commits to (worst ${LEN_WORST_MS} ms). A hook killed at its declared timeout emits nothing and the call is ALLOWED, so a row over this bound is a bypass, not a slow test" \
+  "$LEN_SLOW" ""
+record "LENGTH AXIS worst observed: ${LEN_WORST_MS} ms against a declared bound of ${LEN_BOUND_MS} ms, on $(uname -sr)"
+
+# ===============================================================================================
 suite "AC7 FLOOR: two spellings nobody enumerated, whose effect is identical"
 # These are the rows a literal eleven-row table passes the whole suite without catching.
 assert_eq "DENY: git commit -aqm 'm' (bundled short flags; verified with real git to commit every tracked modification)" \

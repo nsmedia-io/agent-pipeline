@@ -296,15 +296,95 @@ assert_eq "AC25 CONTROL: with CLAUDE_PROJECT_DIR unset and no .pipeline anywhere
 # AC12's ownership property, re-asserted with .pipeline reachable from TWO roots. A second root's
 # NEWER record must not override the first root's ownership resolution: across roots the candidate
 # set is still two, so R4(3) abstains.
+#
+# THE THREE CANDIDATE SOURCES ARE HELD APART HERE, AND THAT IS THE WHOLE POINT OF THE CELL. The
+# resolver unions three roots -- the payload's `cwd`, CLAUDE_PROJECT_DIR, and the child's actual
+# working directory -- and while every fixture set all three to one value, the union was a
+# disjunction sitting in the cell where its terms agree: deleting the payload-cwd read outright
+# (`_CWD=''` in the hook) SURVIVED all 379 gate assertions. So the child is parked on a THIRD
+# directory that holds no .pipeline at all, and each of the two records is reachable through
+# exactly one source.
+NO_RECORDS="$TEMP_PROJECT/multiroot-elsewhere"
+mkdir -p "$NO_RECORDS"
 ROOT_ONE="$TEMP_PROJECT/multiroot-cwd"
 gate_inflight_status "$ROOT_ONE/.pipeline/39/status.json" "3-impl"
 ROOT_TWO="$TEMP_PROJECT/multiroot-project"
 gate_inflight_status "$ROOT_TWO/.pipeline/98/status.json" "4-review"
 sleep 0.05; touch "$ROOT_TWO/.pipeline/98/status.json"
-gate_reset_env "$ROOT_ONE"
+gate_reset_env "$NO_RECORDS"
 GATE_PROJECT_DIR="$ROOT_TWO"
 run_gate "$(gate_payload "$FORBIDDEN_CMD" agent_id=sub-25 agent_type=pipeline:qa "cwd=$ROOT_ONE")"
 assert_eq "AC25: a SECOND root's newer '4-review' record does not override the first root's ownership -> abstain" \
+  "$GATE_DECISION" "none"
+
+# THE CELL THAT MAKES THE PAYLOAD `cwd` LOAD-BEARING ON ITS OWN. The only in-flight '4-review'
+# record in the world is reachable through the payload cwd and through nothing else; the child
+# sits in a directory with no .pipeline and CLAUDE_PROJECT_DIR points at that same directory. A
+# gate that stops reading the payload cwd resolves no root at all here and abstains, so this row
+# is the one that reddens under that mutation.
+ROOT_SOLE="$TEMP_PROJECT/multiroot-payload-only"
+gate_inflight_status "$ROOT_SOLE/.pipeline/77/status.json" "4-review"
+gate_reset_env "$NO_RECORDS"
+GATE_PROJECT_DIR="$NO_RECORDS"
+run_gate "$(gate_payload "$FORBIDDEN_CMD" agent_id=sub-25 agent_type=pipeline:qa "cwd=$ROOT_SOLE")"
+assert_eq "AC25: the payload cwd is the SOLE carrier of the only in-flight '4-review' record -> DENIED" \
+  "$GATE_DECISION" "deny"
+
+# Its discrimination twin, so the row above separates rather than merely fires: with the payload
+# cwd naming a '3-impl' root instead, the same three-way split must NOT deny -- otherwise the deny
+# above would be satisfied by a gate that denies whenever any root is reachable.
+ROOT_SOLE_P3="$TEMP_PROJECT/multiroot-payload-only-p3"
+gate_inflight_status "$ROOT_SOLE_P3/.pipeline/78/status.json" "3-impl"
+gate_reset_env "$NO_RECORDS"
+GATE_PROJECT_DIR="$NO_RECORDS"
+run_gate "$(gate_payload "$FORBIDDEN_CMD" agent_id=sub-25 agent_type=pipeline:qa "cwd=$ROOT_SOLE_P3")"
+assert_eq "AC25 DISCRIMINATION: the same split with the payload-cwd root at '3-impl' -> NOT denied" \
+  "$GATE_DECISION" "none"
+
+# And the third source is pinned the same way: with the record reachable ONLY through the child's
+# actual working directory, the deny must still land. Together the three rows make the union a
+# union rather than three names for one path.
+ROOT_PROC="$TEMP_PROJECT/multiroot-process-only"
+gate_inflight_status "$ROOT_PROC/.pipeline/79/status.json" "4-review"
+gate_reset_env "$ROOT_PROC"
+GATE_PROJECT_DIR="$NO_RECORDS"
+run_gate "$(gate_payload "$FORBIDDEN_CMD" agent_id=sub-25 agent_type=pipeline:qa "cwd=$NO_RECORDS")"
+assert_eq "AC25: the child's own working directory is the SOLE carrier of the record -> DENIED" \
+  "$GATE_DECISION" "deny"
+
+# ===============================================================================================
+suite "AC25 DE-DUPLICATION: the same issue in two roots is ONE candidate; two issues are TWO"
+# ===============================================================================================
+#
+# THIS REPOSITORY BUILDS THE COLLIDING CASE FOR ITSELF. `.pipeline/*/status.json` is git-tracked
+# here, so `git worktree add` -- the way every Phase 3 and Phase 4 dispatch tree is made -- checks
+# out a SECOND, physically distinct copy of every issue's record. A gate resolving with the
+# worktree as the payload cwd and the main checkout as CLAUDE_PROJECT_DIR then meets issue 106
+# twice, in two directories that are not the same inode and are not symlinks to one another, so a
+# key built from the RESOLVED PATH counts one run as two and abstains on a run nobody was
+# ambiguous about. The key is the issue-dir NAME.
+#
+# The second half is what stops that becoming a licence to collapse: two roots naming DIFFERENT
+# issues are still two candidates and still abstain. Asserted together, because a gate that
+# collapses everything passes the first row and a gate that collapses nothing passes the second.
+DUP_A="$TEMP_PROJECT/dedup-checkout"
+DUP_B="$TEMP_PROJECT/dedup-worktree"
+gate_inflight_status "$DUP_A/.pipeline/106/status.json" "4-review"
+gate_inflight_status "$DUP_B/.pipeline/106/status.json" "4-review"
+assert_eq "VACUITY: the two copies really are distinct directories, not one path spelled twice" \
+  "$([[ "$(cd "$DUP_A/.pipeline/106" && pwd -P)" != "$(cd "$DUP_B/.pipeline/106" && pwd -P)" ]] && echo distinct || echo "SAME PATH, so this suite asserts nothing")" "distinct"
+gate_reset_env "$DUP_B"
+GATE_PROJECT_DIR="$DUP_A"
+run_gate "$(gate_payload "$FORBIDDEN_CMD" agent_id=sub-dedup agent_type=pipeline:qa "cwd=$DUP_B")"
+assert_eq "AC25: one issue reachable through TWO roots is ONE candidate -> DENIED, not abstained" \
+  "$GATE_DECISION" "deny"
+
+DIFF_B="$TEMP_PROJECT/dedup-other-issue"
+gate_inflight_status "$DIFF_B/.pipeline/98/status.json" "4-review"
+gate_reset_env "$DIFF_B"
+GATE_PROJECT_DIR="$DUP_A"
+run_gate "$(gate_payload "$FORBIDDEN_CMD" agent_id=sub-dedup agent_type=pipeline:qa "cwd=$DIFF_B")"
+assert_eq "AC25 DISCRIMINATION: TWO DIFFERENT issues across the same two roots are still two candidates -> abstain" \
   "$GATE_DECISION" "none"
 
 # ===============================================================================================

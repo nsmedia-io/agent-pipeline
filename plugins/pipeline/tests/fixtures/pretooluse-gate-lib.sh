@@ -135,9 +135,11 @@ GATE_DECISION=""
 GATE_REASON=""
 GATE_SCRATCH=""
 
+# The fallback is the suite's own temp project and never $PWD: a default that reaches outside the
+# fixture is how the payload builder leaked the caller's cwd, and the same trap is set here.
 gate_reset_env() {
-  GATE_CWD="${1:-$PWD}"
-  GATE_PROJECT_DIR="${1:-$PWD}"
+  GATE_CWD="${1:-${TEMP_PROJECT:-$PWD}}"
+  GATE_PROJECT_DIR="${1:-${TEMP_PROJECT:-$PWD}}"
   GATE_PLUGIN_ROOT_OVERRIDE="$GATE_PLUGIN_DIR"
   GATE_TMPDIR=""
   GATE_PATH="$PATH"
@@ -179,7 +181,7 @@ run_gate_raw() {
   # `env -i` is deliberately NOT used: the real runtime hands the hook an inherited environment,
   # and a stripped one would make the disarm/marker reachability cells (AC23, AC38) measure a
   # world the gate never runs in.
-  ( cd "${GATE_CWD:-$PWD}" 2>/dev/null || exit 126
+  ( cd "${GATE_CWD:-${TEMP_PROJECT:-$PWD}}" 2>/dev/null || exit 126
     printf '%s' "$payload" | env "${envv[@]}" sh -c "$cmd" ) >"$of" 2>"$ef"
   GATE_RC=$?
 
@@ -205,8 +207,29 @@ run_gate() {
 # ---- fixture builders --------------------------------------------------------------------------
 
 # gate_payload <command> [key=value ...]
+#
+# The payload's `cwd` is ALWAYS supplied, and always from the fixture's own roots -- GATE_CWD when
+# a case has bound one, otherwise the suite's temp project. It is emitted BEFORE "$@" so a case
+# that wants the payload cwd to differ from the child's working directory (AC25's multi-root
+# cells) can still say `cwd=<other>` and win, and so `cwd=__ABSENT__` still deletes it. What is no
+# longer possible is a fixture whose payload silently carries the CALLER's cwd: see the comment in
+# pretooluse-payload.mjs for the 64-passed/83-failed reading that bought this rule.
 gate_payload() {
-  "$GATE_REAL_NODE" "$PAYLOAD_MJS" "$@"
+  local hermetic="$GATE_CWD"
+  if [[ -z "$hermetic" ]]; then
+    # No case has bound a root yet -- which happens whenever the payload is built in a command
+    # substitution that runs BEFORE the gate_reset_env inside it. The fallback is a directory
+    # this suite owns and never puts a record in, NOT $TEMP_PROJECT (whose .pipeline/<issue>
+    # skeleton a case may later fill) and never $PWD.
+    [[ -n "${TEMP_PROJECT:-}" ]] || {
+      printf 'FATAL: gate_payload has no hermetic root (GATE_CWD and TEMP_PROJECT both unset).\n' >&2
+      return 90
+    }
+    hermetic="$TEMP_PROJECT/payload-cwd-unbound"
+    mkdir -p "$hermetic"
+  fi
+  local cmd="$1"; shift
+  "$GATE_REAL_NODE" "$PAYLOAD_MJS" "$cmd" "cwd=$hermetic" "$@"
 }
 
 # gate_status <file> [key=value ...]
