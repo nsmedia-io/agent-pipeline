@@ -56,11 +56,13 @@ import {
   mkdtempSync,
   mkdirSync,
   writeFileSync,
+  realpathSync,
   rmSync,
   utimesSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { isMain as isMainScript } from "./lib.mjs";
+import { inFlightObservations } from "./run-candidates.mjs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -239,7 +241,7 @@ export function validate(value, schema, root, pathStr = "", errors = []) {
 // `rootsOverride`, when passed, REPLACES the default root list entirely (it is not appended
 // to). It exists so the self-test can pin root resolution to a temp tree and never fall
 // through to the checkout's own .pipeline.
-function pipelineDirs(input, rootsOverride) {
+export function pipelineDirs(input, rootsOverride) {
   const roots = rootsOverride || [
     input && input.cwd,
     process.env.CLAUDE_PROJECT_DIR,
@@ -308,7 +310,7 @@ function issueDirs(pipelineDir) {
 //       blocked by artifacts it did not write. A tie under (b) lands here for the same reason
 //       -- the cost of guessing wrong is blocking a stop for an issue this session never
 //       touched, and there is no evidence available to guess from.
-function activeIssueName(input) {
+export function activeIssueName(input) {
   const raw =
     (input && input.active_issue) ||
     process.env.CLAUDE_PIPELINE_ACTIVE_ISSUE ||
@@ -370,6 +372,126 @@ export function activeIssueDir(pipelineDir, input) {
 
 function loadJson(file) {
   return JSON.parse(readFileSync(file, "utf8"));
+}
+
+/**
+ * An installed-plugin dispatch carries a NAMESPACED agent_type ("pipeline:secops",
+ * "plugin:pipeline:secops"), a local-file dispatch carries the bare role. Take the segment after
+ * the LAST colon so the two resolve identically. Exported because #106's PreToolUse gate needs
+ * the same reading for its role attribution, and a second copy is exactly how `exp-` runs stayed
+ * invisible to voice-lint.mjs for months (see ISSUE_DIR_RE's comment above).
+ */
+export function bareRole(agentType) {
+  return String(agentType || "")
+    .split(":")
+    .pop()
+    .trim()
+    .toLowerCase();
+}
+
+/**
+ * RUN OWNERSHIP: which recorded run does a call belong to, and how do we know.
+ *
+ * activeIssueDir answers "which dir is active" from directory names, status.json mtime and the
+ * explicit marker, and it is IN-FLIGHT BLIND on both paths -- it never reads `final_verdict` or
+ * `updated_at`. That is right for the SubagentStop sweep, whose question is "which artifact did
+ * this stop just write", and wrong for a caller that must decide whose RUN a tool call belongs
+ * to: after a fresh `git clone` every tracked status.json carries a new mtime, and the raw
+ * answer on a clone of this repository is a record whose own `final_verdict` says its run ended.
+ *
+ * So this is a second QUESTION over the same records, not a second derivation of the first:
+ *
+ *   (1) Narrow to the CANDIDATE set: no `final_verdict`, and either datable-and-recent or not
+ *       datable at all (run-candidates.mjs holds that predicate; an undatable record counts, so
+ *       it can never shrink a set to one).
+ *   (2) ZERO candidates -> no owner. The caller abstains.
+ *   (3) An explicit marker naming a record that is itself IN FLIGHT resolves the owner, and the
+ *       answer is labelled `marker` so an over-refusal is diagnosable in one look. A marker
+ *       naming a record the narrowing excludes is not honoured and falls through, which is what
+ *       stops a stale signal manufacturing denies forever.
+ *   (4) EXACTLY ONE candidate -> that record is the owner, labelled `inference`. If it cannot be
+ *       dated it is NOT the owner: its recency is unknowable by construction, so treating it as
+ *       one would let an arbitrarily old abandoned run author a refusal.
+ *   (5) TWO OR MORE -> no owner. Not a tie-break, not newest-wins: mtime is not consulted in
+ *       this branch at all, because the answer it would give is the one that refuses correct
+ *       work in the clone case above.
+ *
+ * `pipelineDirs` may be a single .pipeline path or a list of them; the candidate set is the
+ * UNION across every root, so a second root's record cannot override the first root's answer.
+ *
+ * Returns { provenance, dir, issue, phase, reason } where provenance is "marker" | "inference" |
+ * "none" and `reason` names the non-action for a caller that has to attribute it. Nothing here
+ * counts candidates OUT loud: two callers looking at different roots with the same shape must be
+ * able to attribute the same way.
+ */
+export function resolveRunOwner(pipelineDirsIn, input, now = Date.now(), ceilingMs = undefined) {
+  const roots = Array.isArray(pipelineDirsIn) ? pipelineDirsIn : [pipelineDirsIn];
+  const marker = activeIssueName(input);
+  const candidates = [];
+  const seen = new Set();
+  let unreadable = false;
+  let sawRoot = false;
+
+  for (const root of roots) {
+    if (!root) continue;
+    sawRoot = true;
+    for (const dir of issueDirs(root)) {
+      // Two roots can be the SAME directory reached by different paths -- on macOS $TMPDIR is
+      // /var/... through a symlink and /private/var/... resolved, and the payload's cwd and
+      // CLAUDE_PROJECT_DIR routinely disagree on which spelling they carry. Counting one record
+      // twice turns "one in-flight run" into "two" and abstains the gate permanently, so the key
+      // is the resolved path rather than the joined one.
+      let key = dir;
+      try {
+        key = realpathSync(dir);
+      } catch {
+        /* unresolvable: fall back to the literal path */
+      }
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const file = path.join(dir, "status.json");
+      let status;
+      try {
+        status = loadJson(file);
+      } catch (e) {
+        // A status.json that exists and will not parse is a tooling gap of its own: the caller
+        // must be able to tell it from "this root holds no runs".
+        if (existsSync(file)) unreadable = true;
+        continue;
+      }
+      const obs =
+        ceilingMs === undefined
+          ? inFlightObservations(status, now)
+          : inFlightObservations(status, now, ceilingMs);
+      if (!obs.candidate) continue;
+      candidates.push({
+        dir,
+        issue: path.basename(dir),
+        phase: typeof status.current_phase === "string" ? status.current_phase : null,
+        datable: obs.datable,
+      });
+    }
+  }
+
+  const none = (reason) => ({ provenance: "none", dir: null, issue: null, phase: null, reason });
+
+  if (!sawRoot) return none("no-pipeline-root");
+  if (candidates.length === 0) return none(unreadable ? "unreadable-record" : "no-in-flight-run");
+
+  if (marker) {
+    const named = candidates.find((c) => c.issue === marker && c.datable);
+    if (named) {
+      return { provenance: "marker", dir: named.dir, issue: named.issue, phase: named.phase, reason: "resolved" };
+    }
+  }
+
+  if (candidates.length === 1) {
+    const only = candidates[0];
+    if (!only.datable) return none("undatable-sole-candidate");
+    return { provenance: "inference", dir: only.dir, issue: only.issue, phase: only.phase, reason: "resolved" };
+  }
+
+  return none("ambiguous-owner");
 }
 
 // ---- grounding: impl-report claims vs cheap read-only evidence ---------------
@@ -766,8 +888,7 @@ export function checkArtifacts(agentType, input, now = Date.now(), rootsOverride
   // segment after the LAST colon before lowercasing, so "pipeline:secops" and "secops" resolve
   // identically. Without this, every namespaced dispatch missed AGENT_RULES entirely and this
   // validator silently checked nothing -- see #66 and #98's Phase 4 panel, which proved it live.
-  const bareAgentType = String(agentType || "").split(":").pop();
-  const rules = AGENT_RULES[bareAgentType.toLowerCase()];
+  const rules = AGENT_RULES[bareRole(agentType)];
   const failures = [];
   if (!rules) return { failures };
 

@@ -69,6 +69,7 @@ import { isMain } from "./lib.mjs";
 import { KNOWN_TIERS } from "./dispatch-model.mjs";
 import { phaseKey } from "./pipeline-telemetry.mjs";
 import { activeIssueDir } from "./validate-pipeline-artifact.mjs";
+import { inFlightObservations } from "./run-candidates.mjs";
 
 /**
  * The 15 guarded rows: the 8 phases pipeline.md checkpoints into ("Checkpoint first:") and the
@@ -546,10 +547,11 @@ function prerequisiteSatisfied(issueDir, row, events) {
  * fails if one does.
  */
 function inFlight(status, now) {
-  if (status.final_verdict) return false;
-  const updated = Date.parse(status.updated_at);
-  if (!Number.isFinite(updated)) return false;
-  return now - updated <= IN_FLIGHT_MS;
+  // The predicate itself moved to the leaf run-candidates.mjs, which #106's PreToolUse gate is
+  // the second consumer of; the DECISION recorded in #63 that it had no second consumer is
+  // superseded by that, not contradicted. The CEILING is still read from this module's own
+  // export, so a rewrite of the declaration above still changes this guard's behaviour.
+  return inFlightObservations(status, now, IN_FLIGHT_MS).inFlight;
 }
 
 function isTerminal(phase, status) {
