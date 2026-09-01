@@ -236,6 +236,11 @@
       "phase": "4-review",
       "verdict": "OWNER_CHOSE_ROUND_3",
       "at": "2026-09-01T16:00:00Z"
+    },
+    {
+      "phase": "4-review-delta-fix",
+      "verdict": "DEV_DISPATCHED_ROUND_3",
+      "at": "2026-09-01T16:05:00Z"
     }
   ],
   "flags": [
