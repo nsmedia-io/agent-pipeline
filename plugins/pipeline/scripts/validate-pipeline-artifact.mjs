@@ -56,7 +56,6 @@ import {
   mkdtempSync,
   mkdirSync,
   writeFileSync,
-  realpathSync,
   rmSync,
   utimesSync,
 } from "node:fs";
@@ -424,7 +423,7 @@ export function bareRole(agentType) {
  * counts candidates OUT loud: two callers looking at different roots with the same shape must be
  * able to attribute the same way.
  */
-export function resolveRunOwner(pipelineDirsIn, input, now = Date.now(), ceilingMs = undefined) {
+export function resolveRunOwner(pipelineDirsIn, input, now = Date.now(), ceilingMs) {
   const roots = Array.isArray(pipelineDirsIn) ? pipelineDirsIn : [pipelineDirsIn];
   const marker = activeIssueName(input);
   const candidates = [];
@@ -436,24 +435,11 @@ export function resolveRunOwner(pipelineDirsIn, input, now = Date.now(), ceiling
     if (!root) continue;
     sawRoot = true;
     for (const dir of issueDirs(root)) {
-      // Two roots can be the SAME directory reached by different paths -- on macOS $TMPDIR is
-      // /var/... through a symlink and /private/var/... resolved, and the payload's cwd and
-      // CLAUDE_PROJECT_DIR routinely disagree on which spelling they carry. Counting one record
-      // twice turns "one in-flight run" into "two" and abstains the gate permanently, so the key
-      // is the resolved path rather than the joined one.
-      let key = dir;
-      try {
-        key = realpathSync(dir);
-      } catch {
-        /* unresolvable: fall back to the literal path */
-      }
-      if (seen.has(key)) continue;
-      seen.add(key);
       const file = path.join(dir, "status.json");
       let status;
       try {
         status = loadJson(file);
-      } catch (e) {
+      } catch {
         // A status.json that exists and will not parse is a tooling gap of its own: the caller
         // must be able to tell it from "this root holds no runs".
         if (existsSync(file)) unreadable = true;
@@ -464,9 +450,27 @@ export function resolveRunOwner(pipelineDirsIn, input, now = Date.now(), ceiling
           ? inFlightObservations(status, now)
           : inFlightObservations(status, now, ceilingMs);
       if (!obs.candidate) continue;
+      // DE-DUPLICATED BY ISSUE NAME, AND ONLY ONCE A RECORD HAS BEEN READ. Two roots can be the
+      // SAME directory reached by different spellings -- on macOS $TMPDIR is /var/... through a
+      // symlink and /private/var/... resolved -- and they can also be genuinely distinct copies
+      // of one run: `.pipeline/*/status.json` is git-tracked in this repository, so a `git
+      // worktree add` (how every dispatch tree is made) checks out a SECOND physical copy of
+      // every issue's record, and a call resolving with the worktree as cwd and the main checkout
+      // as CLAUDE_PROJECT_DIR then meets issue 106 twice. A resolved-path key collapses the first
+      // case and not the second, so one run read as two and the gate abstained on a run nobody
+      // was ambiguous about. The name collapses both, and two roots naming DIFFERENT issues are
+      // still two candidates, which is what leaves R4(3)'s abstention on real ambiguity intact.
+      //
+      // The key is claimed HERE and not at the top of the loop, because a directory that holds no
+      // readable record must not claim it: an empty or unparseable `.pipeline/106` in the first
+      // root would otherwise mask a live `.pipeline/106` in the second, and an empty directory is
+      // exactly what a checkout with a gitignored .pipeline leaves behind.
+      const key = path.basename(dir);
+      if (seen.has(key)) continue;
+      seen.add(key);
       candidates.push({
         dir,
-        issue: path.basename(dir),
+        issue: key,
         phase: typeof status.current_phase === "string" ? status.current_phase : null,
         datable: obs.datable,
       });
