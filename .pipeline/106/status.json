@@ -221,6 +221,16 @@
       "phase": "4-review",
       "verdict": "delta-dispatched",
       "at": "2026-09-01T15:20:00Z"
+    },
+    {
+      "phase": "4-review",
+      "verdict": "REQUEST_CHANGES",
+      "at": "2026-09-01T15:50:00Z"
+    },
+    {
+      "phase": "4-review",
+      "verdict": "PAUSED_FOR_OWNER_ROUND_3_DECISION",
+      "at": "2026-09-01T15:55:00Z"
     }
   ],
   "flags": [
@@ -429,6 +439,34 @@
       "verdict": "SELF_FOUND_2_BUGS_FIXED",
       "summary": "Own status.json had 7 verdict labels over the 32-char schema cap, and current_phase carried invented values outside gate-phase-entry.mjs's blessed vocabulary. Both fixed, verified via full suite: 3454 passed, 0 failed, clean",
       "at": "2026-09-01T15:15:00Z"
+    },
+    {
+      "phase": "4-review",
+      "agent": "ba",
+      "verdict": "APPROVE_WITH_NOTES",
+      "summary": "round 2: round-1 finding fully closed and independently reverified (64/83->236/0). Full suite exit 0. Not re-litigating R4/#111",
+      "at": "2026-09-01T14:24:00Z"
+    },
+    {
+      "phase": "4-review",
+      "agent": "dba",
+      "verdict": "APPROVE_WITH_NOTES",
+      "summary": "round 2: both round-1 blockers closed. NEW major: dedup picks a winner by ROOT ORDER on disagreeing same-named copies, proven on 2 real #106 status.json commits, can wrongly DENY a concluded run; 402 asserts unchanged if order reversed. NEW major: Dev's own code comment justifying the design doesn't reproduce",
+      "at": "2026-09-01T14:59:00Z"
+    },
+    {
+      "phase": "4-review",
+      "agent": "secops",
+      "verdict": "REQUEST_CHANGES",
+      "summary": "round 2: HIGH (metatext bypass) closed, rigorously (2438-row differential + real-shell oracle). MEDIUM: quadratic fix only closed the long-string axis; real driver is word-boundary COUNT, still fully exploitable via many short words, no git needed. Deferred residual never filed (2nd finding of this)",
+      "at": "2026-09-01T14:34:00Z"
+    },
+    {
+      "phase": "4-review",
+      "agent": "qa",
+      "verdict": "REQUEST_CHANGES",
+      "summary": "round 2: all 4 round-1 findings closed and reverified. NEW blocker: backslash-newline creates a phantom operand, real bypass (staged+committed in a real repo). NEW blocker: the disclosed quadratic residual is a live bypass, reproduced, and was never actually filed as an issue",
+      "at": "2026-09-01T14:34:00Z"
     }
   ],
   "orchestrator_process_notes": [
@@ -489,17 +527,17 @@
       "1": 16380000,
       "2": 12720000,
       "3": 18600000,
-      "4": 7200000,
+      "4": 9300000,
       "2.5": 300000
     },
-    "total_lead_time_ms": 55800000,
+    "total_lead_time_ms": 57900000,
     "unattributed_ms": 600000,
     "unattributed_events": 1,
     "untimed_events": 0,
     "review_rounds": 2,
-    "review_rounds_observed": 1,
-    "review_rounds_recorded_delta": 1,
-    "events_counted": 41,
+    "review_rounds_observed": 2,
+    "review_rounds_recorded_delta": 0,
+    "events_counted": 43,
     "attribution": "exit"
   },
   "effective_config": {
