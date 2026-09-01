@@ -3,8 +3,8 @@
  *
  * WHY IT IS A LEAF AND NOT A FUNCTION IN EITHER CONSUMER. gate-phase-entry.mjs already imports
  * activeIssueDir from validate-pipeline-artifact.mjs, so an edge back the other way closes a
- * cycle. Measured on the real 16-module graph before this file existed: adding
- * `import { IN_FLIGHT_MS } from "./gate-phase-entry.mjs"` to validate-pipeline-artifact.mjs and
+ * cycle. Measured on the real 16-module graph before this file existed: importing the guard's
+ * IN_FLIGHT_MS into validate-pipeline-artifact.mjs and
  * using it at module scope made `node gate-phase-entry.mjs` exit 1 with
  * `ReferenceError: Cannot access 'IN_FLIGHT_MS' before initialization` on stderr, while entering
  * the identical cycle from the validator was invisible. gate-phase-entry's try/catch wraps main(),
