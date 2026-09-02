@@ -357,6 +357,7 @@ _inv_words() { # <closed word>...
     # beside a path this scanner cannot resolve, neither is a shape anything in this repository
     # writes, and the narrow form `git add $X` -- which is what an agent staging a computed path
     # actually writes -- is untouched.
+    #
     # THE TEST SITS AT THE OPERAND POSITIONS AND NOWHERE ELSE, because a word that opens with a
     # dash is read for its FLAG letters and those still count: `git commit -a$X` and `git add -A$X`
     # are `-a` and `-A` however `$X` resolves, and skipping them here would trade one phantom
@@ -518,12 +519,20 @@ _lit1() {
 # its re-takeable command BEFORE this shipped, because a residual recorded only in the file that
 # has it is readable only by someone already looking at the defect. Once per structural character
 # is not once per COMMAND, so a string carrying MANY of them is still (structural characters) x
-# (length), and a multi-line command is the reachable instance -- every line-ending newline is
-# structural. Measured on darwin 25.5.0 for a heredoc document written and staged in one call:
-# 654 ms at 19.5 KB, 2984 at 78 KB, 4148 at 97 KB, and 5382 at 117 KB, which is past the declared
-# timeout and so an allow. Closing it needs a BOUNDED scan window refilled from an untouched
-# remainder, with refill points inside both quote loops and the backslash arm, which is a redesign
-# rather than a fix.
+# (length).
+#
+# THE REACHABLE SIZE IS SIZE x DENSITY, NOT SIZE, and quoting the size alone understates it by up
+# to 8x -- which is the correction #116 now carries and the reason this paragraph no longer quotes
+# one curve. Whitespace is deliberately NOT structural, so density ranges over 24x between the
+# shapes an agent really writes. Measured on darwin 25.5.0 against the declared 5 s, for a document
+# written and staged in one call: quote-free PROSE crosses at ~110 KB (78 KB 3186 ms, 117 KB
+# 5656 ms), ordinary JSON at 25-30 KB (19 KB 2791 ms, 34 KB 6837 ms), and quote-dense text at
+# ~13 KB (12 KB 4771 ms, 14 KB 5962 ms). The concrete instance is this repository's own work:
+# heredoc-writing `.pipeline/106/peer-review.json` (85 KB) and staging it in one call measured
+# 3373-4134 ms over four runs, 67-83% of the budget.
+#
+# Closing it needs a BOUNDED scan window refilled from an untouched remainder, with refill points
+# inside both quote loops and the backslash arm, which is a redesign rather than a fix.
 _run_words() { # the run is in _run, already cut from _sc
   # A word left OPEN before this run either closes here or absorbs the run's first field --
   # `foo"bar"baz` is one word, and the quoted middle is why the field cannot simply be re-split.

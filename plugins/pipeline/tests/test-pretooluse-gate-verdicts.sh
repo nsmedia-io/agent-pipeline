@@ -456,7 +456,14 @@ git add plugins/pipeline/agents/dba.md" "none"
 done
 assert_eq "AC7 BOUNDARY: every probe above returned inside the ${LEN_TIMEOUT_S}s the declaration commits to (worst ${WB_WORST_MS} ms). This is the axis that was live at the reviewed commit: a hook killed at its declared timeout emits nothing and the call is ALLOWED" \
   "$WB_SLOW" ""
-record "WORD-BOUNDARY AXIS worst observed: ${WB_WORST_MS} ms against a declared bound of ${LEN_BOUND_MS} ms, on $(uname -sr);${WB_GROWTH}"
+# WHAT THE MARGIN BELOW IS A MARGIN OVER, said plainly so it is not read as more than it is. Every
+# pad here is quote-free -- `wb_pad` emits `w<n>` tokens, so its densest mode is one newline per
+# ~48 bytes -- and the scan's cost is (structural characters) x (length), where a double quote
+# costs about 3x a newline. A SMALLER body of ordinary JSON crosses the same declared bound: 34 KB
+# of it measured 6837 ms where 78 KB of this population measures ~3200 ms. So this record says the
+# BOUNDARY-COUNT mechanism is closed; it says nothing about structural DENSITY, which is #116's,
+# is still open, and whose acceptance contract must vary density at fixed length.
+record "WORD-BOUNDARY AXIS worst observed: ${WB_WORST_MS} ms against a declared bound of ${LEN_BOUND_MS} ms over a QUOTE-FREE population (density is #116, still open), on $(uname -sr);${WB_GROWTH}"
 
 # ===============================================================================================
 suite "AC7 FLOOR: two spellings nobody enumerated, whose effect is identical"
