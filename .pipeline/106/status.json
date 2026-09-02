@@ -266,6 +266,11 @@
       "phase": "4-review-delta-fix",
       "verdict": "DEV_DISPATCHED_ROUND_4",
       "at": "2026-09-01T21:15:00Z"
+    },
+    {
+      "phase": "retrospective",
+      "verdict": "ISSUE_117_FILED",
+      "at": "2026-09-01T21:25:00Z"
     }
   ],
   "flags": [
