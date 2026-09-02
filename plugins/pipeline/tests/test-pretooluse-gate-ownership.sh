@@ -753,11 +753,34 @@ assert_eq "AC40: and the non-action carries the R4 OWNERSHIP attribution, matchi
 suite "AC42: ownership under a REAL clone, where the TIE is not the variable"
 # ===============================================================================================
 #
-# Round 6 built this criterion on an mtime TIE and that premise is false for the deployment it was
-# written about. MEASURED on an actual `git clone --no-hardlinks` of this repo: every tracked
-# status.json shares ONE whole second while node's mtimeMs carries sub-millisecond decimals and
-# all of them are DISTINCT, so the resolver's strict-max finds a winner and NO tie occurs. A
-# `touch -t`-forced equality does NOT reproduce a clone and is not used here.
+# Round 6 built this criterion on a `touch -t`-forced mtime TIE, which does not reproduce a clone;
+# round 7 replaced that with a measurement of a real `git clone --no-hardlinks`, which was right,
+# and then wrote ONE runner's reading of that measurement into the assertion as if it were
+# universal ("all n mtimeMs values are DISTINCT, so the resolver finds a strict winner"). It is
+# not universal, and it is not even stable on a single host. A `touch -t`-forced equality is still
+# not used here: the real clone stays the fixture.
+#
+# THE MEASUREMENTS, all on this repo's 12 tracked .pipeline/*/status.json:
+#   - macOS 15 / APFS, 8 consecutive clones: n=12 distinctMs=12 maxCount=1, every run.
+#   - GitHub ubuntu-latest, run 33585245871: n=12 distinctMs=2, and the resolver returned NULL.
+#   - node:22-bookworm, overlay2 on ext4, --cpus=0.5, 20 consecutive clones on one container with
+#     nothing changed between them: distinctMs ranged 6..11 and was NEVER 12, while the argmax was
+#     unique in 10 runs and shared in the other 10.
+# So `distinctMs == n` is not a property of the code under test. It is a property of the runner's
+# timestamp granularity raced against its clone speed -- this repo's own "a rendered measurement
+# measures the runner" rule, and on Linux it is a coin flip run to run, not a platform constant.
+#
+# What the resolver actually consumes is neither the count nor the platform: it is whether the
+# ARGMAX IS UNIQUE. That splits into two branches, BOTH real, BOTH observed above, and both
+# proving AC42's thesis that a clone's mtimes cannot carry ownership -- by different mechanisms,
+# which is why the branch taken is RECORDED and only the disjunction is asserted:
+#
+#   strict-winner (argmax unique): the resolver names a dir, and which dir it names is decided by
+#     git's CHECKOUT ORDER, not by any record's content. On this repo that is the last-checked-out
+#     status.json, which carries a final_verdict -- a record R5 excludes unconditionally. An mtime
+#     ownership rule would seat the deny on a CONCLUDED record. DANGEROUS.
+#   tie (argmax shared): the resolver names nothing at all, while in-flight records sit in the
+#     tree. An mtime ownership rule would seat the deny nowhere. INERT, and differently useless.
 #
 # What actually decides the clone case is the CANDIDATE COUNT, not the timestamps.
 CLONE="$TEMP_PROJECT/real-clone"
@@ -767,8 +790,10 @@ assert_eq "PRECONDITION: a real \`git clone --no-hardlinks\` of this repo (a syn
   "$CLONE_OK" "yes"
 
 if [[ "$CLONE_OK" == "yes" ]]; then
-  # (iii) NON-ZERO CONTROL ON THE MEASUREMENT ITSELF -- this is where round 6 went wrong. A cell
-  # asserting a clone produces a tie must FAIL.
+  # (iii) THE MEASUREMENT, and the branch it selects. `distinctMs` and `distinctSec` are RECORDED
+  # and never asserted: both are runner properties, per the readings in this suite's header.
+  # `maxCount` -- how many files share the maximum mtimeMs -- is the one figure the resolver's
+  # strict-max actually consumes, and it is what selects the branch.
   MEAS="$("$GATE_REAL_NODE" -e '
     const { readdirSync, statSync } = require("node:fs"); const path = require("node:path");
     const root = path.join(process.argv[1], ".pipeline");
@@ -777,26 +802,68 @@ if [[ "$CLONE_OK" == "yes" ]]; then
       .map((d) => path.join(root, d.name, "status.json"))
       .filter((f) => { try { statSync(f); return true; } catch { return false; } });
     const ms = files.map((f) => statSync(f).mtimeMs);
-    const secs = files.map((f) => Math.floor(statSync(f).mtimeMs / 1000));
+    const secs = ms.map((m) => Math.floor(m / 1000));
     const distinct = (a) => new Set(a).size;
-    process.stdout.write(`n=${files.length} distinctMs=${distinct(ms)} distinctSec=${distinct(secs)}`);
+    const max = ms.length ? Math.max(...ms) : NaN;
+    const maxCount = ms.filter((m) => m === max).length;
+    process.stdout.write(
+      `n=${files.length} distinctMs=${distinct(ms)} distinctSec=${distinct(secs)} maxCount=${maxCount}`);
   ' "$CLONE")"
-  record "AC42(iii) MEASUREMENT on the real clone: $MEAS"
   CN="$(printf '%s' "$MEAS" | sed -n 's/n=\([0-9]*\).*/\1/p')"
-  DMS="$(printf '%s' "$MEAS" | sed -n 's/.*distinctMs=\([0-9]*\).*/\1/p')"
-  DSEC="$(printf '%s' "$MEAS" | sed -n 's/.*distinctSec=\([0-9]*\).*/\1/p')"
-  assert_eq "AC42(iii): the clone's status.json mtimeMs values are ALL DISTINCT, so the resolver's strict-max finds a WINNER (no tie)" \
-    "$([[ "${DMS:-0}" -eq "${CN:-0}" && "${CN:-0}" -ge 2 ]] && echo all-distinct || echo "NOT ALL DISTINCT: $MEAS")" "all-distinct"
-  assert_eq "AC42(iii): while their WHOLE SECONDS collapse, which is why a seconds-grained fixture would have concluded 'tie'" \
-    "$([[ "${DSEC:-99}" -lt "${DMS:-0}" ]] && echo seconds-collapse || echo "SECONDS DO NOT COLLAPSE: $MEAS")" "seconds-collapse"
+  MAXC="$(printf '%s' "$MEAS" | sed -n 's/.*maxCount=\([0-9]*\).*/\1/p')"
+  MEAS_BRANCH="$([[ "${MAXC:-0}" -eq 1 ]] && echo strict-winner || echo tie)"
+  record "AC42(iii) MEASUREMENT on the real clone: $MEAS -> this host took the [$MEAS_BRANCH] branch"
+  assert_eq "AC42(iii) PREMISE: the clone carries TWO OR MORE status.json files, so 'the argmax is unique' is a claim about a real contest (with n<2 every cell below is VOID, not a pass)" \
+    "$([[ "${CN:-0}" -ge 2 ]] && echo contested || echo "ONLY ${CN:-0} FILE(S): $MEAS")" "contested"
 
-  # (iv) the RAW resolver on the clone returns SOME dir (no tie), and that answer is not what
-  # decides ownership. Recorded rather than pinned to a literal: which dir wins depends on the
-  # checkout order of a clone taken now, and a transcribed name would be stale before it is read.
+  # (iv) THE DISJUNCTION. Two rows, and neither pins a platform.
+  #
+  # (iv-a) THE BRIDGE, falsifiable on BOTH branches and against opposite defects: the measured
+  # argmax-uniqueness predicts the resolver's answer EXACTLY. Mutate the resolver's strict `>` to
+  # `>=` and a tie-branch host reddens here (it would name a winner where the max is shared);
+  # make it return null unconditionally and a strict-winner-branch host reddens. Neither branch
+  # can be green by construction, because each is graded against the OTHER half of the iff.
   RAW_ON_CLONE="$(ADIR_PROBE "$CLONE/.pipeline" '{}')"
   record "AC42(iv) the RAW resolver on this clone returns: $RAW_ON_CLONE"
-  assert_eq "AC42(iv): the raw resolver finds a STRICT winner on a real clone (this is what makes an mtime rule dangerous rather than merely useless)" \
-    "$([[ "$RAW_ON_CLONE" != "NULL" && -n "$RAW_ON_CLONE" ]] && echo resolves || echo "NULL: the clone tied after all, which contradicts (iii)")" "resolves"
+  RESOLVER_BRANCH="$([[ "$RAW_ON_CLONE" != "NULL" && -n "$RAW_ON_CLONE" ]] && echo strict-winner || echo tie)"
+  assert_eq "AC42(iv-a) [$MEAS_BRANCH]: a UNIQUE argmax and a named winner are the same event, and a SHARED argmax and a NULL are the same event -- the measurement predicts the resolver on whichever branch this host took" \
+    "$RESOLVER_BRANCH" "$MEAS_BRANCH"
+
+  # (iv-b) THE THESIS, one row, both branches, each separately meaningful: whichever branch this
+  # host took, the answer an mtime rule would give is NOT an owner.
+  #   strict-winner -> the named dir carries a final_verdict, so R5 excludes it unconditionally
+  #     (AC13(a)) and no clock is involved: the reading does not decay with the calendar. This is
+  #     the DANGEROUS half -- an mtime rule would confidently seat a deny on a concluded record.
+  #   tie -> the resolver names nothing, which is the INERT half.
+  # The two are held apart by the paired premise below, without which the tie half would assert
+  # that "no owner" is wrong while nothing in the tree showed an owner exists.
+  #
+  # EXPIRY, strict-winner half: the winner is the LAST-CHECKED-OUT status.json, so this row goes
+  # red if a new .pipeline/<dir> sorting after the current last one is added WITHOUT a
+  # final_verdict. That failure is not a defect in the gate -- re-read this comment, confirm the
+  # winner is still decided by checkout order rather than by content, and re-anchor. Do NOT
+  # relax the row to accept an in-flight winner: an mtime rule that happened to name the right
+  # record would make AC42's whole thesis unfalsifiable here.
+  WINNER_CONCLUDED="$([[ "$RESOLVER_BRANCH" == "tie" ]] && echo names-nothing || "$GATE_REAL_NODE" -e '
+    const fs = require("node:fs"); const path = require("node:path");
+    const f = path.join(process.argv[1], ".pipeline", process.argv[2], "status.json");
+    let s; try { s = JSON.parse(fs.readFileSync(f, "utf8")); } catch { process.stdout.write("UNREADABLE"); process.exit(0); }
+    process.stdout.write(s.final_verdict ? "concluded" : `IN-FLIGHT WINNER: ${process.argv[2]}`);
+  ' "$CLONE" "$RAW_ON_CLONE")"
+  assert_eq "AC42(iv-b) [$MEAS_BRANCH]: an mtime ownership rule on a REAL clone seats the deny either on NOTHING (tie branch) or on a CONCLUDED record R5 excludes (strict-winner branch) -- on neither branch does it name a record R5 would call the owner" \
+    "$([[ "$WINNER_CONCLUDED" == "names-nothing" || "$WINNER_CONCLUDED" == "concluded" ]] && echo not-an-owner || echo "$WINNER_CONCLUDED")" "not-an-owner"
+  assert_eq "AC42(iv-b) PAIRED PREMISE, so the tie branch's 'names nothing' is a WRONG answer and not a correct one: the pristine clone really does carry at least one record with NO final_verdict for an owner rule to find" \
+    "$("$GATE_REAL_NODE" -e '
+      const { readdirSync, readFileSync } = require("node:fs"); const path = require("node:path");
+      const root = path.join(process.argv[1], ".pipeline");
+      let open = 0;
+      for (const d of readdirSync(root, { withFileTypes: true })) {
+        if (!d.isDirectory()) continue;
+        let s; try { s = JSON.parse(readFileSync(path.join(root, d.name, "status.json"), "utf8")); } catch { continue; }
+        if (!s.final_verdict) open++;
+      }
+      process.stdout.write(open > 0 ? "unconcluded-records-exist" : "EVERY RECORD IS CONCLUDED");
+    ' "$CLONE")" "unconcluded-records-exist"
 
   # (i) the clone with TWO in-flight records, at least one at a Phase 4 phase -> NOT denied, with
   # the ownership abstention. The clone's own records are dated by CONTENT and go stale with the
@@ -842,7 +909,19 @@ if [[ "$CLONE_OK" == "yes" ]]; then
       s.final_verdict = s.final_verdict || "APPROVE";
       fs.writeFileSync(f, JSON.stringify(s, null, 2) + "\n");' "$d/status.json" 2>/dev/null
   done
-  assert_eq "AC42(ii): reduced to exactly ONE in-flight record at a Phase 4 phase -> DENIED" \
+  # THE GATE-BEHAVIOUR HALF of (iv), and the one row here that needs NO branch: the loop above
+  # writes every dir EXCEPT 98, so the newest status.json in the clone is now one of the records
+  # it just CONCLUDED, and 98 -- the sole in-flight record and the true owner -- cannot be the
+  # mtime winner. Asserted rather than assumed, because a cell that merely happens to hold this
+  # way is green by construction. On a tie-branch host the resolver returns NULL here and on a
+  # strict-winner host it returns a concluded dir; both are "not 98", which is what makes the deny
+  # below a discrimination on EITHER branch rather than only on the one this host took.
+  RAW_AT_II="$(ADIR_PROBE "$CLONE/.pipeline" '{}')"
+  record "AC42(ii) the RAW resolver, after the clone is reduced to one in-flight record, returns: $RAW_AT_II"
+  assert_eq "AC42(ii) PREMISE: the mtime rule does NOT name 98, so the deny below cannot be an mtime rule agreeing with the content rule by luck" \
+    "$([[ "$RAW_AT_II" != "98" ]] && echo names-something-else || echo "MTIME NAMED 98: the two rules agree here and the next row discriminates nothing")" \
+    "names-something-else"
+  assert_eq "AC42(ii): reduced to exactly ONE in-flight record at a Phase 4 phase -> DENIED, naming a record the mtime rule did not and could not have named -- a gate reading mtime as its ownership signal would have abstained here on both branches" \
     "$(sub_verdict "$CLONE")" "deny"
 else
   assert_eq "AC42: the clone did not happen, so cells (i)-(iv) did not run -- reported as a FAILURE, never a skip" \
