@@ -476,7 +476,21 @@ done
 # field descriptions. The pattern check now exists; a schema that still says otherwise is a schema
 # lying about its own controls, which is worse than one that says nothing.
 for f in review peer-review; do
-  assert_eq "$f.schema.json no longer claims there is no pattern check" \
+  # LABEL WORDING IS LOAD-BEARING HERE, and not for style. AC10 in test-status-schema-contract.sh
+  # walks every OTHER suite for a schema file name followed on the SAME LINE by one of its four
+  # present-tense verbs, to catch a comment still asserting that the status schema b[l]esses a
+  # phase nothing writes. Its needle cannot tell that subject from this one, and the first draft
+  # of this label put the filename first and one of those verbs after it, so it tripped. The fix
+  # belongs on THIS side: AC10's single exemption is deliberate ("a new suite is covered the day
+  # it lands"), and widening it to make room for a false positive would blunt the check for every
+  # suite added after. So the filename goes LAST here and the verb is outside AC10's class.
+  #
+  # THE BRACKET ABOVE IS THE SAME DEVICE AC10'S OWN SOURCE USES on two of its verbs, for the same
+  # reason: a comment EXPLAINING a scanner is prose the scanner cannot tell from the thing it
+  # polices, so spelling the pattern out here would report this file instead of the repo. That is
+  # not hypothetical -- this comment's first draft named the verbs literally and reddened AC10 by
+  # itself, one edit after the label it was written to explain had been fixed.
+  assert_eq "the pre-#71 no-pattern-check sentence is gone from $f.schema.json" \
     "$(grep -c 'there is no length check, no pattern check and no redaction of credential material' "$SCHEMA_DIR/$f.schema.json" | tr -d ' ')" "0"
   assert_eq "  and it says what the control does NOT cover, so the correction is not an overclaim" \
     "$([[ "$(grep -c 'spelled as prose' "$SCHEMA_DIR/$f.schema.json" | tr -d ' ')" -ge 1 ]] && echo stated || echo "NOT STATED")" "stated"
