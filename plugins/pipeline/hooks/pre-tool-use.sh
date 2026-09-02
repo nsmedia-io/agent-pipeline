@@ -691,6 +691,11 @@ _wordchunk() { # <queue entry at or over _CMAX> : fills _T1.._TN with windows
   # separator; the guard refuses the delimiter outright in that case rather than trying to tell the
   # two apart. A dropped LEADING newline is never neutral -- it merges two invocations -- so it is
   # restored by hand. The trailing one is restored by the appended space above.
+  #
+  # THAT RESTORE IS A RATCHET AND NOT A LIVE CONTROL, said plainly so a reader does not go looking
+  # for the input that reaches it. Deleting it moves no verdict over 38864 corpus rows, because
+  # level 1 prefixes EVERY word with one space unconditionally, so no queue entry can open with a
+  # newline. It guards `_wordchunk`'s own contract against a level-1 build that stopped doing that.
   case $_wc_w in
     *'\'"$_NL"*) ;;
     *"$_NL"*)
@@ -961,6 +966,13 @@ _scan_go() { # <command string> -> _VERDICT
     # except `>&`, where the `&` would end the invocation instead of being consumed as part of the
     # redirection. Keeping two characters in the window while any input remains closes all of them
     # at once rather than one spelling at a time.
+    #
+    # THIS IS ALSO A RATCHET TODAY, and the reason is worth writing down because it is the kind of
+    # thing a reader re-derives badly. Weakening `??*` to `?*` moves no verdict over 38864 corpus
+    # rows: a window edge falls either at a WORD boundary (level 1, so an adjacent pair is never
+    # split) or immediately before a delimiter INSIDE a word of at least `_CMAX` bytes (level 2) --
+    # and a `>&` reachable inside a git invocation cannot sit at the second kind, because that
+    # word's own `&` characters have ended the invocation long before the `>&` is reached.
     #
     # THE GUARD IS A `case` AND NOT TWO `[`s, AND SO IS EVERY OTHER TEST ON THIS PATH. `case`
     # measured 379 ms per 50000 turns against 513 ms for `${#var}` and 794 ms for the bare loop
