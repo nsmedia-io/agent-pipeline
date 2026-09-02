@@ -199,10 +199,12 @@ suite "AC7 OPAQUE OPERAND: a word the shell has not resolved yet cannot narrow a
 #
 # THE ROWS ARE THE CLASS, NOT SPELLINGS OF IT. POSIX sh introduces a substitution with exactly two
 # characters, `$` and the backquote, and the operand column below walks every syntactic form each
-# one takes -- bare name, braced, braced-with-default, command substitution, arithmetic, the
-# backquoted form, the double-quoted form, two in a row, and one behind `--` where every word is
-# an operand -- against all thirteen commands. A gate that closed one spelling passes its own row
-# and fails the rest.
+# one takes: bare name, braced, braced-with-default, command substitution in both its spellings,
+# arithmetic, the backquoted form, the double-quoted form, and two in a row. It is a CROSS with
+# two POSITIONS -- as an ordinary operand and behind `--`, where the scanner takes a different
+# branch and every word is an operand -- over all thirteen commands. A gate that closed one
+# spelling, or closed one of the two branches, passes its own row and fails the rest: the two
+# branches were separately mutated and each reddened only its own cells.
 OPAQUE_OPERANDS=(
   '$NOPE'
   '${NOPE}'
@@ -213,12 +215,13 @@ OPAQUE_OPERANDS=(
   '"$NOPE"'
   '$NOPE $NOPE'
   '$(( 1 - 1 ))'
-  '-- $NOPE'
 )
 for c in "${FORBIDDEN[@]}" "${FLOOR_ROWS[@]}"; do
-  for op in "${OPAQUE_OPERANDS[@]}"; do
-    assert_eq "DENY (opaque operand appended): $c $op" \
-      "$(sub_verdict "$P4" "$c $op")" "deny"
+  for pos in '' '-- '; do
+    for op in "${OPAQUE_OPERANDS[@]}"; do
+      assert_eq "DENY (opaque operand appended): $c $pos$op" \
+        "$(sub_verdict "$P4" "$c $pos$op")" "deny"
+    done
   done
 done
 # THE TEST SITS AT THE OPERAND POSITION AND NOWHERE ELSE. A word that opens with a dash is read
@@ -264,6 +267,13 @@ assert_eq "ALLOW, disclosed residual: git add \${X} (same, braced)" \
 # argument count the shell really produced. Its own NON-ZERO CONTROL is the literal-path row,
 # which must come back with one MORE argument than the vanishing one; without that, "2 arguments"
 # and "the shim was never reached" are the same reading.
+#
+# THESE NINE ROWS ARE NOT COVERAGE OF THE HOOK, AND THAT IS RECORDED SO NOBODY COUNTS THEM AS IT.
+# They assert a property of /bin/sh, so every hook mutation SURVIVES them by construction: with
+# the opacity arm reverted to its literal-empty-only form, 63 verdict rows above went red and all
+# nine of these stayed green. What they pin is the fixture population's PREMISE -- that the rows
+# above really do construct a vanishing word -- which is the half a green suite cannot otherwise
+# tell from a row that was never dangerous.
 GATE_SHIM_DIR="$TEMP_PROJECT/argv-shim"
 mkdir -p "$GATE_SHIM_DIR"
 cat > "$GATE_SHIM_DIR/git" <<'SHIMEOF'
