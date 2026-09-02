@@ -75,7 +75,14 @@ mkinvalid() {
     > "$1/review.dba.json"
 }
 
-# stop <root> [marker] -> RC, OUT (the decision channel), ERR (the attribution line)
+# stop <root> [payload-marker] -> RC, OUT (the decision channel), ERR (the attribution line)
+#
+# $ENV_MARKER carries the OTHER half of the marker seam: activeIssueName reads the payload field
+# first and then CLAUDE_PIPELINE_ACTIVE_ISSUE / PIPELINE_ACTIVE_ISSUE. The two channels are tested
+# separately because a resolver can only be asked "with no marker at all" by passing a value the
+# issue-dir shape rejects -- unsetting the environment around a call is not something the module
+# can do -- so the env channel is the one where a missing sentinel actually shows.
+ENV_MARKER=""
 stop() {
   local root="$1" marker="${2:-}" payload
   payload=$(node -e '
@@ -85,7 +92,7 @@ stop() {
     process.stdout.write(JSON.stringify(p));
   ' "$root" "$marker")
   printf '%s' "$payload" \
-    | ( cd "$root" && CLAUDE_PROJECT_DIR="$root" node "$VALIDATOR" ) \
+    | ( cd "$root" && CLAUDE_PROJECT_DIR="$root" CLAUDE_PIPELINE_ACTIVE_ISSUE="$ENV_MARKER" node "$VALIDATOR" ) \
       >"$WORK/out.txt" 2>"$WORK/err.txt"
   RC=$?
   OUT=$(cat "$WORK/out.txt")
@@ -185,6 +192,24 @@ F=$(root f); mkrun "$F" 9001 60000; mkinvalid "$F/.pipeline/9001"
 stop "$F" 9999
 assert_eq "B4: a marker naming an absent dir cannot suppress it either" "$(blocked)" "yes"
 assert_eq "B4: still scoped to the sole in-flight run" "$(scoped)" "9001"
+
+# B4b THE SAME PROPERTY THROUGH THE ENVIRONMENT CHANNEL, which is the one the no-marker sentinel
+# actually guards. The bare question is asked by passing a value ISSUE_DIR_RE rejects, precisely
+# because a module cannot unset the caller's environment; ask it with `{}` instead and the env var
+# leaks into the answer that is supposed to be marker-free. Measured: with the sentinel replaced
+# by `{}` AND resolveRunOwner's marker branch made preemptive, this cell is the one that reddens
+# while the payload-channel cells above stay green.
+ENV_MARKER=9002
+stop "$E"
+assert_eq "B4b: an ENV marker naming a concluded run cannot suppress the deny either" "$(blocked)" "yes"
+assert_eq "B4b: still scoped to the sole in-flight run" "$(scoped)" "9001"
+# CONTROL, so B4b is a discrimination and not "the env var is ignored": pointed at an in-flight
+# run in an ambiguous root, the env marker resolves it exactly as the payload field does.
+ENV_MARKER=9002
+stop "$A"
+assert_eq "B4b CONTROL: the env marker DOES resolve an ambiguous root" "$(blocked)" "yes"
+assert_eq "B4b CONTROL: to the record it names" "$(scoped)" "9002"
+ENV_MARKER=""
 
 # B5 WIDEN-ONLY, asserted as a SET RELATION over the cross product rather than on one fixture.
 # For every root built above and every marker value, the set of issues the marker run checks must
