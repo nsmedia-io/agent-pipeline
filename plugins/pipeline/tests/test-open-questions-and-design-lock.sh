@@ -29,7 +29,7 @@ PIPELINE_MD="$PLUGIN_ROOT/commands/pipeline.md"
 ISSUE=4243
 
 make_temp_project "$ISSUE" || exit 90
-printf '%s' '{"current_phase":"2.5-design"}' > "$TEMP_ISSUE_DIR/status.json"
+write_run_record "$TEMP_ISSUE_DIR/status.json" "2.5-design"
 
 # hook <agent_type> -> RC, OUT
 hook() {
@@ -228,7 +228,7 @@ suite "experiment runs are validated too (they were the pipeline's one blind cel
 # retroactive spec for this very change was written to an exp- dir and was never validated.
 EXP_DIR="$TEMP_PROJECT/.pipeline/exp-two-owner-gates"
 mkdir -p "$EXP_DIR"
-printf '%s' '{"current_phase":"1-ba"}' > "$EXP_DIR/status.json"
+write_run_record "$EXP_DIR/status.json" "1-ba"
 
 exp_hook() {
   local outf="$TEMP_PROJECT/expout.txt"

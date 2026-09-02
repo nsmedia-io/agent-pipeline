@@ -6,10 +6,15 @@
 # validator error. A validation hook must never wedge an agent stop.
 #
 # The validator (scripts/validate-pipeline-artifact.mjs) reads the hook payload on stdin,
-# resolves the ONE active .pipeline/<issue> dir under the project (newest status.json mtime,
-# or an explicit active-issue signal in the payload/env if a future orchestrator sets one),
-# and prints the decision JSON only on a real failure. Until that script ships in the plugin's
-# scripts/ dir, this hook simply no-ops (the -f guard below), which is the safe default.
+# resolves the ONE .pipeline/<issue> dir whose RUN this stop belongs to -- the run that is in
+# flight by its own `updated_at`, named by an explicit active-issue signal in the payload/env or
+# left as the sole surviving candidate -- and prints the decision JSON only on a real failure.
+# Until that script ships in the plugin's scripts/ dir, this hook simply no-ops (the -f guard
+# below), which is the safe default.
+#
+# THE FAIL-OPEN BELOW IS FOR TOOLING GAPS ONLY. A non-empty payload is a real decision:block and
+# is passed straight through, which is why the validator's scoping is a refusal control and not
+# an advisory one: resolving the wrong run REFUSES A CORRECT STOP (#109).
 
 set -u
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
