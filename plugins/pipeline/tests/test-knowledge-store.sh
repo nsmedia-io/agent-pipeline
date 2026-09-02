@@ -130,6 +130,65 @@ assert_not_contains "and re-stamped" "$(jget "$LC/testing--conventions.json" las
 ks --write --file "$TEMP_PROJECT/courier--roster.json" --supersede nothing-here
 assert_eq "--supersede on an unknown slug exits 1" "$RC" "1"
 
+suite "knowledge-store: --write honours --collection (#83)"
+
+# The parser ACCEPTED --collection on the write path and cmdWrite then discarded it, passing
+# "living-context" unconditionally, so knowledge/decisions/ -- a destination the Librarian's own
+# contract names (agents/librarian.md, "Record standalone decisions") -- was unreachable by the
+# one script that is supposed to be the store's sole writer. On #53's Phase 5 the decision entry
+# was hand-written instead, which puts that whole class of entry outside this script's validation.
+# Created HERE rather than left to the first write, so the fixtures below do not depend on the
+# behaviour under test to have a directory to land in: a thrown setup and a passing case are
+# hard to tell apart from the transcript.
+DEC="$ROOT/knowledge/decisions"
+mkdir -p "$DEC"
+printf '%s' '{"title":"Ferry cadence decision","status":"current","domain":"ops","content":"Ferries run hourly."}' \
+  > "$TEMP_PROJECT/ferry-cadence.json"
+
+ks --write --file "$TEMP_PROJECT/ferry-cadence.json" --collection decisions
+assert_eq "--write --collection decisions exits 0" "$RC" "0"
+# BOTH halves, because they fail for different reasons. The first is the flag doing its job; the
+# second is the flag being the ONLY thing that decides, so a write that fanned out to every
+# collection could not pass a one-sided check.
+assert_eq "the doc lands in the named collection" \
+  "$([[ -f "$DEC/ferry-cadence.json" ]] && echo written || echo missing)" "written"
+assert_eq "and NOT in the default collection" \
+  "$([[ -f "$LC/ferry-cadence.json" ]] && echo leaked || echo contained)" "contained"
+assert_contains "the reported path names the collection" "$OUT" "$DEC/ferry-cadence.json"
+
+# --supersede has to resolve in the SAME collection the write targets. A supersede still pinned
+# to living-context retires the wrong document whenever a slug exists in both, which is the
+# louder half of this defect: the twin below is `current` in both collections on purpose, so a
+# supersede that reads the wrong directory flips a doc that should not have been touched.
+printf '%s' '{"title":"Ferry cadence v0","status":"current","content":"Ferries ran twice daily."}' \
+  > "$DEC/ferry-cadence-v0.json"
+printf '%s' '{"title":"Ferry cadence v0 (living-context twin)","status":"current","content":"Not the target."}' \
+  > "$LC/ferry-cadence-v0.json"
+ks --write --file "$TEMP_PROJECT/ferry-cadence.json" --collection decisions --supersede ferry-cadence-v0
+assert_eq "--supersede inside a non-default collection exits 0" "$RC" "0"
+assert_eq "it flips the doc in THAT collection" "$(jget "$DEC/ferry-cadence-v0.json" status)" "superseded"
+assert_eq "and leaves the same-named doc in living-context alone" \
+  "$(jget "$LC/ferry-cadence-v0.json" status)" "current"
+
+# Honouring the value means validating it, on the same allowlist the read paths already use.
+ks --write --file "$TEMP_PROJECT/ferry-cadence.json" --collection nonsense
+assert_eq "an unknown --collection on write exits 1" "$RC" "1"
+assert_contains "and says which collection" "$ERR" "unknown --collection"
+
+# The allowlist is also what closes the traversal the read paths never had: collectionDir joins
+# the value straight into the path, so an unvalidated --collection writes wherever the `..` run
+# lands. $ROOT/knowledge/../../escaped resolves to $TEMP_PROJECT/escaped.
+#
+# NOT RED ON THE OLD DEFECT, deliberately. Against the pre-#83 code the flag was discarded, so
+# this wrote harmlessly into living-context and the containment half passed. It reddens on the
+# WRONG FIX -- honouring --collection without validating it -- which is the only way this line
+# can now be reached. Verified by planting exactly that: dropping the COLLECTIONS check turns
+# both assertions below red while every other case in this suite stays green.
+ks --write --file "$TEMP_PROJECT/ferry-cadence.json" --collection ../../escaped
+assert_eq "a traversing --collection is refused" "$RC" "1"
+assert_eq "and writes nothing outside knowledge/" \
+  "$([[ -e "$TEMP_PROJECT/escaped" ]] && echo escaped || echo contained)" "contained"
+
 suite "knowledge-store: --archive-issue"
 
 ART="$TEMP_PROJECT/artifacts"
@@ -163,6 +222,18 @@ assert_eq "--list exits 0" "$RC" "0"
 assert_contains "it prints the living-context collection" "$OUT" "# living-context"
 assert_contains "it prints the issue-archive collection" "$OUT" "# issue-archive"
 assert_contains "it lists a doc by title" "$OUT" "Courier roster"
+
+# The read half of #83, asserted rather than assumed: --list and --search were audited as
+# already honouring --collection, and this is the observation that says so. It doubles as the
+# end-to-end proof that a doc written to a non-default collection is discoverable from it.
+ks --list --collection decisions
+assert_eq "--list --collection decisions exits 0" "$RC" "0"
+assert_contains "the read path honours --collection" "$OUT" "# decisions"
+assert_contains "and finds the doc written to it" "$OUT" "Ferry cadence decision"
+assert_not_contains "without listing the default collection" "$OUT" "# living-context"
+
+ks --search "ferries" --collection decisions
+assert_contains "--search honours --collection too" "$OUT" "Ferry cadence decision"
 
 EMPTYROOT="$TEMP_PROJECT/empty-root"
 mkdir -p "$EMPTYROOT"
