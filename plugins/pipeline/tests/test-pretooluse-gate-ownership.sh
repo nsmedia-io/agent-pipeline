@@ -929,12 +929,22 @@ else
 fi
 
 # ===============================================================================================
-suite "AC28: SubagentStop is UNTOUCHED"
+suite "AC28: SubagentStop changes ONLY where an issue reviewed it, and nowhere else"
 # ===============================================================================================
 #
-# This criterion exists to catch the failure this issue is ABOUT, one level up: a change reviewed
-# for one thing silently altering a shipped gate. Paired same-run capture against the reviewed
-# commit, from one pinned cwd against one record-store state.
+# This criterion exists to catch the failure #106 was ABOUT, one level up: a change reviewed for
+# one thing silently altering a shipped gate. Paired same-run capture against the reviewed commit,
+# from one pinned cwd against one record-store state.
+#
+# ITS SUBJECT IS "SILENTLY", NOT "NEVER". #109 migrated this exact path onto run-candidate
+# resolution, deliberately and with its own review, and it is the only thing that has ever been
+# allowed to move here. So the ERA IS MEASURED FROM A STRUCTURAL PROPERTY OF THE BASE -- does the
+# base's validator export #109's seam -- and never from the behaviour under test, which would be
+# circular. Before that base exists, the two are REQUIRED to differ and the difference is asserted
+# in its direction; from that base on, they are required to match byte for byte again.
+#
+# READ THAT TOGETHER WITH THE #128 NOTE BELOW. Both are the same lesson twice: an assertion phrased
+# against a moving base is true for exactly one merge unless it says which era it is in.
 SS_BASE_SHA="$(git -C "$GATE_REPO_ROOT" merge-base HEAD origin/main 2>/dev/null || git -C "$GATE_REPO_ROOT" rev-parse HEAD~1 2>/dev/null || printf '')"
 SS_WT="$TEMP_PROJECT/subagentstop-base"
 SS_OK=no
@@ -995,15 +1005,43 @@ if [[ "$SS_OK" == "yes" ]]; then
   assert_eq "AC28 FILTER PREMISE: the base emits at most one, so a second unexpected line is never absorbed" \
     "$([[ "$SS_BASE_LINES" -le 1 ]] && echo ok || echo "base emitted $SS_BASE_LINES")" "ok"
   record "AC28 ERA: base $SS_BASE_SHA emits $SS_BASE_LINES attribution line(s); HEAD emits $SS_HEAD_LINES"
+
+  # THE #109 ERA, measured from the BASE MODULE'S SHAPE rather than from what it printed on this
+  # fixture. Asking "did the base resolve a run here?" would be asking the behaviour under test to
+  # certify its own era, which is no test at all. Asking "does the base export the ownership seam?"
+  # is a fact about the base that holds whatever fixture it is pointed at.
+  SS_BASE_HAS_109="$("$GATE_REAL_NODE" --input-type=module -e "
+    try {
+      const m = await import('file://$SS_WT/plugins/pipeline/scripts/validate-pipeline-artifact.mjs');
+      process.stdout.write(typeof m.stopRunScope === 'function' ? 'yes' : 'no');
+    } catch { process.stdout.write('unreadable'); }" 2>/dev/null)"
+  record "AC28 ERA: base carries #109's ownership seam: $SS_BASE_HAS_109"
+  assert_eq "AC28 ERA PREMISE: the base module was READABLE, so the era was measured and not guessed" \
+    "$([[ "$SS_BASE_HAS_109" == "unreadable" ]] && echo "could-not-import-the-base" || echo measured)" "measured"
+
   if [[ "$SS_BASE_LINES" -eq 0 ]]; then
     # Pre-#128 base. The strip is doing real work; prove it, by showing the UNFILTERED capture
     # genuinely differs. Without this the "load-bearing" claim is untested in the era it describes.
     assert_eq "AC28 ERA(pre-#128): the strip is LOAD-BEARING -- unfiltered, the two genuinely differ" \
       "$([[ "$SS_B_RAW" != "$SS_A_RAW" ]] && echo differs || echo "identical, so the strip was never needed")" "differs"
+  elif [[ "$SS_BASE_HAS_109" == "no" ]]; then
+    # PRE-#109 BASE. The attribution line is REQUIRED to differ here, because #109 is the change
+    # that made it differ, and a cell asserting sameness would be asserting the defect. What AC28
+    # still guarantees is that NOTHING ELSE moved: same exit code, same stdout (empty -- neither
+    # era blocks on a root holding no artifacts), and no second stderr line on either side. The
+    # direction is pinned too, so a regression that changed the line some OTHER way reddens.
+    assert_eq "AC28 ERA(pre-#109): everything except the attribution line is byte-identical" "$SS_B" "$SS_A"
+    assert_contains "AC28 ERA(pre-#109): the base resolved a run by newest mtime (the behaviour #109 retired)" \
+      "$(cat "$TEMP_PROJECT/ss.base.err")" "verdict=checked"
+    assert_contains "AC28 ERA(pre-#109): HEAD abstains instead, and names the ambiguity" \
+      "$(cat "$TEMP_PROJECT/ss.head.err")" "ambiguous-owner"
+    assert_eq "AC28 ERA(pre-#109): and it is an ABSTENTION, not a differently-scoped block" "$SS_B_HEAD" "rc=0 out=[]"
   else
-    # Post-#128 base: both carry the line, so the strip removes the same thing from both and the
-    # unfiltered comparison must ALSO hold. This is the assertion that keeps working from here on.
-    assert_eq "AC28 ERA(post-#128): the strip is a NO-OP, so the UNFILTERED capture matches byte for byte" \
+    # Post-#109 base: both eras carry the fix and both carry the line, so the strip removes the
+    # same thing from both and the unfiltered comparison must ALSO hold. This is the assertion
+    # that keeps working from here on, and it is strictly stronger than the stripped one because
+    # it pins the attribution line's own bytes.
+    assert_eq "AC28 ERA(post-#109): the strip is a NO-OP, so the UNFILTERED capture matches byte for byte" \
       "$SS_B_RAW" "$SS_A_RAW"
   fi
   git -C "$GATE_REPO_ROOT" worktree remove --force "$SS_WT" >/dev/null 2>&1

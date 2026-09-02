@@ -13,13 +13,34 @@
  *     and a Phase 2 reviewer's peer-review block does not exist yet in Phase 4. We catch
  *     malformed-present, never absent.
  *   - Scope to ONE active issue, never a sibling. Within a resolved .pipeline root the sweep
- *     validates only the single issue dir the session owns, derived by precedence (see
- *     activeIssueDir): a forward-compatible orchestrator marker/env seam, then the newest
- *     status.json mtime (the only path exercised in normal use), then fail-open (validate
- *     nothing). A freshly synced or checked-out sibling issue's artifacts carry a recent
- *     mtime too, so without this the recent-mtime narrowing could not tell the session's own
- *     just-written artifact from an unrelated sibling, and a defect in another issue dir
- *     would block a stop the session had nothing to do with.
+ *     validates only the run dir the session owns, resolved by RUN OWNERSHIP (see
+ *     stopRunScope, which composes resolveRunOwner): the candidate set is narrowed to runs that
+ *     are in flight by their own `updated_at`, then an explicit orchestrator marker or a sole
+ *     surviving candidate resolves it, and anything else abstains. A freshly synced or checked-
+ *     out sibling issue's artifacts carry a recent mtime too, so without this the recent-mtime
+ *     narrowing could not tell the session's own just-written artifact from an unrelated
+ *     sibling, and a defect in another issue dir would block a stop the session had nothing to
+ *     do with.
+ *
+ *     UNTIL #109 THIS PATH RANKED BY NEWEST status.json MTIME, and that was a live
+ *     refuses-correct-work defect rather than a latent one. hooks/subagent-stop.sh is fail-open
+ *     for TOOLING gaps only; a non-empty payload from here is passed straight through as a real
+ *     `decision:block`. Measured on the shipped hook at 70e7d46: one root, two runs in flight,
+ *     the dba agent's own review.dba.json under `.pipeline/9001` VALID and a freshly-synced
+ *     `.pipeline/9002` invalid and newer by mtime -- 856 bytes of decision:block naming five
+ *     violations, all of them in 9002. The same wrong pick also missed the real defect in the
+ *     other direction: with 9001's artifact broken instead, it reported violations=0.
+ *
+ *     WHAT THAT COSTS, stated because a narrowing owes it. This sweep now validates nothing in
+ *     a root where two runs are in flight and no marker names one, and nothing at all in a run
+ *     whose status.json carries no parseable `updated_at`. Both are the claim-LESS direction (a
+ *     missed block, not a false one), the marker is the documented route back to a deny, and
+ *     `updated_at` is one of the fields the shipped run-record shape requires (check-status-
+ *     record.mjs's isRunRecord reads that list), so a record written by the orchestrator always
+ *     carries one.
+ *   - activeIssueDir keeps its own contract, unchanged, because gate-phase-entry.mjs (which
+ *     REFUSES a phase entry) and voice-lint.mjs read it. #109 changes what the SubagentStop
+ *     sweep ASKS FOR, not what that older answer means.
  *   - Fail open. Any internal error exits 0 with no decision, so a validator bug can never
  *     wedge a legitimate stop. Each agent's turn cap bounds the fix-loop a block could
  *     otherwise create.
@@ -449,6 +470,13 @@ function loadJson(file) {
  * missing a required field is not recognised here, so it keeps the pre-existing silence. That
  * fails INERT, never toward a false block, and it is the same posture the rest of this file takes
  * on an input it cannot characterise.
+ *
+ * #109 ADDS THE IN-FLIGHT BOUND, so this recovery answers the same question the named half now
+ * answers. Before it, a named half that abstained (two runs in flight, or none) handed the
+ * `!issueDir` branch below an unconditional win, so narrowing the named half would have WIDENED
+ * the unnamable one -- a change that closes a false block on one path by opening one on the
+ * other. The predicate is run-candidates.mjs's, not a second copy: an unnamable run owns a stop
+ * only while it is in flight by its own `updated_at`.
  */
 // mtime of a run dir's status.json, or null when there is none to read. The same quantity
 // activeIssueDir ranks its own candidates by, so the two comparisons stay commensurable.
@@ -460,7 +488,9 @@ function statusMtime(dir) {
   }
 }
 
-export function unnamedRunDirs(pipelineDir) {
+/** Returns `{ dir, datable }[]` -- the shape changed with #109's bound; nothing outside this
+ *  module reads it. */
+export function unnamedRunDirs(pipelineDir, now = Date.now()) {
   const out = [];
   let entries;
   try {
@@ -478,7 +508,13 @@ export function unnamedRunDirs(pipelineDir) {
       continue; // no record, or an unreadable one: not evidence of a run
     }
     if (!isRunRecord(status)) continue;
-    out.push(dir);
+    // #109: the same candidate predicate the named half is narrowed by, from the same leaf.
+    // `candidate` and not `inFlight`, so an undatable record still COUNTS -- it must be able to
+    // make the set ambiguous below, exactly as it does for a named run. `datable` travels with
+    // it so the caller can honour the other half of that ruling: counted, but never the owner.
+    const obs = inFlightObservations(status, now);
+    if (!obs.candidate) continue;
+    out.push({ dir, datable: obs.datable });
   }
   return out;
 }
@@ -616,6 +652,83 @@ export function resolveRunOwner(pipelineDirsIn, input, now = Date.now(), ceiling
 
   return none("ambiguous-owner");
 }
+
+/**
+ * A sentinel that asks resolveRunOwner "who resolves with NO marker at all".
+ *
+ * It is a value ISSUE_DIR_RE rejects, so activeIssueName() returns null for it AND never falls
+ * through to the environment -- which is the whole point: unsetting two env vars around a call is
+ * not something a library can do, and asking a SECOND resolver the no-marker question would let
+ * the two answer differently. One resolver, two questions.
+ *
+ * DECLARED HERE AND EXPORTED because gate-phase-entry.mjs already imports from this module and
+ * used to carry a private `const MTIME_ONLY = "!"`. A second copy of a shared vocabulary is the
+ * drift this repo has paid for twice (voice-lint.mjs's private /^\d+$/, which kept `exp-` runs
+ * invisible for months; the IN_FLIGHT_MS pair, which needed a suite of its own to stay honest).
+ * There is no cycle to avoid here, so one declaration is simply correct.
+ */
+export const MTIME_ONLY = "!";
+
+/**
+ * WHICH RUN DIRS THE SubagentStop SWEEP MAY VALIDATE (#109).
+ *
+ * The shape is gate-phase-entry.mjs's shipped candidateDirs precedent, over the OWNERSHIP
+ * question instead of the mtime one: ask the one resolver twice -- once with whatever marker the
+ * payload/env carries, once with the marker forced off -- and act on the UNION.
+ *
+ * THE UNION IS WHAT MAKES THE MARKER'S DIRECTION STRUCTURAL RATHER THAN ARGUED. The no-marker
+ * answer is always in the set, so a marker can only ever ADD a dir to the sweep. It CANNOT be an
+ * off-switch: pointing it at a concluded run, or at a dir that does not exist, cannot take the
+ * sole in-flight candidate out of scope. And it CAN turn an abstention into a deny: where two
+ * runs are in flight the bare answer is `ambiguous-owner` and nothing is checked, and a marker
+ * naming either of them resolves it.
+ *
+ * THAT IS THE LIVE RULING AND IT REVERSES AN EARLIER ONE. #106's round-4 spec first ruled the
+ * marker "may only ever REDUCE refusals" on the reasoning that a wider marker is strictly safer.
+ * Round-5 review showed the reasoning inverted for a control whose entire function is to refuse:
+ * reduce-only makes the marker functionally identical to an operator disarm, with none of the
+ * reachability testing a disarm gets, and it forecloses the only remedy for the abstention above.
+ * #109's correction note retires reduce-only. Do not re-derive it.
+ *
+ * The union is one dir or none in every reachable state -- if the marker resolved, its record is
+ * a candidate, so the bare call either resolves the same record or abstains as ambiguous -- but
+ * it is COMPUTED as a union rather than asserted to be a singleton, so a later change to
+ * resolveRunOwner's marker branch cannot quietly make the marker subtractive.
+ *
+ * Returns { dirs, markerResolved, reason }, where `reason` names the bare abstention for the
+ * attribution line. The reason is deliberately the BARE one: it is the answer that describes
+ * what the record store looks like, and a marker that resolved is reported by `markerResolved`.
+ */
+export function stopRunScope(pipelineDir, input, now = Date.now()) {
+  const bare = resolveRunOwner([pipelineDir], { active_issue: MTIME_ONLY }, now);
+  const marked = activeIssueName(input) ? resolveRunOwner([pipelineDir], input, now) : bare;
+  const dirs = [];
+  for (const r of [bare, marked]) {
+    if (r.dir && !dirs.includes(r.dir)) dirs.push(r.dir);
+  }
+  return { dirs, markerResolved: marked.provenance === "marker", reason: bare.reason };
+}
+
+/**
+ * Why the abstention happened, in words, for the one stderr attribution line.
+ *
+ * NOT SHARED WITH hooks/pre-tool-use-resolve.mjs's NOTE map, deliberately, and the difference is
+ * not cosmetic: that gate is answering "whose RUN does this tool call belong to" and this sweep
+ * is answering "which run did this stop just write into". The two say different things about the
+ * same reason code, and folding them would force one of them to lie. What they DO share -- the
+ * predicate and the reason codes themselves -- comes from run-candidates.mjs and resolveRunOwner
+ * rather than from either copy of this prose.
+ */
+const STOP_SCOPE_NOTE = {
+  "no-pipeline-root": "no run record store under this root",
+  "unreadable-record": "a status.json under this root would not parse, so the record store cannot be narrowed",
+  "no-in-flight-run":
+    "no run under this root is in flight: every record has concluded or has not been updated inside the in-flight window",
+  "undatable-sole-candidate":
+    "the one candidate run carries no parseable updated_at, so its recency is unknowable and it cannot own this stop",
+  "ambiguous-owner":
+    "two or more runs are in flight and no active-issue marker names one of them, so which run this stop belongs to is not derivable",
+};
 
 // ---- grounding: impl-report claims vs cheap read-only evidence ---------------
 //
@@ -1063,56 +1176,70 @@ export function checkArtifacts(agentType, input, now = Date.now(), rootsOverride
   for (const dir of roots) {
     const projectRoot = path.dirname(dir); // <root> for a <root>/.pipeline dir
     let sawRecent = false; // any recent artifact for this agent in this root
-    // Scope to the single active issue dir, not every sibling in this root. A null means no
-    // active issue is derivable here (no signal, no status.json), so this session owns nothing
-    // to validate: skip the root entirely (fail-open).
-    let issueDir = activeIssueDir(dir, input);
+    // Scope to the run this stop belongs to, not every sibling in this root, and not the newest
+    // mtime (#109 -- see stopRunScope, and this file's header for the measurement). An empty set
+    // means no run under this root owns this stop, so there is nothing here to validate: skip the
+    // root entirely (fail-open).
+    const scope = stopRunScope(dir, input, now);
+    let scopeDirs = scope.dirs;
     let viaUnnamed = false;
-    // Did precedence (a) -- the orchestrator's explicit marker -- decide this? Recomputed from
-    // activeIssueName rather than inferred from the result, because an mtime scan can legitimately
-    // land on the same dir the marker names and the two must not be confused.
-    const marker = activeIssueName(input);
-    const markerResolved = Boolean(marker && issueDir && path.basename(issueDir) === marker);
+    const markerResolved = scope.markerResolved;
+    // The machine reason code is printed ALONGSIDE the prose, not instead of it. The prose is
+    // what an operator reads; the code is what a transcript census greps, and it is the half that
+    // survives a rewording. #66 property 2 is only satisfied if the fail-open path says WHICH
+    // fail-open it was in a form a later reader can match on.
+    if (scopeDirs.length === 0 && verdict === "no-active-issue") {
+      detail =
+        `no run dir resolves under ${roots.length} .pipeline root(s) [${scope.reason}]: ` +
+        (STOP_SCOPE_NOTE[scope.reason] || scope.reason);
+    }
 
-    // #115 RECOVERY. The rule is the one this validator already uses to decide which issue is
-    // active -- THE NEWEST status.json WINS -- applied to a candidate ISSUE_DIR_RE excluded from
-    // that comparison purely on its name. Nothing new is invented here; a run is simply no longer
-    // disqualified from being the newest by being unnamable.
+    // #115 RECOVERY, now bounded by #109's ownership rule. A run whose dir ISSUE_DIR_RE cannot
+    // name is still checked; it is simply no longer disqualified from owning the stop by being
+    // unnamable, and no longer qualified merely by being newest.
     //
     // "A NAMED DIR ALWAYS WINS" WAS THE WRONG RULE, and it was measured wrong rather than argued
     // wrong. In the realistic adopting-project shape -- one finished `.pipeline/12` from last
-    // month plus today's unnamable run -- activeIssueDir resolves the stale numeric dir, so a
-    // last-resort-only fallback never fires and today's run stays exactly as unchecked as before
-    // this change. Measured 2026-09-02: 0 bytes on a fixture carrying 14 known violations.
+    // month plus today's unnamable run -- the old mtime scan resolved the stale numeric dir, so a
+    // last-resort-only fallback never fired and today's run stayed exactly as unchecked as before
+    // that change. Measured 2026-09-02: 0 bytes on a fixture carrying 14 known violations.
     //
-    // THREE THINGS THAT STILL BOUND IT, each refusing a different way to guess wrong:
+    // FOUR THINGS THAT BOUND IT, each refusing a different way to guess wrong:
     //   - AN EXPLICIT MARKER IS NEVER OVERRIDDEN. If the orchestrator named the run, that answer
-    //     stands; precedence (a) in activeIssueDir's contract is untouched.
-    //   - STRICTLY NEWER, never equal. A tie keeps the named dir, so this can only ever move the
-    //     answer on a positive signal, and the git-clone case (every tracked status.json stamped
-    //     within one coarse clock tick) cannot flip it.
-    //   - UNIQUE, for the same reason activeIssueDir refuses an mtime tie: two unnamable runs are
-    //     an absence of a signal, not a weaker one, and guessing between them would block a stop
-    //     for work this session never touched.
+    //     stands.
+    //   - IN FLIGHT, by unnamedRunDirs' own use of the shared predicate: a run abandoned in a
+    //     tree months ago does not become this stop's owner by being the only unnamable one.
+    //   - DATABLE. An undatable record is counted (so it can make the set ambiguous) and is never
+    //     the resolved owner, which is #106's ruling applied to the half it did not reach.
+    //   - UNIQUE, and STRICTLY NEWER than every named dir already in scope. Two unnamable runs are
+    //     an absence of a signal, not a weaker one, and a tie keeps the named answer -- so the
+    //     git-clone case (every tracked status.json stamped within one coarse clock tick) cannot
+    //     flip it.
     if (!markerResolved) {
-      const orphans = unnamedRunDirs(dir);
-      if (orphans.length === 1) {
-        const candidate = orphans[0];
+      const orphans = unnamedRunDirs(dir, now);
+      if (orphans.length === 1 && orphans[0].datable) {
+        const candidate = orphans[0].dir;
         const candidateAt = statusMtime(candidate);
-        if (candidateAt !== null && (!issueDir || candidateAt > statusMtime(issueDir))) {
-          issueDir = candidate;
+        const beatsScope =
+          scopeDirs.length === 0 ||
+          scopeDirs.every((d) => {
+            const at = statusMtime(d);
+            return at === null || candidateAt > at;
+          });
+        if (candidateAt !== null && beatsScope) {
+          scopeDirs = [candidate];
           viaUnnamed = true;
         }
-      } else if (orphans.length > 1 && !issueDir && verdict === "no-active-issue") {
+      } else if (orphans.length > 1 && scopeDirs.length === 0 && verdict === "no-active-issue") {
         verdict = "unnamed-run-ambiguous";
         detail =
           `${orphans.length} dirs under ${dir} hold a run record but match neither <number> nor ` +
-          `exp-<slug> (${orphans.map((o) => path.basename(o)).join(", ")}); which run this stop ` +
+          `exp-<slug> (${orphans.map((o) => path.basename(o.dir)).join(", ")}); which run this stop ` +
           `belongs to is not derivable, so nothing was validated`;
       }
     }
 
-    if (issueDir) {
+    for (const issueDir of scopeDirs) {
       if (verdict === "no-active-issue" || verdict === "unnamed-run-ambiguous") {
         verdict = viaUnnamed ? "unnamed-run" : "checked";
         issue = path.basename(issueDir);
@@ -1469,6 +1596,25 @@ function selfTest() {
   const testClaimedFalse = { ...groundedReport, checks_passed: { typecheck: true, test: false, lint: true } };
   check("grounding: test not claimed true skips signal check (pass)", groundImplReport(testClaimedFalse, evTestFailed), false);
 
+  // A SCHEMA-SHAPED RUN RECORD THAT IS IN FLIGHT BY ITS OWN `updated_at` (#109).
+  //
+  // These fixtures used to write `{ issue_number: N }` -- a placeholder that carried no phase and
+  // no timestamp, which was adequate while the sweep resolved by newest mtime and reads as an
+  // UNDATABLE record now that it resolves by run ownership. An undatable record is deliberately
+  // never the resolved owner, so a stub here would make every case below abstain and pass for the
+  // wrong reason. The timestamp is COMPUTED, never a literal: the point of the change is that
+  // `updated_at` and mtime are different clocks, and a fixture that freezes one of them into a
+  // date literal starts failing on the day it drifts outside the window.
+  const inFlightRecord = (issueNumber, agoMs = 60_000) =>
+    JSON.stringify({
+      issue_number: issueNumber,
+      current_phase: "4-review",
+      started_at: "2026-01-01T00:00:00Z",
+      updated_at: new Date(Date.now() - agoMs).toISOString(),
+      branch: "b",
+      events: [],
+    });
+
   // ---- active-issue scoping: pure activeIssueDir derivation ----
   {
     const root = mkdtempSync(path.join(tmpdir(), "vpa-active-"));
@@ -1479,8 +1625,8 @@ function selfTest() {
       const sibling = path.join(pipe, "1964");
       mkdirSync(active, { recursive: true });
       mkdirSync(sibling, { recursive: true });
-      writeFileSync(path.join(active, "status.json"), JSON.stringify({ issue_number: 1965 }));
-      writeFileSync(path.join(sibling, "status.json"), JSON.stringify({ issue_number: 1964 }));
+      writeFileSync(path.join(active, "status.json"), inFlightRecord(1965));
+      writeFileSync(path.join(sibling, "status.json"), inFlightRecord(1964));
       // Force the sibling's status.json newer, so mtime derivation alone would pick it.
       const later = (Date.now() + 5000) / 1000;
       utimesSync(path.join(sibling, "status.json"), later, later);
@@ -1545,7 +1691,7 @@ function selfTest() {
       const decoyPipe = path.join(decoyCheckout, ".pipeline");
       const decoyIssue = path.join(decoyPipe, "9001");
       mkdirSync(decoyIssue, { recursive: true });
-      writeFileSync(path.join(decoyIssue, "status.json"), JSON.stringify({ issue_number: 9001 }));
+      writeFileSync(path.join(decoyIssue, "status.json"), inFlightRecord(9001));
       writeFileSync(path.join(decoyIssue, "peer-review.secops.json"), JSON.stringify(brokenPanel));
 
       process.env.CLAUDE_PROJECT_DIR = decoyCheckout;
@@ -1555,9 +1701,9 @@ function selfTest() {
       const pin = [root];
 
       // Case 1: sibling holds a DEFECT, active holds a VALID artifact. No block.
-      writeFileSync(path.join(active, "status.json"), JSON.stringify({ issue_number: 1965 }));
+      writeFileSync(path.join(active, "status.json"), inFlightRecord(1965));
       writeFileSync(path.join(active, "peer-review.secops.json"), JSON.stringify(validPanel));
-      writeFileSync(path.join(sibling, "status.json"), JSON.stringify({ issue_number: 1964 }));
+      writeFileSync(path.join(sibling, "status.json"), inFlightRecord(1964));
       writeFileSync(path.join(sibling, "peer-review.secops.json"), JSON.stringify(brokenPanel));
       const r1 = checkArtifacts("secops", { cwd: root, active_issue: "1965" }, Date.now(), pin);
       check("scoping: sibling defect does NOT block the active session (pass)", r1.failures, false);
@@ -1582,6 +1728,16 @@ function selfTest() {
       // NAMESPACED agent_type resolution (#98, #66). Every installed-plugin dispatch (the
       // shipping default) carries agent_type "pipeline:<role>", not the bare role name
       // AGENT_RULES is keyed on. Reuse the active-issue defect fixture above.
+      //
+      // THE RECORDS ARE PUT BACK FIRST, because Case 3 above deleted them to build its
+      // no-derivable-run case and #109 changed what a marker means. It used to name a DIRECTORY,
+      // which resolved whether or not that directory held a record; it now names a RECORD, and is
+      // honoured only when the run it names is itself an in-flight candidate -- which is what
+      // stops a stale marker from manufacturing denies forever. Without this the three cases below
+      // would abstain and report zero failures, i.e. pass the "does it resolve" question by never
+      // asking it.
+      writeFileSync(path.join(active, "status.json"), inFlightRecord(1965));
+      writeFileSync(path.join(sibling, "status.json"), inFlightRecord(1964));
       writeFileSync(path.join(active, "peer-review.secops.json"), JSON.stringify(brokenPanel));
       const rBare = checkArtifacts("secops", { cwd: root, active_issue: "1965" }, Date.now(), pin);
       check("namespacing: bare 'secops' catches the active-issue defect (control)", rBare.failures, true);
@@ -1617,7 +1773,7 @@ function selfTest() {
       mkdirSync(issue, { recursive: true });
       mkdirSync(schemasDir, { recursive: true });
       mkdirSync(archived, { recursive: true });
-      writeFileSync(path.join(issue, "status.json"), JSON.stringify({ issue_number: 1965 }));
+      writeFileSync(path.join(issue, "status.json"), inFlightRecord(1965));
       writeFileSync(path.join(schemasDir, "status.json"), JSON.stringify({ x: 1 }));
       writeFileSync(path.join(archived, "status.json"), JSON.stringify({ x: 1 }));
 
@@ -1729,9 +1885,15 @@ function selfTest() {
       const named = path.join(pipe, "1965");
       mkdirSync(named, { recursive: true });
       const pin = [root];
+      // IN FLIGHT BY `updated_at`, not by mtime, and computed rather than literal (#109). This
+      // used to read `updated_at: "2026-01-01T00:00:00Z"` -- a run eight months stale -- which was
+      // harmless while the sweep ranked by mtime and is decisive now that it resolves by run
+      // ownership. The mtimes below are still stamped explicitly and still decide which run wins
+      // among CANDIDATES; `updated_at` decides which runs are candidates at all. Two clocks, two
+      // jobs, and the fixture must set each on purpose.
       const runRecord = JSON.stringify({
         current_phase: "2-review", started_at: "2026-01-01T00:00:00Z",
-        updated_at: "2026-01-01T00:00:00Z", branch: "b", events: [],
+        updated_at: new Date(Date.now() - 60_000).toISOString(), branch: "b", events: [],
       });
       const validPanel = { verdict: "APPROVE", reviewed_at: "2026-01-01T00:00:00Z", concerns: [], notes: "n" };
       const brokenPanel = { verdict: "NOT_A_VERDICT" };
@@ -1838,7 +2000,7 @@ function selfTest() {
         writeFileSync(path.join(j, "status.json"), JSON.stringify({ x: 1 }));
       }
       check("unnamed-run: a status.json with no phase is NOT a run candidate",
-        unnamedRunDirs(pipe).length === 1 ? [] : [`candidates: ${unnamedRunDirs(pipe).map((d) => path.basename(d)).join(",")}`], false);
+        unnamedRunDirs(pipe).length === 1 ? [] : [`candidates: ${unnamedRunDirs(pipe).map((d) => path.basename(d.dir)).join(",")}`], false);
       // A current_phase that IS a string but is not phase-SHAPED. Without this case the schema
       // pattern clause is dead weight: every junk fixture above omits current_phase entirely, so
       // the `typeof phase !== "string"` clause alone rejects them and deleting the pattern test
@@ -1852,24 +2014,24 @@ function selfTest() {
       writeFileSync(path.join(pipe, "_archived", "status.json"),
         JSON.stringify({ ...JSON.parse(runRecord), current_phase: "archived" }));
       check("unnamed-run: a FULL record whose only defect is a non-phase-shaped current_phase is NOT a candidate",
-        unnamedRunDirs(pipe).length === 1 ? [] : [`candidates: ${unnamedRunDirs(pipe).map((d) => path.basename(d)).join(",")}`], false);
+        unnamedRunDirs(pipe).length === 1 ? [] : [`candidates: ${unnamedRunDirs(pipe).map((d) => path.basename(d.dir)).join(",")}`], false);
       // And the mirror: a schema-shaped phase whose record is missing a required key.
       writeFileSync(path.join(pipe, "_archived", "status.json"),
         JSON.stringify((({ branch, ...rest }) => rest)(JSON.parse(runRecord))));
       check("unnamed-run: a phase-shaped record missing ONE required key is NOT a candidate",
-        unnamedRunDirs(pipe).length === 1 ? [] : [`candidates: ${unnamedRunDirs(pipe).map((d) => path.basename(d)).join(",")}`], false);
+        unnamedRunDirs(pipe).length === 1 ? [] : [`candidates: ${unnamedRunDirs(pipe).map((d) => path.basename(d.dir)).join(",")}`], false);
       // THE SHAPE THAT DEFEATED THE PHASE-PATTERN CHECK ALONE, kept here as its own case rather
       // than left to the suite that found it: a one-field stub whose phase IS schema-shaped.
       // tests/test-open-questions-and-design-lock.sh plants exactly this at `.pipeline/schemas`
       // to prove a non-run sibling is never selected, and it caught this on CI, not locally.
       writeFileSync(path.join(pipe, "_archived", "status.json"), JSON.stringify({ current_phase: "1-ba" }));
       check("unnamed-run: a phase-shaped ONE-FIELD stub is NOT a run candidate (no required fields)",
-        unnamedRunDirs(pipe).length === 1 ? [] : [`candidates: ${unnamedRunDirs(pipe).map((d) => path.basename(d)).join(",")}`], false);
+        unnamedRunDirs(pipe).length === 1 ? [] : [`candidates: ${unnamedRunDirs(pipe).map((d) => path.basename(d.dir)).join(",")}`], false);
       // CONTROL for the two cases above: the SAME dir with a full record IS recognised, so they
       // are rejecting the record's shape and not merely failing to see the directory at all.
       writeFileSync(path.join(pipe, "_archived", "status.json"), runRecord);
       check("unnamed-run: CONTROL -- the same dir with a FULL record IS a candidate",
-        unnamedRunDirs(pipe).length === 2 ? [] : [`candidates: ${unnamedRunDirs(pipe).map((d) => path.basename(d)).join(",")}`], false);
+        unnamedRunDirs(pipe).length === 2 ? [] : [`candidates: ${unnamedRunDirs(pipe).map((d) => path.basename(d.dir)).join(",")}`], false);
       writeFileSync(path.join(pipe, "_archived", "status.json"), JSON.stringify({ x: 1 }));
       check("unnamed-run: a defect in the real orphan still blocks with the junk siblings present",
         checkArtifacts("pipeline:secops", { cwd: root }, Date.now(), pin).failures, true);
