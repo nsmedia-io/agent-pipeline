@@ -142,6 +142,8 @@ Four more customization points:
 
 Every phase writes typed JSON under `.pipeline/<id>/` in your project (add it to your `.gitignore`; keep `status.json` if you want cross-machine resume). Schemas are in [`schemas/`](schemas/). The validator is a SubagentStop hook, not a general-purpose CLI: it reads the hook payload on stdin and validates the stopping agent's artifact, so it takes no `<type> <file>` arguments. Its only flag is `node "${CLAUDE_PLUGIN_ROOT}/scripts/validate-pipeline-artifact.mjs" --self-test`, which runs its built-in checks.
 
+**Naming a run directory, and how to tell the gate is alive.** The validator only recognises a run directory named `<issue-number>` or `exp-<slug>`, because those are the two names `ba.md` sanctions. A run named any other way — which is what you get when `gh issue create` fails outside experiment mode — used to opt out of every artifact check in silence. It no longer does: such a directory is still validated when it is the only run in the project, and the validator says so. More generally the validator now writes **one line to stderr on every stop**, naming the agent, the verdict (`checked`, `no-rules`, `no-active-issue`, `unnamed-run`, `unnamed-run-ambiguous`), the run directory and the violation count, so "I checked and it was fine" and "I never checked" are no longer the same observation. `decision:block` on stdout is unchanged. The one case that stays completely silent is a project with no `.pipeline/` directory at all — an ad-hoc, non-pipeline session must not be taxed a line per subagent stop.
+
 ## Tests
 
 The four hooks have a dependency-free bash suite (no framework, no `node_modules`):

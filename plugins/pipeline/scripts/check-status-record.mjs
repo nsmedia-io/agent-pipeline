@@ -101,6 +101,61 @@ export function capsFromSchema(schema) {
 }
 
 /**
+ * IS THIS PARSED OBJECT A RUN RECORD? Answered from the schema, for callers that must decide
+ * whether a `.pipeline/` subdirectory holds a run AT ALL (#115).
+ *
+ * WHY IT LIVES HERE and not in its one caller. validate-pipeline-artifact.mjs needs this to
+ * recognise a run directory whose name ISSUE_DIR_RE cannot match, and it must not grow a second
+ * copy of the vocabulary -- a hardcoded twin of `required` or of the phase pattern would silently
+ * stop recognising the newest runs the day either grows, which fails INERT and is the exact defect
+ * #115 is about. This file already owns "read a fact out of schemas/status.schema.json and refuse
+ * to invent it", so the read belongs here, the way run-candidates.mjs owns the in-flight predicate.
+ * Siting it here also keeps validate-pipeline-artifact.mjs from naming status.schema.json, which
+ * matters: tests/test-status-schema-contract.sh's EXPIRY assertion reads that module for exactly
+ * that string, to notice the day status.json becomes a validated artifact. It has not.
+ *
+ * THIS IS RECOGNITION, NOT VALIDATION, and the difference is the whole point. It asks only whether
+ * the schema's own `required` keys are PRESENT and whether `current_phase` matches the schema's own
+ * pattern. It checks no type, reports no violation, blocks nothing and tells no one their record is
+ * wrong. Nothing anywhere validates status.json against this schema, and the schema's prose saying
+ * so stays true.
+ *
+ * FAIL DIRECTION: an unreadable or unusable schema returns false, so recognition simply does not
+ * happen and the caller stays as inert as it was before this existed. A record missing a required
+ * key is likewise not recognised. Both are silences, never false blocks -- the right direction for
+ * a predicate whose only power is to make a fail-open path do MORE work.
+ */
+let _runShapeCache;
+export function runRecordShape(schemaPath = DEFAULT_SCHEMA) {
+  if (_runShapeCache !== undefined && schemaPath === DEFAULT_SCHEMA) return _runShapeCache;
+  let shape = null;
+  try {
+    const schema = JSON.parse(readFileSync(schemaPath, "utf8"));
+    const required = Array.isArray(schema?.required)
+      ? schema.required.filter((k) => typeof k === "string")
+      : [];
+    const pattern = schema?.properties?.current_phase?.pattern;
+    if (required.length > 0 && typeof pattern === "string" && pattern.length > 0) {
+      shape = { required, phasePattern: new RegExp(pattern) };
+    }
+  } catch {
+    // unusable schema: recognise nothing (see FAIL DIRECTION above)
+  }
+  if (schemaPath === DEFAULT_SCHEMA) _runShapeCache = shape;
+  return shape;
+}
+
+export function isRunRecord(status, schemaPath = DEFAULT_SCHEMA) {
+  if (!status || typeof status !== "object" || Array.isArray(status)) return false;
+  const shape = runRecordShape(schemaPath);
+  if (!shape) return false;
+  for (const key of shape.required) {
+    if (!Object.prototype.hasOwnProperty.call(status, key)) return false;
+  }
+  return shape.phasePattern.test(String(status.current_phase ?? ""));
+}
+
+/**
  * Walk parsed records. Pure: takes { file, text } pairs, returns the measurement.
  *
  * Every record that could not be read or is mis-shaped is ACCOUNTED FOR in its own list rather

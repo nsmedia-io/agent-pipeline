@@ -42,9 +42,14 @@
  * grounding gap can never wedge a legitimate stop.
  *
  * Exit / output contract:
- *   - Hook mode (default, stdin payload): silent exit 0 on pass; a `{decision:"block",...}`
- *     JSON object on stdout on failure (still exit 0 -- the block is advisory to the agent);
- *     any crash exits 0 (fail open).
+ *   - Hook mode (default, stdin payload): exit 0 on pass; a `{decision:"block",...}` JSON object
+ *     on STDOUT on failure (still exit 0 -- the block is advisory to the agent); any crash exits
+ *     0 (fail open).
+ *   - STDERR carries one attribution line per run saying what the gate DID -- which agent, which
+ *     verdict, which run dir, how many violations -- including on a clean pass and on every
+ *     fail-open path. It is silent only where there is no .pipeline directory at all. See
+ *     announceLine() for why the success case speaks and why that one silence stays. stdout is
+ *     unaffected: the decision channel is still pure JSON or nothing.
  *   - `--self-test`: runs the built-in checks and exits 0 (all pass) or 1 (any fail).
  */
 
@@ -62,6 +67,7 @@ import {
 import { tmpdir } from "node:os";
 import { isMain as isMainScript } from "./lib.mjs";
 import { inFlightObservations } from "./run-candidates.mjs";
+import { isRunRecord } from "./check-status-record.mjs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -125,6 +131,26 @@ const AGENT_RULES = {
     { artifact: "librarian-report.json", schema: "librarian-report.schema.json", schemaPtr: "#", dataPtr: "" },
   ],
 };
+
+// Shipped pipeline agents that own NO schema-validated artifact, so an AGENT_RULES miss at their
+// stop is the CORRECT outcome and not a gap. Declaring them is what lets the announcement below
+// grade a miss instead of reporting every miss identically: "design stopped and owns nothing" and
+// "a name nobody registered stopped" are different events, and only the second is a finding.
+//
+// THIS LIST IS CONFIGURATION, NOT HISTORY, and that distinction is #66's property 3. Inferring
+// which agents should be validated from which agents HAVE been validated makes an inert gate look
+// like a smaller working one -- the exact reading that let this validator sit silent from its
+// first release commit until a 353,907-line transcript census went looking. So the union
+// `Object.keys(AGENT_RULES) + ARTIFACTLESS_AGENTS` is asserted set-equal to the `name:` frontmatter
+// of every agents/*.md the plugin ships, by tests/test-validate-pipeline-artifact.sh. Adding an
+// agent file without deciding which side it belongs on reddens that case; so does deleting one.
+export const ARTIFACTLESS_AGENTS = new Set(["design", "art-director"]);
+
+// The roles AGENT_RULES actually validates. Exported as a copy so the completeness check above can
+// compare it against the shipped agent manifest without handing anyone a mutable rules table.
+export function registeredAgents() {
+  return Object.keys(AGENT_RULES);
+}
 
 // ---- pointer + schema helpers ----------------------------------------------
 
@@ -371,6 +397,90 @@ export function activeIssueDir(pipelineDir, input) {
 
 function loadJson(file) {
   return JSON.parse(readFileSync(file, "utf8"));
+}
+
+// WHAT MAKES A DIRECTORY A RUN is answered by check-status-record.mjs's isRunRecord, which reads
+// the shipped status schema. It is imported rather than reimplemented for two reasons, and the
+// second is not obvious. (1) A second copy of a vocabulary is how `exp-` runs stayed invisible to
+// voice-lint for months (see ISSUE_DIR_RE above), and a hardcoded twin of the required list or the
+// phase pattern would silently stop recognising the newest runs the day either grows -- failing
+// INERT, the direction this whole change exists to close. (2) THIS MODULE MUST NOT NAME THE STATUS
+// SCHEMA FILE AT ALL -- not even in a comment, which is why this sentence talks around it.
+// tests/test-status-schema-contract.sh greps exactly this file for that filename to notice the day
+// status.json becomes a validated artifact, and a scanner cannot tell a mention from a
+// registration. That expiry is still doing its job and this change does not retire it: recognition
+// is not validation -- see isRunRecord's own header for the distinction -- and nothing here
+// validates a status record, registers one in AGENT_RULES, or blocks a stop over one.
+
+/**
+ * The .pipeline subdirectories that HOLD A RUN RECORD but that ISSUE_DIR_RE will not name (#115).
+ *
+ * THE DEFECT. issueDirs() filters on the DIRECTORY NAME and nothing else, so a run whose dir BA
+ * could name neither `<number>` (the tracker was unreachable, auth had expired, the host was
+ * offline) nor `exp-<slug>` (it is not an experiment -- ba.md duty 8 sanctions no third branch)
+ * is dropped with no record that it was dropped. Measured on the shipped hook: one fixture with
+ * 14 schema violations emits a 1180-byte decision:block from `.pipeline/9001` and 0 bytes from
+ * `.pipeline/tracker-unreachable-20260902`. The name is the only difference, and the whole run
+ * silently opts out of every check issueDirs() feeds.
+ *
+ * WHY THIS IS A SEPARATE FUNCTION AND NOT A WIDER ISSUE_DIR_RE. Widening the regex would change
+ * three OTHER consumers at once, two of which REFUSE work: voice-lint.mjs's sweep,
+ * gate-phase-entry.mjs (which can refuse a phase entry) and -- through issueDirs() ->
+ * resolveRunOwner() -- #106's PreToolUse gate, which DENIES tool calls. Admitting a new directory
+ * shape there could manufacture a refusal against correct work, which is the harm the scoping in
+ * activeIssueDir exists to prevent. So the vocabulary those consumers share is untouched, and the
+ * recovery lives ONLY in checkArtifacts, whose worst case is an advisory decision:block telling an
+ * agent to fix an artifact it just wrote.
+ *
+ * THE PREDICATE. A directory qualifies when its name is NOT an issue name and it holds a
+ * `status.json` that isRunRecord() accepts -- the schema's shape AND a schema-shaped phase. Both
+ * halves were earned by a failing control rather than reasoned out: `.pipeline/schemas` carrying
+ * `{"current_phase":"1-ba"}` is planted by tests/test-open-questions-and-design-lock.sh precisely
+ * to prove a non-run sibling is never selected, and a phase-pattern check alone ADOPTED it. All 13
+ * committed records in this repo carry the schema's full required set (`node -e` over every
+ * `.pipeline/<issue>/status.json`, 2026-09-02), so the stricter rule costs a real run nothing.
+ *
+ * THE CORRECT WORK THIS COULD REFUSE, stated because a guardrail owes that: a directory that is
+ * not a run, carries a status.json that validates against the run schema anyway, AND holds a
+ * recent artifact this agent owns that fails ITS schema. Nothing writes that shape; a run record
+ * is written by the orchestrator and by nothing else.
+ *
+ * AND THE OTHER DIRECTION, which is the one that stays open: a genuine run whose status.json is
+ * missing a required field is not recognised here, so it keeps the pre-existing silence. That
+ * fails INERT, never toward a false block, and it is the same posture the rest of this file takes
+ * on an input it cannot characterise.
+ */
+// mtime of a run dir's status.json, or null when there is none to read. The same quantity
+// activeIssueDir ranks its own candidates by, so the two comparisons stay commensurable.
+function statusMtime(dir) {
+  try {
+    return statSync(path.join(dir, "status.json")).mtimeMs;
+  } catch {
+    return null;
+  }
+}
+
+export function unnamedRunDirs(pipelineDir) {
+  const out = [];
+  let entries;
+  try {
+    entries = readdirSync(pipelineDir, { withFileTypes: true });
+  } catch {
+    return out;
+  }
+  for (const d of entries) {
+    if (!d.isDirectory() || ISSUE_DIR_RE.test(d.name)) continue;
+    const dir = path.join(pipelineDir, d.name);
+    let status;
+    try {
+      status = loadJson(path.join(dir, "status.json"));
+    } catch {
+      continue; // no record, or an unreadable one: not evidence of a run
+    }
+    if (!isRunRecord(status)) continue;
+    out.push(dir);
+  }
+  return out;
 }
 
 /**
@@ -891,7 +1001,30 @@ function evidenceFor(issueDir, now, data) {
   };
 }
 
-// Returns { failures: string[] } where each entry is a human-readable violation.
+// Returns { failures, verdict, detail, agent, issue, roots }.
+//
+// `failures` is unchanged: a string[] of human-readable violations, and `const { failures } = ...`
+// still destructures exactly as it did. The rest is #66's PROPERTY 2, the half that issue calls
+// load-bearing: an empty `failures` used to mean three unrelated things at once -- "no rules
+// matched this agent", "no run was found to check", and "this agent's artifacts are valid" -- and
+// they produced byte-identical output. Measured on the shipped hook at 856a5d0 (2026-09-02):
+// agent_type `pipeline:art-director` against a fixture with 14 known violations, and
+// `pipeline:secops` against a genuinely clean root, both returned 0 bytes on stdout and exit 0.
+// A FAIL-OPEN PATH MUST SAY THAT IT FAILED OPEN, so the reason is now carried out of here and
+// announced (see announce() below, which decides WHICH of these is worth a line).
+//
+//   checked                -- rules matched, a run dir resolved, its artifacts were examined
+//   no-rules               -- bareRole() matched no AGENT_RULES entry; `detail` grades it against
+//                             ARTIFACTLESS_AGENTS, so a shipped artifact-less agent reads
+//                             differently from a name nobody registered
+//   no-pipeline-root       -- no .pipeline anywhere: a genuinely non-pipeline session
+//   no-active-issue        -- .pipeline exists, but no run dir resolves (no status.json, or an
+//                             mtime tie, which activeIssueDir treats as absence of a signal)
+//   unnamed-run            -- #115: the ONLY resolvable run is one ISSUE_DIR_RE cannot name, so it
+//                             was validated through the fallback below and the name is reported
+//   unnamed-run-ambiguous  -- two or more such dirs: which run this stop belongs to is unknowable,
+//                             so nothing was validated and the abstention is named
+//
 // `rootsOverride` is a test-only seam (see pipelineDirs): when passed it pins root resolution
 // to exactly those roots so a self-test can never escape to the real .pipeline of the checkout
 // running it. Production callers never pass it.
@@ -901,19 +1034,94 @@ export function checkArtifacts(agentType, input, now = Date.now(), rootsOverride
   // segment after the LAST colon before lowercasing, so "pipeline:secops" and "secops" resolve
   // identically. Without this, every namespaced dispatch missed AGENT_RULES entirely and this
   // validator silently checked nothing -- see #66 and #98's Phase 4 panel, which proved it live.
-  const rules = AGENT_RULES[bareRole(agentType)];
+  const agent = bareRole(agentType);
+  const rules = AGENT_RULES[agent];
   const failures = [];
-  if (!rules) return { failures };
+  const roots = pipelineDirs(input, rootsOverride);
+
+  if (!rules) {
+    return {
+      failures,
+      verdict: "no-rules",
+      agent,
+      issue: null,
+      roots: roots.length,
+      detail: ARTIFACTLESS_AGENTS.has(agent)
+        ? `"${agent}" is a shipped pipeline agent that owns no schema-validated artifact, so nothing was checked`
+        : `"${agent}" matches no AGENT_RULES entry and is not a shipped pipeline agent, so nothing was checked`,
+    };
+  }
+  if (roots.length === 0) {
+    return { failures, verdict: "no-pipeline-root", agent, issue: null, roots: 0, detail: "no .pipeline directory in any candidate root" };
+  }
+
+  let verdict = "no-active-issue";
+  let detail = `no run dir resolves under ${roots.length} .pipeline root(s)`;
+  let issue = null;
 
   const schemaCache = new Map();
-  for (const dir of pipelineDirs(input, rootsOverride)) {
+  for (const dir of roots) {
     const projectRoot = path.dirname(dir); // <root> for a <root>/.pipeline dir
     let sawRecent = false; // any recent artifact for this agent in this root
     // Scope to the single active issue dir, not every sibling in this root. A null means no
     // active issue is derivable here (no signal, no status.json), so this session owns nothing
     // to validate: skip the root entirely (fail-open).
-    const issueDir = activeIssueDir(dir, input);
+    let issueDir = activeIssueDir(dir, input);
+    let viaUnnamed = false;
+    // Did precedence (a) -- the orchestrator's explicit marker -- decide this? Recomputed from
+    // activeIssueName rather than inferred from the result, because an mtime scan can legitimately
+    // land on the same dir the marker names and the two must not be confused.
+    const marker = activeIssueName(input);
+    const markerResolved = Boolean(marker && issueDir && path.basename(issueDir) === marker);
+
+    // #115 RECOVERY. The rule is the one this validator already uses to decide which issue is
+    // active -- THE NEWEST status.json WINS -- applied to a candidate ISSUE_DIR_RE excluded from
+    // that comparison purely on its name. Nothing new is invented here; a run is simply no longer
+    // disqualified from being the newest by being unnamable.
+    //
+    // "A NAMED DIR ALWAYS WINS" WAS THE WRONG RULE, and it was measured wrong rather than argued
+    // wrong. In the realistic adopting-project shape -- one finished `.pipeline/12` from last
+    // month plus today's unnamable run -- activeIssueDir resolves the stale numeric dir, so a
+    // last-resort-only fallback never fires and today's run stays exactly as unchecked as before
+    // this change. Measured 2026-09-02: 0 bytes on a fixture carrying 14 known violations.
+    //
+    // THREE THINGS THAT STILL BOUND IT, each refusing a different way to guess wrong:
+    //   - AN EXPLICIT MARKER IS NEVER OVERRIDDEN. If the orchestrator named the run, that answer
+    //     stands; precedence (a) in activeIssueDir's contract is untouched.
+    //   - STRICTLY NEWER, never equal. A tie keeps the named dir, so this can only ever move the
+    //     answer on a positive signal, and the git-clone case (every tracked status.json stamped
+    //     within one coarse clock tick) cannot flip it.
+    //   - UNIQUE, for the same reason activeIssueDir refuses an mtime tie: two unnamable runs are
+    //     an absence of a signal, not a weaker one, and guessing between them would block a stop
+    //     for work this session never touched.
+    if (!markerResolved) {
+      const orphans = unnamedRunDirs(dir);
+      if (orphans.length === 1) {
+        const candidate = orphans[0];
+        const candidateAt = statusMtime(candidate);
+        if (candidateAt !== null && (!issueDir || candidateAt > statusMtime(issueDir))) {
+          issueDir = candidate;
+          viaUnnamed = true;
+        }
+      } else if (orphans.length > 1 && !issueDir && verdict === "no-active-issue") {
+        verdict = "unnamed-run-ambiguous";
+        detail =
+          `${orphans.length} dirs under ${dir} hold a run record but match neither <number> nor ` +
+          `exp-<slug> (${orphans.map((o) => path.basename(o)).join(", ")}); which run this stop ` +
+          `belongs to is not derivable, so nothing was validated`;
+      }
+    }
+
     if (issueDir) {
+      if (verdict === "no-active-issue" || verdict === "unnamed-run-ambiguous") {
+        verdict = viaUnnamed ? "unnamed-run" : "checked";
+        issue = path.basename(issueDir);
+        detail = viaUnnamed
+          ? `.pipeline/${issue} holds a run record but matches neither <number> nor exp-<slug>; ` +
+            `its artifacts were validated here, but every OTHER consumer of the issue-dir name ` +
+            `still skips it -- rename it or record why it could not be named (#115)`
+          : "";
+      }
       for (const rule of rules) {
         const artifactPath = path.join(issueDir, rule.artifact);
         let st;
@@ -976,13 +1184,47 @@ export function checkArtifacts(agentType, input, now = Date.now(), rootsOverride
           }
         }
       }
+      if (!sawRecent && !detail) {
+        detail = `no artifact owned by "${agent}" was written under .pipeline/${issue} in the last ${RECENT_MS / 60000} minutes`;
+      }
     }
     // The most-specific root that holds this agent's recent artifacts is the session's own; do
     // not scan further roots, where another session's recent artifacts would produce
     // cross-worktree false blocks.
     if (sawRecent) break;
   }
-  return { failures };
+  return { failures, verdict, detail, agent, issue, roots: roots.length };
+}
+
+/**
+ * ONE LINE ON STDERR SAYING WHAT THE GATE DID. #66 properties 2 and 3.
+ *
+ * WHY STDERR. stdout is the hook's decision channel and must stay parseable JSON; stderr is not,
+ * so nothing written here can wedge a stop or corrupt a decision. This is the same shape
+ * hooks/pre-tool-use.sh already ships for the same reason ("every tooling gap and every abstention
+ * ... writes one attribution line to stderr saying which gap it was, so a non-action is
+ * diagnosable afterwards without re-running the session").
+ *
+ * WHY IT ALSO SPEAKS ON SUCCESS, which looks like noise and is the point. A line that appears only
+ * when something is wrong cannot answer "is this gate alive?" -- and that question went unanswered
+ * from this validator's first release commit until a 353,907-line cross-machine transcript census
+ * asked it. A judge that has never spoken is indistinguishable from a judge that has never had
+ * anything to say, unless it says the second one out loud.
+ *
+ * THE ONE SILENCE THAT SURVIVES, and it is load-bearing rather than an oversight: a root set with
+ * NO .pipeline directory says nothing at all. That is the genuinely ad-hoc, non-pipeline session --
+ * a general-purpose subagent in a project that has never run the pipeline -- and it must not be
+ * taxed a line per stop for a fail-open that is simply correct. pre-tool-use.sh draws the same
+ * boundary in the same words ("nothing is written on the non-acting fast path"). Everything above
+ * that floor is scoped to projects that DO run the pipeline, which is where a silent gate is a
+ * defect rather than a courtesy.
+ */
+export function announceLine(result) {
+  if (!result || !result.roots) return null; // non-pipeline session: the silent fast path
+  const bits = [`agent=${result.agent || "-"}`, `verdict=${result.verdict}`];
+  if (result.issue) bits.push(`issue=${result.issue}`);
+  bits.push(`violations=${result.failures.length}`);
+  return `agent-pipeline SubagentStop: ${bits.join(" ")}${result.detail ? `; ${result.detail}` : ""}`;
 }
 
 // ---- self-test (no external fixtures needed beyond the shipped ../schemas) ---
@@ -1472,6 +1714,185 @@ function selfTest() {
     }
   }
 
+  // ---- #66 property 2 + #115: a fail-open path must say WHICH fail-open path it took ----
+  //
+  // The defect these pin is that `failures: []` meant three unrelated things and said none of
+  // them. Every case here asserts the VERDICT, not the emptiness, because emptiness is exactly
+  // what could not tell them apart. Hermetic via rootsOverride, like the scoping block above.
+  {
+    const root = mkdtempSync(path.join(tmpdir(), "vpa-verdict-"));
+    const prevEnv = { a: process.env.CLAUDE_PIPELINE_ACTIVE_ISSUE, b: process.env.PIPELINE_ACTIVE_ISSUE };
+    try {
+      delete process.env.CLAUDE_PIPELINE_ACTIVE_ISSUE;
+      delete process.env.PIPELINE_ACTIVE_ISSUE;
+      const pipe = path.join(root, ".pipeline");
+      const named = path.join(pipe, "1965");
+      mkdirSync(named, { recursive: true });
+      const pin = [root];
+      const runRecord = JSON.stringify({
+        current_phase: "2-review", started_at: "2026-01-01T00:00:00Z",
+        updated_at: "2026-01-01T00:00:00Z", branch: "b", events: [],
+      });
+      const validPanel = { verdict: "APPROVE", reviewed_at: "2026-01-01T00:00:00Z", concerns: [], notes: "n" };
+      const brokenPanel = { verdict: "NOT_A_VERDICT" };
+      const verdictOf = (r, want) => (r.verdict === want ? [] : [`verdict was "${r.verdict}", wanted "${want}"`]);
+
+      writeFileSync(path.join(named, "status.json"), runRecord);
+      writeFileSync(path.join(named, "peer-review.secops.json"), JSON.stringify(validPanel));
+
+      // THE PAIR. Both return zero failures; before this change both returned nothing else.
+      const rClean = checkArtifacts("pipeline:secops", { cwd: root }, Date.now(), pin);
+      const rNoRules = checkArtifacts("pipeline:art-director", { cwd: root }, Date.now(), pin);
+      check("verdict: a clean artifact reports 'checked'", verdictOf(rClean, "checked"), false);
+      check("verdict: an unregistered agent reports 'no-rules', NOT 'checked'", verdictOf(rNoRules, "no-rules"), false);
+      check("verdict: the two zero-failure cases are distinguishable (#66 property 2)",
+        rClean.verdict !== rNoRules.verdict ? [] : ["a lookup miss is still indistinguishable from a clean artifact"], false);
+      // The grading half: a shipped artifact-less agent is not the same event as an unknown name.
+      check("verdict: a shipped artifact-less agent says so in its detail",
+        /owns no schema-validated artifact/.test(rNoRules.detail) ? [] : [rNoRules.detail], false);
+      check("verdict: an unregistered NON-agent says so instead",
+        /is not a shipped pipeline agent/.test(
+          checkArtifacts("pipeline:wizard", { cwd: root }, Date.now(), pin).detail) ? [] : ["ungraded miss"], false);
+      // Failures must still ride along; the verdict is additive, not a replacement.
+      writeFileSync(path.join(named, "peer-review.secops.json"), JSON.stringify(brokenPanel));
+      const rDirty = checkArtifacts("pipeline:secops", { cwd: root }, Date.now(), pin);
+      check("verdict: 'checked' still carries the failures it found (control)", rDirty.failures, true);
+      check("verdict: a defect is reported as 'checked', not as a fail-open", verdictOf(rDirty, "checked"), false);
+      // No .pipeline at all: the ad-hoc session. Its verdict is nameable but announceLine() stays
+      // quiet on it, which is what keeps a non-pipeline session from paying a line per stop.
+      const bare = mkdtempSync(path.join(tmpdir(), "vpa-adhoc-"));
+      try {
+        const rAdhoc = checkArtifacts("pipeline:secops", { cwd: bare }, Date.now(), [bare]);
+        check("verdict: no .pipeline anywhere reports 'no-pipeline-root'", verdictOf(rAdhoc, "no-pipeline-root"), false);
+        check("announce: the ad-hoc session gets NO line at all (the silence that must survive)",
+          announceLine(rAdhoc) === null ? [] : [`announced: ${announceLine(rAdhoc)}`], false);
+        check("announce: an unregistered agent in an ad-hoc session gets NO line either",
+          announceLine(checkArtifacts("pipeline:wizard", { cwd: bare }, Date.now(), [bare])) === null
+            ? [] : ["announced on the non-pipeline fast path"], false);
+      } finally {
+        rmSync(bare, { recursive: true, force: true });
+      }
+      check("announce: a pipeline project DOES get a line on a clean pass (liveness, #66 property 3)",
+        (announceLine(rClean) || "").includes("verdict=checked") ? [] : ["no liveness line on a clean pass"], false);
+
+      // ---- #115: the run dir ISSUE_DIR_RE cannot name ----
+      const orphan = path.join(pipe, "tracker-unreachable-20260902");
+      mkdirSync(orphan, { recursive: true });
+      writeFileSync(path.join(orphan, "status.json"), runRecord);
+      writeFileSync(path.join(orphan, "peer-review.secops.json"), JSON.stringify(brokenPanel));
+
+      // WHICH RUN WINS when a named dir and an unnamable one both hold a record. The rule is the
+      // validator's existing one -- newest status.json -- so this asserts BOTH directions rather
+      // than only the direction that flatters the change. Every mtime is stamped EXPLICITLY: two
+      // files written microseconds apart do not reliably differ on Linux's coarse clock, and
+      // leaving the ordering to the host is #27, green on APFS and red as a group on ubuntu.
+      const stampStatus = (d, ms) => utimesSync(path.join(d, "status.json"), ms / 1000, ms / 1000);
+      const t0 = Date.now();
+
+      stampStatus(named, t0);
+      stampStatus(orphan, t0 - 10_000); // named is NEWER
+      check("unnamed-run: a NEWER named dir wins over an unnamable one",
+        checkArtifacts("pipeline:secops", { cwd: root }, Date.now(), pin).issue === "1965"
+          ? [] : ["the unnamable dir displaced a newer named run"], false);
+
+      stampStatus(orphan, t0 + 10_000); // orphan is NEWER: the realistic #115 shape
+      const rOrphanNewer = checkArtifacts("pipeline:secops", { cwd: root }, Date.now(), pin);
+      check("unnamed-run: a NEWER unnamable dir wins over a stale named one (the realistic shape)",
+        rOrphanNewer.issue === "tracker-unreachable-20260902"
+          ? [] : [`resolved to ${rOrphanNewer.issue}; a finished run from last month still masks today's`], false);
+      check("unnamed-run: and that is what makes its defect visible at all", rOrphanNewer.failures, true);
+
+      // STRICTLY newer, never equal. A tie keeps the named dir, so a fresh `git clone` -- which
+      // stamps every tracked status.json inside one coarse clock tick -- cannot flip the answer.
+      stampStatus(orphan, t0);
+      check("unnamed-run: an mtime TIE keeps the named dir (clone-safe)",
+        checkArtifacts("pipeline:secops", { cwd: root }, Date.now(), pin).issue === "1965"
+          ? [] : ["a tie displaced the named run"], false);
+
+      // An EXPLICIT marker is never overridden, however new the unnamable dir is. Precedence (a)
+      // in activeIssueDir's contract stays exactly as it was.
+      stampStatus(orphan, t0 + 10_000);
+      check("unnamed-run: an explicit active_issue marker is never overridden",
+        checkArtifacts("pipeline:secops", { cwd: root, active_issue: "1965" }, Date.now(), pin).issue === "1965"
+          ? [] : ["the marker was overridden by an unnamable dir"], false);
+
+      // Remove the named dir's record: now the orphan is the only run in the root.
+      rmSync(path.join(named, "status.json"), { force: true });
+      const rOrphan = checkArtifacts("pipeline:secops", { cwd: root }, Date.now(), pin);
+      check("unnamed-run: an unnamable run dir is now VALIDATED, not skipped (#115)", rOrphan.failures, true);
+      check("unnamed-run: and it is reported as 'unnamed-run', not as an ordinary check",
+        verdictOf(rOrphan, "unnamed-run"), false);
+      check("unnamed-run: the announcement NAMES the offending directory",
+        (announceLine(rOrphan) || "").includes("tracker-unreachable-20260902") ? [] : ["dir not named"], false);
+      // NON-ZERO CONTROL in the other direction: the same dir with a VALID artifact must not block.
+      writeFileSync(path.join(orphan, "peer-review.secops.json"), JSON.stringify(validPanel));
+      check("unnamed-run: a VALID artifact in an unnamed dir does NOT block (control)",
+        checkArtifacts("pipeline:secops", { cwd: root }, Date.now(), pin).failures, false);
+      writeFileSync(path.join(orphan, "peer-review.secops.json"), JSON.stringify(brokenPanel));
+
+      // A NON-RUN sibling must not be adopted. `_archived` and `schemas` are the two names this
+      // repo actually puts beside real runs; neither carries a phase-shaped current_phase.
+      for (const junk of ["_archived", "schemas"]) {
+        const j = path.join(pipe, junk);
+        mkdirSync(j, { recursive: true });
+        writeFileSync(path.join(j, "status.json"), JSON.stringify({ x: 1 }));
+      }
+      check("unnamed-run: a status.json with no phase is NOT a run candidate",
+        unnamedRunDirs(pipe).length === 1 ? [] : [`candidates: ${unnamedRunDirs(pipe).map((d) => path.basename(d)).join(",")}`], false);
+      // A current_phase that IS a string but is not phase-SHAPED. Without this case the schema
+      // pattern clause is dead weight: every junk fixture above omits current_phase entirely, so
+      // the `typeof phase !== "string"` clause alone rejects them and deleting the pattern test
+      // changes nothing. Found by the mutation battery, which is what a battery is for.
+      // THE FIXTURE MATRIX, not a representative fixture. Recognition is a CONJUNCTION -- the
+      // schema's required keys are present AND current_phase is schema-shaped -- so a fixture that
+      // fails BOTH clauses proves nothing about either. `{current_phase:"archived"}` is rejected
+      // for its missing required keys whatever the pattern says, and a battery mutation deleting
+      // the pattern clause SURVIVED against it. Each clause therefore gets a fixture that fails
+      // ONLY that clause, with everything else valid.
+      writeFileSync(path.join(pipe, "_archived", "status.json"),
+        JSON.stringify({ ...JSON.parse(runRecord), current_phase: "archived" }));
+      check("unnamed-run: a FULL record whose only defect is a non-phase-shaped current_phase is NOT a candidate",
+        unnamedRunDirs(pipe).length === 1 ? [] : [`candidates: ${unnamedRunDirs(pipe).map((d) => path.basename(d)).join(",")}`], false);
+      // And the mirror: a schema-shaped phase whose record is missing a required key.
+      writeFileSync(path.join(pipe, "_archived", "status.json"),
+        JSON.stringify((({ branch, ...rest }) => rest)(JSON.parse(runRecord))));
+      check("unnamed-run: a phase-shaped record missing ONE required key is NOT a candidate",
+        unnamedRunDirs(pipe).length === 1 ? [] : [`candidates: ${unnamedRunDirs(pipe).map((d) => path.basename(d)).join(",")}`], false);
+      // THE SHAPE THAT DEFEATED THE PHASE-PATTERN CHECK ALONE, kept here as its own case rather
+      // than left to the suite that found it: a one-field stub whose phase IS schema-shaped.
+      // tests/test-open-questions-and-design-lock.sh plants exactly this at `.pipeline/schemas`
+      // to prove a non-run sibling is never selected, and it caught this on CI, not locally.
+      writeFileSync(path.join(pipe, "_archived", "status.json"), JSON.stringify({ current_phase: "1-ba" }));
+      check("unnamed-run: a phase-shaped ONE-FIELD stub is NOT a run candidate (no required fields)",
+        unnamedRunDirs(pipe).length === 1 ? [] : [`candidates: ${unnamedRunDirs(pipe).map((d) => path.basename(d)).join(",")}`], false);
+      // CONTROL for the two cases above: the SAME dir with a full record IS recognised, so they
+      // are rejecting the record's shape and not merely failing to see the directory at all.
+      writeFileSync(path.join(pipe, "_archived", "status.json"), runRecord);
+      check("unnamed-run: CONTROL -- the same dir with a FULL record IS a candidate",
+        unnamedRunDirs(pipe).length === 2 ? [] : [`candidates: ${unnamedRunDirs(pipe).map((d) => path.basename(d)).join(",")}`], false);
+      writeFileSync(path.join(pipe, "_archived", "status.json"), JSON.stringify({ x: 1 }));
+      check("unnamed-run: a defect in the real orphan still blocks with the junk siblings present",
+        checkArtifacts("pipeline:secops", { cwd: root }, Date.now(), pin).failures, true);
+      // A phase-shaped record in a junk dir WOULD be adopted -- assert the discriminator is the
+      // phase and not the name, so a reader knows exactly which clause is doing the work.
+      writeFileSync(path.join(pipe, "schemas", "status.json"), runRecord);
+      check("unnamed-run: TWO unnamable runs abstain rather than guess",
+        verdictOf(checkArtifacts("pipeline:secops", { cwd: root }, Date.now(), pin), "unnamed-run-ambiguous"), false);
+      check("unnamed-run: the ambiguous abstention blocks nothing",
+        checkArtifacts("pipeline:secops", { cwd: root }, Date.now(), pin).failures, false);
+      check("unnamed-run: the ambiguous abstention NAMES both candidates",
+        ["schemas", "tracker-unreachable-20260902"].every((n) =>
+          (announceLine(checkArtifacts("pipeline:secops", { cwd: root }, Date.now(), pin)) || "").includes(n))
+          ? [] : ["candidates not named"], false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      if (prevEnv.a === undefined) delete process.env.CLAUDE_PIPELINE_ACTIVE_ISSUE;
+      else process.env.CLAUDE_PIPELINE_ACTIVE_ISSUE = prevEnv.a;
+      if (prevEnv.b === undefined) delete process.env.PIPELINE_ACTIVE_ISSUE;
+      else process.env.PIPELINE_ACTIVE_ISSUE = prevEnv.b;
+    }
+  }
+
   // ---- active-issue scoping: an mtime TIE is not a signal ----
   // The tie rule is a deliberate semantic, so it is pinned here rather than left to emerge from
   // enumeration order. Every mtime below is stamped explicitly: a fixture that wrote these files
@@ -1569,7 +1990,11 @@ async function main() {
     return; // no/garbled payload: fail open
   }
 
-  const { failures } = checkArtifacts(input.agent_type, input);
+  const result = checkArtifacts(input.agent_type, input);
+  const line = announceLine(result);
+  if (line) process.stderr.write(`${line}\n`);
+
+  const { failures } = result;
   if (failures.length === 0) return; // allow stop
 
   const reason =

@@ -946,17 +946,41 @@ if [[ "$SS_OK" == "yes" ]]; then
   gate_inflight_status "$SS_ROOT/.pipeline/39/status.json" "3-impl"
   gate_inflight_status "$SS_ROOT/.pipeline/98/status.json" "4-review"
   sleep 0.05; touch "$SS_ROOT/.pipeline/98/status.json"
+  # THE ONE LINE THIS COMPARISON DOES NOT PIN, and why it is named rather than dropped. #115 makes
+  # the validator write a single `agent-pipeline SubagentStop: ...` attribution line to stderr on
+  # every stop, deliberately: before it, "no rules matched this agent" and "this agent's artifacts
+  # are valid" were byte-identical, which is the defect that issue is about. That line is a
+  # DIFFERENCE FROM THE REVIEWED COMMIT BY DESIGN, so an unfiltered byte comparison would redden
+  # forever and this criterion would be deleted rather than read. Everything else about the
+  # SubagentStop path -- exit code, stdout, and any OTHER stderr -- is still pinned byte for byte,
+  # which is what AC28 is actually for: a change reviewed for one thing silently altering a
+  # shipped gate. If the validator grows a second stderr line, this comparison reddens, correctly.
+  ss_strip_announce() { grep -v '^agent-pipeline SubagentStop: ' || true; }
   ss_capture() {
     local sd="$1" o e r
     o="$( ( cd "$SS_ROOT" && printf '%s' '{"hook_event_name":"SubagentStop","session_id":"ac28","agent_type":"pipeline:qa"}' \
         | CLAUDE_PROJECT_DIR="$SS_ROOT" "$GATE_REAL_NODE" "$sd/validate-pipeline-artifact.mjs" 2>"$TEMP_PROJECT/ss.err" ) )"; r=$?
-    e="$(cat "$TEMP_PROJECT/ss.err")"
+    e="$(ss_strip_announce < "$TEMP_PROJECT/ss.err")"
     printf 'rc=%s out=[%s] err=[%s]' "$r" "$o" "$e"
   }
   SS_A="$(ss_capture "$SS_WT/plugins/pipeline/scripts")"
   SS_B="$(ss_capture "$GATE_PLUGIN_DIR/scripts")"
   record "AC28 reviewed-commit SubagentStop resolution on a two-in-flight-dir root: $SS_A"
   assert_eq "AC28: the SubagentStop path resolves EXACTLY as it does at the reviewed commit" "$SS_B" "$SS_A"
+  # THE FILTER'S OWN PREMISE, asserted so it cannot hide what it was written to excuse. The strip
+  # above makes the comparison blind to the #115 attribution line; if that line ever stopped being
+  # emitted, AC28 would go green on a validator that had lost the very announcement it filters.
+  # So: it must be there at HEAD, and it must NOT be there at the reviewed commit.
+  ( cd "$SS_ROOT" && printf '%s' '{"hook_event_name":"SubagentStop","session_id":"ac28","agent_type":"pipeline:qa"}' \
+      | CLAUDE_PROJECT_DIR="$SS_ROOT" "$GATE_REAL_NODE" "$GATE_PLUGIN_DIR/scripts/validate-pipeline-artifact.mjs" ) \
+      >/dev/null 2>"$TEMP_PROJECT/ss.head.err"
+  ( cd "$SS_ROOT" && printf '%s' '{"hook_event_name":"SubagentStop","session_id":"ac28","agent_type":"pipeline:qa"}' \
+      | CLAUDE_PROJECT_DIR="$SS_ROOT" "$GATE_REAL_NODE" "$SS_WT/plugins/pipeline/scripts/validate-pipeline-artifact.mjs" ) \
+      >/dev/null 2>"$TEMP_PROJECT/ss.base.err"
+  assert_eq "AC28 FILTER PREMISE(+): HEAD does emit the #115 attribution line the strip removes" \
+    "$(grep -c '^agent-pipeline SubagentStop: ' "$TEMP_PROJECT/ss.head.err" | tr -d ' ')" "1"
+  assert_eq "AC28 FILTER PREMISE(-): the reviewed commit emits none, so the strip is what makes the two comparable" \
+    "$(grep -c '^agent-pipeline SubagentStop: ' "$TEMP_PROJECT/ss.base.err" | tr -d ' ')" "0"
   git -C "$GATE_REPO_ROOT" worktree remove --force "$SS_WT" >/dev/null 2>&1
 else
   assert_eq "AC28: the paired capture did not run -- reported as a FAILURE, never a skip" "could-not-check-out" "ran"
