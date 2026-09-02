@@ -3,7 +3,7 @@
   "current_phase": "4-review",
   "current_phase_note": "Corrected 2026-09-01T15:05Z: was carrying invented descriptive values (3-impl-disposition, 4-review-request-changes, 4-review-delta-fix-dispatched) that are not in gate-phase-entry.mjs's blessed ENTRY/EXIT/UNGUARDED/TERMINAL vocabulary, found by Dev's test-gate-phase-entry.sh run failing on main. current_phase is a narrow guard-checked state machine field, not a free-text status; richer detail belongs in events[]/flags[], which carry no vocabulary restriction. Set to 4-review (blessed ENTRY) to reflect the actual state: an in-progress Phase 4 review cycle, delta round about to be dispatched.",
   "started_at": "2026-08-31T23:50:00Z",
-  "updated_at": "2026-09-01T22:40:00Z",
+  "updated_at": "2026-09-01T23:45:00Z",
   "branch": "main",
   "ask_text": "Add a PreToolUse hook that mechanically enforces the Phase 4 tracked-write isolation rule already documented in commands/pipeline.md, closing the self-documented gap the file admits nothing mechanically enforces.",
   "review_rounds": 4,
@@ -286,6 +286,16 @@
       "phase": "4-review",
       "verdict": "delta-dispatched",
       "at": "2026-09-01T22:40:00Z"
+    },
+    {
+      "phase": "4-review",
+      "verdict": "APPROVE_WITH_NOTES",
+      "at": "2026-09-01T23:40:00Z"
+    },
+    {
+      "phase": "4-review-delta-fix",
+      "verdict": "DEV_DISPATCHED_ROUND_5",
+      "at": "2026-09-01T23:45:00Z"
     }
   ],
   "flags": [
@@ -558,6 +568,20 @@
       "verdict": "R4_VERIFIED_118_FILED",
       "summary": "Independently reproduced all 5 vanishing-expansion rows (now deny) and 4 must-allow rows (still allow) against the real hook. Filed #118 for the command-word/verb opacity residual Dev disclosed, per deferring-is-an-action, before merge",
       "at": "2026-09-01T22:35:00Z"
+    },
+    {
+      "phase": "4-review",
+      "agent": "qa",
+      "verdict": "APPROVE_WITH_NOTES",
+      "summary": "round 4: both round-3 findings closed, re-measured. +254 verified real (126 genuinely earned by the fix, states so plainly). Mutation battery 4 incl. documented expected survivor. 1 minor: the over-denial cost sentence is falsified by git add -A packages/$PKG (exits 0, stages narrowed). Must not hold merge",
+      "at": "2026-09-01T23:40:00Z"
+    },
+    {
+      "phase": "4-review",
+      "agent": "secops",
+      "verdict": "REQUEST_CHANGES",
+      "summary": "round 4: HIGH closed at the class (30/30 argv-erasing rows deny, hook==oracle, 5504-row differential 0 blanket->clear w/ working non-zero control). NO CODE CHANGE REQUESTED: 2 medium + 1 low are all prose. nullglob pathname-expansion outside the stated class; cost sentence false for 416/488 rows",
+      "at": "2026-09-01T23:40:00Z"
     }
   ],
   "orchestrator_process_notes": [
