@@ -1843,8 +1843,20 @@ function selfTest() {
       // pattern clause is dead weight: every junk fixture above omits current_phase entirely, so
       // the `typeof phase !== "string"` clause alone rejects them and deleting the pattern test
       // changes nothing. Found by the mutation battery, which is what a battery is for.
-      writeFileSync(path.join(pipe, "_archived", "status.json"), JSON.stringify({ current_phase: "archived" }));
-      check("unnamed-run: a non-phase-shaped current_phase is NOT a run candidate",
+      // THE FIXTURE MATRIX, not a representative fixture. Recognition is a CONJUNCTION -- the
+      // schema's required keys are present AND current_phase is schema-shaped -- so a fixture that
+      // fails BOTH clauses proves nothing about either. `{current_phase:"archived"}` is rejected
+      // for its missing required keys whatever the pattern says, and a battery mutation deleting
+      // the pattern clause SURVIVED against it. Each clause therefore gets a fixture that fails
+      // ONLY that clause, with everything else valid.
+      writeFileSync(path.join(pipe, "_archived", "status.json"),
+        JSON.stringify({ ...JSON.parse(runRecord), current_phase: "archived" }));
+      check("unnamed-run: a FULL record whose only defect is a non-phase-shaped current_phase is NOT a candidate",
+        unnamedRunDirs(pipe).length === 1 ? [] : [`candidates: ${unnamedRunDirs(pipe).map((d) => path.basename(d)).join(",")}`], false);
+      // And the mirror: a schema-shaped phase whose record is missing a required key.
+      writeFileSync(path.join(pipe, "_archived", "status.json"),
+        JSON.stringify((({ branch, ...rest }) => rest)(JSON.parse(runRecord))));
+      check("unnamed-run: a phase-shaped record missing ONE required key is NOT a candidate",
         unnamedRunDirs(pipe).length === 1 ? [] : [`candidates: ${unnamedRunDirs(pipe).map((d) => path.basename(d)).join(",")}`], false);
       // THE SHAPE THAT DEFEATED THE PHASE-PATTERN CHECK ALONE, kept here as its own case rather
       // than left to the suite that found it: a one-field stub whose phase IS schema-shaped.
