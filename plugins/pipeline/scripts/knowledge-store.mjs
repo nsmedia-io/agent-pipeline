@@ -24,11 +24,12 @@ const HELP = `knowledge-store.mjs — file-based knowledge store (no deps, no ne
 
 Usage:
   knowledge-store.mjs --search "<terms>" [--domain <d>] [--collection <c>] [--root <dir>]
-  knowledge-store.mjs --write --file <path.json> [--supersede <slug>] [--root <dir>]
+  knowledge-store.mjs --write --file <path.json> [--collection <c>] [--supersede <slug>] [--root <dir>]
   knowledge-store.mjs --archive-issue <n> --from <artifact-dir> [--root <dir>]
   knowledge-store.mjs --list [--collection <c>] [--root <dir>]
 
-Collections: ${COLLECTIONS.join(" | ")}  (default for search/list: living-context)
+Collections: ${COLLECTIONS.join(" | ")}  (default: living-context)
+--archive-issue always writes to issue-archive and takes no --collection.
 Knowledge dir defaults to <root>/knowledge; <root> defaults to the current directory.`;
 
 function parseArgs(argv) {
@@ -122,12 +123,17 @@ function cmdWrite(args) {
   if (!doc) fail(`could not read or parse JSON at ${src}`);
   if (typeof doc.title !== "string" || !doc.title.trim()) fail('document is missing a "title"');
   if (typeof doc.status !== "string" || !doc.status.trim()) fail('document is missing a "status"');
-  const dir = collectionDir(args, "living-context");
+  // Validated against the same allowlist the read paths use, and not only for symmetry: this is
+  // the one path that CREATES a directory from the value, so an unchecked `../..` run would
+  // write outside knowledge/ entirely.
+  const collection = typeof args.collection === "string" ? args.collection : "living-context";
+  if (!COLLECTIONS.includes(collection)) fail(`unknown --collection '${collection}'`);
+  const dir = collectionDir(args, collection);
   mkdirSync(dir, { recursive: true });
   if (typeof args.supersede === "string") {
     const slug = args.supersede.endsWith(".json") ? args.supersede : `${args.supersede}.json`;
     const old = readJson(join(dir, slug));
-    if (!old) fail(`--supersede: no living-context file '${args.supersede}'`);
+    if (!old) fail(`--supersede: no ${collection} file '${args.supersede}'`);
     old.status = "superseded";
     old.last_updated = new Date().toISOString();
     writeFileSync(join(dir, slug), JSON.stringify(old, null, 2) + "\n");
