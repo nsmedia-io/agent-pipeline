@@ -1,7 +1,27 @@
-import glob, json, collections, datetime, sys
+"""Re-derives captured-records.json from the live Claude Code transcripts on THIS machine.
 
-OUT = "/Users/brandonsmith/WebstormProjects/agent-pipeline/.claude/worktrees/harddrive-space-review-4c7a9e/plugins/pipeline/tests/fixtures/voice-lint-56/captured-records.json"
-files = sorted(glob.glob('/Users/brandonsmith/.claude/projects/*/*.jsonl'))
+TWO INPUTS, AND ONLY ONE OF THEM IS PORTABLE (#91). The OUTPUT path is derived from this file's
+own location, so the script writes beside itself in whatever checkout it is run from; it used to
+be an absolute path naming an author's home directory and an ephemeral worktree, which made the
+documented re-derivation recipe break the moment that worktree was removed.
+
+THE INPUT IS NOT PORTABLE AND CANNOT BE MADE SO, so the constraint is stated rather than hidden:
+these fixtures are captured from real transcripts, and transcripts are not in the repo and never
+will be (they are the owner's conversations). Running this on a machine with no Claude Code
+history exits non-zero naming the class it could not find, rather than writing a thinner file
+that would silently weaken every cell it feeds. The transcript root defaults to
+~/.claude/projects and can be pointed elsewhere with CLAUDE_PROJECTS_DIR.
+"""
+
+import glob, json, collections, datetime, os, sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+OUT = os.path.join(HERE, "captured-records.json")
+PROJECTS = os.environ.get("CLAUDE_PROJECTS_DIR") or os.path.expanduser("~/.claude/projects")
+files = sorted(glob.glob(os.path.join(PROJECTS, '*', '*.jsonl')))
+if not files:
+    sys.exit("NO TRANSCRIPTS under " + PROJECTS + ". Set CLAUDE_PROJECTS_DIR, or run this on a "
+             "machine with Claude Code history: these fixtures are CAPTURED, never hand-written.")
 
 def content_str(r):
     c = r.get('message', {}).get('content')
@@ -129,7 +149,10 @@ doc = {
         "  - origin.kind is VERBATIM. Every other origin key keeps its name and loses its value.",
         "  - timestamp is the captured one and is OVERWRITTEN per cell by the fixture builder.",
         "",
-        "RE-DERIVE (author machine, records are the owner's own transcripts and are not in the repo):",
+        "RE-DERIVE (records are the owner's own transcripts and are not in the repo, so this",
+        "needs a machine with Claude Code history; the script writes beside itself, in whatever",
+        "checkout it is run from, and reads ~/.claude/projects unless CLAUDE_PROJECTS_DIR says",
+        "otherwise):",
         "  python3 plugins/pipeline/tests/fixtures/voice-lint-56/capture.py",
         "",
         "STALENESS: every field these fixtures are pinned on is asserted as a present-tense fact",

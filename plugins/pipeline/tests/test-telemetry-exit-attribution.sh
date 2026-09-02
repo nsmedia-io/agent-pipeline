@@ -338,7 +338,9 @@ suite "AC25: the schema stops forbidding a value its own corpus produces"
 # SUPPORTED SIGNAL. phase_elapsed_ms correctly stays non-negative because the code guards
 # delta >= 0. Asserted as a shape read of the schema, in the idiom this suite already uses.
 # NOTE, so nobody reads more urgency into this than it has: nothing in this repo validates
-# status.json against status.schema.json (voice-lint.mjs:261, the phaseShapeFailure message, says so outright), so no validator
+# status.json against status.schema.json (the refusal text `phaseShapeFailure` returns in
+# voice-lint.mjs says so outright; cited by SYMBOL rather than by line, per #91, because the
+# line this used to name had already drifted), so no validator
 # is about to fire. It is a contract that contradicts its own corpus and its own sibling field.
 assert_eq "AC25: total_lead_time_ms declares no \`minimum\`" \
   "$(SCHEMA="$SCHEMA" node -e '
