@@ -660,8 +660,9 @@ export function run(payload, projectDir, scriptDir = SCRIPT_DIR) {
   // ext4, insertion order on APFS (#27) -- so it abstains rather than let the filesystem decide
   // whose run gets voice-checked. This compares ONE record against ONE boundary: there is no
   // second candidate and nothing arbitrary to refuse, and equality means the record was touched
-  // at the instant the turn began. So the turn window is HALF-OPEN, [humanTurnMs, now], and a
-  // record dated exactly at the boundary is IN the turn.
+  // at the instant the turn began. So the turn window is CLOSED AT ITS LEFT END -- a record is
+  // in-turn when recordFreshnessMs >= humanTurnMs -- and one dated exactly at the boundary is IN
+  // the turn.
   //
   // WHY STRICT `<` AND NOT `<=`, in this file's own terms: this comparison is the ONLY new
   // suppressor #56 added, and the governing direction above says this change must never be the

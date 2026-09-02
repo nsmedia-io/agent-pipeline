@@ -1261,7 +1261,7 @@ VL91_TIE_PROBE="$(node -e '
 ' "$VL56_PROJECT/.pipeline/4244/status.json" "$VL56_TRANSCRIPT" 2>&1)"
 assert_eq "#91 PREMISE: the fixture really constructs an EXACT tie -- the record's updated_at and the owner record's timestamp parse to the same integer millisecond. Without this the cell below could pass by being one ms LATE, which exercises the strictly-greater path and witnesses nothing about the tie" \
   "$VL91_TIE_PROBE" "EXACT"
-assert_eq "#91(a) THE TIE ITSELF: a record dated EXACTLY at the turn boundary is IN the turn and still gets graded: exit 2. The turn window is half-open, [humanTurnMs, now]. MUTATION THIS CELL EXISTS FOR: change run()'s \`<\` to \`<=\` and this flips to 0 -- and nothing else in this suite moves, which is what made the mutation survivable before #91" \
+assert_eq "#91(a) THE TIE ITSELF: a record dated EXACTLY at the turn boundary is IN the turn and still gets graded: exit 2. The turn window is CLOSED AT ITS LEFT END: in-turn means recordFreshnessMs >= humanTurnMs. MUTATION THIS CELL EXISTS FOR: change run()'s \`<\` to \`<=\` and this flips to 0 -- and nothing else in this suite moves, which is what made the mutation survivable before #91" \
   "$VL91_TIE_RC" "2"
 
 vl91_tie "$((VL56_OWNER_MS - 1))"
