@@ -451,6 +451,16 @@ function runPhasePattern() {
  * agent owns that fails its schema. Nothing writes that shape; a run record is written by the
  * orchestrator and by nothing else.
  */
+// mtime of a run dir's status.json, or null when there is none to read. The same quantity
+// activeIssueDir ranks its own candidates by, so the two comparisons stay commensurable.
+function statusMtime(dir) {
+  try {
+    return statSync(path.join(dir, "status.json")).mtimeMs;
+  } catch {
+    return null;
+  }
+}
+
 export function unnamedRunDirs(pipelineDir) {
   const out = [];
   let entries;
@@ -1063,18 +1073,42 @@ export function checkArtifacts(agentType, input, now = Date.now(), rootsOverride
     // to validate: skip the root entirely (fail-open).
     let issueDir = activeIssueDir(dir, input);
     let viaUnnamed = false;
+    // Did precedence (a) -- the orchestrator's explicit marker -- decide this? Recomputed from
+    // activeIssueName rather than inferred from the result, because an mtime scan can legitimately
+    // land on the same dir the marker names and the two must not be confused.
+    const marker = activeIssueName(input);
+    const markerResolved = Boolean(marker && issueDir && path.basename(issueDir) === marker);
 
-    // #115 RECOVERY, and it is deliberately the LAST resort. A named dir always wins: this runs
-    // only where activeIssueDir found nothing, so it can never redirect a stop away from a run
-    // that resolved the ordinary way. It requires a UNIQUE candidate for the same reason
-    // activeIssueDir refuses an mtime tie -- two orphaned runs are an absence of a signal, not a
-    // weaker one, and guessing would block a stop for work this session never touched.
-    if (!issueDir) {
+    // #115 RECOVERY. The rule is the one this validator already uses to decide which issue is
+    // active -- THE NEWEST status.json WINS -- applied to a candidate ISSUE_DIR_RE excluded from
+    // that comparison purely on its name. Nothing new is invented here; a run is simply no longer
+    // disqualified from being the newest by being unnamable.
+    //
+    // "A NAMED DIR ALWAYS WINS" WAS THE WRONG RULE, and it was measured wrong rather than argued
+    // wrong. In the realistic adopting-project shape -- one finished `.pipeline/12` from last
+    // month plus today's unnamable run -- activeIssueDir resolves the stale numeric dir, so a
+    // last-resort-only fallback never fires and today's run stays exactly as unchecked as before
+    // this change. Measured 2026-09-02: 0 bytes on a fixture carrying 14 known violations.
+    //
+    // THREE THINGS THAT STILL BOUND IT, each refusing a different way to guess wrong:
+    //   - AN EXPLICIT MARKER IS NEVER OVERRIDDEN. If the orchestrator named the run, that answer
+    //     stands; precedence (a) in activeIssueDir's contract is untouched.
+    //   - STRICTLY NEWER, never equal. A tie keeps the named dir, so this can only ever move the
+    //     answer on a positive signal, and the git-clone case (every tracked status.json stamped
+    //     within one coarse clock tick) cannot flip it.
+    //   - UNIQUE, for the same reason activeIssueDir refuses an mtime tie: two unnamable runs are
+    //     an absence of a signal, not a weaker one, and guessing between them would block a stop
+    //     for work this session never touched.
+    if (!markerResolved) {
       const orphans = unnamedRunDirs(dir);
       if (orphans.length === 1) {
-        issueDir = orphans[0];
-        viaUnnamed = true;
-      } else if (orphans.length > 1 && verdict === "no-active-issue") {
+        const candidate = orphans[0];
+        const candidateAt = statusMtime(candidate);
+        if (candidateAt !== null && (!issueDir || candidateAt > statusMtime(issueDir))) {
+          issueDir = candidate;
+          viaUnnamed = true;
+        }
+      } else if (orphans.length > 1 && !issueDir && verdict === "no-active-issue") {
         verdict = "unnamed-run-ambiguous";
         detail =
           `${orphans.length} dirs under ${dir} hold a run record but match neither <number> nor ` +
@@ -1752,11 +1786,40 @@ function selfTest() {
       writeFileSync(path.join(orphan, "status.json"), runRecord);
       writeFileSync(path.join(orphan, "peer-review.secops.json"), JSON.stringify(brokenPanel));
 
-      // A NAMED dir still wins. This is the case that proves the recovery is a last resort and
-      // cannot redirect a stop away from a run that resolved the ordinary way.
-      const rBothPresent = checkArtifacts("pipeline:secops", { cwd: root }, Date.now(), pin);
-      check("unnamed-run: a named issue dir still wins over an unnamed one",
-        rBothPresent.issue === "1965" ? [] : [`resolved to ${rBothPresent.issue}`], false);
+      // WHICH RUN WINS when a named dir and an unnamable one both hold a record. The rule is the
+      // validator's existing one -- newest status.json -- so this asserts BOTH directions rather
+      // than only the direction that flatters the change. Every mtime is stamped EXPLICITLY: two
+      // files written microseconds apart do not reliably differ on Linux's coarse clock, and
+      // leaving the ordering to the host is #27, green on APFS and red as a group on ubuntu.
+      const stampStatus = (d, ms) => utimesSync(path.join(d, "status.json"), ms / 1000, ms / 1000);
+      const t0 = Date.now();
+
+      stampStatus(named, t0);
+      stampStatus(orphan, t0 - 10_000); // named is NEWER
+      check("unnamed-run: a NEWER named dir wins over an unnamable one",
+        checkArtifacts("pipeline:secops", { cwd: root }, Date.now(), pin).issue === "1965"
+          ? [] : ["the unnamable dir displaced a newer named run"], false);
+
+      stampStatus(orphan, t0 + 10_000); // orphan is NEWER: the realistic #115 shape
+      const rOrphanNewer = checkArtifacts("pipeline:secops", { cwd: root }, Date.now(), pin);
+      check("unnamed-run: a NEWER unnamable dir wins over a stale named one (the realistic shape)",
+        rOrphanNewer.issue === "tracker-unreachable-20260902"
+          ? [] : [`resolved to ${rOrphanNewer.issue}; a finished run from last month still masks today's`], false);
+      check("unnamed-run: and that is what makes its defect visible at all", rOrphanNewer.failures, true);
+
+      // STRICTLY newer, never equal. A tie keeps the named dir, so a fresh `git clone` -- which
+      // stamps every tracked status.json inside one coarse clock tick -- cannot flip the answer.
+      stampStatus(orphan, t0);
+      check("unnamed-run: an mtime TIE keeps the named dir (clone-safe)",
+        checkArtifacts("pipeline:secops", { cwd: root }, Date.now(), pin).issue === "1965"
+          ? [] : ["a tie displaced the named run"], false);
+
+      // An EXPLICIT marker is never overridden, however new the unnamable dir is. Precedence (a)
+      // in activeIssueDir's contract stays exactly as it was.
+      stampStatus(orphan, t0 + 10_000);
+      check("unnamed-run: an explicit active_issue marker is never overridden",
+        checkArtifacts("pipeline:secops", { cwd: root, active_issue: "1965" }, Date.now(), pin).issue === "1965"
+          ? [] : ["the marker was overridden by an unnamable dir"], false);
 
       // Remove the named dir's record: now the orphan is the only run in the root.
       rmSync(path.join(named, "status.json"), { force: true });

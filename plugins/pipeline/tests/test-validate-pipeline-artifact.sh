@@ -258,14 +258,36 @@ assert_eq "two unnamable runs block nothing (fail open)" "$OUT" ""
 assert_contains "and the abstention is named" "$ERR" "verdict=unnamed-run-ambiguous"
 assert_contains "naming both candidates" "$ERR" "_archived"
 
-# A NAMED dir wins, even with two unnamable runs sitting beside it. The recovery is a last resort
-# and must never redirect a stop away from a run that resolved the ordinary way -- that would be a
-# false block on work the session never touched.
+# WHICH RUN WINS. The rule is the validator's existing one -- the newest status.json -- so both
+# directions are asserted, not only the one that flatters the change. Mtimes are set with an
+# EXPLICIT `touch -t` rather than by write order: two files written microseconds apart do not
+# reliably differ on Linux's coarser clock, and leaving the ordering to the host is #27 (green on
+# APFS, red as a group on ubuntu-latest, at a fixed commit).
+# Reset _archived to a NON-run first: the ambiguity case above left it holding a run record, and
+# with two unnamable candidates the uniqueness rule refuses to pick either -- which would make the
+# cases below pass for the wrong reason.
+printf '%s' '{"x":1}' > "$ORPHAN_ROOT/.pipeline/_archived/status.json"
 mkdir -p "$ORPHAN_ROOT/.pipeline/777"
 printf '%s' "$RUN_RECORD" > "$ORPHAN_ROOT/.pipeline/777/status.json"
+touch -t 202701010000 "$ORPHAN_ROOT/.pipeline/777/status.json"          # named is NEWER
+touch -t 202601010000 "$ORPHAN_DIR/status.json"
 orphan_hook
-assert_contains "a named issue dir still wins over any unnamable one" "$ERR" "issue=777"
-assert_eq "so the unnamable dir's defect no longer blocks" "$OUT" ""
+assert_contains "a NEWER named issue dir wins over the unnamable ones" "$ERR" "issue=777"
+assert_eq "so the unnamable dir's defect does not block" "$OUT" ""
+
+# The realistic adopting-project shape, and the one a last-resort-only fallback got WRONG: a
+# finished numeric run from last month, plus today's unnamable one. Measured before this rule:
+# 0 bytes on a fixture carrying real violations, because the stale named dir masked today's run.
+touch -t 202601010000 "$ORPHAN_ROOT/.pipeline/777/status.json"          # named is now STALE
+touch -t 202701010000 "$ORPHAN_DIR/status.json"                        # today's run is NEWER
+orphan_hook
+assert_contains "a NEWER unnamable run is no longer masked by a stale named one" "$ERR" "issue=tracker-unreachable-20260902"
+assert_contains "and its defect is visible at last" "$OUT" '"decision":"block"'
+
+# An EXPLICIT marker is never overridden, however new the unnamable dir is.
+MARKED_ERR=$(printf '{"agent_type":"pipeline:secops","cwd":"%s","active_issue":"777"}' "$ORPHAN_ROOT" \
+  | ( cd "$ORPHAN_ROOT" && CLAUDE_PROJECT_DIR="$ORPHAN_ROOT" node "$VALIDATOR" ) 2>&1 >/dev/null)
+assert_contains "an explicit active_issue marker is never overridden" "$MARKED_ERR" "issue=777"
 
 suite "validate-pipeline-artifact: every SHIPPED agent is classified (#66 property 3)"
 
