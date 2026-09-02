@@ -170,6 +170,14 @@ assert_eq "it flips the doc in THAT collection" "$(jget "$DEC/ferry-cadence-v0.j
 assert_eq "and leaves the same-named doc in living-context alone" \
   "$(jget "$LC/ferry-cadence-v0.json" status)" "current"
 
+# The refusal names the directory it actually searched. Pinned because it is what an operator
+# navigates by: a message hardcoded to "living-context" while the write targeted `decisions`
+# sends whoever is debugging a failed supersede to the wrong folder. Caught this as a surviving
+# mutation -- re-pinning the message to the literal left the whole suite green.
+ks --write --file "$TEMP_PROJECT/ferry-cadence.json" --collection decisions --supersede nothing-here
+assert_eq "--supersede on an unknown slug in a named collection exits 1" "$RC" "1"
+assert_contains "and the refusal names the collection it searched" "$ERR" "no decisions file"
+
 # Honouring the value means validating it, on the same allowlist the read paths already use.
 ks --write --file "$TEMP_PROJECT/ferry-cadence.json" --collection nonsense
 assert_eq "an unknown --collection on write exits 1" "$RC" "1"
