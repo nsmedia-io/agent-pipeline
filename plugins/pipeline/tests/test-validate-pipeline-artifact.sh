@@ -267,13 +267,18 @@ suite "validate-pipeline-artifact: every SHIPPED agent is classified (#66 proper
 # agents/*.md the plugin ships. Each one must be either registered in AGENT_RULES or declared
 # artifact-less. Adding an agent file without deciding which reddens here, as does deleting one,
 # as does a namespaced dispatch resolving differently from a bare one.
+# Paths arrive as argv, NOT interpolated into the script body: nesting shell quoting inside a
+# node -e string is a second escaping layer under the thing being measured, and a path that
+# happened to contain a quote or a space would corrupt the program rather than the result.
 MANIFEST=$(node -e '
-import("file://'"$SCRIPTS_DIR"'/validate-pipeline-artifact.mjs").then(async (m) => {
+const [scriptsDir, agentsDir] = process.argv.slice(1);
+import("file://" + scriptsDir + "/validate-pipeline-artifact.mjs").then(async (m) => {
   const fs = await import("node:fs");
-  const shipped = fs.readdirSync("'"$PLUGIN_ROOT"'/agents")
+  const path = await import("node:path");
+  const shipped = fs.readdirSync(agentsDir)
     .filter((f) => f.endsWith(".md"))
     .map((f) => {
-      const head = fs.readFileSync("'"$PLUGIN_ROOT"'/agents/" + f, "utf8").split("\n").slice(0, 10);
+      const head = fs.readFileSync(path.join(agentsDir, f), "utf8").split("\n").slice(0, 10);
       const line = head.find((l) => l.startsWith("name:"));
       return line ? line.slice(5).trim() : "";
     })
@@ -287,7 +292,7 @@ import("file://'"$SCRIPTS_DIR"'/validate-pipeline-artifact.mjs").then(async (m) 
     m.checkArtifacts(a, {}, Date.now(), []).verdict !== m.checkArtifacts("pipeline:" + a, {}, Date.now(), []).verdict);
   process.stdout.write(JSON.stringify({ shipped: shipped.length, missing, extra, drift }));
 });
-' 2>&1)
+' "$SCRIPTS_DIR" "$PLUGIN_ROOT/agents" 2>&1)
 assert_contains "the manifest check ran and enumerated the shipped agents" "$MANIFEST" '"shipped":9'
 assert_contains "every shipped agent is registered or declared artifact-less" "$MANIFEST" '"missing":[]'
 assert_contains "and nothing is classified that the plugin does not ship" "$MANIFEST" '"extra":[]'
