@@ -429,10 +429,12 @@ assert_eq "AC36(a): a FUNCTION-SCOPE reverse edge is still a cycle and is still 
   "$(printf '%s' "$FN_OUT" | sed -n 's/.*cycles=\([0-9]*\).*/\1/p' | head -1)" "1"
 
 # The module count is a present-tense fact, so a stale expectation fails loudly rather than
-# passing confidently: 16 at the reviewed commit, 17 once R6's leaf module lands.
+# passing confidently: 16 at the reviewed commit, 17 once R6's leaf module landed, 18 with
+# #117's check-status-record.mjs. It went red on schedule when that eighteenth module landed,
+# which is the behaviour this pin is for -- bump the number, do not soften it to a floor.
 MODULE_N="$(printf '%s' "$GRAPH_OUT" | sed -n 's/modules=\([0-9]*\).*/\1/p' | head -1)"
-assert_eq "AC36: R6's LEAF module has landed, so scripts/ holds 17 modules, not the reviewed commit's 16" \
-  "$MODULE_N" "17"
+assert_eq "AC36: scripts/ holds 18 modules -- R6's LEAF module plus #117's check-status-record.mjs, not the reviewed commit's 16" \
+  "$MODULE_N" "18"
 
 # ===============================================================================================
 suite "AC36(b): three entry directions, PAIRED SAME-RUN CAPTURE against the reviewed commit"

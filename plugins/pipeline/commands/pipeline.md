@@ -101,11 +101,17 @@ Commit the `status.json` checkpoints, but keep every other per-issue artifact (`
 
 ```bash
 # Run BEFORE entering each phase, after setting current_phase to the phase being ENTERED.
+# The checker refuses an over-cap events[]/flags[] verdict BEFORE it reaches a commit. It takes
+# no arguments, reads the cap out of schemas/status.schema.json, and is silent when clean; a
+# non-zero exit names the file, the json path and the value, and means fix the record.
+node "${CLAUDE_PLUGIN_ROOT}/scripts/check-status-record.mjs"
 git add .pipeline/<issue>/status.json
 git commit -m "chore(pipeline): checkpoint phase <n> for #<issue>"
 ```
 
-Dependency note (do not widen the commit scope blindly): a checkpoint commit touches ONLY `.pipeline/<issue>/status.json`. This plugin now ships one such filter itself — the `PreToolUse(Bash)` gate in `hooks/pre-tool-use.sh`, which is the commit-triggered automation nearest to hand and refuses a SUBAGENT's blanket staging while a Phase 4 run is in flight — and your project may wire others (a `PostToolUse(Bash)` hook that fires on specific committed paths, say). A status-only checkpoint commit must match none of them: the two commands above name their pathspec, so they do not, and that is what keeps the gate silent for the orchestrator. A future change that widens what a checkpoint commit stages (e.g. committing other artifacts, or reaching for `git add -A`) must re-check every such filter, or it can silently start firing that automation on every phase transition.
+**Run that checker on every checkpoint, not only after you hand-edited a verdict.** It reads the FILE, not a diff, and takes no argument naming what you changed, because the second occurrence in #117 was not a typo: a 33-char label was fixed by Dev in a worktree and then silently restored when a routine `cp` from the orchestrator's own stale copy overwrote the fixed file, and the clobber was committed. A check scoped to "the value I just wrote" passes that. A check over the record's whole content cannot tell a keystroke from a `cp`, and does not need to.
+
+Dependency note (do not widen the commit scope blindly): a checkpoint commit touches ONLY `.pipeline/<issue>/status.json`. This plugin now ships one such filter itself — the `PreToolUse(Bash)` gate in `hooks/pre-tool-use.sh`, which is the commit-triggered automation nearest to hand and refuses a SUBAGENT's blanket staging while a Phase 4 run is in flight — and your project may wire others (a `PostToolUse(Bash)` hook that fires on specific committed paths, say). A status-only checkpoint commit must match none of them: the two `git` commands above name their pathspec, so they do not, and that is what keeps the gate silent for the orchestrator. A future change that widens what a checkpoint commit stages (e.g. committing other artifacts, or reaching for `git add -A`) must re-check every such filter, or it can silently start firing that automation on every phase transition.
 
 **Append to `flags` after each agent returns** so downstream phases (especially the Phase 4 panel) can start from a digest instead of re-reading the full artifact JSON. One entry per agent, one short line of free text:
 
@@ -119,7 +125,7 @@ Rules for `summary`:
 - Verdict-only ("APPROVE") agents still get an entry with `summary: ""`.
 
 Rules for `verdict` (the same rule governs `events[].verdict`):
-- A TOKEN, not prose: strict 32-char cap, matching the `maxLength` on both verdict fields in `schemas/status.schema.json`. Write the agent's verdict word and nothing else; the reasoning goes in `summary`. Nothing validates status.json against that schema, so this restatement IS the write-time honorer.
+- A TOKEN, not prose: strict 32-char cap, matching the `maxLength` on both verdict fields in `schemas/status.schema.json`. Write the agent's verdict word and nothing else; the reasoning goes in `summary`. Nothing validates status.json against that schema automatically, so this restatement is one honorer and `node "${CLAUDE_PLUGIN_ROOT}/scripts/check-status-record.mjs"` is the other -- run it before every checkpoint commit, as the recipe above does. Prose alone was not enough: #117 records the cap being broken twice in one run, once by seven labels accumulating unnoticed across phases (longest 44) and once by a fix being overwritten by a stale copy.
 
 When dispatching Phase 4 reviewer prompts (see the Phase 4 section below), include the line `Prior flags: see status.json flags array; the digest is authoritative for what earlier agents already raised.` This avoids each Phase 4 reviewer re-parsing review.json and impl-report.json from cold.
 

@@ -386,6 +386,12 @@ for cand in $(grep -oE 'scripts/[a-zA-Z0-9_-]+\.mjs' "$PIPELINE_MD" | sort -u); 
     # "p" in the single-survivor `break` this suite used to take. See the twin comment in
     # test-dispatch-model-resolver.sh.
     gate-phase-entry.mjs|pipeline-telemetry.mjs) continue ;;
+    # #117's write-time verdict-cap checker, referenced from the durable-checkpoint recipe. It
+    # sorts FIRST of every candidate ("c"), so it is the "next early-sorting scripts/*.mjs
+    # reference" the comment above predicted; the ambiguity halt named it instead of silently
+    # handing this suite a script that resolves no model. See the twin in
+    # test-dispatch-model-resolver.sh.
+    check-status-record.mjs) continue ;;
   esac
   CANDIDATES_REL+=("$cand")
 done
