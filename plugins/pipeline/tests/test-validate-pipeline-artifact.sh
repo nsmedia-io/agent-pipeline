@@ -231,21 +231,24 @@ assert_eq "a VALID artifact in an unnamable dir does NOT block" "$OUT" ""
 assert_contains "but the naming gap is still reported" "$ERR" "verdict=unnamed-run"
 printf '%s' '{"verdict":"NOT_A_VERDICT"}' > "$ORPHAN_DIR/peer-review.secops.json"
 
-# A NAMED dir wins. The recovery is a last resort and must never redirect a stop away from a run
-# that resolved the ordinary way -- that would be a false block on work the session never touched.
-mkdir -p "$ORPHAN_ROOT/.pipeline/777"
-printf '%s' "$RUN_RECORD" > "$ORPHAN_ROOT/.pipeline/777/status.json"
-orphan_hook
-assert_contains "a named issue dir still wins over an unnamable one" "$ERR" "issue=777"
-assert_eq "so the unnamable dir's defect no longer blocks" "$OUT" ""
-rm -rf "$ORPHAN_ROOT/.pipeline/777"
-
 # A NON-RUN sibling is not adopted. `_archived` is a real name in this repo's own .pipeline.
+# NOTE ON ORDERING: every case below only ever ADDS a fixture or overwrites a file in place.
+# Nothing here removes a directory, deliberately -- harness.sh owns the single guarded rm -rf in
+# these suites, and test-harness.sh refuses a hand-rolled one (a path from a failed mktemp is
+# set-and-EMPTY, which `set -u` does not catch, so `rm -rf "$dir"/...` reaches the filesystem
+# root). So the "a named dir wins" case is stated LAST, where it needs no teardown.
 mkdir -p "$ORPHAN_ROOT/.pipeline/_archived"
 printf '%s' '{"x":1}' > "$ORPHAN_ROOT/.pipeline/_archived/status.json"
 orphan_hook
 assert_contains "a status.json with no phase is not mistaken for a run" "$ERR" "tracker-unreachable-20260902"
 assert_contains "so the real orphan is still the one checked" "$OUT" '"decision":"block"'
+
+# A current_phase that IS a string but is not phase-SHAPED, which is the case that makes the
+# status-schema pattern clause load-bearing rather than dead weight.
+printf '%s' '{"current_phase":"archived"}' > "$ORPHAN_ROOT/.pipeline/_archived/status.json"
+orphan_hook
+assert_contains "a non-phase-shaped current_phase is not a run either" "$ERR" "tracker-unreachable-20260902"
+assert_contains "so the real orphan is STILL the one checked" "$OUT" '"decision":"block"'
 
 # TWO unnamable runs: abstain rather than guess, and say so. Same rule as activeIssueDir's mtime
 # tie -- two candidates are the absence of a signal, not a weaker one.
@@ -254,6 +257,15 @@ orphan_hook
 assert_eq "two unnamable runs block nothing (fail open)" "$OUT" ""
 assert_contains "and the abstention is named" "$ERR" "verdict=unnamed-run-ambiguous"
 assert_contains "naming both candidates" "$ERR" "_archived"
+
+# A NAMED dir wins, even with two unnamable runs sitting beside it. The recovery is a last resort
+# and must never redirect a stop away from a run that resolved the ordinary way -- that would be a
+# false block on work the session never touched.
+mkdir -p "$ORPHAN_ROOT/.pipeline/777"
+printf '%s' "$RUN_RECORD" > "$ORPHAN_ROOT/.pipeline/777/status.json"
+orphan_hook
+assert_contains "a named issue dir still wins over any unnamable one" "$ERR" "issue=777"
+assert_eq "so the unnamable dir's defect no longer blocks" "$OUT" ""
 
 suite "validate-pipeline-artifact: every SHIPPED agent is classified (#66 property 3)"
 
