@@ -13,10 +13,16 @@
 #      exactly as captured (2026-08-04, permanently stale). The same field is pinned in
 #      opposite directions on purpose: hardcode (b) and the criterion rots into a staleness
 #      test; refresh (c) and the staleness check silently stops testing anything.
-#   2. AC12/AC13/AC14 assert on the DECISION STRING and never on an exit code. `granted` and
-#      `not-applicable` both exit 0, so an exit-code assertion for those criteria would be
-#      asserting something other than what it claims. The spec's own falsifiability pass names
-#      this as the ONE mutation expected to survive.
+#   2. AC12/AC13/AC14's CRITERION CELL IS THE REASON CLAUSE, never the exit code and never the
+#      decision (#44). All three criteria decide `not-applicable` and exit 0, and so does a
+#      fourth branch none of them is about, so neither of those observables can carry any of the
+#      three: #44-P1 MEASURES that off live stdout rather than restating it here. What that cost,
+#      before it was fixed: with the decision and the exit code as the only assertions, deleting
+#      the ENTIRE phase-name half of `isTerminal` left AC12 fully green, because every terminal
+#      phase is also absent from GUARDED and the vocabulary fail-open answers `not-applicable`
+#      too. The rc-0 cells are kept and RELABELLED rather than deleted -- `not-applicable` not
+#      blocking a turn is a real fact worth pinning -- but each says in its own label that it
+#      cannot discriminate, so no future reader mistakes one for the criterion again.
 #
 # Fixture roots are new_tmpdir()s, registered and trap-removed by harness.sh. None is ever
 # committed under .pipeline/, because AC19 and AC24 walk `git ls-files '.pipeline/*/status.json'`
@@ -241,9 +247,19 @@ capture() {
   ' "$1" "$2" "$3"
 }
 
-# gate <root> -> GATE_RC, GATE_OUT, GATE_ERR, GATE_DEC, GATE_ISSUE
+# gate <root> -> GATE_RC, GATE_OUT, GATE_ERR, GATE_DEC, GATE_ISSUE, GATE_REASON, GATE_CLAUSE
 # The guard prints ONE JSON line on a decision. `decision` and `issue_dir` are bounded values,
 # read with a bounded sed; `reason` is matched by substring so its wording stays Dev's.
+#
+# GATE_CLAUSE IS THE JUDGEMENT, WITH THE RECORD-DERIVED SPAN REMOVED (#44). Every reason opens
+# with `.pipeline/<dir> at \`<phase>\``, which is interpolated from the fixture and therefore
+# differs between two records that were judged by the SAME branch. Asserting the whole reason
+# would make every cell restate its own fixture; asserting the clause asserts the judgement.
+# The strip is an ANCHORED PATTERN and never a fixed-length cut, for the reason #53-A7 measures:
+# the interpolated spans have different byte lengths, so a `cut -c N-` leaves fixture text in the
+# clause and two records judged identically then compare unequal. A strip that matches NOTHING
+# yields a sentinel rather than silently returning the whole reason, so a cell reading GATE_CLAUSE
+# fails by name instead of comparing two strings that trivially differ.
 gate() {
   local root="$1" errf="$1/.gate-stderr.txt"
   GATE_OUT="$( cd "$root" && node "$GUARD" --root "$root" 2>"$errf" )"
@@ -253,6 +269,10 @@ gate() {
   [[ -n "$GATE_DEC" ]] || GATE_DEC="<no-decision-on-stdout>"
   GATE_ISSUE="$(printf '%s' "$GATE_OUT" | sed -n 's/.*"issue_dir"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
   [[ -n "$GATE_ISSUE" ]] || GATE_ISSUE="<no-issue-dir-on-stdout>"
+  GATE_REASON="$(printf '%s' "$GATE_OUT" | sed -n 's/.*"reason"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
+  [[ -n "$GATE_REASON" ]] || GATE_REASON="<no-reason-on-stdout>"
+  GATE_CLAUSE="$(printf '%s' "$GATE_REASON" | sed 's/^\.pipeline\/[^ ]* at `[^`]*`//')"
+  [[ "$GATE_CLAUSE" != "$GATE_REASON" ]] || GATE_CLAUSE="<NO-RECORD-DERIVED-PREFIX>: $GATE_REASON"
 }
 
 NO_EVENTS='[]'
@@ -723,18 +743,29 @@ ac11 "null"             null
 ac11 "an unknown string" '"deep"'
 
 # ---------------------------------------------------------------------------
-suite "AC12: terminal states decline to judge (asserted on the DECISION, never the exit code)"
+suite "AC12: terminal states decline to judge (the CRITERION is the reason clause, per #44)"
 # ---------------------------------------------------------------------------
+# THE CLAUSE CELL IS THE ONE THAT BITES, and the decision cell beside it is kept because it is
+# true, not because it discriminates. MEASURED at fbc5212 with only the decision and the rc
+# asserted here: deleting `TERMINAL.includes(phase)`, deleting the whole phase-name half of
+# `isTerminal`, and rewriting the reason to `WRONGREASON.` ALL left this suite at failed=0, and
+# neutering `/-error$/` alone survived the WHOLE file. Each of those is a terminal record judged
+# as a phase this table has never heard of, which is a different fact about a run.
 for p in "5-archived" "halted-error" "3-impl-error"; do
   new_case 4242 "$(mk_status "$p" '"architectural"' "$NO_EVENTS")"
   gate "$CASE_ROOT"
   assert_eq "$p -> not-applicable" "$GATE_DEC" "not-applicable"
-  assert_eq "  and stop.sh's side of it exits 0" "$GATE_RC" "0"
+  assert_eq "  AC12's CRITERION: $p is judged FINISHED, and not merely un-guarded -- the clause off live stdout, with the fixture-derived span stripped" \
+    "$GATE_CLAUSE" " is finished."
+  assert_eq "  and stop.sh's side of it exits 0 (a LIVENESS pin, NOT this criterion's discriminator: \`granted\` and every other not-applicable branch exit 0 too, so no mutation to the terminal check can redden this cell -- see #44-P1)" \
+    "$GATE_RC" "0"
 done
 # A DIFFERENT predicate: a non-terminal phase that would otherwise refuse, carrying completed_at.
 new_case 4242 "$(mk_status "3-impl" '"architectural"' "$NO_EVENTS" ',"completed_at":"2026-01-02T00:00:00Z"')"
 gate "$CASE_ROOT"
 assert_eq "a non-terminal phase carrying completed_at -> not-applicable" "$GATE_DEC" "not-applicable"
+assert_eq "  and ITS clause is the terminal one too. Without this the completed_at arm is pinned only by a decision `3-impl` reaches by four other routes, one of which (staleness) this fixture is one edit away from" \
+  "$GATE_CLAUSE" " is finished."
 
 # ---------------------------------------------------------------------------
 suite "AC13: each of the 9 UNGUARDED literals lets a halted run end its turn"
@@ -745,10 +776,17 @@ UNGUARDED_LITERALS=(
   "3-impl-tripwire" "3-impl-tripwire-indeterminate" "4-veto-rework-required"
 )
 assert_eq "the UNGUARDED set under test has 9 literals" "${#UNGUARDED_LITERALS[@]}" "9"
+# THE POINT OF THE CLAUSE CELL HERE, in Dev's own words at the time: the decision alone "cannot
+# tell unguarded from unknown". Every one of these 9 literals is also absent from GUARDED, so
+# emptying the UNGUARDED array entirely would leave the decision cell green on all 9 -- each
+# record falling through to the vocabulary fail-open, which is the branch for a phase nobody
+# taught this table, not for a halt state it knows about and declines to guard.
 for p in "${UNGUARDED_LITERALS[@]}"; do
   new_case 4242 "$(mk_status "$p" '"architectural"' "$NO_EVENTS")"
   gate "$CASE_ROOT"
   assert_eq "$p -> not-applicable" "$GATE_DEC" "not-applicable"
+  assert_eq "  AC13's CRITERION: $p is judged a KNOWN halt or rework state, not an unrecognised one" \
+    "$GATE_CLAUSE" " is a halt or rework state, which is never guarded."
 done
 
 # ---------------------------------------------------------------------------
@@ -763,7 +801,113 @@ for p in "3-scope-drift-adjudication" "3-something-nobody-writes"; do
   new_case 4242 "$(mk_status "$p" '"architectural"' "$NO_EVENTS")"
   gate "$CASE_ROOT"
   assert_eq "unrecognised phase $p -> not-applicable, NOT refused" "$GATE_DEC" "not-applicable"
+  assert_eq "  AC14's CRITERION: $p reaches not-applicable BY THE VOCABULARY FAIL-OPEN and not by some other abstention -- this is the cell that stops a future author 'fixing' the fail-open by adding these two literals to UNGUARDED, which would leave the decision green here and quietly restore deny-by-default for the next phase nobody writes" \
+    "$GATE_CLAUSE" ", which is not a guarded phase."
 done
+
+# ===========================================================================================
+# #44 -- TERMINAL, UNGUARDED AND UNKNOWN ARE THREE FACTS SHARING ONE DECISION
+#
+# THE DEFECT. AC12/AC13/AC14 each asserted a decision (`not-applicable`) and AC12 additionally
+# asserted an exit code (0). Four branches of `decideForDir` produce that exact pair, so those
+# assertions partition nothing: every cell above was green for a record judged by ANY of the
+# four. Measured at fbc5212 against the suite as it then stood, `passed=505 failed=0`:
+#   - `return /-error$/.test(phase)` -> `return false` (a `3-impl-error` record judged as a
+#     phase this table has never heard of): SURVIVED the whole file, 505/0.
+#   - deleting `TERMINAL.includes(phase)`, and deleting the phase-name half of `isTerminal`
+#     entirely: AC12 stayed green on all three of its phases. Each was caught only by #53-A6,
+#     an incidental BYTE-COUNT control belonging to another criterion, which happens to probe
+#     `5-archived` and would stop catching them the moment #53's probe phase changed.
+#   - the reason `is finished.` -> `WRONGREASON.`: AC12 stayed green; caught only by #53-P1.
+# So AC12's own subject was covered by nothing, and AC13's by nothing: Dev's note at the time
+# conceded it, that AC13 "cannot tell unguarded from unknown".
+#
+# THE FIX IS TEST-ONLY. The three clauses are already distinct on stdout and were the whole time.
+# What follows asserts the DISCRIMINATION between them, so the cells above are a partition rather
+# than three restatements of one observable.
+#
+# THE ONE MUTATION EXPECTED TO SURVIVE THIS SECTION, with its mechanism, because a battery in
+# which everything reddens cannot tell coverage from an instrument that reddens on everything:
+# deleting `if (phase === "halted-error") return true;` from `isTerminal`. That line is provably
+# redundant -- `/-error$/` on the line below matches `halted-error` -- so its deletion is
+# behaviour-preserving on every input, and the surviving green is a THEOREM about the guard and
+# not a hole in this suite. VERIFIED as a survivor both before and after this section landed.
+# If it ever reddens, `/-error$/` changed, not the coverage.
+# ===========================================================================================
+AC44_IDS=""
+reg44() { AC44_IDS="$AC44_IDS$1
+"; }
+
+# ac44_probe <phase> -> "<rc>|<decision>|<clause>", all three off ONE live invocation of the
+# guard's real CLI. Never off this file's own prose: what is worth asserting is what the process
+# produced, and a table of expected wording maintained here would track whoever last edited it.
+ac44_probe() {
+  new_case 4242 "$(mk_status "$1" '"architectural"' "$NO_EVENTS")"
+  gate "$CASE_ROOT"
+  printf '%s|%s|%s' "$GATE_RC" "$GATE_DEC" "$GATE_CLAUSE"
+}
+ac44_f() { printf '%s' "$1" | cut -d'|' -f"$2"; }
+
+AC44_TERM="$(ac44_probe "5-archived")"
+AC44_HALT="$(ac44_probe "3-impl-gate-failed")"
+AC44_GHOST="$(ac44_probe "3-something-nobody-writes")"
+
+# ---------------------------------------------------------------------------
+suite "#44 premises: the decision and the exit code are MEASURED to be non-discriminating here"
+# ---------------------------------------------------------------------------
+reg44 "#44-P1"
+assert_eq "#44-P1 THE PREMISE THE WHOLE SECTION RESTS ON, taken off live stdout rather than argued: a terminal record, a known halt state and a phase this table has never heard of are INDISTINGUISHABLE by decision and by exit code. Any cell claiming to test one of the three while asserting only those two observables is asserting something other than what it claims" \
+  "$(ac44_f "$AC44_TERM" 1)/$(ac44_f "$AC44_TERM" 2) $(ac44_f "$AC44_HALT" 1)/$(ac44_f "$AC44_HALT" 2) $(ac44_f "$AC44_GHOST" 1)/$(ac44_f "$AC44_GHOST" 2)" \
+  "0/not-applicable 0/not-applicable 0/not-applicable"
+reg44 "#44-P2"
+assert_eq "#44-P2 and the strip found a record-derived span in all three, so a clause below is a JUDGEMENT and not a whole reason that trivially differs by its own fixture's phase name" \
+  "$(printf '%s\n%s\n%s\n' "$(ac44_f "$AC44_TERM" 3)" "$(ac44_f "$AC44_HALT" 3)" "$(ac44_f "$AC44_GHOST" 3)" | grep -c 'NO-RECORD-DERIVED-PREFIX' | tr -d ' ')" \
+  "0"
+
+# ---------------------------------------------------------------------------
+suite "#44 the criterion: the three clauses DISCRIMINATE, pairwise, off live stdout"
+# ---------------------------------------------------------------------------
+ac44_pair() {  # ac44_pair <clause-a> <clause-b> -> `discriminates` | a diagnosis naming the collision
+  if [[ "$1" != "$2" ]]; then printf 'discriminates'; else printf 'IDENTICAL CLAUSES: %s' "$1"; fi
+}
+reg44 "#44-D1"
+assert_eq "#44-D1 a TERMINAL record's clause is not a KNOWN-HALT record's clause. Without it, emptying UNGUARDED or deleting the terminal check moves records between two branches with no cell able to see it" \
+  "$(ac44_pair "$(ac44_f "$AC44_TERM" 3)" "$(ac44_f "$AC44_HALT" 3)")" "discriminates"
+reg44 "#44-D2"
+assert_eq "#44-D2 a TERMINAL record's clause is not an UNRECOGNISED phase's clause. THIS is the pair the four surviving mutations all collapsed: a finished run reported as a phase nobody taught the table" \
+  "$(ac44_pair "$(ac44_f "$AC44_TERM" 3)" "$(ac44_f "$AC44_GHOST" 3)")" "discriminates"
+reg44 "#44-D3"
+assert_eq "#44-D3 a KNOWN-HALT record's clause is not an UNRECOGNISED phase's clause -- the AC13 half Dev's own note conceded was uncovered" \
+  "$(ac44_pair "$(ac44_f "$AC44_HALT" 3)" "$(ac44_f "$AC44_GHOST" 3)")" "discriminates"
+
+# ---------------------------------------------------------------------------
+suite "#44 the non-zero control: the clause instrument is not returning a constant"
+# ---------------------------------------------------------------------------
+# THREE VALUES THAT DIFFER PROVE NOTHING ON THEIR OWN unless the instrument can also be shown to
+# track the guard rather than the fixture. This drives a record the guard genuinely REFUSES: a
+# different rc, a different decision, and a fourth clause distinct from all three above.
+new_case 4242 "$(mk_status "3-impl" '"architectural"' "$NO_EVENTS")"
+gate "$CASE_ROOT"
+AC44_REFUSED_CLAUSE="$GATE_CLAUSE"
+reg44 "#44-C1"
+assert_eq "#44-C1 NON-ZERO CONTROL: a record whose prerequisite is genuinely missing exits 2, decides \`refused\`, and its clause is none of the three abstention clauses. So every equality above is the guard reporting a branch and not this helper echoing one string" \
+  "$GATE_RC/$GATE_DEC/$(ac44_pair "$AC44_REFUSED_CLAUSE" "$(ac44_f "$AC44_TERM" 3)")/$(ac44_pair "$AC44_REFUSED_CLAUSE" "$(ac44_f "$AC44_HALT" 3)")/$(ac44_pair "$AC44_REFUSED_CLAUSE" "$(ac44_f "$AC44_GHOST" 3)")" \
+  "2/refused/discriminates/discriminates/discriminates"
+reg44 "#44-C2"
+assert_contains "#44-C2 and that refusal's clause still carried a record-derived span for the strip to remove, so #44-C1's four-way distinctness is about the judgement and not about a sentinel" \
+  "$AC44_REFUSED_CLAUSE" "no \`design.json\`"
+
+# ---------------------------------------------------------------------------
+suite "#44 the label namespace: unique, and every id that exists actually RAN"
+# ---------------------------------------------------------------------------
+reg44 "#44-Z1"
+reg44 "#44-Z2"
+AC44_UNIQ="$(printf '%s' "$AC44_IDS" | grep . | sort -u)"
+assert_eq "#44-Z1 no #44 assertion id is used twice (a colliding label makes a mutation battery's grep return two unrelated sites)" \
+  "$(printf '%s\n' "$AC44_IDS" | grep -c . | tr -d ' ')" "$(printf '%s\n' "$AC44_UNIQ" | grep -c . | tr -d ' ')"
+assert_eq "#44-Z2 every #44 id written in this file was REGISTERED by a cell that ran" \
+  "$(printf '%s\n' "$AC44_UNIQ" | grep -c . | tr -d ' ')" \
+  "$(grep -o '#44-[A-Za-z0-9][A-Za-z0-9]*' "${BASH_SOURCE[0]}" | sort -u | grep -c . | tr -d ' ')"
 
 # ---------------------------------------------------------------------------
 suite "AC15: the in-flight predicate (the Stop hook is project-scoped, not run-scoped)"
