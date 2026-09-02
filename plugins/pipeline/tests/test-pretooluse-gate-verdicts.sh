@@ -233,8 +233,17 @@ assert_eq "DENY: git commit -a\$X (the same, on the commit branch)" \
   "$(sub_verdict "$P4" 'git commit -a$X')" "deny"
 assert_eq "DENY: git commit -a\`true\` (the same, in the backquoted spelling)" \
   "$(sub_verdict "$P4" 'git commit -a`true`')" "deny"
-assert_eq "DENY: git add -A --\$X (an expansion attached to \`--\` is still end-of-options)" \
+# `--$X` is NOT end-of-options, and the row below says so because the verdict alone cannot: only
+# the exact two-character word `--` sets it, and `--$X` falls to the unknown-long-option arm, which
+# ignores the word and leaves the already-read `-A` standing. The two rows after it are the
+# DISCRIMINATOR that earns the sentence -- if `--$X` opened end-of-options, the word after it would
+# be read as an OPERAND and would narrow.
+assert_eq "DENY: git add -A --\$X (\`--\` with an expansion attached is an unknown long option, not end-of-options; the blanket -A stands)" \
   "$(sub_verdict "$P4" 'git add -A --$X')" "deny"
+assert_eq "DISCRIMINATOR (positive control): git add -A -- -u (a REAL \`--\` does make the next word an operand, so this narrows)" \
+  "$(sub_verdict "$P4" 'git add -A -- -u')" "none"
+assert_eq "DISCRIMINATOR: git add -A --\$X -u (\`-u\` is still read as a FLAG, so \`--\$X\` did not open end-of-options)" \
+  "$(sub_verdict "$P4" 'git add -A --$X -u')" "deny"
 
 # THE FALSIFICATION HALF, so the fix cannot be "deny every operand carrying a dollar sign". A
 # REAL narrowing operand must still narrow, INCLUDING when an opaque word stands beside it.
@@ -320,6 +329,46 @@ assert_eq "ORACLE: the LITERAL empty string arrives as a real (empty) argument, 
 #   git add -A plugins/... $NOPE      -> exit 128, staged NOTHING (it narrowed to the named path)
 # so every deny above is a command that really does stage what its author did not name, and the
 # allow twin really does narrow.
+
+# ---- THE DISCLOSED OVER-DENIAL, asserted for the same reason the residual above is ------------
+#
+# BOTH HALVES OF ONE TRADE-OFF, OR NEITHER. The under-denial (`git add $X` is not credited with the
+# power to blanket) gets two ALLOW cells above, and they bite: a mutation that credits an opaque
+# operand with blanketing reddens them. The over-denial had only prose, so a later change that
+# widened or narrowed it would redden nothing. These rows are that missing half.
+#
+# WHAT IS OVER-DENIED, and it is not the two exit-128 curiosities an earlier note named. A blanket
+# flag beside an operand carrying a substitution is refused EVEN WHEN THE SUBSTITUTION RESOLVES to
+# a real path and the command would have staged a correctly narrowed set. Ground truth from real
+# git 2.x in a scratch repository holding a modified `packages/pipeline/a.txt`, an untracked
+# `packages/pipeline/new.txt` and an untracked `outside.txt`:
+#   PKG=pipeline; git add -A packages/$PKG      -> rc 0, staged packages/pipeline/{a,new}.txt only
+#   F=packages/pipeline/a.txt; git add -u "$F"  -> rc 0, staged exactly that one file
+#   git add -A                       (control)  -> rc 0, staged all three, INCLUDING outside.txt
+# The first two are correct narrowed work and this gate refuses them. That is accepted, because
+# `$F` holding a path and `$F` holding nothing are the same text to a scanner that never sees argv.
+# The rows are here so the acceptance is a decision the suite defends, not a sentence.
+assert_eq "DENY, disclosed OVER-denial: git add -A packages/\$PKG (the expansion RESOLVES; a real shell stages two files at rc 0 and this refuses it)" \
+  "$(sub_verdict "$P4" 'git add -A packages/$PKG')" "deny"
+assert_eq "DENY, disclosed OVER-denial: PKG=pipeline; git add -A packages/\$PKG (the assignment stands in the same command line and still does not make the word readable)" \
+  "$(sub_verdict "$P4" 'PKG=pipeline; git add -A packages/$PKG')" "deny"
+assert_eq "DENY, disclosed OVER-denial: git add -u \"\$F\" (a real shell stages exactly the one file F names, rc 0)" \
+  "$(sub_verdict "$P4" 'git add -u "$F"')" "deny"
+# THE TWO REWRITES THAT ARE ALLOWED, which is what bounds the cost of the three denies above -- and
+# they are also the falsification half: if these went red the deny would be bought by the command
+# SHAPE rather than by the expansion, and the over-denial would be far wider than stated.
+assert_eq "OVER-DENIAL BOUND: git add -A packages/pipeline (the same stage with the path written LITERALLY is allowed)" \
+  "$(sub_verdict "$P4" 'git add -A packages/pipeline')" "none"
+assert_eq "OVER-DENIAL BOUND: git add \"\$DIR\" (dropping the blanket flag is the other rewrite the deny leaves open)" \
+  "$(sub_verdict "$P4" 'git add "$DIR"')" "none"
+# AND THE ARGV THAT MAKES THE THREE DENIES AN OVER-DENIAL RATHER THAN A CORRECT REFUSAL, measured
+# by the same shim rather than asserted: the word the scanner could not read arrives at git as a
+# real, narrowing pathspec. Without these two rows the block above would be indistinguishable from
+# three rows that refuse nothing.
+assert_eq "ORACLE: the over-denied operand RESOLVES -- git really is handed a narrowing pathspec" \
+  "$(real_argv 'PKG=pipeline; git add -A packages/$PKG')" "3 [add] [-A] [packages/pipeline]"
+assert_eq "ORACLE: the quoted form resolves too, to exactly one pathspec" \
+  "$(real_argv 'F=packages/pipeline/a.txt; git add -u "$F"')" "3 [add] [-u] [packages/pipeline/a.txt]"
 
 # ===============================================================================================
 suite "AC7 LENGTH AXIS: a forbidden command stays forbidden however long its operand is"

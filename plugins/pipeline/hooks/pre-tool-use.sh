@@ -337,12 +337,38 @@ _inv_words() { # <closed word>...
     #   once: an agent that builds a path list in a variable gets a blanket stage EXACTLY WHEN THE
     #   LIST CAME BACK EMPTY, which is precisely when it did not mean to stage anything.
     #
-    # THE TEST IS STRUCTURAL, NOT A TABLE OF SPELLINGS, because a table would be reopened by the
-    # next spelling nobody enumerated. POSIX sh has exactly TWO characters that introduce a
-    # substitution -- `$` (parameter, command and arithmetic) and the backquote -- and every
-    # spelling of every one of them (`$X`, `${X}`, `${X:-}`, `$(cmd)`, `$((e))`, `$@`, `$1`, `$?`,
-    # and the backquoted form) necessarily contains one of the two. So the rule is over the CLASS:
-    # a word whose final content is not determined by the text cannot be read as naming a path.
+    # THE TEST IS STRUCTURAL OVER THE SUBSTITUTIONS, NOT A TABLE OF SPELLINGS OF THEM, because a
+    # table would be reopened by the next spelling nobody enumerated. POSIX sh introduces a
+    # SUBSTITUTION with exactly two characters -- `$` (parameter, command and arithmetic) and the
+    # backquote -- and every spelling of every one of them (`$X`, `${X}`, `${X:-}`, `$(cmd)`,
+    # `$((e))`, `$@`, `$1`, `$?`, and the backquoted form) necessarily contains one of the two. So
+    # the rule is over THAT class: a word whose final content is decided by a SUBSTITUTION cannot
+    # be read as naming a path.
+    #
+    # WHAT THAT SENTENCE DOES NOT COVER, named because a general claim over a specific test is what
+    # makes the next reader stop looking. Substitution is not the only word expansion that can
+    # erase an operand. PATHNAME EXPANSION contains neither character, and its result is decided by
+    # the FILESYSTEM rather than by the text -- and under `shopt -s nullglob` it DELETES the word,
+    # which is the same argv erasure this arm exists to close. Measured on darwin 25.5.0 with bash
+    # 3.2.57(1) and a recording `git` shim, in a directory holding a.txt and b.txt:
+    #
+    #   bash -c 'shopt -s nullglob; git add -A *.nope'  -> ARGC=2 [add] [-A]   gate: ALLOW
+    #   bash -c 'git add -A *.nope'   (nullglob OFF)    -> ARGC=3 [add] [-A] [*.nope]   gate: ALLOW
+    #
+    # The second line is the non-zero control that makes the first a reading and not a silence, and
+    # it is also why this is left OPEN: nullglob is off by default, so on an ordinary host the word
+    # survives, real git exits 128 having staged nothing, and the ALLOW is correct. Closing it by
+    # adding `*` to the opaque set would put the control back to reading spellings of the input,
+    # and would refuse `git add -A *.md` where the glob RESOLVES -- real narrowing work.
+    #
+    # AND THE COMMAND WORD AND THE VERB ARE READ LITERALLY, which is issue #118's residual, stated
+    # here because a reader asking why some blanket stage was not seen looks at this comment first.
+    # The opacity rule above is applied at the OPERAND positions only; the word naming the command
+    # and the word naming the subcommand are matched as TEXT. Measured with the same shim, each of
+    # these hands git `ARGC=2 [add] [-A]` -- a full blanket stage -- and each is ALLOWED here:
+    # `GIT=git; $GIT add -A`, `VERB=add; git $VERB -A`, `eval "git add -A"`, and
+    # `CMD="git add -A"; sh -c "$CMD"`. All four require an author to write the indirection
+    # deliberately, which is why they are #118's adversarial class and not this change's accident.
     #
     # THE DIRECTION IS DELIBERATE AND ONLY ONE WAY. An opaque word is refused the power to NARROW,
     # so `git add -A $X` earns the same verdict as `git add -A` alone. It is NOT credited with the
@@ -352,11 +378,32 @@ _inv_words() { # <closed word>...
     # expansion is an ACCIDENT the author did not intend while `X=.` is a blanket stage the author
     # chose, and a text-scanning gate never claimed to refuse a stage its author meant.
     #
-    # WHAT IT COSTS, measured rather than assumed: `git add -A foo$X` and `git add -A '$literal'`
-    # are now denied although a real shell hands git a pathspec for both. Both keep a blanket flag
-    # beside a path this scanner cannot resolve, neither is a shape anything in this repository
-    # writes, and the narrow form `git add $X` -- which is what an agent staging a computed path
-    # actually writes -- is untouched.
+    # WHAT IT COSTS, measured rather than assumed, and stated over the CLASS rather than over two
+    # convenient fixtures. EVERY blanket flag standing beside an operand that carries a
+    # substitution is now denied, INCLUDING one that RESOLVES to a real path and would have staged
+    # a correctly narrowed set. Measured against real git 2.x in a scratch repository holding a
+    # modified `packages/pipeline/a.txt`, an untracked `packages/pipeline/new.txt` and an untracked
+    # `outside.txt`:
+    #
+    #   PKG=pipeline; git add -A packages/$PKG   -> rc 0, staged packages/pipeline/{a,new}.txt,
+    #                                               outside.txt untouched. DENIED here.
+    #   F=packages/pipeline/a.txt; git add -u "$F" -> rc 0, staged exactly that one file. DENIED.
+    #
+    # `git add -A "$ARTIFACT_DIR"`, `git add -A .pipeline/$ISSUE` and `git add -u "$DIR"` are the
+    # same shape. An earlier version of this paragraph named only `git add -A foo$X` and
+    # `git add -A '$literal'`, which exit 128 and stage nothing, and concluded that no successful
+    # staging is refused. THAT CONCLUSION WAS FALSE: both of those fixtures use an UNSET variable,
+    # so exit 128 was a property of the two fixtures chosen and not of the class.
+    #
+    # THE REFUSAL IS ACCEPTED RATHER THAN OVERLOOKED, and this is the reason. `$F` holding a real
+    # path and `$F` holding nothing are THE SAME TEXT, and this scanner never sees argv -- so
+    # refusing the first is the price of denying the second, and no ordering of a text scan
+    # separates them. What bounds the cost: the refusal is loud, carries its reason, and is
+    # rewritable in two ways that are both allowed and both asserted in the suite -- name the path
+    # literally (`git add -A packages/pipeline`), or drop the blanket flag (`git add "$DIR"`). And
+    # a repository-wide grep for a blanket flag beside an expansion-bearing operand returns only
+    # prose ABOUT this trade-off and zero real consumers, so no work this repository does today is
+    # actually refused.
     #
     # THE TEST SITS AT THE OPERAND POSITIONS AND NOWHERE ELSE, because a word that opens with a
     # dash is read for its FLAG letters and those still count: `git commit -a$X` and `git add -A$X`
