@@ -85,6 +85,13 @@ for cand in $(grep -oE 'scripts/[a-zA-Z0-9_-]+\.mjs' "$PIPELINE_MD" | sort -u); 
     # first run rather than letting it be silently picked. It resolves no model and takes no
     # (role, tier, phase) triple at all. Excluded by NAME, like the two above.
     check-status-record.mjs) continue ;;
+    # #74's in-flight/datability leaf, newly REFERENCED from pipeline.md by #110's clearing rule,
+    # which names it as the module whose `concluded` term the rule protects. Note what changed and
+    # what did not: the FILE is not new (#106 added it), only its first mention in pipeline.md is,
+    # which is why a reference and not a script is what tripped the halt -- worth stating, because
+    # "did you add a scripts/*.mjs?" is the natural question here and the answer was no. It
+    # resolves no model and takes no (role, tier, phase) triple. Excluded by NAME, like the rest.
+    run-candidates.mjs) continue ;;
   esac
   # The data-layer surface module is referenced from the same file by R3; it is not this.
   grep -q 'migrationGlobsForTripwire' "$PLUGIN_DIR/$cand" 2>/dev/null && continue

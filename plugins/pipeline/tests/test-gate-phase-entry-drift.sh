@@ -415,8 +415,8 @@ assert_not_contains "  and the bare 'Opt-out for one-off iterations.' comment is
 # be claimed by neither and excluded by a hand-written rule, silently.
 #
 # THE EXCLUDED BUCKET IS A SORTED MULTISET, ASSERTED; ITS SIZE IS ONLY REPORTED.
-#   - MULTISET, never `sort -u`: three of the five excluded LINES carry TWO occurrences each
-#     with IDENTICAL text (measured, per line: 2/2/2/1/1), so `sort -u` turns 8 entries into 5
+#   - MULTISET, never `sort -u`: three of the seven excluded LINES carry TWO occurrences each
+#     with IDENTICAL text (measured, per line: 2/2/2/1/1/1/1), so `sort -u` turns 10 entries into 7
 #     and a mutation removing one of a duplicated pair leaves the asserted list unchanged.
 #   - SIZE REPORTED, NOT ASSERTED (#33): a pinned 8 is discharged by editing one digit, and the
 #     edit that absorbs a legitimate new prose mention is the same edit that absorbs a SWALLOWED
@@ -513,18 +513,24 @@ assert_eq "UNCLASSIFIED is EMPTY: no assignment the WIDER pattern can see is mis
 # closing paren WITHOUT honouring quoted-heredoc rules, so the UNPAIRED backtick left by a
 # 72-character truncation makes the whole file un-parseable. A multi-line single-quoted
 # assignment has no such hazard, and single quotes cannot appear in these eight lines.
-EXCLUDED_MULTISET_8='133|- **User interrupts mid-phase**: status.json preserves position. `/pipel
+# ONE ENTRY CARRIES AN APOSTROPHE, spliced as '\''. The pinned block is a single-quoted shell
+# literal, and #110's prose is the first pinned occurrence to contain a `'` -- without the splice
+# the assignment terminates mid-entry and the file stops parsing. Future pipeline.md edits will
+# hit this again, so the splice is the fixture's limitation being handled, not the prose bending.
+EXCLUDED_MULTISET_10='1253|**Rows 2 and 3 loop back for remediation, and the write that DOES the lo
+133|- **User interrupts mid-phase**: status.json preserves position. `/pipel
 285|- If starts with `--resume <issue>`: set `ISSUE=<issue>`, read `.pipelin
 285|- If starts with `--resume <issue>`: set `ISSUE=<issue>`, read `.pipelin
+397|Nothing is lost by clearing. The panel'\''s result is durable in `events[]`
 461|**`events[]` entries are EXIT markers and `current_phase` is an ENTRY ma
 461|**`events[]` entries are EXIT markers and `current_phase` is an ENTRY ma
 479|`status.json` is the `/pipeline --resume <issue>` checkpoint, so it must
 479|`status.json` is the `/pipeline --resume <issue>` checkpoint, so it must
 89|# Run BEFORE entering each phase, after setting current_phase to the pha'
 assert_eq "and the EXCLUDED bucket's MEMBERSHIP is what is asserted -- the sorted occurrence-text MULTISET, so an occurrence cannot be ADDED to or REMOVED from this bucket at constant bucket sizes. NARROWED deliberately from \"cannot move between buckets\": the key is a length-plus-72-character FINGERPRINT and it is non-injective (pipeline.md already holds a colliding pair, see above), so a swap BETWEEN two occurrences sharing one fingerprint is invisible here. The add/remove form is what this cell supports and is what the ghost fixture below exercises" \
-  "$(tp_exfp "$TP_REAL")" "$EXCLUDED_MULTISET_8"
-assert_eq "MULTISET, NOT A SET: three of the five excluded LINES carry two occurrences each with identical text, so \`sort -u\` would collapse 8 entries to 5 and re-open the bypass. This cell measures that collapse rather than asserting it is absent by inspection" \
-  "$(tp_exfp "$TP_REAL" | sort -u | grep -c . | tr -d ' ')/$(tp_exfp "$TP_REAL" | grep -c . | tr -d ' ')" "5/8"
+  "$(tp_exfp "$TP_REAL")" "$EXCLUDED_MULTISET_10"
+assert_eq "MULTISET, NOT A SET: three of the seven excluded LINES carry two occurrences each with identical text, so \`sort -u\` would collapse 10 entries to 7 and re-open the bypass. This cell measures that collapse rather than asserting it is absent by inspection" \
+  "$(tp_exfp "$TP_REAL" | sort -u | grep -c . | tr -d ' ')/$(tp_exfp "$TP_REAL" | grep -c . | tr -d ' ')" "7/10"
 
 # ---------------------------------------------------------------------------
 suite "#53 AC3(i): the SYNTHETIC fixture -- six unclaimed assignment forms, each NAMED"

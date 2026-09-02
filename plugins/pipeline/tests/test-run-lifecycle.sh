@@ -195,7 +195,13 @@ assert_contains "and the 16 lines above it say it is unreachable, so a reader of
 # THE PREMISE OF THAT DEADNESS, ASSERTED. If this cell ever fails, the two writes have been split
 # and the row has come ALIVE. That is fine and possibly an improvement -- but the comment above the
 # row then says something false, and this is the only thing that would notice.
-POSTVERDICT="$(grep -n 'Update \`status.json\` with \`current_phase: "4-review-complete"\`' "$PIPELINE_MD" | head -1)"
+# -F AND SINGLE QUOTES, both load-bearing, and this line is where the suite first went red on CI
+# while passing locally. A backtick inside a double-quoted shell string has to be backslashed, and
+# `\`` in a BASIC REGULAR EXPRESSION is a GNU extension meaning START OF BUFFER -- so the escaped
+# spelling matched nothing under GNU grep on ubuntu and matched a literal backtick under the grep
+# on the author's machine. Same pattern, same file, opposite answers. Single quotes keep the shell
+# off the backticks and -F keeps the regex engine off them, so neither layer gets an opinion.
+POSTVERDICT="$(grep -nF 'Update `status.json` with `current_phase: "4-review-complete"`' "$PIPELINE_MD" | head -1)"
 assert_contains "PREMISE: pipeline.md still writes current_phase 4-review-complete and final_verdict in ONE update. If this fails, the writes were split, the guard's 4-review-complete row is now REACHABLE, and the 'structurally unreachable' comment above it must be rewritten -- this cell is not asking you to put it back" \
   "$POSTVERDICT" "\`final_verdict\`"
 
