@@ -3,10 +3,10 @@
   "current_phase": "4-review",
   "current_phase_note": "Corrected 2026-09-01T15:05Z: was carrying invented descriptive values (3-impl-disposition, 4-review-request-changes, 4-review-delta-fix-dispatched) that are not in gate-phase-entry.mjs's blessed ENTRY/EXIT/UNGUARDED/TERMINAL vocabulary, found by Dev's test-gate-phase-entry.sh run failing on main. current_phase is a narrow guard-checked state machine field, not a free-text status; richer detail belongs in events[]/flags[], which carry no vocabulary restriction. Set to 4-review (blessed ENTRY) to reflect the actual state: an in-progress Phase 4 review cycle, delta round about to be dispatched.",
   "started_at": "2026-08-31T23:50:00Z",
-  "updated_at": "2026-09-01T15:05:00Z",
+  "updated_at": "2026-09-01T22:40:00Z",
   "branch": "main",
   "ask_text": "Add a PreToolUse hook that mechanically enforces the Phase 4 tracked-write isolation rule already documented in commands/pipeline.md, closing the self-documented gap the file admits nothing mechanically enforces.",
-  "review_rounds": 3,
+  "review_rounds": 4,
   "review_rounds_note": "This field tracks PHASE 4 panel rounds per its schema description (events[] entries labelled 4-review with a panel verdict), not Phase 2 rounds. It was carrying 6 -- the Phase 2 spec-review round count -- through Phase 3; corrected to 1 on entering the first real Phase 4 round, 2 for the round-1-fix delta, now 3 for the round-2-fix delta (owner explicitly chose one more scoped round over a scanner redesign). Phase 2's 6 rounds remain fully recorded in events[]/flags[] under the 2-review/1-ba-rework labels, just not double-counted here.",
   "panel_roles": [
     "ba",
@@ -271,6 +271,21 @@
       "phase": "retrospective",
       "verdict": "ISSUE_117_FILED",
       "at": "2026-09-01T21:25:00Z"
+    },
+    {
+      "phase": "4-review-delta-fix",
+      "verdict": "ROUND_4_FIXED_VERIFIED",
+      "at": "2026-09-01T22:30:00Z"
+    },
+    {
+      "phase": "retrospective",
+      "verdict": "ISSUE_118_FILED",
+      "at": "2026-09-01T22:35:00Z"
+    },
+    {
+      "phase": "4-review",
+      "verdict": "delta-dispatched",
+      "at": "2026-09-01T22:40:00Z"
     }
   ],
   "flags": [
@@ -529,6 +544,20 @@
       "verdict": "REQUEST_CHANGES",
       "summary": "round 3: both round-2 blockers closed, independently reverified. BLOCKER: reviewed commit RED, same orchestrator bug as SecOps found, caused by orchestrator's own main->worktree sync clobbering Dev's earlier fix -- 2nd occurrence this session. MAJOR: #116 reachability is 8x cheaper than filed; this run's own 79KB peer-review.json sits at 79% of the timeout budget already",
       "at": "2026-09-01T20:06:00Z"
+    },
+    {
+      "phase": "4-review-delta-fix",
+      "agent": "dev",
+      "verdict": "ROUND_4_FIXED",
+      "summary": "Closed the vanishing-operand class structurally (POSIX substitution = $ or backquote, opaque at operand positions only). 23/23 forbidden deny, 8/8 allow twins hold, verified 3 ways incl. real-shell argv shim. #116 corrected to size x DENSITY. Suite 3808/0",
+      "at": "2026-09-01T22:30:00Z"
+    },
+    {
+      "phase": "4-review-delta-fix",
+      "agent": "orchestrator",
+      "verdict": "R4_VERIFIED_118_FILED",
+      "summary": "Independently reproduced all 5 vanishing-expansion rows (now deny) and 4 must-allow rows (still allow) against the real hook. Filed #118 for the command-word/verb opacity residual Dev disclosed, per deferring-is-an-action, before merge",
+      "at": "2026-09-01T22:35:00Z"
     }
   ],
   "orchestrator_process_notes": [
