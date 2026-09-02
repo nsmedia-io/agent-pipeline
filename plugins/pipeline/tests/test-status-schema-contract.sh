@@ -2,9 +2,11 @@
 # status.schema.json's own contract: the verdict cap (#34) and the current_phase example
 # list (#42).
 #
-# WHY THIS FILE EXISTS. status.schema.json has exactly ONE runtime reader -- the readFileSync in
-# voice-lint.mjs's `phaseShapeFailure`, which reads properties.current_phase.pattern out of it and
-# nothing else. CITED BY SYMBOL AND NOT BY LINE (#91): the two line numbers that used to sit here
+# WHY THIS FILE EXISTS. status.schema.json has TWO runtime readers, and neither is a validator
+# that fires on its own: the readFileSync in voice-lint.mjs's `phaseShapeFailure`, which reads
+# properties.current_phase.pattern out of it and nothing else, and `capsFromSchema` in
+# check-status-record.mjs, which reads the two verdict maxLengths and is a COMMAND somebody
+# runs (#117). CITED BY SYMBOL AND NOT BY LINE (#91): the two line numbers that used to sit here
 # were both stale, having moved three times inside #56's own review, and a stale coordinate sends
 # the next reader to an unrelated line with no signal that it is the wrong one. The file appears in no
 # AGENT_RULES entry in validate-pipeline-artifact.mjs, and that walker does not implement
@@ -52,73 +54,30 @@ if [[ -s "$HELPER_SRC" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
-# The walker. Parameterised by CAP and by the file list, so the same code runs against the live
-# corpus and against crafted temp trees -- the cells are the only way to watch each conjunct
-# fail, and a conjunct nobody has watched fail is a claim.
+# The walker. NOT REIMPLEMENTED HERE (#117). scripts/check-status-record.mjs IS the walk, and it
+# is the same command the orchestrator runs before a checkpoint commit; this suite drives it
+# through its --report mode. One reader, so the CI corpus walk and the write-time refusal cannot
+# disagree about what a violation is, and neither can carry its own copy of the cap. What this
+# suite still owns is everything the script does not: the POPULATION (the tracked/on-disk union
+# below), the vacuity controls, and the fixture matrix that watches each conjunct fail
+# separately -- a conjunct nobody has watched fail is a claim.
+#
+# --cap is how the cells below reach a violation without editing the schema. The script refuses
+# a --cap that would LOOSEN either field, so no cell here can silence the check it measures; the
+# flag can only ever make the walk refuse more.
 # ---------------------------------------------------------------------------
-WALKER="$TEMP_PROJECT/verdict-walk.cjs"
-cat > "$WALKER" <<'NODE'
-const fs = require("fs");
-const cap = Number(process.argv[2]);
-const files = process.argv.slice(3);
-if (!Number.isInteger(cap) || cap <= 0) {
-  process.stdout.write("caperror=" + JSON.stringify(process.argv[2]) + "\n");
-  process.exit(3);
-}
-const out = {
-  files: files.length, read: 0, verdicts: 0, longest: 0, longestvalue: "",
-  unreadable: [], badevents: [], badflags: [], violations: [],
-};
-for (const f of files) {
-  let s;
-  try { s = JSON.parse(fs.readFileSync(f, "utf8")); }
-  catch (e) {
-    // ACCOUNTED FOR, not skipped: `read` is asserted against the shell's own count, so a walk
-    // that continued past what it could not read cannot report a zero it did not earn.
-    out.unreadable.push(f + " (" + String(e.message).slice(0, 40) + ")");
-    continue;
-  }
-  out.read++;
-  if (!Array.isArray(s.events)) {
-    out.badevents.push(f + " (events is " + (s.events === undefined ? "absent" : typeof s.events) + ")");
-  }
-  if (s.flags !== undefined && !Array.isArray(s.flags)) {
-    out.badflags.push(f + " (flags is " + typeof s.flags + ")");
-  }
-  for (const field of ["events", "flags"]) {
-    const arr = s[field];
-    if (!Array.isArray(arr)) continue;
-    arr.forEach((entry, i) => {
-      const v = entry && entry.verdict;
-      // An ABSENT verdict is schema-valid and stays valid: the cap must not become a
-      // requirement. test-gate-phase-entry.sh:287 pins one live record whose event carries no
-      // verdict key at all, and a walk that counted absence as a violation would refuse it.
-      if (typeof v !== "string") return;
-      out.verdicts++;
-      if (v.length > out.longest) { out.longest = v.length; out.longestvalue = v; }
-      if (v.length > cap) {
-        out.violations.push(f + " " + field + "[" + i + "].verdict=" + JSON.stringify(v) +
-          " len=" + v.length + " cap=" + cap);
-      }
-    });
-  }
-}
-const flat = (v) => (Array.isArray(v) ? v.join(" ;; ") : String(v)).replace(/[\r\n]+/g, " ");
-let text = "";
-for (const k of ["files", "read", "verdicts", "longest", "longestvalue",
-                 "unreadable", "badevents", "badflags", "violations"]) {
-  text += k + "=" + flat(out[k]) + "\n";
-}
-process.stdout.write(text);
-NODE
+WALKER="$SCRIPTS_DIR/check-status-record.mjs"
 
 # verdict_report <root> <cap> -> KEY=VALUE lines
 verdict_report() {
   local root="$1" cap="$2" files
   files="$(corpus_files "$root" '.pipeline/*/status.json')"
+  # --root is passed EXPLICITLY rather than inherited: the script falls back to
+  # CLAUDE_PROJECT_DIR when it has one, and run.sh is this repo's checkCommand, executed by the
+  # Stop hook DURING live pipeline runs where that variable points at the real project.
   # Word splitting on $files is deliberate: it is a newline-separated path list.
   # shellcheck disable=SC2086
-  ( cd "$root" 2>/dev/null && node "$WALKER" "$cap" $files ) 2>/dev/null
+  ( cd "$root" 2>/dev/null && node "$WALKER" --report --cap "$cap" --root "$root" $files ) 2>/dev/null
 }
 
 # rfield <report> <key> -> the value, or a SENTINEL.

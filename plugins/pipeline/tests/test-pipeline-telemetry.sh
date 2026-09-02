@@ -882,8 +882,15 @@ assert_contains "and told the only legal alternative is a repo-relative path" "$
 # CODE CHECK for the "nothing reads it" claim, over the shipped tree. tasks.json is the reader,
 # and the one script that does touch a worktree_path reads the artifact it was handed, not
 # status.json.
+# -h, not -n alone (#117): grep -r prefixes each hit with the ABSOLUTE path it was given, so
+# the second grep was matching this repo's own CHECKOUT DIRECTORY. Measured: identical sources
+# report 0 at /Users/.../agent-pipeline and 8 from a worktree named `i117-status-check`, and the
+# eight hits were in validate-pipeline-artifact.mjs and knowledge-store.mjs, neither of which
+# had changed. The needle belongs to the LINE CONTENT, which is what this assertion means; -h
+# drops the path and keeps -n's line number. It matters more now that scripts/ holds a file
+# whose own NAME carries the needle (check-status-record.mjs).
 assert_eq "no shipped script reads worktree_path out of a status file" \
-  "$(grep -rn 'worktree_path' "$PLUGIN_DIR/scripts" 2>/dev/null | grep -c 'status' | tr -d ' ')" "0"
+  "$(grep -rhn 'worktree_path' "$PLUGIN_DIR/scripts" 2>/dev/null | grep -c 'status' | tr -d ' ')" "0"
 assert_eq "CONTROL: the same grep DOES find the field being read somewhere, so the zero is not vacuous" \
   "$([[ "$(grep -rc 'worktree_path' "$PLUGIN_DIR/scripts"/*.mjs 2>/dev/null | grep -v ':0$' | wc -l | tr -d ' ')" -ge 1 ]] && echo found || echo "nothing reads it anywhere")" \
   "found"
