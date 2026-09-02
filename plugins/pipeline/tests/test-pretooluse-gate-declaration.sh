@@ -478,18 +478,37 @@ EVAL-IMPORT rc=$r out=[$o] err=[$e]"
   o="$( ( cd "$PINNED_CWD" && printf '%s' '{"hook_event_name":"SubagentStop","session_id":"paired","agent_type":"pipeline:qa"}' \
         | CLAUDE_PROJECT_DIR="$PINNED_CWD" "$GATE_REAL_NODE" "$sd/validate-pipeline-artifact.mjs" 2>"$TEMP_PROJECT/e3" ) )"; r=$?
   # The #115 attribution line is a DELIBERATE difference from the reviewed commit: the validator
-  # now writes one `agent-pipeline SubagentStop: ...` line to stderr on every stop, because before
-  # it a lookup miss and a clean artifact were byte-identical. It is stripped HERE and only here,
-  # so exit code, stdout and every OTHER stderr byte stay pinned; a SECOND new stderr line would
-  # still redden this. The premise -- that the line exists at HEAD and not at the base -- is
-  # asserted in test-pretooluse-gate-ownership.sh's AC28 FILTER PREMISE pair.
-  e="$(grep -v '^agent-pipeline SubagentStop: ' "$TEMP_PROJECT/e3" || true)"
+  # writes one `agent-pipeline SubagentStop: ...` line to stderr on every stop, because before it a
+  # lookup miss and a clean artifact were byte-identical. A SECOND new stderr line still reddens
+  # this, which is what the strip must never absorb.
+  #
+  # STRIPPED ONLY IN THE ERA THAT NEEDS IT. The base is `merge-base HEAD origin/main`, so whether
+  # it carries this line depends on whether #128 has merged -- and an unconditional strip is
+  # therefore a control whose justification silently expires. Once #128 is in the base, BOTH sides
+  # emit the line, the strip becomes a no-op, and stripping would only serve to HIDE a divergence
+  # in the line's own text. So the strip is applied only when the base predates it, which makes the
+  # comparison UNFILTERED and strictly stronger in the era that now persists. The era is measured
+  # into AC36_BASE_ANNOUNCE below, never assumed. (The same reasoning, with its assertions, is in
+  # test-pretooluse-gate-ownership.sh's AC28 FILTER PREMISE / AC28 ERA block; that is where the
+  # premise is proven in both directions.)
+  if [[ "${AC36_BASE_ANNOUNCE:-0}" -eq 0 ]]; then
+    e="$(grep -v '^agent-pipeline SubagentStop: ' "$TEMP_PROJECT/e3" || true)"
+  else
+    e="$(cat "$TEMP_PROJECT/e3")"
+  fi
   out="$out
 VALIDATOR-STDIN rc=$r out=[$o] err=[$e]"
   printf '%s' "$out"
 }
 
 if [[ "$BASE_OK" == "yes" ]]; then
+  # MEASURE THE ERA before capturing, so capture3 knows whether its strip is load-bearing or a
+  # no-op. See the comment inside capture3 for why an unconditional strip expires on merge.
+  ( cd "$PINNED_CWD" && printf '%s' '{"hook_event_name":"SubagentStop","session_id":"paired","agent_type":"pipeline:qa"}' \
+      | CLAUDE_PROJECT_DIR="$PINNED_CWD" "$GATE_REAL_NODE" "$BASE_WT/plugins/pipeline/scripts/validate-pipeline-artifact.mjs" ) \
+      >/dev/null 2>"$TEMP_PROJECT/e0"
+  AC36_BASE_ANNOUNCE="$(grep -c '^agent-pipeline SubagentStop: ' "$TEMP_PROJECT/e0" | tr -d ' ')"
+  record "AC36(b) ERA: base $BASE_SHA emits $AC36_BASE_ANNOUNCE attribution line(s); the strip is $([[ "$AC36_BASE_ANNOUNCE" -eq 0 ]] && echo 'LOAD-BEARING' || echo 'a NO-OP, so this comparison runs UNFILTERED')"
   CAP_BASE="$(capture3 "$BASE_WT/plugins/pipeline/scripts")"
   CAP_HEAD="$(capture3 "$GATE_PLUGIN_DIR/scripts")"
   record "PAIRED CAPTURE, reviewed commit: $(printf '%s' "$CAP_BASE" | tr '\n' ' | ')"

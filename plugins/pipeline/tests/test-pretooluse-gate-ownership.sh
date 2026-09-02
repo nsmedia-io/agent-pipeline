@@ -946,41 +946,66 @@ if [[ "$SS_OK" == "yes" ]]; then
   gate_inflight_status "$SS_ROOT/.pipeline/39/status.json" "3-impl"
   gate_inflight_status "$SS_ROOT/.pipeline/98/status.json" "4-review"
   sleep 0.05; touch "$SS_ROOT/.pipeline/98/status.json"
-  # THE ONE LINE THIS COMPARISON DOES NOT PIN, and why it is named rather than dropped. #115 makes
+  # THE ONE LINE THIS COMPARISON MAY NOT PIN, and why it is named rather than dropped. #115 makes
   # the validator write a single `agent-pipeline SubagentStop: ...` attribution line to stderr on
   # every stop, deliberately: before it, "no rules matched this agent" and "this agent's artifacts
-  # are valid" were byte-identical, which is the defect that issue is about. That line is a
-  # DIFFERENCE FROM THE REVIEWED COMMIT BY DESIGN, so an unfiltered byte comparison would redden
-  # forever and this criterion would be deleted rather than read. Everything else about the
-  # SubagentStop path -- exit code, stdout, and any OTHER stderr -- is still pinned byte for byte,
-  # which is what AC28 is actually for: a change reviewed for one thing silently altering a
-  # shipped gate. If the validator grows a second stderr line, this comparison reddens, correctly.
+  # are valid" were byte-identical, which is the defect that issue is about. Everything else about
+  # the SubagentStop path -- exit code, stdout, and any OTHER stderr -- is pinned byte for byte,
+  # which is what AC28 is actually for: a change reviewed for one thing silently altering a shipped
+  # gate. If the validator grows a SECOND stderr line, this comparison reddens, correctly.
+  #
+  # THE BASE IS A MOVING TARGET, AND THAT IS WHAT BROKE THIS ONCE ALREADY. The base is resolved
+  # dynamically as `merge-base HEAD origin/main`, so what it emits DEPENDS ON WHETHER #128 HAS
+  # MERGED YET. The first version of this block asserted flatly that the base emits no attribution
+  # line -- true only while #128 was unmerged, i.e. on exactly the one PR that introduced it. The
+  # moment #128 landed, every branch's merge-base carried the line, and the assertion turned main
+  # red and failed #130, which was blameless. A premise stated against a base that moves must be
+  # stated PER ERA, or it is a control with a shelf life measured in one merge.
+  #
+  # So the era is MEASURED, never assumed, and each era asserts the strongest thing available:
+  #   PRE-#128 base  -> base emits 0, HEAD emits 1: the strip is LOAD-BEARING, and the stripped
+  #                     comparison above is the guarantee.
+  #   POST-#128 base -> base and HEAD both emit 1: the strip is a NO-OP, so the UNFILTERED capture
+  #                     must match byte for byte too. That is STRICTLY STRONGER than the stripped
+  #                     comparison, because it also pins the attribution line's OWN bytes, which
+  #                     the strip would otherwise hide -- a divergence in the line's text between
+  #                     base and HEAD is invisible to a filtered comparison and caught here.
+  # Either way HEAD must emit EXACTLY ONE, and the base must never emit more than one, so a second
+  # unexpected line reddens in both eras rather than being absorbed by the filter.
   ss_strip_announce() { grep -v '^agent-pipeline SubagentStop: ' || true; }
-  ss_capture() {
-    local sd="$1" o e r
+  ss_run() {  # <scripts-dir> <errfile> -> "rc=.. out=[..]" and the FULL stderr left in <errfile>
+    local sd="$1" ef="$2" o r
     o="$( ( cd "$SS_ROOT" && printf '%s' '{"hook_event_name":"SubagentStop","session_id":"ac28","agent_type":"pipeline:qa"}' \
-        | CLAUDE_PROJECT_DIR="$SS_ROOT" "$GATE_REAL_NODE" "$sd/validate-pipeline-artifact.mjs" 2>"$TEMP_PROJECT/ss.err" ) )"; r=$?
-    e="$(ss_strip_announce < "$TEMP_PROJECT/ss.err")"
-    printf 'rc=%s out=[%s] err=[%s]' "$r" "$o" "$e"
+        | CLAUDE_PROJECT_DIR="$SS_ROOT" "$GATE_REAL_NODE" "$sd/validate-pipeline-artifact.mjs" 2>"$ef" ) )"; r=$?
+    printf 'rc=%s out=[%s]' "$r" "$o"
   }
-  SS_A="$(ss_capture "$SS_WT/plugins/pipeline/scripts")"
-  SS_B="$(ss_capture "$GATE_PLUGIN_DIR/scripts")"
+  SS_A_HEAD="$(ss_run "$SS_WT/plugins/pipeline/scripts" "$TEMP_PROJECT/ss.base.err")"
+  SS_B_HEAD="$(ss_run "$GATE_PLUGIN_DIR/scripts" "$TEMP_PROJECT/ss.head.err")"
+  SS_A="$SS_A_HEAD err=[$(ss_strip_announce < "$TEMP_PROJECT/ss.base.err")]"
+  SS_B="$SS_B_HEAD err=[$(ss_strip_announce < "$TEMP_PROJECT/ss.head.err")]"
+  SS_A_RAW="$SS_A_HEAD err=[$(cat "$TEMP_PROJECT/ss.base.err")]"
+  SS_B_RAW="$SS_B_HEAD err=[$(cat "$TEMP_PROJECT/ss.head.err")]"
   record "AC28 reviewed-commit SubagentStop resolution on a two-in-flight-dir root: $SS_A"
   assert_eq "AC28: the SubagentStop path resolves EXACTLY as it does at the reviewed commit" "$SS_B" "$SS_A"
-  # THE FILTER'S OWN PREMISE, asserted so it cannot hide what it was written to excuse. The strip
-  # above makes the comparison blind to the #115 attribution line; if that line ever stopped being
-  # emitted, AC28 would go green on a validator that had lost the very announcement it filters.
-  # So: it must be there at HEAD, and it must NOT be there at the reviewed commit.
-  ( cd "$SS_ROOT" && printf '%s' '{"hook_event_name":"SubagentStop","session_id":"ac28","agent_type":"pipeline:qa"}' \
-      | CLAUDE_PROJECT_DIR="$SS_ROOT" "$GATE_REAL_NODE" "$GATE_PLUGIN_DIR/scripts/validate-pipeline-artifact.mjs" ) \
-      >/dev/null 2>"$TEMP_PROJECT/ss.head.err"
-  ( cd "$SS_ROOT" && printf '%s' '{"hook_event_name":"SubagentStop","session_id":"ac28","agent_type":"pipeline:qa"}' \
-      | CLAUDE_PROJECT_DIR="$SS_ROOT" "$GATE_REAL_NODE" "$SS_WT/plugins/pipeline/scripts/validate-pipeline-artifact.mjs" ) \
-      >/dev/null 2>"$TEMP_PROJECT/ss.base.err"
-  assert_eq "AC28 FILTER PREMISE(+): HEAD does emit the #115 attribution line the strip removes" \
-    "$(grep -c '^agent-pipeline SubagentStop: ' "$TEMP_PROJECT/ss.head.err" | tr -d ' ')" "1"
-  assert_eq "AC28 FILTER PREMISE(-): the reviewed commit emits none, so the strip is what makes the two comparable" \
-    "$(grep -c '^agent-pipeline SubagentStop: ' "$TEMP_PROJECT/ss.base.err" | tr -d ' ')" "0"
+
+  SS_HEAD_LINES="$(grep -c '^agent-pipeline SubagentStop: ' "$TEMP_PROJECT/ss.head.err" | tr -d ' ')"
+  SS_BASE_LINES="$(grep -c '^agent-pipeline SubagentStop: ' "$TEMP_PROJECT/ss.base.err" | tr -d ' ')"
+  assert_eq "AC28 FILTER PREMISE(+): HEAD emits EXACTLY ONE attribution line, so the strip cannot hide its loss" \
+    "$SS_HEAD_LINES" "1"
+  assert_eq "AC28 FILTER PREMISE: the base emits at most one, so a second unexpected line is never absorbed" \
+    "$([[ "$SS_BASE_LINES" -le 1 ]] && echo ok || echo "base emitted $SS_BASE_LINES")" "ok"
+  record "AC28 ERA: base $SS_BASE_SHA emits $SS_BASE_LINES attribution line(s); HEAD emits $SS_HEAD_LINES"
+  if [[ "$SS_BASE_LINES" -eq 0 ]]; then
+    # Pre-#128 base. The strip is doing real work; prove it, by showing the UNFILTERED capture
+    # genuinely differs. Without this the "load-bearing" claim is untested in the era it describes.
+    assert_eq "AC28 ERA(pre-#128): the strip is LOAD-BEARING -- unfiltered, the two genuinely differ" \
+      "$([[ "$SS_B_RAW" != "$SS_A_RAW" ]] && echo differs || echo "identical, so the strip was never needed")" "differs"
+  else
+    # Post-#128 base: both carry the line, so the strip removes the same thing from both and the
+    # unfiltered comparison must ALSO hold. This is the assertion that keeps working from here on.
+    assert_eq "AC28 ERA(post-#128): the strip is a NO-OP, so the UNFILTERED capture matches byte for byte" \
+      "$SS_B_RAW" "$SS_A_RAW"
+  fi
   git -C "$GATE_REPO_ROOT" worktree remove --force "$SS_WT" >/dev/null 2>&1
 else
   assert_eq "AC28: the paired capture did not run -- reported as a FAILURE, never a skip" "could-not-check-out" "ran"
