@@ -305,12 +305,54 @@ export const NON_VOICE_PHASES = new Set([
   // with `grep -n 'full voice\|decision block\|Checkpoint first\|current_phase' on
   // commands/pipeline.md and read what falls between the two.
   //
-  // #80 IS WHAT MAKES THAT EXPIRY CHECKABLE RATHER THAN ASPIRATIONAL. The mechanism above says
-  // the halt at Phase 0 step 1 is structurally unreachable by this lint, because it runs before
-  // a phase is ever recorded -- so the one owner-facing moment in Phase 0 is not covered by
-  // anything here, and no failing assertion marks that. #80 tracks it. If #80 changes where
-  // that decision block sits, or gives it a phase of its own, this declaration is the line that
-  // has to move.
+  // #80's RULING, AND IT IS A DECISION RATHER THAN A DEFERRAL: the Phase 0 step-1 halt is
+  // DELIBERATELY OUT OF THIS LINT'S SCOPE. Said here, in the derivation, rather than achieved by
+  // accident of ordering -- which is what #80 was filed to end.
+  //
+  // THE GAP, MEASURED at 317b9f2 with an em dash planted in a step-1-shaped dirty-worktree halt
+  // and the decision block omitted. No `.pipeline` at all (a fresh ask, which is step 1's own
+  // state): rc 0, ZERO bytes. A record already sitting at `0-setup` (i.e. after step 5): rc 0,
+  // ZERO bytes. The IDENTICAL message at `5-archived`: rc 2 with FIVE named failures, which is
+  // the non-zero control that makes the two zeros silence rather than a lint that stopped
+  // firing. A `--resume` is SILENT TOO, and that CORRECTS #80's issue body, which predates #56
+  // and says the prior phase is graded as the wrong moment: #56's turn boundary reads the prior
+  // session's record as stale, so nothing is graded at all. Measured on a resume transcript
+  // carrying a real owner-typed record: a 3-day-old record at `4-review-complete` -> rc 0 / zero
+  // bytes, and the same record with a fresh mtime -> rc 2 with four named failures. So the gap
+  // is uniformly SILENCE, on all three paths, and never a mis-grading.
+  //
+  // WHY IT IS NOT COVERED, and "cheapest" is not the reason. This lint has exactly ONE input --
+  // the phase record -- and at step 1 that input does not exist yet. Every way of manufacturing
+  // one before step 5 is a shape this repo has already paid for:
+  //   - WRITE A RECORD FIRST (#80's option 1). `.gitignore` re-includes
+  //     `<state-dir>/*/status.json`, so the new file is untracked AND not ignored, and step 1's
+  //     own `git status --short` reports it. Measured in a scratch repo carrying this repo's
+  //     `.gitignore`: clean tree -> 0 bytes of status output; after writing the record -> `?? `
+  //     naming the state dir. The dirty-worktree halt would fire on the pipeline's OWN artifact,
+  //     in the one branch whose entire point is that uncommitted work is not the pipeline's to
+  //     touch. It also has no issue number to name a directory with on a fresh ask, and a
+  //     fabricated one enters the mtime scan every other lane in the checkout resolves against.
+  //   - BE TOLD THE MOMENT (#80's option 2). That reinstates the judgment call this file's own
+  //     header exists to remove ("is this a voice moment" never needed to be a judgment call at
+  //     all), and it hands the trigger to the party being graded: an orchestrator that forgets to
+  //     set the signal -- which is the exact failure this lint exists to catch -- buys silence by
+  //     forgetting. Same shape as WHAT THE SELF-DISARM WAS at the foot of this file.
+  //   - READ THE MESSAGE. Deciding the moment from the text being graded is circular: a message
+  //     that omits the decision block also omits whatever the trigger would key on.
+  // There is no honest structural signal before step 5, so this halt is NOT COVERED HERE, on
+  // purpose. Treat Phase 0 step 1 as owner-facing text this control does not read.
+  //
+  // WHAT FAILS IF THE ORDERING CHANGES, which is the half a ruling ALONE would not buy and the
+  // reason #80 could not be closed with a sentence. tests/test-voice-lint.sh's "#80" suite
+  // asserts, off commands/pipeline.md itself, the two premises this declaration rests on:
+  //   (a) the step-1 halt line -- the ONE line carrying `git status --short`, a full-voice marker
+  //       and a decision-block marker together -- sits BEFORE the `0-setup` write; and
+  //   (b) the WINDOW between that write and the next `Checkpoint first` holds NO owner-facing
+  //       full-voice marker at all.
+  // Each marker in that table is separately asserted to be LIVE elsewhere in pipeline.md, so a
+  // marker that stops matching reddens as a dead table entry instead of quietly becoming a hole
+  // (which is #53's own defect, one level in). Reorder Phase 0, or insert an owner-decision block
+  // into that window, and both cells go red naming this line.
   "0-setup",
   "0.5-map", "0.5-map-complete",
   "1-ba", "1-ba-complete",
