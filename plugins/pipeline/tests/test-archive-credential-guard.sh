@@ -30,6 +30,24 @@
 # per-field annotation could ever have covered them. The walk is over the document archiveIssue
 # assembles FROM ARCHIVE_ARTIFACTS, so the population is DERIVED and a field added later is
 # covered the day it appears. Suite 2 is that property, driven off the list in the source.
+#
+# THE MUTATION BATTERY THIS SUITE WAS BUILT AGAINST, and the one mutation that is EXPECTED to
+# survive -- because a battery where everything reddens cannot tell coverage from a rubber stamp.
+# Eight mutations, seven red: dropping the refusal while keeping the scan (9 red); scanning the
+# RAW archive instead of the redacted bytes (2 red -- and it survived until the /opt/ci/AKIA...
+# cell below was added, which is why that cell exists); dropping the object-KEY walk (2);
+# widening high_entropy's mixed-case lookaheads (9); dropping the pg:// alias from db_url_creds
+# (9); trimming a class from the shipped table (5, via the seam); stripping the note off one
+# schema field (2); reverting the writer-copy widening (1).
+#
+# THE SURVIVOR, DECLARED: mutating the `p || "<root>"` fallback in findCredentialMaterial changes
+# no verdict, and it is a THEOREM rather than lost coverage. archiveIssue always builds `archive`
+# as an OBJECT ({issue_number, archived_at, ...}), so a string leaf is never at path "" and that
+# branch is unreachable from the only caller that writes a file. It is reachable only by an
+# external caller passing a bare string to the exported function -- verified directly:
+# findCredentialMaterial("AKIA...") returns path "<root>", findCredentialMaterial({a:"AKIA..."})
+# returns ".a". If a caller is ever added that hands it a bare string, this stops being a theorem
+# and needs a cell.
 
 . "$(dirname "${BASH_SOURCE[0]}")/harness.sh"
 require_node
@@ -192,6 +210,30 @@ assert_contains "the .env line SURVIVING the leading-path redaction is what fire
   "$ERR" ".review.secops.concerns[0].location [env_line]"
 assert_contains "and advisory_notes -- declared in NO schema -- is covered by the same walk" \
   "$ERR" ".review.design_review.advisory_notes[0] [slack_token]"
+
+# GUARD WHERE IT LANDED, NOT HOW IT WAS SPELLED. redactAbsolutePaths sits between the artifact
+# and the file, so the bytes the guard must judge are the REDACTED ones. Here the only
+# credential-shaped run in the document is inside an absolute path that redaction replaces
+# WHOLESALE, so the written archive genuinely does not contain it -- and refusing would be a
+# false refusal the operator cannot act on, since there is nothing in the output to redact.
+#
+# THIS CELL IS THE ONE THAT DISCRIMINATES the two candidate sitings. Measured: with the scan
+# moved from the redacted document to the raw one, every other assertion in this file still
+# passes and only this cell reddens.
+fixture_dir 704 || exit 90
+cat > "$FIXDIR/review.json" <<'FIX'
+{"secops":{"verdict":"APPROVE","reviewed_at":"2026-08-31T00:00:00Z",
+ "concerns":[{"severity":"nit","must_satisfy":"x","description":"see the CI log",
+   "location":"/opt/ci/AKIAIOSFODNN7EXAMPLE/build.log"}],"notes":"ok"}}
+FIX
+archive 704 "$FIXDIR" "$FIXROOT"
+assert_eq "a token that redaction REMOVES is not a refusal (the guard judges what lands)" "$RC" "0"
+# The premise, asserted rather than assumed: without this the cell above passes whenever the
+# fixture simply has no token in it, which is a green light for the wrong reason.
+assert_contains "  and the fixture really did carry one before redaction" \
+  "$(cat "$FIXDIR/review.json")" "AKIAIOSFODNN7EXAMPLE"
+assert_eq "  and the written archive genuinely does not contain it" \
+  "$(grep -c 'AKIAIOSFODNN7EXAMPLE' "$FIXROOT/knowledge/issue-archive/704.json" | tr -d ' ')" "0"
 
 # A CREDENTIAL SPELLED AS AN OBJECT KEY, not a value. Reviewer prose can put a pasted string
 # anywhere, and a walk that reads values only would archive this one.
