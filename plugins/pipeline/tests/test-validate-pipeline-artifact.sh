@@ -33,7 +33,12 @@ hook() {
   ERR=$(cat "$errf")
 }
 
-printf '%s' '{"current_phase":"3"}' > "$TEMP_ISSUE_DIR/status.json"
+# A SCHEMA-SHAPED, IN-FLIGHT run record, not the `{"current_phase":"3"}` stub this used to be.
+# #109 made the SubagentStop sweep resolve its scope by run OWNERSHIP: the marker below names a
+# RECORD, not merely a directory, and an undatable record is never the resolved owner. With the
+# stub, every case in this file would abstain and report zero failures -- passing the question by
+# never asking it.
+write_run_record "$TEMP_ISSUE_DIR/status.json" "3-impl"
 # The report claims this file was touched; grounding checks that the claim is corroborated by
 # the tree, so it must actually exist under the temp worktree root.
 mkdir -p "$TEMP_PROJECT/src"
@@ -201,7 +206,11 @@ new_tmpdir || exit 90
 ORPHAN_ROOT="$NEW_TMPDIR"
 ORPHAN_DIR="$ORPHAN_ROOT/.pipeline/tracker-unreachable-20260902"
 mkdir -p "$ORPHAN_DIR"
-RUN_RECORD='{"current_phase":"2-review","started_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T00:00:00Z","branch":"b","events":[]}'
+# `updated_at` is COMPUTED, not the frozen 2026-01-01 literal this used to carry (#109). Which
+# runs are CANDIDATES is decided by that field; which candidate wins is still decided by the
+# mtimes stamped explicitly below. Two clocks, two jobs -- a clone refreshes every mtime and
+# touches no `updated_at`, which is the whole reason the sweep stopped ranking by mtime.
+RUN_RECORD="$(node -e 'process.stdout.write(JSON.stringify({current_phase:"2-review",started_at:"2026-01-01T00:00:00Z",updated_at:new Date(Date.now()-60000).toISOString(),branch:"b",events:[]}))')"
 printf '%s' "$RUN_RECORD" > "$ORPHAN_DIR/status.json"
 printf '%s' '{"verdict":"NOT_A_VERDICT"}' > "$ORPHAN_DIR/peer-review.secops.json"
 

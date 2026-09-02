@@ -68,7 +68,7 @@ import path from "node:path";
 import { isMain } from "./lib.mjs";
 import { KNOWN_TIERS } from "./dispatch-model.mjs";
 import { phaseKey } from "./pipeline-telemetry.mjs";
-import { activeIssueDir } from "./validate-pipeline-artifact.mjs";
+import { activeIssueDir, MTIME_ONLY } from "./validate-pipeline-artifact.mjs";
 import { inFlightObservations } from "./run-candidates.mjs";
 
 /**
@@ -706,13 +706,17 @@ function refusalMessage(result) {
 }
 
 /**
- * A sentinel the issue-dir shape rejects, so activeIssueDir's signal branch fails over to its
- * mtime derivation. It is passed as the payload field rather than by unsetting the environment,
- * because the point is to ask ONE resolver two questions -- "who does the signal name" and "who
- * is newest" -- without a second scan that could answer differently.
+ * MTIME_ONLY is a sentinel the issue-dir shape rejects, so activeIssueDir's signal branch fails
+ * over to its mtime derivation. It is passed as the payload field rather than by unsetting the
+ * environment, because the point is to ask ONE resolver two questions -- "who does the signal
+ * name" and "who is newest" -- without a second scan that could answer differently.
+ *
+ * IT USED TO BE DECLARED HERE. #109 moved the declaration to validate-pipeline-artifact.mjs (a
+ * module this file already imports, so no cycle is created) because the SubagentStop sweep now
+ * asks the same two-question shape of the ownership resolver, and a second copy of a shared
+ * vocabulary is the drift this repo has already paid for twice. This guard's behaviour is
+ * unchanged: the value, the two calls and the either-may-refuse rule below are all as they were.
  */
-const MTIME_ONLY = "!";
-
 function candidateDirs(pipelineDir) {
   const dirs = [];
   for (const dir of [

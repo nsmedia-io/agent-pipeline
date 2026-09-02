@@ -165,6 +165,35 @@ make_repo() {
   printf '%s' "$dir"
 }
 
+# ---- run records ------------------------------------------------------------
+#
+# write_run_record <file> <phase> [ago-ms]
+#
+# A SCHEMA-SHAPED, IN-FLIGHT status.json. It exists because #109 made the SubagentStop sweep
+# resolve its scope by RUN OWNERSHIP rather than by newest status.json mtime, so a `{"current_
+# phase":"2-review"}` stub -- which several suites used as a placeholder before that -- is no
+# longer a run any consumer will own a stop for: it carries no `updated_at`, and an undatable
+# record is deliberately never the resolved owner.
+#
+# `updated_at` IS WRITTEN AS CONTENT, NOT AS AN MTIME, and that is the whole point of the helper
+# rather than a `touch`. The two clocks disagree by construction on the tree an adopting project
+# checks out: a clone refreshes every mtime and touches no `updated_at`. A fixture that sets the
+# recency it wants via `touch` is testing the wrong term and passes for the wrong reason.
+write_run_record() {
+  local file="$1" phase="$2" ago="${3:-60000}"
+  mkdir -p "$(dirname "$file")"
+  node -e '
+    const fs = require("fs");
+    const [, file, phase, ago] = process.argv;
+    fs.writeFileSync(file, JSON.stringify({
+      current_phase: phase,
+      started_at: "2026-01-01T00:00:00Z",
+      updated_at: new Date(Date.now() - Number(ago)).toISOString(),
+      branch: "test-branch",
+      events: [],
+    }));' "$file" "$phase" "$ago"
+}
+
 # ---- node requirement -------------------------------------------------------
 #
 # DELIBERATE INVERSION of the hooks' fail-open posture. hooks/lib.sh (read_config) and
