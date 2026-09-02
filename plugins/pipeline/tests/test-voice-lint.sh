@@ -508,6 +508,199 @@ lint
 assert_eq "    and \`9-invented\` exits 2 for a different reason again -- it is SHAPE-INVALID against status.schema.json's pattern" "$RC" "2"
 assert_contains "    naming the schema rather than a voice rule, which is what makes it a different cell from (3)" "$ERR" "status.schema.json"
 
+# =============================================================================================
+# #80 -- THE RULING THAT PHASE 0 STEP 1 IS OUT OF SCOPE, AND THE ORDERING THAT RULING RESTS ON
+# =============================================================================================
+# THE GAP THIS GUARDS, measured before it was written. Phase 0 step 1 halts to the owner in full
+# voice with a decision block if the worktree is dirty, and step 5 is what first writes a phase
+# record. voice-lint derives its moment FROM that record, so at step 1 there is nothing to derive
+# from. Measured with an em dash planted in a step-1-shaped halt: no state dir at all -> rc 0 and
+# ZERO bytes; a record already at `0-setup` -> rc 0 and ZERO bytes; the IDENTICAL message at
+# `5-archived` -> rc 2 with five named failures. The cells above already pin the second and third
+# of those. A resume is silent too rather than mis-graded, because #56 reads the prior session
+# record as stale.
+#
+# `0-setup` IS DECLARED NON-VOICE PARTLY BECAUSE OF THAT ORDERING, so the declaration carries an
+# expiry that nothing could see: move the halt after the record write, or add ANY owner-facing
+# full-voice block between that write and the next `Checkpoint first`, and the declaration is
+# wrong while every test stays green. #80's ruling is that the halt stays OUT OF SCOPE (the
+# reasoning is in voice-lint.mjs beside the `0-setup` entry and in Phase 0 of commands/pipeline.md
+# beside the halt itself). This suite is the other half: a ruling with no failing assertion behind
+# it documents a gap instead of protecting one.
+#
+# THE MARKER TABLE IS ITS OWN CONTROL. Each entry is asserted LIVE somewhere in pipeline.md, so a
+# phrase that falls out of use reddens as a dead table entry rather than quietly becoming a hole
+# in the window scan -- which is #53's own defect (a population narrower than its subject) one
+# level in. The fixture matrix below drives MUTATED COPIES of pipeline.md through the identical
+# probe, and it carries a NEGATIVE cell: the same inserted block placed OUTSIDE the window must
+# leave the report green, or this scan would only prove that it fires on anything.
+# ---------------------------------------------------------------------------------------------
+
+# p0_window <pipeline.md path> -> a KEY=value report, consumed with the `vl` accessor above.
+p0_window() {
+  node --input-type=module -e '
+    import { readFileSync } from "node:fs";
+    const lines = readFileSync(process.argv[1], "utf8").split("\n");
+    const MARKERS = [
+      ["full-voice",       /full[ -]voice/i],
+      ["decision-block",   /decision block/i],
+      ["surface-to-owner", /surface to the owner/i],
+      ["return-to-owner",  /return to the owner/i],
+      ["await-the-owner",  /awaits? the owner/i],
+    ];
+    // The step-1 halt, identified by the conjunction that makes it that halt and not prose about
+    // it: the worktree command it runs, plus both owner-facing markers.
+    const isHalt = (l) =>
+      /git status --short/.test(l) && /full[ -]voice/i.test(l) && /decision block/i.test(l);
+    // The ruling paragraph, anchored on the issue number rather than on any of its wording, so a
+    // rewrite of the prose does not read as a stray owner-decision block.
+    const isRuling = (l) => /#80/.test(l);
+    const find = (re, from) => { for (let i = from; i < lines.length; i++) if (re.test(lines[i])) return i; return -1; };
+    const phase0 = find(/^## Phase 0: Setup\s*$/, 0);
+    const setupWrites = lines.filter((l) => /"current_phase": "0-setup"/.test(l)).length;
+    const setup = find(/"current_phase": "0-setup"/, 0);
+    const cp = setup < 0 ? -1 : find(/Checkpoint first/, setup + 1);
+    const marks = (a, b) => {
+      const hits = [];
+      for (let i = a; i < b; i++) for (const [name, re] of MARKERS) if (re.test(lines[i])) hits.push((i + 1) + ":" + name);
+      return hits;
+    };
+    const haltLines = [], rulingLines = [];
+    lines.forEach((l, i) => { if (isHalt(l)) haltLines.push(i + 1); });
+    if (phase0 >= 0 && setup > phase0) for (let i = phase0; i < setup; i++) if (isRuling(lines[i])) rulingLines.push(i + 1);
+    const fileHits = MARKERS.map(([n, re]) => n + ":" + lines.filter((l) => re.test(l)).length);
+    const dead = MARKERS.filter(([, re]) => !lines.some((l) => re.test(l))).map(([n]) => n);
+    const window = setup >= 0 && cp > setup ? marks(setup, cp) : ["WINDOW-UNRESOLVABLE"];
+    const stray = phase0 >= 0 && setup > phase0
+      ? marks(phase0, setup).filter((h) => { const i = Number(h.split(":")[0]) - 1; return !isHalt(lines[i]) && !isRuling(lines[i]); })
+      : ["PREWINDOW-UNRESOLVABLE"];
+    const out = [];
+    out.push("PHASE0=" + (phase0 >= 0 ? "found" : "ABSENT"));
+    out.push("SETUPWRITES=" + setupWrites);
+    out.push("CPAFTER=" + (cp > setup && setup >= 0 ? "found" : "ABSENT"));
+    out.push("WINDOWLINES=" + (cp > setup && setup >= 0 ? cp - setup : 0));
+    out.push("HALTLINES=" + haltLines.join(","));
+    out.push("HALTBEFORE=" + (haltLines.length === 1 && setup >= 0 ? (haltLines[0] - 1 < setup ? "yes" : "NO") : "na"));
+    out.push("RULINGLINES=" + rulingLines.join(","));
+    out.push("FILEHITS=" + fileHits.join(","));
+    out.push("DEAD=" + dead.join(","));
+    out.push("WINDOWHITS=" + window.join(" "));
+    out.push("PREWINDOWSTRAY=" + stray.join(" "));
+    process.stdout.write(out.join("\n"));
+  ' "$1" 2>&1
+}
+
+# p80_count <comma-list> -> how many entries. `awk -F, '{print NF}'` reads ZERO records on an
+# empty string and prints NOTHING, so a deleted halt would compare "" against "0" and the cell
+# would redden for the wrong reason -- or, with the expectation written as "", pass vacuously.
+p80_count() {
+  [[ -n "$1" ]] || { printf '0'; return; }
+  printf '%s' "$1" | tr ',' '\n' | grep -c . | tr -d ' '
+}
+
+# ---------------------------------------------------------------------------
+suite "#80 AC1: the premises the \`0-setup\` non-voice ruling rests on, off pipeline.md itself"
+# ---------------------------------------------------------------------------
+P80="$(p0_window "$PIPELINE_MD")"
+assert_eq "PREMISE: the probe resolved Phase 0, exactly ONE \`0-setup\` write, and a following \`Checkpoint first\` -- without all three the window is undefined and every cell below would range over nothing" \
+  "$(vl "$P80" PHASE0)/$(vl "$P80" SETUPWRITES)/$(vl "$P80" CPAFTER)" "found/1/found"
+assert_eq "PREMISE: the step-1 halt is present and UNIQUE -- exactly one line carries the worktree command together with both owner-facing markers. A deletion or a second copy is named here rather than silently emptying the ordering cell below" \
+  "$(p80_count "$(vl "$P80" HALTLINES)")" "1"
+assert_eq "PREMISE: exactly one ruling paragraph sits in Phase 0 above the write, anchored on the issue number rather than on its wording, so criterion (c) can tell it from a newly added owner-decision block. Delete the ruling and this reddens instead of (c) quietly absolving a stray" \
+  "$(p80_count "$(vl "$P80" RULINGLINES)")" "1"
+assert_eq "ANTI-VACUITY on the marker table, per entry rather than in aggregate: NO marker is dead. A whole-table check passes while one row silently matches nothing, which is exactly how a population gets narrower than its subject" \
+  "$(vl "$P80" DEAD)" ""
+record "REPORTED, not asserted: whole-file marker hits are $(vl "$P80" FILEHITS), and the guarded window spans $(vl "$P80" WINDOWLINES) lines. Counts move on ordinary prose edits; the SETS below are what is asserted"
+
+assert_eq "#80 THE CRITERION (a): the step-1 halt sits BEFORE the \`0-setup\` write, which is the whole reason a turn cannot END at that phase in that halt" \
+  "$(vl "$P80" HALTBEFORE)" "yes"
+assert_eq "#80 THE CRITERION (b): the window between the \`0-setup\` write and the next \`Checkpoint first\` carries NO owner-facing full-voice marker. This is the expiry condition written in voice-lint.mjs beside the \`0-setup\` entry, and until now nothing evaluated it" \
+  "$(vl "$P80" WINDOWHITS)" ""
+assert_eq "#80 THE CRITERION (c): and the region ABOVE the write carries no owner-facing marker other than the step-1 halt and the ruling that declares it out of scope. A second unreachable halt would not break (a) or (b), but it would widen what \"out of scope\" covers without the ruling saying so" \
+  "$(vl "$P80" PREWINDOWSTRAY)" ""
+
+# ---------------------------------------------------------------------------
+suite "#80 AC2: the fixture matrix -- each criterion reddens under its own edit, and only it"
+# ---------------------------------------------------------------------------
+# Mutations are applied to COPIES in a temp dir, never to the checkout: run.sh is this project
+# checkCommand and the Stop hook executes it at live turn ends, so a suite that edited the real
+# pipeline.md would ship a planted defect if it were interrupted between mutation and restore.
+new_tmpdir || exit 90
+P80_DIR="$NEW_TMPDIR"
+P80_BLOCK='**A new owner-facing halt.** Surface to the owner in **full voice mode** with a decision block before continuing.'
+
+# M1 -- the reorder the ruling expires on: the step-1 halt moves BELOW the record write.
+node --input-type=module -e '
+  import { readFileSync, writeFileSync } from "node:fs";
+  const [src, dst] = process.argv.slice(1);
+  const lines = readFileSync(src, "utf8").split("\n");
+  const h = lines.findIndex((l) => /git status --short/.test(l) && /full[ -]voice/i.test(l) && /decision block/i.test(l));
+  const [halt] = lines.splice(h, 1);
+  const w = lines.findIndex((l) => /"current_phase": "0-setup"/.test(l));
+  lines.splice(w + 2, 0, "", halt);
+  writeFileSync(dst, lines.join("\n"));
+' "$PIPELINE_MD" "$P80_DIR/m1.md"
+P80_M1="$(p0_window "$P80_DIR/m1.md")"
+assert_eq "M1 REORDER: with the step-1 halt moved BELOW the \`0-setup\` write, criterion (a) reddens" \
+  "$(vl "$P80_M1" HALTBEFORE)" "NO"
+assert_contains "M1: and criterion (b) reddens too, naming the moved line -- the two cells are not one cell wearing two labels, they fail together here and separately in M2 and M4" \
+  "$(vl "$P80_M1" WINDOWHITS)" ":full-voice"
+
+# M2 -- an owner-decision block INSERTED into the window, the other expiry #53's ruling rests on.
+node --input-type=module -e '
+  import { readFileSync, writeFileSync } from "node:fs";
+  const [src, dst, block] = process.argv.slice(1);
+  const lines = readFileSync(src, "utf8").split("\n");
+  const w = lines.findIndex((l) => /"current_phase": "0-setup"/.test(l));
+  const cp = lines.findIndex((l, i) => i > w && /Checkpoint first/.test(l));
+  lines.splice(cp - 1, 0, "", block);
+  writeFileSync(dst, lines.join("\n"));
+' "$PIPELINE_MD" "$P80_DIR/m2.md" "$P80_BLOCK"
+P80_M2="$(p0_window "$P80_DIR/m2.md")"
+assert_contains "M2 INSERTION: an owner-decision block placed inside the window reddens criterion (b), naming its line and marker" \
+  "$(vl "$P80_M2" WINDOWHITS)" ":full-voice"
+assert_eq "  DISCRIMINATION: and criterion (a) is UNMOVED by it, so (b) is not reading (a) second-hand" \
+  "$(vl "$P80_M2" HALTBEFORE)" "yes"
+
+# M3 -- THE NEGATIVE CELL. The identical block, placed OUTSIDE the window, must change nothing.
+# Without this the scan would prove only that it fires, never that it discriminates by position.
+node --input-type=module -e '
+  import { readFileSync, writeFileSync } from "node:fs";
+  const [src, dst, block] = process.argv.slice(1);
+  const lines = readFileSync(src, "utf8").split("\n");
+  const w = lines.findIndex((l) => /"current_phase": "0-setup"/.test(l));
+  const cp = lines.findIndex((l, i) => i > w && /Checkpoint first/.test(l));
+  lines.splice(cp + 2, 0, "", block);
+  writeFileSync(dst, lines.join("\n"));
+' "$PIPELINE_MD" "$P80_DIR/m3.md" "$P80_BLOCK"
+P80_M3="$(p0_window "$P80_DIR/m3.md")"
+assert_eq "M3 NEGATIVE CONTROL: the BYTE-IDENTICAL block placed just PAST the next \`Checkpoint first\` leaves the window clean. That phase records its own label before the block runs, so it is not this ruling to make" \
+  "$(vl "$P80_M3" WINDOWHITS)" ""
+assert_eq "  and leaves (a) and (c) alone as well, so M2's red is positional and not merely textual" \
+  "$(vl "$P80_M3" HALTBEFORE)/$(vl "$P80_M3" PREWINDOWSTRAY)" "yes/"
+
+# M4 -- the halt DELETED. The premise cell must catch this, or (a) would pass over an empty set.
+node --input-type=module -e '
+  import { readFileSync, writeFileSync } from "node:fs";
+  const [src, dst] = process.argv.slice(1);
+  const lines = readFileSync(src, "utf8").split("\n")
+    .filter((l) => !(/git status --short/.test(l) && /full[ -]voice/i.test(l) && /decision block/i.test(l)));
+  writeFileSync(dst, lines.join("\n"));
+' "$PIPELINE_MD" "$P80_DIR/m4.md"
+P80_M4="$(p0_window "$P80_DIR/m4.md")"
+assert_eq "M4 DELETION: with the halt removed, the uniqueness premise reddens (0 lines) and criterion (a) reports \`na\` rather than \`yes\`, so an absent halt can never read as an ordering that was checked" \
+  "$(p80_count "$(vl "$P80_M4" HALTLINES)")/$(vl "$P80_M4" HALTBEFORE)" "0/na"
+
+# M5 -- a marker RETIRED by a prose rename. The per-entry liveness cell must name it.
+node --input-type=module -e '
+  import { readFileSync, writeFileSync } from "node:fs";
+  const [src, dst] = process.argv.slice(1);
+  writeFileSync(dst, readFileSync(src, "utf8").replace(/decision block/gi, "call block"));
+' "$PIPELINE_MD" "$P80_DIR/m5.md"
+P80_M5="$(p0_window "$P80_DIR/m5.md")"
+assert_eq "M5 RETIRED MARKER: renaming one phrase out of pipeline.md makes its table row match nothing, and the liveness cell NAMES that row. Without this, the window scan would go on passing over a vocabulary that no longer describes the file" \
+  "$(vl "$P80_M5" DEAD)" "decision-block"
+
 rm -f "$TEMP_ISSUE_DIR/status.json"
 
 # ---------------------------------------------------------------------------

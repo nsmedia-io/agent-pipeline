@@ -445,6 +445,22 @@ suite "AC27: the two suites that already own this hook are UNCHANGED consumers"
 # to passed=272 failed=0 at #91, which added five cells (a premise, the tie, its one-millisecond
 # twin either side, and a reported measurement) and removed none.
 #
+# 272 -> 288 (#80): the ruling that Phase 0 step 1 is DELIBERATELY out of voice-lint's scope, plus
+# the guard that makes that ruling expire loudly. Two blocks, 16 cells: AC1 asserts the three
+# premises the `0-setup` non-voice declaration rests on off commands/pipeline.md itself (the halt
+# is unique, the ruling paragraph is present, no marker in the table is dead), reports the marker
+# hits, and asserts the three criteria; AC2 is the fixture matrix over MUTATED COPIES of
+# pipeline.md -- a reorder, an insertion into the window, the byte-identical insertion OUTSIDE the
+# window as the negative cell, a deletion, and a retired marker. Verified the same way as the four
+# re-baselines above (run the suite from the parent commit and from this one, strip the ANSI codes,
+# sort the `ok`/`FAIL` labels, `comm`): 17 labels ADDED, 1 "REMOVED", and that one is the same
+# population-report line carrying its own LINE NUMBERS in its label -- the tri-partition's
+# `at lines 22,22,67,...` report, shifted by two because this change inserts a paragraph into
+# pipeline.md above them. Its counterpart is in the added list at the same text with the shifted
+# numbers. 0 real removals, 0 renames, net +16. Same class of "removal" as the two already recorded
+# at 260 -> 267. THIS COUNT IS RE-DERIVED FROM A RUN, never incremented by hand -- measured
+# passed=288 failed=0 at the commit that adds it.
+#
 # AND THE IRONY, recorded as a pointer rather than acted on here: this cell is a bare exact-count
 # pin over another suite's whole population, which is the class #33 retired elsewhere in Lane 1.
 # It would be better as a LABEL-SET assertion -- pin the sorted label list, and an addition then
@@ -464,7 +480,7 @@ run_suite_counts test-stop-hook.sh
 assert_eq "test-stop-hook.sh still passes exactly its 18 pre-existing assertions" "${SUITE_PASSED:-<none>}" "18"
 assert_eq "  with none failing" "${SUITE_FAILED:-<none>}" "0"
 run_suite_counts test-voice-lint.sh
-assert_eq "test-voice-lint.sh still passes exactly its 272 assertions (41 pre-existing + 7 from #27 + 26 from #53, less 3 retired by #53, + 186 from #56's authored contract, + 3 from #56's Phase-4 gap closure, + 7 from #56's Phase-4 residual (ix) pin, + 5 from #91's turn-boundary tie block -- see the note above)" "${SUITE_PASSED:-<none>}" "272"
+assert_eq "test-voice-lint.sh still passes exactly its 288 assertions (41 pre-existing + 7 from #27 + 26 from #53, less 3 retired by #53, + 186 from #56's authored contract, + 3 from #56's Phase-4 gap closure, + 7 from #56's Phase-4 residual (ix) pin, + 5 from #91's turn-boundary tie block, + 16 from #80's Phase-0 scope ruling and its expiry guard -- see the note above)" "${SUITE_PASSED:-<none>}" "288"
 assert_eq "  with none failing" "${SUITE_FAILED:-<none>}" "0"
 
 # ---------------------------------------------------------------------------
