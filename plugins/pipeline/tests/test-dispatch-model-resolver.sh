@@ -79,6 +79,12 @@ for cand in $(grep -oE 'scripts/[a-zA-Z0-9_-]+\.mjs' "$PIPELINE_MD" | sort -u); 
     # alphabetical accident, not a check that ever confirmed it was the right script. Requiring
     # exactly one survivor (below) is what turned that from invisible into a red suite.
     gate-phase-entry.mjs|pipeline-telemetry.mjs) continue ;;
+    # #117's write-time verdict-cap checker, referenced from the durable-checkpoint recipe. It
+    # sorts FIRST of every candidate ("c"), so it is precisely the "next early-sorting
+    # scripts/*.mjs reference" the comment above predicted; the ambiguity halt named it on the
+    # first run rather than letting it be silently picked. It resolves no model and takes no
+    # (role, tier, phase) triple at all. Excluded by NAME, like the two above.
+    check-status-record.mjs) continue ;;
   esac
   # The data-layer surface module is referenced from the same file by R3; it is not this.
   grep -q 'migrationGlobsForTripwire' "$PLUGIN_DIR/$cand" 2>/dev/null && continue
