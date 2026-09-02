@@ -398,25 +398,52 @@ function loadJson(file) {
   return JSON.parse(readFileSync(file, "utf8"));
 }
 
-// The status schema's OWN `current_phase` pattern, read from the shipped schema rather than
-// restated here. A second copy of a vocabulary is how `exp-` runs stayed invisible to voice-lint
-// for months (see ISSUE_DIR_RE above), and this one would rot the same way: the phase list grows
-// whenever commands/pipeline.md writes a new checkpoint, and a hardcoded twin would silently stop
+// WHAT MAKES A DIRECTORY A RUN, read from the shipped status schema rather than restated here. A
+// second copy of a vocabulary is how `exp-` runs stayed invisible to voice-lint for months (see
+// ISSUE_DIR_RE above), and this one would rot the same way: the phase list grows whenever
+// commands/pipeline.md writes a new checkpoint, and a hardcoded twin would silently stop
 // recognising the newest runs -- failing in the INERT direction, which is the direction this whole
-// change exists to close. Cached because unnamedRunDirs runs once per root per stop.
-// `undefined` = not yet read, `null` = schema unreadable (see the caller's fallback).
-let _phasePatternCache;
-function runPhasePattern() {
-  if (_phasePatternCache !== undefined) return _phasePatternCache;
-  _phasePatternCache = null;
+// change exists to close.
+//
+// THIS READS status.schema.json AND DOES NOT VALIDATE status.json AGAINST IT in the AGENT_RULES
+// sense. No rule registers this schema, nothing blocks a stop over a status record, and the
+// schema's own "nothing validates this file" sentences stay true. What happens here is narrower
+// and is only ever used to answer "is this directory a run at all": a record that does not have
+// the schema's shape is not treated as one. tests/test-status-schema-contract.sh pins both halves
+// of that distinction so the difference cannot quietly erode.
+//
+// TWO CHECKS, because ONE IS NOT ENOUGH IN EITHER DIRECTION. The shared walker implements
+// `required` and `type` but NOT `pattern` (its own header says so), so validate() alone would
+// accept `current_phase: "archived"`; and the pattern alone would accept a one-field
+// `{"current_phase":"1-ba"}` stub, which is exactly the `.pipeline/schemas` sibling this repo's
+// own suites plant to prove a non-run is never selected. Cached: this runs once per root per stop.
+// `undefined` = not read yet, `null` = schema unreadable.
+let _statusSchemaCache;
+function statusSchema() {
+  if (_statusSchemaCache !== undefined) return _statusSchemaCache;
+  _statusSchemaCache = null;
   try {
     const schema = loadJson(path.join(SCHEMA_DIR, "status.schema.json"));
     const p = schema?.properties?.current_phase?.pattern;
-    if (typeof p === "string" && p.length > 0) _phasePatternCache = new RegExp(p);
+    if (schema && typeof p === "string" && p.length > 0) {
+      _statusSchemaCache = { schema, phasePattern: new RegExp(p) };
+    }
   } catch {
-    // Unreadable schema: the caller falls back to "current_phase is a non-empty string".
+    // Unreadable schema: isRunRecord below then recognises NOTHING, which leaves this recovery
+    // exactly as inert as it was before it existed. That is the right direction for an input we
+    // cannot characterise: the alternative is adopting a directory on a weaker rule than the one
+    // this function exists to apply.
   }
-  return _phasePatternCache;
+  return _statusSchemaCache;
+}
+
+// A parsed status.json is a RUN RECORD when it has the schema's shape and a real phase.
+function isRunRecord(status) {
+  if (!status || typeof status !== "object" || Array.isArray(status)) return false;
+  const known = statusSchema();
+  if (!known) return false;
+  if (!known.phasePattern.test(String(status.current_phase ?? ""))) return false;
+  return validate(status, known.schema, known.schema).length === 0;
 }
 
 /**
@@ -439,17 +466,23 @@ function runPhasePattern() {
  * recovery lives ONLY in checkArtifacts, whose worst case is an advisory decision:block telling an
  * agent to fix an artifact it just wrote.
  *
- * THE PREDICATE, and what each clause refuses. A directory qualifies when its name is NOT an issue
- * name, it holds a parseable `status.json` OBJECT, and that object's `current_phase` is a string
- * matching the status schema's own pattern. The last clause is what keeps a non-run sibling out:
- * `.pipeline/schemas` and `.pipeline/_archived` are the two names this repo's own tree and
- * self-test fixture put next to real runs, and neither carries a phase-shaped `current_phase`.
- * `current_phase` is `required` in status.schema.json and present in all 13 committed records in
- * this repo (`node -e` over every `.pipeline/<issue>/status.json`, 2026-09-02), so the clause costs
- * a real run nothing. THE CORRECT WORK THIS COULD REFUSE, stated because a guardrail owes that: a directory
- * that is not a run, carries a phase-shaped status.json anyway, AND holds a recent artifact this
- * agent owns that fails its schema. Nothing writes that shape; a run record is written by the
- * orchestrator and by nothing else.
+ * THE PREDICATE. A directory qualifies when its name is NOT an issue name and it holds a
+ * `status.json` that isRunRecord() accepts -- the schema's shape AND a schema-shaped phase. Both
+ * halves were earned by a failing control rather than reasoned out: `.pipeline/schemas` carrying
+ * `{"current_phase":"1-ba"}` is planted by tests/test-open-questions-and-design-lock.sh precisely
+ * to prove a non-run sibling is never selected, and a phase-pattern check alone ADOPTED it. All 13
+ * committed records in this repo carry the schema's full required set (`node -e` over every
+ * `.pipeline/<issue>/status.json`, 2026-09-02), so the stricter rule costs a real run nothing.
+ *
+ * THE CORRECT WORK THIS COULD REFUSE, stated because a guardrail owes that: a directory that is
+ * not a run, carries a status.json that validates against the run schema anyway, AND holds a
+ * recent artifact this agent owns that fails ITS schema. Nothing writes that shape; a run record
+ * is written by the orchestrator and by nothing else.
+ *
+ * AND THE OTHER DIRECTION, which is the one that stays open: a genuine run whose status.json is
+ * missing a required field is not recognised here, so it keeps the pre-existing silence. That
+ * fails INERT, never toward a false block, and it is the same posture the rest of this file takes
+ * on an input it cannot characterise.
  */
 // mtime of a run dir's status.json, or null when there is none to read. The same quantity
 // activeIssueDir ranks its own candidates by, so the two comparisons stay commensurable.
@@ -469,7 +502,6 @@ export function unnamedRunDirs(pipelineDir) {
   } catch {
     return out;
   }
-  const phasePattern = runPhasePattern();
   for (const d of entries) {
     if (!d.isDirectory() || ISSUE_DIR_RE.test(d.name)) continue;
     const dir = path.join(pipelineDir, d.name);
@@ -479,10 +511,7 @@ export function unnamedRunDirs(pipelineDir) {
     } catch {
       continue; // no record, or an unreadable one: not evidence of a run
     }
-    if (!status || typeof status !== "object" || Array.isArray(status)) continue;
-    const phase = status.current_phase;
-    if (typeof phase !== "string" || phase.length === 0) continue;
-    if (phasePattern && !phasePattern.test(phase)) continue;
+    if (!isRunRecord(status)) continue;
     out.push(dir);
   }
   return out;
@@ -1851,6 +1880,18 @@ function selfTest() {
       writeFileSync(path.join(pipe, "_archived", "status.json"), JSON.stringify({ current_phase: "archived" }));
       check("unnamed-run: a non-phase-shaped current_phase is NOT a run candidate",
         unnamedRunDirs(pipe).length === 1 ? [] : [`candidates: ${unnamedRunDirs(pipe).map((d) => path.basename(d)).join(",")}`], false);
+      // THE SHAPE THAT DEFEATED THE PHASE-PATTERN CHECK ALONE, kept here as its own case rather
+      // than left to the suite that found it: a one-field stub whose phase IS schema-shaped.
+      // tests/test-open-questions-and-design-lock.sh plants exactly this at `.pipeline/schemas`
+      // to prove a non-run sibling is never selected, and it caught this on CI, not locally.
+      writeFileSync(path.join(pipe, "_archived", "status.json"), JSON.stringify({ current_phase: "1-ba" }));
+      check("unnamed-run: a phase-shaped ONE-FIELD stub is NOT a run candidate (no required fields)",
+        unnamedRunDirs(pipe).length === 1 ? [] : [`candidates: ${unnamedRunDirs(pipe).map((d) => path.basename(d)).join(",")}`], false);
+      // CONTROL for the two cases above: the SAME dir with a full record IS recognised, so they
+      // are rejecting the record's shape and not merely failing to see the directory at all.
+      writeFileSync(path.join(pipe, "_archived", "status.json"), runRecord);
+      check("unnamed-run: CONTROL -- the same dir with a FULL record IS a candidate",
+        unnamedRunDirs(pipe).length === 2 ? [] : [`candidates: ${unnamedRunDirs(pipe).map((d) => path.basename(d)).join(",")}`], false);
       writeFileSync(path.join(pipe, "_archived", "status.json"), JSON.stringify({ x: 1 }));
       check("unnamed-run: a defect in the real orphan still blocks with the junk siblings present",
         checkArtifacts("pipeline:secops", { cwd: root }, Date.now(), pin).failures, true);

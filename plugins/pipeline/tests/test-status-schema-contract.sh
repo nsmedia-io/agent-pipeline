@@ -401,9 +401,31 @@ suite "R6's machine-checkable half: the sentence's EXPIRY"
 # The schema now says in prose that nothing validates status.json against it. Prose cannot be
 # mutated into falsity, but the fact underneath it can: the day someone registers status.json in
 # AGENT_RULES is the day that sentence becomes a lie, and this is the assertion that notices.
-AGENT_RULES_HITS="$(grep -c 'status\.schema\.json' "$VALIDATOR" | tr -d ' ')"
-assert_eq "EXPIRY: status.schema.json is still named nowhere in validate-pipeline-artifact.mjs. If this fails, status.json is now validated and the 'nothing validates this file' sentences in the schema must be DELETED, not this assertion." \
+#
+# RE-ANCHORED (#115). This counted EVERY mention of the string in the validator, which was a proxy
+# for "registered in AGENT_RULES" and stopped being one: validate-pipeline-artifact.mjs now READS
+# status.schema.json to recognise whether a `.pipeline/` subdirectory holds a run at all, and it
+# still registers no rule against it, blocks no stop over it and leaves the schema's prose true.
+# A mention was never the thing worth refusing -- voice-lint.mjs has always mentioned it, which is
+# exactly what the CONTROL below asserts -- so the assertion now names the REGISTRATION it is
+# actually about. If THIS fails, status.json really is validated and the schema's
+# "nothing validates this file" sentences must be DELETED, not this assertion.
+AGENT_RULES_HITS="$(grep -cE 'schema: *"status\.schema\.json"' "$VALIDATOR" | tr -d ' ')"
+assert_eq "EXPIRY: no AGENT_RULES rule registers status.schema.json, so nothing validates status.json against it" \
   "$AGENT_RULES_HITS" "0"
+# DISCRIMINATION, not merely firing: the pattern must MATCH a registration and MISS a bare read.
+# Without this pair a typo in the pattern above would report 0 forever and the expiry would be
+# retired in silence -- the same "control that quietly stops firing" this file exists to catch.
+assert_eq "CONTROL(+): the registration pattern MATCHES a real AGENT_RULES rule line" \
+  "$(printf '%s\n' '    { artifact: "status.json", schema: "status.schema.json", schemaPtr: "#", dataPtr: "" },' \
+     | grep -cE 'schema: *"status\.schema\.json"' | tr -d ' ')" "1"
+assert_eq "CONTROL(-): and MISSES the bare read that legitimately exists today" \
+  "$(printf '%s\n' '    const schema = loadJson(path.join(SCHEMA_DIR, "status.schema.json"));' \
+     | grep -cE 'schema: *"status\.schema\.json"' | tr -d ' ')" "0"
+# The legitimate read is PINNED, so deleting or renaming it reddens here and sends the next author
+# to this reasoning rather than letting the recognition rule quietly become a hardcoded copy.
+assert_eq "the validator DOES read status.schema.json (for run recognition, not validation)" \
+  "$([[ "$(grep -c 'status\.schema\.json' "$VALIDATOR" | tr -d ' ')" -ge 1 ]] && echo reads || echo absent)" "reads"
 assert_eq "CONTROL: that grep can find the string when it is there (voice-lint.mjs does read the schema)" \
   "$([[ "$(grep -c 'status\.schema\.json' "$VOICE_LINT" | tr -d ' ')" -ge 1 ]] && echo finds || echo "the grep finds NOTHING anywhere: it is measuring itself")" "finds"
 

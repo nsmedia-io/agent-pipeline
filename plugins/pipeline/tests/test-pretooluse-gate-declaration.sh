@@ -471,7 +471,13 @@ capture3() {  # <scripts-dir> -> "rc|stdout|stderr" for each of the three entry 
 EVAL-IMPORT rc=$r out=[$o] err=[$e]"
   o="$( ( cd "$PINNED_CWD" && printf '%s' '{"hook_event_name":"SubagentStop","session_id":"paired","agent_type":"pipeline:qa"}' \
         | CLAUDE_PROJECT_DIR="$PINNED_CWD" "$GATE_REAL_NODE" "$sd/validate-pipeline-artifact.mjs" 2>"$TEMP_PROJECT/e3" ) )"; r=$?
-  e="$(cat "$TEMP_PROJECT/e3")"
+  # The #115 attribution line is a DELIBERATE difference from the reviewed commit: the validator
+  # now writes one `agent-pipeline SubagentStop: ...` line to stderr on every stop, because before
+  # it a lookup miss and a clean artifact were byte-identical. It is stripped HERE and only here,
+  # so exit code, stdout and every OTHER stderr byte stay pinned; a SECOND new stderr line would
+  # still redden this. The premise -- that the line exists at HEAD and not at the base -- is
+  # asserted in test-pretooluse-gate-ownership.sh's AC28 FILTER PREMISE pair.
+  e="$(grep -v '^agent-pipeline SubagentStop: ' "$TEMP_PROJECT/e3" || true)"
   out="$out
 VALIDATOR-STDIN rc=$r out=[$o] err=[$e]"
   printf '%s' "$out"
