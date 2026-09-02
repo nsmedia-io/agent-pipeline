@@ -1781,6 +1781,14 @@ function selfTest() {
       }
       check("unnamed-run: a status.json with no phase is NOT a run candidate",
         unnamedRunDirs(pipe).length === 1 ? [] : [`candidates: ${unnamedRunDirs(pipe).map((d) => path.basename(d)).join(",")}`], false);
+      // A current_phase that IS a string but is not phase-SHAPED. Without this case the schema
+      // pattern clause is dead weight: every junk fixture above omits current_phase entirely, so
+      // the `typeof phase !== "string"` clause alone rejects them and deleting the pattern test
+      // changes nothing. Found by the mutation battery, which is what a battery is for.
+      writeFileSync(path.join(pipe, "_archived", "status.json"), JSON.stringify({ current_phase: "archived" }));
+      check("unnamed-run: a non-phase-shaped current_phase is NOT a run candidate",
+        unnamedRunDirs(pipe).length === 1 ? [] : [`candidates: ${unnamedRunDirs(pipe).map((d) => path.basename(d)).join(",")}`], false);
+      writeFileSync(path.join(pipe, "_archived", "status.json"), JSON.stringify({ x: 1 }));
       check("unnamed-run: a defect in the real orphan still blocks with the junk siblings present",
         checkArtifacts("pipeline:secops", { cwd: root }, Date.now(), pin).failures, true);
       // A phase-shaped record in a junk dir WOULD be adopted -- assert the discriminator is the
