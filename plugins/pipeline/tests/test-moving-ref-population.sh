@@ -230,8 +230,12 @@ assert_eq "CONTROL: and every occurrence of the ref in THIS file is a comment, n
 # THE DISCRIMINATOR IS THE OPERAND, and it is exact rather than heuristic. `sed -n 'N,Mp'` applied
 # to a FILE is an offset into a document somebody else owns. The same script reading STDIN is an
 # offset into a population this suite already derived for itself, which is a different statement
-# and a correct one: test-claims-consumers.sh takes the lead paragraph of a section it extracted
-# by heading, and that must not be refused.
+# and a correct one, and that must not be refused. The exemplar was test-claims-consumers.sh
+# taking the lead paragraph of a section it had extracted by heading; #88 retired that occurrence
+# for the reason this header gives -- a hand-picked window is outgrowable even over a derived
+# population -- so the permitted shape now has no live instance and lives only in the planted
+# probe below. It stays permitted: the ratchet is about the OPERAND, not about the count of
+# occurrences, and refusing the stdin form would refuse a correct statement.
 #
 # Written as case globs rather than as literals, for the same reason as $OREF above: this file is
 # inside the population it walks. The globs require a DIGIT after `sed -n '`, and every occurrence
