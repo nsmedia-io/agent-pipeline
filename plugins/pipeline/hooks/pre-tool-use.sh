@@ -320,13 +320,51 @@ _inv_words() { # <closed word>...
       _valnext=0
       continue
     fi
-    # AN OPERAND COUNTS AS A PATHSPEC ONLY IF IT NAMES SOMETHING. The empty string does not: real
-    # git refuses it outright (`fatal: empty string is not a valid pathspec`) and stages nothing,
-    # so reading `git add -A ''` as a NARROWED stage credited the command with a restriction the
-    # shell never handed it. That is the same phantom-operand mistake the backslash-newline splice
-    # fixes in the tokenizer; a word that narrows nothing narrows nothing.
+    # AN OPERAND NARROWS ONLY IF THE SCANNER CAN SEE WHAT IT NAMES, and the second half of that
+    # sentence is the one that was live. Two kinds of word name nothing this scanner can see:
+    #
+    #   THE EMPTY STRING, which real git refuses outright (`fatal: empty string is not a valid
+    #   pathspec`, exit 128, nothing staged), so reading `git add -A ''` as a NARROWED stage
+    #   credited the command with a restriction the shell never handed it. Closing that alone
+    #   prevented no staging, because the command it refuses stages nothing either way.
+    #
+    #   A WORD CARRYING AN UNRESOLVED EXPANSION, which is the half that stages every file. This
+    #   scanner reads TEXT; the shell hands git ARGV; and between the two sits an expansion whose
+    #   result is not in the text at all. `git add -A $CHANGED` with CHANGED unset or empty is not
+    #   `add -A <empty operand>` -- the word is DELETED, and a recording git shim reads
+    #   `ARGC=2 [add] [-A]`, a full blanket stage that in a scratch repository staged a modified
+    #   tracked file and two untracked ones. That is the ORDINARY shape and the dangerous one at
+    #   once: an agent that builds a path list in a variable gets a blanket stage EXACTLY WHEN THE
+    #   LIST CAME BACK EMPTY, which is precisely when it did not mean to stage anything.
+    #
+    # THE TEST IS STRUCTURAL, NOT A TABLE OF SPELLINGS, because a table would be reopened by the
+    # next spelling nobody enumerated. POSIX sh has exactly TWO characters that introduce a
+    # substitution -- `$` (parameter, command and arithmetic) and the backquote -- and every
+    # spelling of every one of them (`$X`, `${X}`, `${X:-}`, `$(cmd)`, `$((e))`, `$@`, `$1`, `$?`,
+    # and the backquoted form) necessarily contains one of the two. So the rule is over the CLASS:
+    # a word whose final content is not determined by the text cannot be read as naming a path.
+    #
+    # THE DIRECTION IS DELIBERATE AND ONLY ONE WAY. An opaque word is refused the power to NARROW,
+    # so `git add -A $X` earns the same verdict as `git add -A` alone. It is NOT credited with the
+    # power to BLANKET: `git add $X` stays clear, because crediting it would refuse `git add
+    # $FILE`, the ordinary correct command, on the strength of X possibly being `.`. That is the
+    # residual, stated rather than hidden -- and it is the deliberate half, since an empty
+    # expansion is an ACCIDENT the author did not intend while `X=.` is a blanket stage the author
+    # chose, and a text-scanning gate never claimed to refuse a stage its author meant.
+    #
+    # WHAT IT COSTS, measured rather than assumed: `git add -A foo$X` and `git add -A '$literal'`
+    # are now denied although a real shell hands git a pathspec for both. Both keep a blanket flag
+    # beside a path this scanner cannot resolve, neither is a shape anything in this repository
+    # writes, and the narrow form `git add $X` -- which is what an agent staging a computed path
+    # actually writes -- is untouched.
+    # THE TEST SITS AT THE OPERAND POSITIONS AND NOWHERE ELSE, because a word that opens with a
+    # dash is read for its FLAG letters and those still count: `git commit -a$X` and `git add -A$X`
+    # are `-a` and `-A` however `$X` resolves, and skipping them here would trade one phantom
+    # operand for a lost blanket flag.
     if [ "$_endopts" = 1 ]; then
-      [ -n "$_f" ] || continue
+      case $_f in
+        '' | *'$'* | *'`'*) continue ;; # after `--` every word is an operand, opaque ones included
+      esac
       _pathspec=1
       case $_f in
         . | ./ | :/)
@@ -380,7 +418,7 @@ _inv_words() { # <closed word>...
           _cl=${_cl#?}
         done
         ;;
-      '') ;; # an empty operand names nothing, so it narrows nothing
+      '' | *'$'* | *'`'*) ;; # names nothing this scanner can see, so it narrows nothing
       . | ./ | :/)
         _pathspec=1
         _blanketspec=1

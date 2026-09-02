@@ -160,7 +160,7 @@ assert_eq "DENY: git a\\<newline>dd -A (the continuation splices one word, it do
 # allow twin really does stage only what it named.
 
 # ===============================================================================================
-suite "AC7 EMPTY OPERAND: a word that names nothing narrows nothing"
+suite "AC7 EMPTY OPERAND: a LITERAL empty string is not a pathspec"
 # ===============================================================================================
 #
 # The same phantom, one layer down. `git add -A ''` read the empty string as a PATHSPEC and so as
@@ -168,6 +168,12 @@ suite "AC7 EMPTY OPERAND: a word that names nothing narrows nothing"
 # against real git 2.x in a scratch repository: both spellings exit 128 with `fatal: empty string
 # is not a valid pathspec` and stage NOTHING, so refusing them refuses no correct work -- while
 # reading them as narrow is the same mistake that made a line continuation an operand.
+#
+# THE TITLE SAYS `LITERAL` BECAUSE THAT IS ALL THESE ROWS CONSTRUCT, and the first version of this
+# block said "a word that names nothing narrows nothing" over exactly the same eight literal
+# rows -- a general sentence over a specific fixture, which is what makes the next reader stop
+# looking. The word that VANISHES rather than arriving empty is a different fixture and a much
+# more dangerous one; it is the suite below, and it is not tested here.
 for q in "''" '""'; do
   for c in 'git add -A' 'git add -u' 'git add --all' 'git stage -A'; do
     assert_eq "DENY (an empty operand is not a pathspec): $c $q" \
@@ -178,6 +184,132 @@ assert_eq "ALLOW is preserved: git add -u '<path>' (a QUOTED real path still nar
   "$(sub_verdict "$P4" "git add -u 'plugins/pipeline/agents/dba.md'")" "none"
 assert_eq "ALLOW is preserved: git add '' (no blanket flag, so nothing is staged blanket either)" \
   "$(sub_verdict "$P4" "git add ''")" "none"
+
+# ===============================================================================================
+suite "AC7 OPAQUE OPERAND: a word the shell has not resolved yet cannot narrow anything"
+# ===============================================================================================
+#
+# THE HALF THAT ACTUALLY STAGES FILES, and the block above closed the other one. The two are the
+# same sentence and opposite in effect: `git add -A ''` hands git an EMPTY ARGUMENT, which git
+# refuses (exit 128, nothing staged), while `git add -A $CHANGED` with CHANGED unset or empty
+# hands git NO ARGUMENT AT ALL -- the word is deleted before git is executed -- and that is a full
+# blanket stage. Refusing the literal prevented no staging; the vanishing one is the ordinary
+# shape an agent writes, and it fires EXACTLY WHEN THE VARIABLE CAME BACK EMPTY, which is
+# precisely when its author did not mean to stage everything.
+#
+# THE ROWS ARE THE CLASS, NOT SPELLINGS OF IT. POSIX sh introduces a substitution with exactly two
+# characters, `$` and the backquote, and the operand column below walks every syntactic form each
+# one takes -- bare name, braced, braced-with-default, command substitution, arithmetic, the
+# backquoted form, the double-quoted form, two in a row, and one behind `--` where every word is
+# an operand -- against all thirteen commands. A gate that closed one spelling passes its own row
+# and fails the rest.
+OPAQUE_OPERANDS=(
+  '$NOPE'
+  '${NOPE}'
+  '${NOPE:-}'
+  '$(true)'
+  '$(echo)'
+  '`true`'
+  '"$NOPE"'
+  '$NOPE $NOPE'
+  '$(( 1 - 1 ))'
+  '-- $NOPE'
+)
+for c in "${FORBIDDEN[@]}" "${FLOOR_ROWS[@]}"; do
+  for op in "${OPAQUE_OPERANDS[@]}"; do
+    assert_eq "DENY (opaque operand appended): $c $op" \
+      "$(sub_verdict "$P4" "$c $op")" "deny"
+  done
+done
+# THE TEST SITS AT THE OPERAND POSITION AND NOWHERE ELSE. A word that opens with a dash is read
+# for its FLAG letters whatever follows them, so skipping an opaque word wholesale would have
+# traded one phantom operand for a LOST BLANKET FLAG -- `git add -A$X` is `-A` however X resolves.
+assert_eq "DENY: git add -A\$X (an expansion attached to a flag cluster does not erase the flag)" \
+  "$(sub_verdict "$P4" 'git add -A$X')" "deny"
+assert_eq "DENY: git commit -a\$X (the same, on the commit branch)" \
+  "$(sub_verdict "$P4" 'git commit -a$X')" "deny"
+assert_eq "DENY: git commit -a\`true\` (the same, in the backquoted spelling)" \
+  "$(sub_verdict "$P4" 'git commit -a`true`')" "deny"
+assert_eq "DENY: git add -A --\$X (an expansion attached to \`--\` is still end-of-options)" \
+  "$(sub_verdict "$P4" 'git add -A --$X')" "deny"
+
+# THE FALSIFICATION HALF, so the fix cannot be "deny every operand carrying a dollar sign". A
+# REAL narrowing operand must still narrow, INCLUDING when an opaque word stands beside it.
+assert_eq "ALLOW is preserved: git add -A <path> \$NOPE (a real pathspec beside an opaque word still narrows)" \
+  "$(sub_verdict "$P4" 'git add -A plugins/pipeline/agents/dba.md $NOPE')" "none"
+assert_eq "ALLOW is preserved: git add -u <path> (untouched)" \
+  "$(sub_verdict "$P4" 'git add -u plugins/pipeline/agents/dba.md')" "none"
+assert_eq "ALLOW is preserved: git add -A file.txt (untouched)" \
+  "$(sub_verdict "$P4" 'git add -A file.txt')" "none"
+assert_eq "ALLOW is preserved: git status --porcelain (untouched)" \
+  "$(sub_verdict "$P4" 'git status --porcelain')" "none"
+assert_eq "ALLOW is preserved: git add foo#bar (untouched)" \
+  "$(sub_verdict "$P4" 'git add foo#bar')" "none"
+# THE DISCLOSED RESIDUAL, asserted so it is a decision and not a silence. An opaque word is
+# refused the power to NARROW; it is NOT credited with the power to BLANKET, because crediting it
+# would refuse `git add $FILE` -- what an agent staging a computed path actually writes. So
+# `git add $X` with X set to `.` is not seen. That is the deliberate half: an empty expansion is
+# an ACCIDENT its author did not intend, while `X=.` is a blanket stage its author chose, and a
+# gate that reads command TEXT never claimed to refuse a stage somebody meant to write.
+assert_eq "ALLOW, disclosed residual: git add \$X (no blanket flag, so there is nothing to narrow)" \
+  "$(sub_verdict "$P4" 'git add $X')" "none"
+assert_eq "ALLOW, disclosed residual: git add \${X} (same, braced)" \
+  "$(sub_verdict "$P4" 'git add ${X}')" "none"
+
+# ---- THE ORACLE: what a REAL SHELL hands git, run rather than asserted from memory -------------
+#
+# Every row above is a claim about ARGV, and argv is not visible in the command text -- which is
+# the whole defect. So the claim is MEASURED here rather than recorded in a comment: a recording
+# `git` shim goes first on PATH, /bin/sh runs the identical string, and the shim writes back the
+# argument count the shell really produced. Its own NON-ZERO CONTROL is the literal-path row,
+# which must come back with one MORE argument than the vanishing one; without that, "2 arguments"
+# and "the shim was never reached" are the same reading.
+GATE_SHIM_DIR="$TEMP_PROJECT/argv-shim"
+mkdir -p "$GATE_SHIM_DIR"
+cat > "$GATE_SHIM_DIR/git" <<'SHIMEOF'
+#!/bin/sh
+printf '%s' "$#" > "$GIT_SHIM_LOG"
+for a in "$@"; do printf ' [%s]' "$a" >> "$GIT_SHIM_LOG"; done
+exit 0
+SHIMEOF
+chmod +x "$GATE_SHIM_DIR/git"
+real_argv() {  # <command string> -> "<argc> [arg] [arg] ..." or "(git never invoked)"
+  export GIT_SHIM_LOG="$TEMP_PROJECT/argv-shim.log"
+  : > "$GIT_SHIM_LOG"
+  env -u NOPE -u X -u CHANGED PATH="$GATE_SHIM_DIR:$PATH" /bin/sh -c "$1" >/dev/null 2>&1
+  local out; out="$(cat "$GIT_SHIM_LOG" 2>/dev/null)"
+  [[ -n "$out" ]] && printf '%s' "$out" || printf '(git never invoked)'
+}
+assert_eq "ORACLE VACUITY: the shim is reached at all, so an argument count is a reading and not a silence" \
+  "$(real_argv 'git add -A')" "2 [add] [-A]"
+assert_eq "ORACLE NON-ZERO CONTROL: a LITERAL path really does reach git as a third argument" \
+  "$(real_argv 'git add -A file.txt')" "3 [add] [-A] [file.txt]"
+assert_eq "ORACLE: an unset variable's word is DELETED, not passed empty -- git sees a bare blanket stage" \
+  "$(real_argv 'git add -A $NOPE')" "2 [add] [-A]"
+assert_eq "ORACLE: the braced spelling is deleted the same way" \
+  "$(real_argv 'git add -A ${NOPE}')" "2 [add] [-A]"
+assert_eq "ORACLE: an empty command substitution is deleted the same way" \
+  "$(real_argv 'git add -A $(true)')" "2 [add] [-A]"
+assert_eq "ORACLE: the backquoted spelling is deleted the same way" \
+  "$(real_argv 'git add -A `true`')" "2 [add] [-A]"
+assert_eq "ORACLE: a WHITESPACE-ONLY value is deleted too (field splitting, not emptiness)" \
+  "$(real_argv 'WS="   "; git add -A $WS')" "2 [add] [-A]"
+assert_eq "ORACLE: behind \`--\` the vanishing word leaves git with end-of-options and no pathspec" \
+  "$(real_argv 'git add -A -- $NOPE')" "3 [add] [-A] [--]"
+# THE ASYMMETRY THAT SAYS WHICH HALF MATTERED. The literal empty string ARRIVES, as an empty
+# third argument git then refuses; the expansion does not arrive at all.
+assert_eq "ORACLE: the LITERAL empty string arrives as a real (empty) argument, which is why git can refuse it" \
+  "$(real_argv "git add -A ''")" "3 [add] [-A] []"
+# GROUND TRUTH ON A REAL REPOSITORY, recorded from a run against real git 2.x in a scratch tree
+# holding one modified tracked file and two untracked ones, with the variables unset:
+#   git add -A $NOPE / ${NOPE} / ${NOPE:-} / $(true) / $(echo) / `true` / -- $NOPE
+#                                     -> exit 0, staged tracked.txt, untracked_a.txt, untracked_b.txt
+#   EMPTY=""; git add -A $EMPTY       -> exit 0, staged all three
+#   WS="   "; git add -A $WS          -> exit 0, staged all three
+#   git add -A ''                     -> exit 128, staged NOTHING
+#   git add -A plugins/... $NOPE      -> exit 128, staged NOTHING (it narrowed to the named path)
+# so every deny above is a command that really does stage what its author did not name, and the
+# allow twin really does narrow.
 
 # ===============================================================================================
 suite "AC7 LENGTH AXIS: a forbidden command stays forbidden however long its operand is"
