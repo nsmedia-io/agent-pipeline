@@ -679,7 +679,8 @@ _wordchunk() { # <queue entry at or over _CMAX> : fills _T1.._TN with windows
   _wc_need=$(( ${#_wc_w} / _CW ))
   [ "$_wc_need" -lt 2 ] && _wc_need=2
   _wc_d=''
-  _wc_any=''
+  _wc_best=''
+  _wc_bestn=0
   _wc_lead=''
   _wc_sv=${IFS-}
   # NEWLINE FIRST, AND ONLY BEHIND ITS GUARD. A heredoc body that carries no space is one word to
@@ -699,13 +700,24 @@ _wordchunk() { # <queue entry at or over _CMAX> : fills _T1.._TN with windows
       if [ $# -ge "$_wc_need" ]; then
         _wc_d=$_NL
         case $_wc_w in "$_NL"*) _wc_lead=$_NL ;; esac
+      else
+        _wc_bestn=$#
+        _wc_best=$_NL
       fi
       ;;
   esac
-  # A delimiter is ACCEPTED when it cuts the entry into enough pieces to average under one window.
-  # If none does, every one of them occurs fewer than (length / _CW) times, so the entry's total
-  # structural density is bounded by the size of `_DELIMS` and the first delimiter present is good
-  # enough; if NONE is present the entry carries no structural character at all, and the scan
+  # A delimiter is ACCEPTED when it cuts the entry into enough pieces to average under one window,
+  # and the FIRST one that does wins so the common case stops early. When none does, the fallback is
+  # the delimiter that occurred MOST, and that choice is what keeps the whole function linear rather
+  # than merely usually-fast. Taking the first one PRESENT instead is a trap with a measurement
+  # behind it: one `"` early in a 64 KB word and 1200 `;` after it would pick the `"`, leave a 64 KB
+  # piece holding every `;`, and put the product of density and length straight back inside one
+  # window. Picking the most frequent bounds it in both directions at once -- no other delimiter can
+  # occur more often than the winner, so the entry's TOTAL structural count is at most (size of
+  # `_DELIMS`) x (winner's count) while the window is (length / winner's count), and the product of
+  # those two is (size of `_DELIMS`) x length however the characters are distributed.
+  #
+  # If NO delimiter is present at all the entry carries no structural character, and the scan
   # crosses it in a single move whatever its length.
   if [ -z "$_wc_d" ]; then
     _wc_rest=$_DELIMS
@@ -716,7 +728,6 @@ _wordchunk() { # <queue entry at or over _CMAX> : fills _T1.._TN with windows
         *"$_wc_c"*) ;;
         *) continue ;;
       esac
-      [ -n "$_wc_any" ] || _wc_any=$_wc_c
       IFS=$_wc_c
       set -- $_wc_w
       IFS=$_wc_sv
@@ -724,14 +735,21 @@ _wordchunk() { # <queue entry at or over _CMAX> : fills _T1.._TN with windows
         _wc_d=$_wc_c
         break
       fi
+      if [ $# -gt "$_wc_bestn" ]; then
+        _wc_bestn=$#
+        _wc_best=$_wc_c
+      fi
     done
     if [ -z "$_wc_d" ]; then
-      if [ -z "$_wc_any" ]; then
+      if [ -z "$_wc_best" ]; then
         _TN=1
         _T1=$_wc_w
         return 0
       fi
-      _wc_d=$_wc_any
+      _wc_d=$_wc_best
+      case $_wc_d in
+        "$_NL") case $_wc_w in "$_NL"*) _wc_lead=$_NL ;; esac ;;
+      esac
       IFS=$_wc_d
       set -- $_wc_w
       IFS=$_wc_sv
