@@ -21,6 +21,11 @@ import {
   existsSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
+// #74 s1. The 24h window and the no-final-verdict term used to be spelled again, right here, as
+// `age > 24 * 60 * 60 * 1000 && !r.final_verdict`. That was an independent copy: no symbol was
+// shared with gate-phase-entry.mjs, so the two literals could diverge while both modules compiled
+// and every suite stayed green. The predicate now comes from the leaf that already owns it.
+import { inFlightObservations } from "./run-candidates.mjs";
 
 const ROOT = resolve(process.cwd());
 const PIPELINE_DIR = join(ROOT, ".pipeline");
@@ -98,12 +103,28 @@ function listActive() {
       final_verdict: status?.final_verdict ?? null,
       branch: status?.branch ?? null,
       pr_url: status?.pr_url ?? null,
+      // DISPLAY value. Falls back to the file's mtime so the table's Updated column is never
+      // blank. That fallback is a DIFFERENT QUANTITY from the record's own claim -- the same
+      // mtime-vs-updated_at grain mismatch #74 s2 records against session-start.sh, which the
+      // phase-entry guard's header had already measured in this module and which nothing tested.
       updated_at: status?.updated_at ?? mtime,
+      // DECISION value, added as a sibling rather than by redefining `updated_at`, which callers
+      // of --json already read. Only the record's OWN claim about itself, never the file's mtime:
+      // a fresh `git clone` rewrites every mtime to checkout time, so mtime is a property of the
+      // clone and not of the run. This is the field the stuck filter reads, and it is null when
+      // the record makes no claim -- which is what stops an mtime standing in for one.
+      updated_at_claimed: status?.updated_at ?? null,
       impacted_domains: spec?.impacted_domains ?? [],
     });
   }
 
-  rows.sort((a, b) => (b.updated_at ?? "").localeCompare(a.updated_at ?? ""));
+  // String()-coerced on both sides. `updated_at` is schema-typed `date-time` but nothing
+  // validates a status.json before this reads it, and a non-string value (a bare number, say)
+  // has no .localeCompare, so the sort used to THROW and take the whole report with it -- which
+  // also meant the stuck filter below was never reached on any path for such a record.
+  rows.sort((a, b) =>
+    String(b.updated_at ?? "").localeCompare(String(a.updated_at ?? "")),
+  );
   return rows;
 }
 
@@ -150,11 +171,46 @@ function renderMarkdown(rows) {
   }
   lines.push("");
 
-  const stuck = rows.filter((r) => {
-    if (!r.updated_at) return false;
-    const age = Date.now() - new Date(r.updated_at).getTime();
-    return age > 24 * 60 * 60 * 1000 && !r.final_verdict;
+  // The window and the no-final-verdict term are READ, not restated: `stuck` is derived in
+  // run-candidates.mjs from the same `ceilingMs` term `inFlight` uses, so the reporter and the
+  // phase-entry guard cannot drift apart on the number. A mutation of the leaf's IN_FLIGHT_MS
+  // reddens this module's suite and the PreToolUse gate's suite together; that is the check that
+  // the unification actually bites, and it is asserted in tests/test-pipeline-status.sh.
+  const now = Date.now();
+  const observe = (r) =>
+    inFlightObservations(
+      { final_verdict: r.final_verdict, updated_at: r.updated_at_claimed },
+      now,
+    );
+  const stuck = rows.filter((r) => observe(r).stuck);
+
+  // WHAT DROPPING THE MTIME FALLBACK COSTS, PAID HERE RATHER THAN LEFT AS A SILENCE. Reading
+  // only the record's own claim means a run that never wrote a parseable `updated_at` can no
+  // longer be called stuck -- previously its file mtime stood in, so it appeared under the
+  // heading above as soon as the FILE was a day old, a figure about the checkout rather than
+  // about the run. Such a record is not dropped from the report: it is named here, as the
+  // undatable thing it is, so "we cannot judge this one" never reads as "this one is fine".
+  // `updated_at` is in status.schema.json's `required` list, so this section firing at all is
+  // itself a finding.
+  const undatable = rows.filter((r) => {
+    const o = observe(r);
+    return !o.concluded && !o.datable;
   });
+  if (undatable.length) {
+    lines.push("## Cannot be dated (no parseable updated_at, no final verdict)");
+    lines.push("");
+    for (const r of undatable) {
+      lines.push(
+        "- #" +
+          r.issue_number +
+          " at `" +
+          r.current_phase +
+          "`. Its `updated_at` is absent or unparseable, so neither in-flight nor stuck can be decided for it.",
+      );
+    }
+    lines.push("");
+  }
+
   if (stuck.length) {
     lines.push("## Possibly stuck (over 24h, no final verdict)");
     lines.push("");

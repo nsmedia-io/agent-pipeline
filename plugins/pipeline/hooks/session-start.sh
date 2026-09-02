@@ -150,18 +150,70 @@ if [[ -d .pipeline ]]; then
   [[ -f "$GATE_SCRIPT" ]] || GATE_DISARM="its script is not installed"
   command -v node >/dev/null 2>&1 || GATE_DISARM="node is not on this hook's PATH"
   if [[ -n "$GATE_DISARM" ]]; then
-    # "In flight" is APPROXIMATED here, and it has to be: this must report in the very
-    # environment where node is absent, so there is nothing available to parse an ISO
-    # `updated_at`. The file's own mtime stands in for it. "Guarded" reuses the phase-5 /
-    # completed_at / final_verdict exclusions rather than restating the guard's 15-row phase
-    # table, which would be a second vocabulary with no drift test behind it, so the notice is
-    # a superset: a run parked in a tripwire state is not guarded but is still reported here.
+    # WHICH COLUMN THIS READS, AND WHY IT CHANGED (#74 s2). This used to date a record by its
+    # FILE MTIME (`find "$dir/status.json" -mtime -1`) where the guard dates it by its own
+    # `updated_at`. Those are not the same quantity and they disagreed on live records in the
+    # most common environment: MEASURED in a fresh `git clone --no-hardlinks` pinned at 856a5d0,
+    # all 6 notice-eligible records had mtime age 0.00h -- checkout time -- while their
+    # `updated_at` ages spanned 9.99h to 341.49h, so the notice fired on 6 and the guard called
+    # 5 of those 6 not in flight. 83% disagreement, every one of them in the CLAIM-MORE
+    # direction: the operator was told a run was in flight that the guard had already abstained
+    # on. A clone rewrites every mtime, so mtime is a property of the CHECKOUT; `updated_at` is
+    # the run's own claim about itself, which is the thing the sentence below asserts.
+    #
+    # WHAT THE NARROWER PREDICATE REFUSES, stated because a notice nobody sees is worth as
+    # little as one nobody believes. It no longer announces a disarmed guard in a checkout where
+    # every record is already stale by its own `updated_at` -- which is exactly the case where
+    # the guard would have abstained on all of them anyway, so the disarm has no live
+    # consequence to announce. It newly SURFACES one shape the mtime test missed: a record dated
+    # in the FUTURE. The guard has no floor either (`now - updated <= IN_FLIGHT_MS` is satisfied
+    # by any negative age), so agreeing with it there is the point, not an accident.
+    #
+    # NO NODE. This must report in the very environment where node is absent, so the comparison
+    # is done on the ISO strings themselves. `updated_at` is UTC-Z in every record this repo has
+    # ever committed (25 of 25 blobs across all history: 22 `...SSZ`, 3 `...SS.mmmZ`), and both
+    # spellings share a fixed-width first 19 characters, so truncating both sides to 19 makes
+    # the lexicographic compare exact to the second with no format hazard. A value that is NOT
+    # that shape is not compared as a string at all; see the fallback below.
+    #
+    # The two `date` invocations are ORDERED, not interchangeable. BSD is tried first because
+    # BSD's `-d` means "set DST", not "parse this description", so on macOS the GNU spelling
+    # would silently parse as something else rather than fail; the BSD spelling fails loudly on
+    # GNU (`invalid option -- 'v'`, exit 1) and hands over cleanly. A third `date` that
+    # understands neither leaves CUTOFF empty, which the per-record fallback below handles.
+    #
+    # Compared as INTEGERS, not with `[[ > ]]`: the string operator collates by locale, and a
+    # locale that ignores punctuation at the primary level would be comparing something other
+    # than what this line appears to compare. Stripping to 14 digits (YYYYMMDDHHMMSS) removes
+    # the question. `10#` forces base 10 so a future field with a leading zero cannot be read
+    # as octal.
+    CUTOFF_ISO="$(date -u -v-1d '+%Y-%m-%dT%H:%M:%S' 2>/dev/null \
+      || date -u -d '24 hours ago' '+%Y-%m-%dT%H:%M:%S' 2>/dev/null || true)"
+    CUTOFF_NUM="${CUTOFF_ISO//[^0-9]/}"
     for dir in .pipeline/[0-9]*/ .pipeline/exp-*/; do
       [[ -f "$dir/status.json" ]] || continue
+      # "Guarded" reuses the phase-5 / completed_at / final_verdict exclusions rather than
+      # restating the guard's 15-row phase table, which would be a second vocabulary with no
+      # drift test behind it, so the notice is a superset: a run parked in a tripwire state is
+      # not guarded but is still reported here.
       grep -q '"completed_at"\|"final_verdict"' "$dir/status.json" 2>/dev/null && continue
       PHASE=$(grep -oE '"current_phase"[[:space:]]*:[[:space:]]*"[^"]*"' "$dir/status.json" 2>/dev/null | head -1 | sed -E 's/.*:[[:space:]]*"([^"]*)"/\1/')
       [[ "$PHASE" == 5-* ]] && continue
-      [[ -n "$(find "$dir/status.json" -mtime -1 2>/dev/null)" ]] || continue
+      UPDATED=$(grep -oE '"updated_at"[[:space:]]*:[[:space:]]*"[^"]*"' "$dir/status.json" 2>/dev/null | head -1 | sed -E 's/.*:[[:space:]]*"([^"]*)"/\1/')
+      # THE DEGRADED PATH IS THE OLD PATH, DELIBERATELY. Two things can make the string compare
+      # unavailable: neither `date` dialect produced a cutoff (BSD `-v` and GNU `-d` are both
+      # tried), or this record's `updated_at` is absent or is not the UTC-Z shape the compare is
+      # exact for. In either case fall back to the mtime approximation rather than to silence:
+      # this is a WARNING about a disarmed safety control, so a superset that costs noise beats a
+      # subset that costs the announcement. That is also why the fallback is byte-identical to
+      # what shipped before -- a degraded run is today's behaviour, never a new one.
+      if [[ -n "$CUTOFF_NUM" && "$UPDATED" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?Z$ ]]; then
+        UPDATED_NUM="${UPDATED:0:19}"
+        UPDATED_NUM="${UPDATED_NUM//[^0-9]/}"
+        [[ $((10#$UPDATED_NUM)) -gt $((10#$CUTOFF_NUM)) ]] || continue
+      else
+        [[ -n "$(find "$dir/status.json" -mtime -1 2>/dev/null)" ]] || continue
+      fi
       echo "NOTICE: a pipeline run is in flight and the phase-entry guard (scripts/gate-phase-entry.mjs) is DISARMED because $GATE_DISARM. A turn can end at a phase whose prerequisite was never produced and nothing will refuse it."
       echo ""
       break
