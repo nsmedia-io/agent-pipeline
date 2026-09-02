@@ -289,14 +289,20 @@ assert_eq "AC3: and the walk actually inspected verdict strings (which is what m
   "$([[ "$(rfield "$LIVE" verdicts)" -ge 1 ]] && echo inspected || echo "inspected NOTHING: verdicts=$(rfield "$LIVE" verdicts)")" "inspected"
 
 # THE NON-ZERO CONTROL, permanent and in-suite rather than a one-off an author ran once. At a cap
-# of 17 exactly one committed record violates, and the check must NAME it -- a check that reddens
-# without identifying the violator cannot be told apart from one that reddens because the walk
-# broke.
+# of 17 several committed records violate, and the check must NAME the one this control rests on --
+# a check that reddens without identifying a violator cannot be told apart from one that reddens
+# because the walk broke.
 #
 # EXPIRY, and it is a real one: this control is anchored to a LIVE record, and the correct fate of
 # a live record is that somebody edits or deletes it. If this assertion fails, check FIRST whether
 # .pipeline/17/status.json still carries APPROVE_WITH_NOTES; if it does not, this control has lost
 # its subject and needs re-anchoring to whatever the corpus maximum then is, NOT deleting.
+#
+# AND IT HAS EXPIRED ONCE ALREADY, on exactly that instruction. The corpus maximum was the 18-char
+# APPROVE_WITH_NOTES until #106's own in-flight record landed a longer label that still conforms,
+# so the final cell pins the 32-char value instead. The cap-17 cells above are untouched by that:
+# they rest on the 18-char value, which is still in the corpus. Re-anchor the same way next time,
+# and note that the maximum now sits exactly AT the cap, so the next widening is a cap decision.
 C17="$(verdict_report "$REPO_ROOT" 17)"
 assert_contains "AC3 NON-ZERO CONTROL: at cap 17 the check goes red and NAMES the file" \
   "$(rfield "$C17" violations)" ".pipeline/17/status.json"
@@ -304,8 +310,8 @@ assert_contains "AC3 NON-ZERO CONTROL: ...names the FLAGS entry that carries the
   "$(rfield "$C17" violations)" "flags["
 assert_contains "AC3 NON-ZERO CONTROL: ...and quotes the offending value" \
   "$(rfield "$C17" violations)" "APPROVE_WITH_NOTES"
-assert_eq "AC3 NON-ZERO CONTROL: the corpus maximum is still the 18-char value this control rests on" \
-  "$(rfield "$LIVE" longestvalue)/$(rfield "$LIVE" longest)" "APPROVE_WITH_NOTES/18"
+assert_eq "AC3 NON-ZERO CONTROL: the corpus maximum is the 32-char SKIPPED_OWNER_DECISION_CONFIRMED, now exactly AT the cap" \
+  "$(rfield "$LIVE" longestvalue)/$(rfield "$LIVE" longest)" "SKIPPED_OWNER_DECISION_CONFIRMED/32"
 
 # BOTH FIELDS, mutated independently: a control drawn from one cap over the live corpus can leave
 # a whole branch unexercised, so "the check fired" would not say WHICH branch fired.
