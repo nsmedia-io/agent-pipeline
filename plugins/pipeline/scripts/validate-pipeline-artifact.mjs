@@ -67,6 +67,7 @@ import {
 import { tmpdir } from "node:os";
 import { isMain as isMainScript } from "./lib.mjs";
 import { inFlightObservations } from "./run-candidates.mjs";
+import { isRunRecord } from "./check-status-record.mjs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -398,53 +399,18 @@ function loadJson(file) {
   return JSON.parse(readFileSync(file, "utf8"));
 }
 
-// WHAT MAKES A DIRECTORY A RUN, read from the shipped status schema rather than restated here. A
-// second copy of a vocabulary is how `exp-` runs stayed invisible to voice-lint for months (see
-// ISSUE_DIR_RE above), and this one would rot the same way: the phase list grows whenever
-// commands/pipeline.md writes a new checkpoint, and a hardcoded twin would silently stop
-// recognising the newest runs -- failing in the INERT direction, which is the direction this whole
-// change exists to close.
-//
-// THIS READS status.schema.json AND DOES NOT VALIDATE status.json AGAINST IT in the AGENT_RULES
-// sense. No rule registers this schema, nothing blocks a stop over a status record, and the
-// schema's own "nothing validates this file" sentences stay true. What happens here is narrower
-// and is only ever used to answer "is this directory a run at all": a record that does not have
-// the schema's shape is not treated as one. tests/test-status-schema-contract.sh pins both halves
-// of that distinction so the difference cannot quietly erode.
-//
-// TWO CHECKS, because ONE IS NOT ENOUGH IN EITHER DIRECTION. The shared walker implements
-// `required` and `type` but NOT `pattern` (its own header says so), so validate() alone would
-// accept `current_phase: "archived"`; and the pattern alone would accept a one-field
-// `{"current_phase":"1-ba"}` stub, which is exactly the `.pipeline/schemas` sibling this repo's
-// own suites plant to prove a non-run is never selected. Cached: this runs once per root per stop.
-// `undefined` = not read yet, `null` = schema unreadable.
-let _statusSchemaCache;
-function statusSchema() {
-  if (_statusSchemaCache !== undefined) return _statusSchemaCache;
-  _statusSchemaCache = null;
-  try {
-    const schema = loadJson(path.join(SCHEMA_DIR, "status.schema.json"));
-    const p = schema?.properties?.current_phase?.pattern;
-    if (schema && typeof p === "string" && p.length > 0) {
-      _statusSchemaCache = { schema, phasePattern: new RegExp(p) };
-    }
-  } catch {
-    // Unreadable schema: isRunRecord below then recognises NOTHING, which leaves this recovery
-    // exactly as inert as it was before it existed. That is the right direction for an input we
-    // cannot characterise: the alternative is adopting a directory on a weaker rule than the one
-    // this function exists to apply.
-  }
-  return _statusSchemaCache;
-}
-
-// A parsed status.json is a RUN RECORD when it has the schema's shape and a real phase.
-function isRunRecord(status) {
-  if (!status || typeof status !== "object" || Array.isArray(status)) return false;
-  const known = statusSchema();
-  if (!known) return false;
-  if (!known.phasePattern.test(String(status.current_phase ?? ""))) return false;
-  return validate(status, known.schema, known.schema).length === 0;
-}
+// WHAT MAKES A DIRECTORY A RUN is answered by check-status-record.mjs's isRunRecord, which reads
+// the shipped status schema. It is imported rather than reimplemented for two reasons, and the
+// second is not obvious. (1) A second copy of a vocabulary is how `exp-` runs stayed invisible to
+// voice-lint for months (see ISSUE_DIR_RE above), and a hardcoded twin of the required list or the
+// phase pattern would silently stop recognising the newest runs the day either grows -- failing
+// INERT, the direction this whole change exists to close. (2) THIS MODULE MUST NOT NAME THE STATUS
+// SCHEMA FILE AT ALL -- not even in a comment, which is why this sentence talks around it.
+// tests/test-status-schema-contract.sh greps exactly this file for that filename to notice the day
+// status.json becomes a validated artifact, and a scanner cannot tell a mention from a
+// registration. That expiry is still doing its job and this change does not retire it: recognition
+// is not validation -- see isRunRecord's own header for the distinction -- and nothing here
+// validates a status record, registers one in AGENT_RULES, or blocks a stop over one.
 
 /**
  * The .pipeline subdirectories that HOLD A RUN RECORD but that ISSUE_DIR_RE will not name (#115).
