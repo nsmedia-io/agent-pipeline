@@ -66,7 +66,7 @@ Append an entry to `events` after each phase transition: `{"phase": "1-ba", "ver
 
 **`events[]` entries are EXIT markers and `current_phase` is an ENTRY marker.** An event is appended AFTER a phase finishes and carries that phase's `verdict`, so it records a phase CLOSING; `current_phase` is set BEFORE a phase begins and names the phase being ENTERED. Two fields with opposite conventions five lines apart is the trap that made the telemetry credit every interval to the wrong phase, so the two are named here rather than left to be inferred.
 
-**NO FREE-TEXT FIELD IN `status.json` MAY CARRY A SECRET.** This file reaches a public tree twice: it is the one `.pipeline/` artifact committed to git (see the durable-checkpoint convention below), and Phase 5 copies it **verbatim** into `knowledge/issue-archive/<n>.json`. Neither copy is rewritten afterwards, so a pasted secret persists in history and a fix-forward commit does not remove it. Before writing any of these five fields, redact any token-shaped substring (API key, Bearer token, OAuth code, password, DSN with inline credentials, `.env` line):
+**NO FREE-TEXT FIELD IN A COMMITTED PIPELINE ARTIFACT MAY CARRY A SECRET.** `status.json` reaches a public tree twice: it is the one `.pipeline/` artifact committed to git (see the durable-checkpoint convention below), and Phase 5 copies it **verbatim** into `knowledge/issue-archive/<n>.json`. Neither copy is rewritten afterwards, so a pasted secret persists in history and a fix-forward commit does not remove it. Before writing any of these five fields, redact any token-shaped substring (API key, Bearer token, OAuth code, password, DSN with inline credentials, `.env` line):
 
 | field | why it is exposed |
 |---|---|
@@ -76,9 +76,22 @@ Append an entry to `events` after each phase transition: `{"phase": "1-ba", "ver
 | `veto_reason` | orchestrator prose, unbounded |
 | `error` | **the sharpest case**: the natural content of an error field is COPIED MACHINE OUTPUT -- a failed `gh`/`curl` echoing a URL with a token, a DB connection error carrying a DSN, a stack trace |
 
-**The instrument is CONTENT, not length.** Do not "solve" this by truncating. `events[].note` is deliberately unbounded and a 600-char note recording a live reproduction is correct work; `veto_reason` is a sentence by design. Capping them would destroy audit content to address a problem length was never the mechanism of. Redact the token and keep the sentence.
+**`status.json` IS NOT THE ONLY ARTIFACT THAT REACHES THAT TREE (#71).** It is the only one COMMITTED from `.pipeline/`, which is why the rule was written about it -- but `ARCHIVE_ARTIFACTS` in `scripts/knowledge-store.mjs` is seven names long, and Phase 5 folds every one of them into the same committed `knowledge/issue-archive/<n>.json`. `review.json` and `peer-review.json` are two of the seven, and their free-text fields are written by the reviewer subagents, not by you:
 
-**YOU are the writer, so YOU are the control.** It is true that no code path copies provider tokens, Bearer tokens, OAuth codes, or database rows into `status.json` -- and it is beside the point, because every field above is written by the orchestrator, which is not a code path. `tests/test-status-schema-contract.sh` runs a credential-shaped scan over the committed records and the archived copies, but that is DETECTION AFTER THE FACT: by the time it reddens, the string is already in the branch's history. If it fires on something you just wrote, **amend the commit; do not fix forward.**
+| field | why it is exposed |
+|---|---|
+| `concerns[].location` and `vulnerabilities[].location` | **the sharpest case on these two artifacts**, and the same shape as `error` above: a location is PASTED from a tool, so a DSN, a token-bearing URL or an `.env` line arrives without anyone deciding to write one. Measured: `/etc/app.env:12 DATABASE_PASSWORD=s3cr3t` archived with the leading path redacted and the secret standing |
+| `concerns[].description`, `vulnerabilities[].description` | reviewer prose, unbounded, and routinely quoting copied machine output from a live reproduction |
+| `notes`, `must_satisfy`, `remediation`, `rationale_not_checked` | reviewer prose, unbounded |
+| `compliance_flags[].concern` and `.statute` | SecOps prose; the items subschema has no required list, so nothing else reads them either |
+| `advisory_notes`, `knowledge_drift_claims[].evidence` | archived and declared in NO schema, so no field-level annotation reaches them at all |
+
+**The instrument is CONTENT, not length.** Do not "solve" this by truncating. `events[].note` is deliberately unbounded and a 600-char note recording a live reproduction is correct work; `veto_reason` is a sentence by design; a reviewer `description` recording a real reproduction is the same. Capping them would destroy audit content to address a problem length was never the mechanism of. Redact the token and keep the sentence.
+
+**YOU are the writer, so YOU are the control.** It is true that no code path copies provider tokens, Bearer tokens, OAuth codes, or database rows into `status.json` -- and it is beside the point, because every field above is written by the orchestrator or a reviewer subagent, which is not a code path. TWO MECHANISMS BACK YOU UP AND NEITHER REPLACES YOU. Both match enumerated credential SHAPES, so a secret spelled as prose ("the staging password is hunter2") passes both, which is why this rule is addressed to you and not to them. They also fail in opposite directions, and that decides your remedy:
+
+- `scripts/knowledge-store.mjs` REFUSES the Phase 5 archive write when the assembled document carries a credential-shaped string, naming the json path and the class. That is PREVENTION: nothing is committed, and the archive simply does not appear. It walks the whole document built from `ARCHIVE_ARTIFACTS`, so it covers the undeclared fields above and any field added later. Override with `PIPELINE_ARCHIVE_ALLOW_CREDENTIAL_SHAPES=1` only for a hit you have hand-checked as a fake -- a planted DSN quoted inside a security report is the case that actually exists -- and say in the run record that you did.
+- `tests/test-status-schema-contract.sh` runs a credential-shaped scan over the committed records and the archived copies. That is DETECTION AFTER THE FACT: by the time it reddens, the string is already in the branch's history. If it fires on something you just wrote, **amend the commit; do not fix forward.**
 
 ### Durable checkpoint convention (resume reliability)
 
