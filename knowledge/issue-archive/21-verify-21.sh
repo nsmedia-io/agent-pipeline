@@ -83,6 +83,15 @@ LIT_BOLD='A diff that touches `pipeline.config.json` itself is architectural, al
 LIT_BA_FLOOR='the `data`, `security`, or `compliance` domains'
 LIT_CMD_FLOOR='intersects `{data, security, compliance}`'
 LIT_ORIG_PAREN='(it is listed under `architecturalTriggers.paths` in both this repo'"'"'s config and the shipped example)'
+# HISTORICAL PIN, LEFT UNCHANGED BY THE LIBRARIAN (2026-09-02, #106 archival pass).
+# DIGEST is what the ten-file replicated span hashed to AT #21's merge (cab267f), proving
+# #21's own edits (sited far outside every file's span) did not move it. Rewriting it to
+# match a later tree would falsify that historical claim. #106 (merged fc9a171)
+# legitimately re-edited the span (a stale citation) and moved the digest to
+# 847cd28217115c41dc8628cb8e35a4f9162c5bfe -- see
+# knowledge/living-context/architecture--agent-contract-replication-digest.json. Running
+# AC16 against a tree at or after #106 will therefore FAIL on that ground alone; that is
+# expected drift-with-provenance, not a regression in #21's work or a defect in this pin.
 DIGEST='14b65c48479dfceefb780689adccfbd53656b21e'
 REF_SHA='587a4aa'          # the named, reachable SHA the run.sh table was taken at
 # RE-PINNED 2026-08-22, after this branch was rebased onto origin/main. The old pin,

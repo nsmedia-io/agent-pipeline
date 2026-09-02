@@ -51,6 +51,16 @@ NAGENTS=${#AGENTS[@]}
 PIPEMD=plugins/pipeline/commands/pipeline.md
 
 BASE=$(git merge-base origin/main HEAD 2>/dev/null) || BASE=""
+# HISTORICAL PIN, LEFT UNCHANGED BY THE LIBRARIAN (2026-09-02, #106 archival pass).
+# FROZEN_SHA is what the ten-file replicated span hashed to AT #19's merge, and this
+# script's job was to prove #19's own edits did not move it. Rewriting it to match a
+# later tree would falsify that historical claim, not correct it. #106 (merged fc9a171)
+# legitimately re-edited the span (a stale citation) and moved the digest to
+# 847cd28217115c41dc8628cb8e35a4f9162c5bfe -- see
+# knowledge/living-context/architecture--agent-contract-replication-digest.json. Running
+# this script against a tree at or after #106 will therefore FAIL this cell on that
+# ground alone; that is expected drift-with-provenance, not a regression in #19's work,
+# and not a defect in this pin.
 FROZEN_SHA=14b65c48479dfceefb780689adccfbd53656b21e
 FROZEN_LINES=15
 
