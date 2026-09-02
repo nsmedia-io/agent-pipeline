@@ -46,6 +46,37 @@ NOW=$(node -e 'console.log(new Date().toISOString())')
 # it computes the timestamps and the suite stays portable.
 OLD=$(node -e 'console.log(new Date(Date.now() - 48*3600*1000).toISOString())')
 
+# ------------------------------------------------------------------------------------------------
+# #74 s1: the ceiling is READ from the module that owns it, never re-spelled here.
+#
+# The old fixture was a bare `48*3600*1000` straddling a hardcoded 24h -- a straddle standing in
+# for a boundary test, against pipeline-status.mjs's own copy of the number, with no boundary pair
+# behind it. That is the same defect #63 fixed one level over, and #74 s4 records it. $OLD above is
+# kept for the cases that only need "old", and the two cells below pin the BOUNDARY.
+LEAF="$SCRIPTS_DIR/run-candidates.mjs"
+CEIL="$(node --input-type=module -e 'const m = await import(process.argv[1]); process.stdout.write(String(m.IN_FLIGHT_MS))' "$LEAF" 2>/dev/null)"
+MARGIN=$((60 * 60 * 1000))   # 1h, comfortably above any plausible wall-clock elapsed in one case
+suite "pipeline-status: the ceiling is read from run-candidates.mjs, not re-spelled (#74 s1)"
+# READ-STATE FIRST. A `$(( ))` on an empty or non-numeric read is the one spelling `set -u` does
+# not catch: it evaluates to 0, which would date both fixtures in the future and pass every cell
+# below for the wrong reason.
+assert_eq "the leaf exports IN_FLIGHT_MS as a finite integer strictly greater than 2*MARGIN (below that, CEIL-MARGIN dates the INSIDE fixture in the FUTURE and the guard has no floor)" \
+  "$(node -e 'const v = Number(process.argv[1]); const m = Number(process.argv[2]); process.stdout.write(Number.isSafeInteger(v) && v > 2*m ? "ok" : "UNUSABLE: " + JSON.stringify(process.argv[1]))' "$CEIL" "$MARGIN")" \
+  "ok"
+INSIDE=$(node -e 'console.log(new Date(Date.now() - (Number(process.argv[1]) - Number(process.argv[2]))).toISOString())' "$CEIL" "$MARGIN")
+OUTSIDE=$(node -e 'console.log(new Date(Date.now() - (Number(process.argv[1]) + Number(process.argv[2]))).toISOString())' "$CEIL" "$MARGIN")
+
+new_root boundary-inside
+write_status 700 "{\"current_phase\":\"3\",\"updated_at\":\"$INSIDE\"}"
+ps_run "$PROJ"
+assert_not_contains "a record MARGIN INSIDE the ceiling is not stuck" "$OUT" "Possibly stuck"
+
+new_root boundary-outside
+write_status 701 "{\"current_phase\":\"3\",\"updated_at\":\"$OUTSIDE\"}"
+ps_run "$PROJ"
+assert_contains "a record MARGIN OUTSIDE the ceiling is stuck" "$OUT" "Possibly stuck"
+assert_contains "and is named" "$OUT" "/pipeline --resume 701"
+
 suite "pipeline-status: nothing in flight"
 
 new_root empty-no-dir
@@ -176,5 +207,136 @@ mkdir -p "$PROJ/.pipeline/600"
 printf '%s' '{"title":"no status here"}' > "$PROJ/.pipeline/600/spec.json"
 ps_run "$PROJ"
 assert_contains "an issue dir with no status.json is skipped" "$OUT" "No active pipelines here."
+
+suite "pipeline-status: the mtime substitution no longer reaches the DECISION (#74 s2, same grain)"
+
+# A record with NO updated_at used to be dated by its FILE MTIME (`updated_at: status?.updated_at
+# ?? mtime`) and so appeared under the stuck heading as soon as the FILE was a day old -- a figure
+# about the checkout, not about the run, and one a fresh clone resets. The display column still
+# falls back to mtime; the decision reads only the record's own claim.
+new_root undatable
+write_status 800 '{"current_phase":"3"}'
+# Backdate the FILE well past the ceiling. If the decision still read mtime, this would be stuck.
+touch -t 202001010000.00 "$PROJ/.pipeline/800/status.json"
+ps_run "$PROJ"
+assert_not_contains "a record with no updated_at is NOT called stuck on the strength of an ancient file mtime" "$OUT" "Possibly stuck"
+# ...and it is not silently dropped either. "We cannot judge this one" must not read as "fine".
+assert_contains "it is named under its own heading instead" "$OUT" "## Cannot be dated (no parseable updated_at, no final verdict)"
+assert_contains "and the row is still in the table" "$OUT" "| #800 |"
+
+new_root undatable-concluded
+write_status 801 '{"current_phase":"5-archived","final_verdict":"APPROVE"}'
+touch -t 202001010000.00 "$PROJ/.pipeline/801/status.json"
+ps_run "$PROJ"
+assert_not_contains "a CONCLUDED record is not listed undatable: concluded is decided before dating" "$OUT" "Cannot be dated"
+
+# NON-ZERO CONTROL for the heading above: it must be able to stay absent. A `assert_not_contains`
+# on a heading that never renders under any input proves nothing about this fixture.
+new_root undatable-control
+write_status 802 "{\"current_phase\":\"3\",\"updated_at\":\"$NOW\"}"
+ps_run "$PROJ"
+assert_not_contains "CONTROL: a datable record renders NO undatable section (so its presence above was caused by the fixture)" "$OUT" "Cannot be dated"
+
+# ================================================================================================
+suite "#74 s1 BITE PROOF: one mutation of the leaf must move BOTH consumers"
+# ================================================================================================
+#
+# Unifying two modules on one symbol is worth nothing if only one of them actually reads it. So
+# this does not assert that the import exists -- it MUTATES the single source and requires both
+# consumers to change their answer about the SAME record.
+#
+# WHOLE-DIRECTORY COPY, never one file: pipeline-status.mjs imports ./run-candidates.mjs and
+# validate-pipeline-artifact.mjs imports it too, and a one-file copy dies with
+# ERR_MODULE_NOT_FOUND, which reads as a failure of the behaviour under test rather than of the
+# fixture (the lesson is #63's R6(a), recorded there against six whole-directory copies).
+#
+# VALUE-RELATIVE SHIFT, never a rewrite of the literal `24 * 60 * 60 * 1000`: the shipped value is
+# read at runtime and the replacement is computed from it, so this cell survives a future retune
+# of the constant instead of dying on it.
+new_tmpdir || exit 90
+MUT="$NEW_TMPDIR/scripts"
+mkdir -p "$MUT"
+cp "$SCRIPTS_DIR"/*.mjs "$MUT/" 2>/dev/null
+mkdir -p "$NEW_TMPDIR/schemas" && cp "$PLUGIN_ROOT/schemas"/*.json "$NEW_TMPDIR/schemas/" 2>/dev/null
+
+DECL_COUNT="$(grep -c '^export const IN_FLIGHT_MS = .*;$' "$MUT/run-candidates.mjs" | tr -d ' ')"
+assert_eq "the leaf carries EXACTLY ONE ceiling declaration to mutate (a mutation that edits zero lines is a rubber stamp that reports green)" \
+  "$DECL_COUNT" "1"
+
+SHIFTED=$(( (CEIL - MARGIN) / 2 ))
+node -e '
+const fs = require("node:fs");
+const f = process.argv[1];
+const before = fs.readFileSync(f, "utf8");
+const re = /^export const IN_FLIGHT_MS = .*;$/m;
+const after = before.replace(re, "export const IN_FLIGHT_MS = " + process.argv[2] + ";");
+if (after === before) { console.error("MUTATION DID NOT APPLY"); process.exit(1); }
+fs.writeFileSync(f, after);
+process.stdout.write(after.match(re)[0]);
+' "$MUT/run-candidates.mjs" "$SHIFTED" > "$TEMP_PROJECT/mutline.txt"
+# PROVE THE MUTATION YOU APPLIED IS THE MUTATION YOU MEANT: print the changed line and assert it.
+record "mutated leaf declaration now reads: $(cat "$TEMP_PROJECT/mutline.txt")"
+assert_eq "the mutation landed on the declaration line and wrote the computed value" \
+  "$(cat "$TEMP_PROJECT/mutline.txt")" "export const IN_FLIGHT_MS = $SHIFTED;"
+
+# The SAME record for both consumers: age = CEIL - MARGIN. Inside the shipped ceiling, outside
+# the shifted one. Under the shipped constant it is neither stuck nor excluded from candidacy.
+new_root bite
+write_status 900 "{\"current_phase\":\"4-review\",\"updated_at\":\"$INSIDE\"}"
+
+# CONSUMER 1 -- the reporter. Baseline first: the UNMUTATED module must call it not-stuck, or the
+# flip below is not a flip.
+ps_run "$PROJ"
+assert_not_contains "CONSUMER 1 baseline: the shipped module does not call the fixture stuck" "$OUT" "Possibly stuck"
+MUT_OUT="$( ( cd "$PROJ" && node "$MUT/pipeline-status.mjs" ) 2>&1 )"
+assert_contains "CONSUMER 1 BITES: the same record IS stuck once the leaf's ceiling is shifted, so pipeline-status.mjs genuinely reads it" \
+  "$MUT_OUT" "Possibly stuck"
+
+# CONSUMER 2 -- validate-pipeline-artifact.mjs's run-owner resolution, which the PreToolUse gate
+# uses. Same record, same mutated leaf, no ceiling passed in, so it takes the leaf's default.
+owner_provenance() {  # <scripts-dir> -> the provenance resolveRunOwner returns for $PROJ
+  node --input-type=module -e '
+    const m = await import(process.argv[1] + "/validate-pipeline-artifact.mjs");
+    const r = m.resolveRunOwner(process.argv[2] + "/.pipeline", {});
+    process.stdout.write(String(r && r.provenance));
+  ' "$1" "$2" 2>/dev/null
+}
+assert_eq "CONSUMER 2 baseline: under the SHIPPED leaf the record is the single candidate and resolves as the owner" \
+  "$(owner_provenance "$SCRIPTS_DIR" "$PROJ")" "inference"
+assert_eq "CONSUMER 2 BITES: under the SHIFTED leaf the same record is no longer recent, so it leaves the candidate set and no owner resolves -- one mutation, two consumers, which is what 'unified' has to mean" \
+  "$(owner_provenance "$MUT" "$PROJ")" "none"
+
+# ------------------------------------------------------------------------------------------------
+# THE MUTATION EXPECTED TO SURVIVE. A battery where every mutation reddens cannot tell coverage
+# from a rubber stamp, so one cell here is a mutation that must NOT move the reporter -- and it is
+# a THEOREM about the design rather than a coverage gap. gate-phase-entry.mjs declares its own
+# IN_FLIGHT_MS and passes it EXPLICITLY into inFlightObservations; run-candidates.mjs's copy is the
+# default for callers with no guard to ask. That separation is deliberate and documented at
+# run-candidates.mjs's declaration (#63-A2 pins the guard's exact source text, and folding it into
+# a re-export would leave that mutation driving the shipped number). So a rewrite of the GUARD's
+# declaration must leave pipeline-status.mjs's answer untouched. What keeps the two equal is
+# tests/test-pretooluse-inflight-ceiling.sh, which asserts both declarations carry the same value
+# expression -- if THIS cell ever reddens, the separation has been collapsed and that suite, not
+# this one, is where the drift should have been caught.
+new_tmpdir || exit 90
+SURV="$NEW_TMPDIR/scripts"
+mkdir -p "$SURV"
+cp "$SCRIPTS_DIR"/*.mjs "$SURV/" 2>/dev/null
+node -e '
+const fs = require("node:fs");
+const f = process.argv[1];
+const before = fs.readFileSync(f, "utf8");
+const re = /^export const IN_FLIGHT_MS = .*;$/m;
+const after = before.replace(re, "export const IN_FLIGHT_MS = " + process.argv[2] + ";");
+if (after === before) { console.error("MUTATION DID NOT APPLY"); process.exit(1); }
+fs.writeFileSync(f, after);
+process.stdout.write(after.match(re)[0]);
+' "$SURV/gate-phase-entry.mjs" "$SHIFTED" > "$TEMP_PROJECT/survline.txt"
+record "mutated GUARD declaration now reads: $(cat "$TEMP_PROJECT/survline.txt")"
+assert_eq "the survivor mutation also landed where it was aimed" \
+  "$(cat "$TEMP_PROJECT/survline.txt")" "export const IN_FLIGHT_MS = $SHIFTED;"
+SURV_OUT="$( ( cd "$PROJ" && node "$SURV/pipeline-status.mjs" ) 2>&1 )"
+assert_not_contains "EXPECTED SURVIVOR: shifting gate-phase-entry.mjs's OWN declaration does NOT move the reporter, because the guard passes its constant in explicitly and the reporter reads the leaf's default (#74 s1; the two are kept equal by test-pretooluse-inflight-ceiling.sh, not by sharing a symbol)" \
+  "$SURV_OUT" "Possibly stuck"
 
 finish
