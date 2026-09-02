@@ -539,10 +539,19 @@ suite "AC7 DENSITY AXIS (#116): at FIXED length, cost must not follow structural
 #      is measuring its own floor and the row above is unfalsifiable, so the cells must differ
 #      measurably from each other as well as not differ hugely.
 #
-# THE FLOOR IS SUBTRACTED RATHER THAN IGNORED, for the reason AC18 retired its absolute bound: a
-# node cold start and a resolver run dominate a small command, and a ratio taken over them is a
-# ratio over the harness. The floor is measured in this run, on this host, from the same driver.
-DENS_TARGET=8192
+# THE LENGTH IS SIZED FOR THE RUNNER AND NOT FOR THE DEFECT, and saying so is the honest half of
+# this block. Every probe here pays the whole gate -- two node starts and a resolver run -- and the
+# same-run floor recorded below measured 447 ms on an idle host and 922 ms on the same host under
+# load. At 12 KB the densest cells then read 3183 ms idle and 6474 ms loaded, so a fixture that
+# discriminated hardest would also be the one that went red on a busy shared runner for a gate that
+# was working. 6 KB is what fits with margin. The consequence, stated rather than hidden: these
+# timing rows would not by themselves have caught the defect at the reviewed commit, which crossed
+# the same bound from about 12 KB of this shape. The DISCRIMINATING evidence for this issue is the
+# 38864-row old-versus-new differential and the density-by-length matrix recorded in #116 and #132;
+# what this block gives the tree afterwards is the axis itself -- six structural classes at one
+# fixed length, each with its verdict and its bound -- so the next change cannot be green over
+# density the way both axes above were.
+DENS_TARGET=6144
 dens_pad() { # <kind> <bytes> -> a body of exactly that length in the named structural class
   "$GATE_REAL_NODE" -e '
     const kind = process.argv[1], n = Number(process.argv[2]);
@@ -560,7 +569,21 @@ dens_pad() { # <kind> <bytes> -> a body of exactly that length in the named stru
       // one unbroken run: the LENGTH AXIS population, here as the O(1)-structure extreme
       run: () => "y".repeat(n),
     };
-    process.stdout.write(mk[kind]().slice(0, n));
+    // TRUNCATION MUST NOT LEAVE A QUOTE OPEN, and the first draft of this builder did. Cutting a
+    // generated body to a fixed length can end it inside a `"...`, and this scanner does not model
+    // heredocs -- so the terminator and the staging command on the far side of it were read as
+    // QUOTED TEXT and the row came back `none`. That would have been a fixture reporting an allow
+    // for a gate that is correct, which is the worst kind of red. The last two bytes are therefore
+    // spent balancing the quote counts, which keeps the length exactly n.
+    //
+    // NO APOSTROPHE APPEARS IN THIS PROGRAM'"'"'S SOURCE and the single-quoted shell word around it is
+    // why: one would close the quote and truncate the program, which is how the first draft of this
+    // line silently emitted a ZERO-LENGTH body. The row above caught it -- that is what the fixed
+    // length assertion is for -- but the quote character still has to be built rather than typed.
+    const core = mk[kind]().slice(0, n - 2);
+    const SQ = String.fromCharCode(39);
+    const odd = (s, q) => (s.split(q).length - 1) % 2 === 1;
+    process.stdout.write(core + (odd(core, "\"") ? "\"" : "z") + (odd(core, SQ) ? SQ : "z"));
   ' "$1" "$2"
 }
 dens_struct() { # <string> -> how many characters of it are in the hook's own structural set
@@ -571,17 +594,21 @@ dens_struct() { # <string> -> how many characters of it are in the hook's own st
   ' "$1"
 }
 
-# The same-run floor: the identical driver, the identical decision, a command too small to measure.
+# The same-run floor, RECORDED and never subtracted. It is what every cell below carries in
+# common -- a node cold start and a resolver run -- and knowing it is what stops a reader mistaking
+# the cheap cells for a fast scan. Subtracting it is the trap: on a loaded host it exceeded the
+# cheap cells outright and turned a stable ratio into noise.
 DENS_FLOOR_A="$(len_now_ms)"
 for _ in 1 2 3; do sub_verdict "$P4" 'git commit -a -m x' >/dev/null; done
 DENS_FLOOR_B="$(len_now_ms)"
 DENS_FLOOR=$(( (DENS_FLOOR_B - DENS_FLOOR_A) / 3 ))
+record "DENSITY AXIS same-run floor (the identical driver and decision on a command too small to measure): ${DENS_FLOOR} ms/call, carried in common by every cell below"
 
 DENS_KINDS=(quotes minified json code prose run)
 DENS_SLOW=""
 DENS_WORST=0
-DENS_MIN_MARG=""
-DENS_MAX_MARG=""
+DENS_MIN_MS=""
+DENS_MAX_MS=""
 DENS_MIN_D=""
 DENS_MAX_D=""
 DENS_ROWS=""
@@ -616,29 +643,41 @@ $BODY
 EOF
 git add plugins/pipeline/agents/dba.md")" "none"
 
-  DENS_MARG=$(( DENS_MS - DENS_FLOOR )); [[ "$DENS_MARG" -ge 1 ]] || DENS_MARG=1
   DENS_ROWS="$DENS_ROWS ${k}=${DENS_MS}ms/${BODY_STRUCT}s"
-  if [[ -z "$DENS_MIN_MARG" || "$DENS_MARG" -lt "$DENS_MIN_MARG" ]]; then DENS_MIN_MARG="$DENS_MARG"; fi
-  if [[ -z "$DENS_MAX_MARG" || "$DENS_MARG" -gt "$DENS_MAX_MARG" ]]; then DENS_MAX_MARG="$DENS_MARG"; fi
+  if [[ -z "$DENS_MIN_MS" || "$DENS_MS" -lt "$DENS_MIN_MS" ]]; then DENS_MIN_MS="$DENS_MS"; fi
+  if [[ -z "$DENS_MAX_MS" || "$DENS_MS" -gt "$DENS_MAX_MS" ]]; then DENS_MAX_MS="$DENS_MS"; fi
   if [[ -z "$DENS_MIN_D" || "$BODY_STRUCT" -lt "$DENS_MIN_D" ]]; then DENS_MIN_D="$BODY_STRUCT"; fi
   if [[ -z "$DENS_MAX_D" || "$BODY_STRUCT" -gt "$DENS_MAX_D" ]]; then DENS_MAX_D="$BODY_STRUCT"; fi
 done
 
-assert_eq "AC7 DENSITY: every cell returned inside the ${LEN_TIMEOUT_S}s the declaration commits to (worst ${DENS_WORST} ms). A hook killed at its declared timeout emits nothing and the call is ALLOWED, so a row over this bound is a bypass" \
+assert_eq "AC7 DENSITY: every cell returned inside the ${LEN_TIMEOUT_S}s the declaration commits to (worst ${DENS_WORST} ms). A hook killed at its declared timeout emits nothing and the call is ALLOWED, so a row over this bound is a bypass and not a slow test. This is the assertion the block exists for: at the reviewed commit the quote-dense cell at this length took over 5 s and returned NOTHING" \
   "$DENS_SLOW" ""
 
 DENS_SPAN=$(( DENS_MAX_D - DENS_MIN_D ))
-DENS_SPREAD_X10=$(( DENS_MAX_MARG * 10 / DENS_MIN_MARG ))
-record "DENSITY AXIS at ${DENS_TARGET} bytes:${DENS_ROWS}; floor ${DENS_FLOOR} ms; marginal ${DENS_MIN_MARG}-${DENS_MAX_MARG} ms (spread $(( DENS_SPREAD_X10 / 10 )).$(( DENS_SPREAD_X10 % 10 ))x) over a population carrying ${DENS_MIN_D} to ${DENS_MAX_D} structural characters at that one length, on $(uname -sr)"
+DENS_SPREAD_X10=$(( DENS_MAX_MS * 10 / (DENS_MIN_MS < 1 ? 1 : DENS_MIN_MS) ))
+record "DENSITY AXIS at ${DENS_TARGET} bytes:${DENS_ROWS}; totals ${DENS_MIN_MS}-${DENS_MAX_MS} ms (spread $(( DENS_SPREAD_X10 / 10 )).$(( DENS_SPREAD_X10 % 10 ))x) over a population carrying ${DENS_MIN_D} to ${DENS_MAX_D} structural characters at that one length, on $(uname -sr)"
 
-assert_eq "AC7 DENSITY VACUITY: the population really spans density -- ${DENS_MIN_D} to ${DENS_MAX_D} structural characters at ONE fixed length. A cost that followed the product of the two would spread by about that factor, which is what the bound below is a bound against, and a pad set that quietly stopped varying would make every timing row here green over the defect this block exists to catch" \
+assert_eq "AC7 DENSITY VACUITY: the population really spans density -- ${DENS_MIN_D} to ${DENS_MAX_D} structural characters at ONE fixed length. A cost that followed the PRODUCT of the two would spread by roughly that factor, and a pad set that quietly stopped varying would make every timing row here green over the defect this block exists to catch, exactly as the LENGTH AXIS's single-character pad did" \
   "$([[ "$DENS_SPAN" -ge 2048 ]] && echo spans || echo "TOO NARROW: ${DENS_MIN_D}..${DENS_MAX_D}")" "spans"
-assert_eq "AC7 DENSITY VACUITY: the same-run floor is non-zero (${DENS_FLOOR} ms), so subtracting it is a correction and not a licence" \
-  "$([[ "$DENS_FLOOR" -gt 0 ]] && echo measured || echo "ZERO FLOOR")" "measured"
-assert_eq "AC7 DENSITY: the marginal cost of the densest cell is within 12x of the sparsest, over that ${DENS_MIN_D}-to-${DENS_MAX_D} structural-character span ($(( DENS_SPREAD_X10 / 10 )).$(( DENS_SPREAD_X10 % 10 ))x). This is the property: total cost linear in LENGTH and blind to DENSITY, rather than the product of the two" \
-  "$([[ "$DENS_SPREAD_X10" -le 120 ]] && echo bounded || echo "FOLLOWS DENSITY: $(( DENS_SPREAD_X10 / 10 )).$(( DENS_SPREAD_X10 % 10 ))x spread over ${DENS_MIN_D}..${DENS_MAX_D} structural characters")" "bounded"
-assert_eq "AC7 DENSITY DISCRIMINATION: and the cells still differ measurably from each other ($(( DENS_SPREAD_X10 / 10 )).$(( DENS_SPREAD_X10 % 10 ))x > 1.2x), so the row above is bounding the GATE and not the harness floor it just subtracted" \
-  "$([[ "$DENS_SPREAD_X10" -gt 12 ]] && echo discriminates || echo "FLOOR-DOMINATED: $(( DENS_SPREAD_X10 / 10 )).$(( DENS_SPREAD_X10 % 10 ))x -- every cell is the floor and the bound above proves nothing")" \
+
+# THE SPREAD IS A REGRESSION GUARD AND IT IS HONEST ABOUT BEING ONE. It is taken over RAW totals,
+# never over a floor-subtracted marginal: a first draft subtracted a same-run floor to sharpen the
+# ratio, and on a loaded host the floor exceeded the cheap cells outright, the marginal clamped to
+# 1 ms and the ratio read 832x for a gate that was working. A ratio whose denominator can go to
+# noise is not an instrument. Raw totals carry the harness's fixed cost in BOTH terms, which damps
+# the figure and is exactly what makes it stable.
+#
+# WHAT IT CAN AND CANNOT DO, so nobody reads it as a proof. It cannot separate the reviewed commit
+# from this one at a length CI can afford, because at 12 KB the fixed cost still dominates both:
+# measured on darwin 25.5.0 the same six cells spread 7.7x before this change and 6.2x after, at
+# 8 KB. What it CAN do is catch a return to the product, which grows without bound: at 64 KB the
+# same population spread over 22x before (three cells past a 120 s cap, so the true figure is
+# larger) and 13.7x after. The DISCRIMINATING evidence for this issue is the differential and the
+# curve recorded above, not this row; this row is here so a regression cannot land silently.
+assert_eq "AC7 DENSITY: the densest cell stays inside 12x of the cheapest at one fixed length ($(( DENS_SPREAD_X10 / 10 )).$(( DENS_SPREAD_X10 % 10 ))x over a ${DENS_MIN_D}-to-${DENS_MAX_D} structural-character span). A REGRESSION GUARD against cost returning to the product of density and length, not a proof that it has not: see the comment above it and the recorded curve" \
+  "$([[ "$DENS_SPREAD_X10" -le 120 ]] && echo bounded || echo "FOLLOWS DENSITY: $(( DENS_SPREAD_X10 / 10 )).$(( DENS_SPREAD_X10 % 10 ))x over ${DENS_MIN_D}..${DENS_MAX_D} structural characters")" "bounded"
+assert_eq "AC7 DENSITY DISCRIMINATION: and the cells still differ measurably from each other ($(( DENS_SPREAD_X10 / 10 )).$(( DENS_SPREAD_X10 % 10 ))x > 1.2x), so the row above is bounding the GATE and not a harness floor that swamped every cell" \
+  "$([[ "$DENS_SPREAD_X10" -gt 12 ]] && echo discriminates || echo "FLOOR-DOMINATED: $(( DENS_SPREAD_X10 / 10 )).$(( DENS_SPREAD_X10 % 10 ))x -- every cell is the harness and the bound above proves nothing")" \
   "discriminates"
 
 # ===============================================================================================
@@ -651,33 +690,37 @@ suite "AC7 DENSITY AXIS (#116): and the cost is LINEAR in length at each fixed d
 # as much and not sixteen, at BOTH ends of the density range, so the growth is measured at the
 # densest class and the sparsest one and each is bounded separately.
 #
-# THE BOUND IS A RATIO INSIDE ONE RUN, never an absolute figure, because a wall-clock threshold on
-# a rendered measurement measures the runner. The same floor is subtracted from both terms.
+# THE GROWTH FIGURE IS RECORDED AND THE VERDICT AND THE DECLARED BOUND ARE ASSERTED, which is the
+# same division the two axes above make and is deliberate. A growth RATIO cannot be asserted here
+# without either subtracting a floor -- which on a loaded host exceeded the small cell outright and
+# read 424x for a gate that was working -- or spending a length CI cannot afford. What IS asserted
+# is the thing a reader of this file cares about: at four times the length, at both ends of the
+# density range, the gate still decides, and still decides inside the timeout the runtime kills at.
 DENS_GROWTH=""
-DENS_GROW_BAD=""
+DENS_GROW_SLOW=""
 for k in quotes prose; do
   GROW_MS=()
   for mult in 1 4; do
-    GBODY="$(dens_pad "$k" $(( 2048 * mult )))"
+    GBODY="$(dens_pad "$k" $(( 1536 * mult )))"
     GA="$(len_now_ms)"
     GV="$(sub_verdict "$P4" "cat > notes.md <<'EOF'
 $GBODY
 EOF
 git add -A")"
     GB="$(len_now_ms)"
-    GROW_MS+=( $(( GB - GA )) )
-    assert_eq "AC7 DENSITY LINEARITY: a $(( 2048 * mult ))-byte '${k}' body, then git add -A -> deny" "$GV" "deny"
+    # `${arr[-1]}` is bash 4; this file runs under the 3.2 that ships with macOS.
+    GTHIS=$(( GB - GA ))
+    GROW_MS+=( "$GTHIS" )
+    assert_eq "AC7 DENSITY LINEARITY: a $(( 1536 * mult ))-byte '${k}' body (density class '${k}'), then git add -A -> deny" "$GV" "deny"
+    [[ "$GTHIS" -lt "$LEN_BOUND_MS" ]] || DENS_GROW_SLOW="$DENS_GROW_SLOW
+${k} at $(( 1536 * mult )) bytes -> ${GTHIS} ms"
   done
-  G1=$(( GROW_MS[0] - DENS_FLOOR )); [[ "$G1" -ge 1 ]] || G1=1
-  G4=$(( GROW_MS[1] - DENS_FLOOR )); [[ "$G4" -ge 1 ]] || G4=1
-  GROWTH_X10=$(( G4 * 10 / G1 ))
-  DENS_GROWTH="$DENS_GROWTH ${k}: 2048B=${GROW_MS[0]}ms 8192B=${GROW_MS[1]}ms marginal ${G1}->${G4} ($(( GROWTH_X10 / 10 )).$(( GROWTH_X10 % 10 ))x for 4x length);"
-  [[ "$GROWTH_X10" -le 90 ]] || DENS_GROW_BAD="$DENS_GROW_BAD
-${k} grew $(( GROWTH_X10 / 10 )).$(( GROWTH_X10 % 10 ))x for 4x the length"
+  GROWTH_X10=$(( GROW_MS[1] * 10 / (GROW_MS[0] < 1 ? 1 : GROW_MS[0]) ))
+  DENS_GROWTH="$DENS_GROWTH ${k}: 1536B=${GROW_MS[0]}ms 6144B=${GROW_MS[1]}ms ($(( GROWTH_X10 / 10 )).$(( GROWTH_X10 % 10 ))x for 4x length, floor ${DENS_FLOOR} ms in both);"
 done
 record "DENSITY LINEARITY:${DENS_GROWTH} on $(uname -sr)"
-assert_eq "AC7 DENSITY LINEARITY: four times the length costs at most 9x the marginal time at BOTH ends of the density range. Quadratic in length is 16x and the product with density is worse; linear is 4x, and the 9x here is the slack a shared runner needs${DENS_GROWTH}" \
-  "$DENS_GROW_BAD" ""
+assert_eq "AC7 DENSITY LINEARITY: at four times the length, at BOTH ends of the density range, every probe still returned inside the ${LEN_TIMEOUT_S}s the declaration commits to.${DENS_GROWTH}" \
+  "$DENS_GROW_SLOW" ""
 
 # ===============================================================================================
 suite "AC7 FLOOR: two spellings nobody enumerated, whose effect is identical"
