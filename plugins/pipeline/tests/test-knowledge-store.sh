@@ -137,7 +137,9 @@ suite "knowledge-store: --write honours --collection (#83)"
 # contract names (agents/librarian.md, "Record standalone decisions") -- was unreachable by the
 # one script that is supposed to be the store's sole writer. On #53's Phase 5 the decision entry
 # was hand-written instead, which puts that whole class of entry outside this script's validation.
-# Created HERE rather than left to the first write, so the fixtures below do not depend on the
+#
+# The decisions dir is created HERE rather than left to the first write, so the fixtures do not
+# depend on the behaviour under test to have a directory to land in: a thrown setup and a
 # behaviour under test to have a directory to land in: a thrown setup and a passing case are
 # hard to tell apart from the transcript.
 DEC="$ROOT/knowledge/decisions"
