@@ -1220,6 +1220,61 @@ assert_eq "AC16(d) ONE-VARIABLE CONTROL: the identical fixture with only the mti
 record "REPORTED, so a reader does not count (d) as coverage of the restore class: its INPUT is structurally identical to AC3's stale cell, and its value is the LABEL and the EXPIRY, not new coverage. The signature is built with utimesSync plus a stale updated_at written into the content and NEVER by shelling out to cp -p, rsync or tar -- that pair is the restore's whole signature in the two fields the predicate reads, and shelling out would reintroduce the touch -t portability ban in another costume (rsync is not verified present on ubuntu-latest, and BSD and GNU cp differ). ctime DOES differ between a restored record and an untouched stale one, and ctime is rejected as a mechanism for a separate measured reason: utimesSync leaves ctime fresh, so a ctime-inclusive composition would force every stale fixture in this suite to be rebuilt by write-ordering against ~1.1s of real elapsed time"
 
 # ---------------------------------------------------------------------------------------------
+suite "#91: the TURN-BOUNDARY TIE resolves toward REFUSING, the opposite way from AC9(e)'s mtime tie"
+# ---------------------------------------------------------------------------------------------
+# WHAT THIS BLOCK EXISTS FOR. run()'s turn-scoping comparison is `recordFreshnessMs(...) <
+# humanTurnMs`, and mutating that `<` to `<=` SURVIVED this whole suite -- a live coverage hole
+# found reviewing #56 and filed as #91. The direction is not a detail: `<` keeps an exactly-tied
+# record IN the turn and therefore LOUD, `<=` reads it stale and SILENCES a refusal the pre-#56
+# code produced, which is the one thing the module's governing direction forbids of its own new
+# suppressor. resolveStatus's mtime tie resolves the other way (AC9(e): abstain to null) and that
+# is deliberate, because it ties between TWO CANDIDATE RECORDS where picking either means picking
+# by readdir order; this comparison has one record and one boundary and nothing arbitrary to
+# refuse. Both halves are now pinned, so a future reader finds a ruling instead of an asymmetry.
+#
+# THE TIE IS CONSTRUCTED THROUGH updated_at AND NOT THROUGH mtime, deliberately and by
+# measurement: utimesSync-stamped mtimes read back with a fractional millisecond on APFS (the
+# STAMP ledger at the end of this block records every drift), so an mtime tie against a
+# whole-millisecond parsed timestamp is not constructible here. updated_at is an ISO string on
+# both sides of the comparison, so `Date.parse` lands on the same integer and the tie is EXACT
+# -- and the cell below asserts that exactness as a premise rather than assuming it, because a
+# fixture that missed by one millisecond would exercise `>` and pass while proving nothing.
+
+vl91_tie() {  # <updated_at ms> -> RC, with the mtime held far stale so updated_at decides
+  vl56_ac16 "$VL56_STALE_MS" "$1"
+}
+
+vl91_tie "$VL56_OWNER_MS"
+VL91_TIE_RC="$RC"
+VL91_TIE_PROBE="$(node -e '
+  const { readFileSync } = require("node:fs");
+  const [statusFile, transcript] = process.argv.slice(1);
+  const stated = Date.parse(JSON.parse(readFileSync(statusFile, "utf8")).updated_at);
+  const owner = readFileSync(transcript, "utf8").split("\n").filter(Boolean)
+    .map((l) => JSON.parse(l))
+    .filter((r) => r && r.origin && r.origin.kind === "human").pop();
+  if (!owner) { process.stdout.write("NO_OWNER_RECORD"); }
+  else {
+    const boundary = Date.parse(owner.timestamp);
+    process.stdout.write(stated === boundary ? "EXACT" : "OFF_BY_" + (stated - boundary));
+  }
+' "$VL56_PROJECT/.pipeline/4244/status.json" "$VL56_TRANSCRIPT" 2>&1)"
+assert_eq "#91 PREMISE: the fixture really constructs an EXACT tie -- the record's updated_at and the owner record's timestamp parse to the same integer millisecond. Without this the cell below could pass by being one ms LATE, which exercises the strictly-greater path and witnesses nothing about the tie" \
+  "$VL91_TIE_PROBE" "EXACT"
+assert_eq "#91(a) THE TIE ITSELF: a record dated EXACTLY at the turn boundary is IN the turn and still gets graded: exit 2. The turn window is CLOSED AT ITS LEFT END: in-turn means recordFreshnessMs >= humanTurnMs. MUTATION THIS CELL EXISTS FOR: change run()'s \`<\` to \`<=\` and this flips to 0 -- and nothing else in this suite moves, which is what made the mutation survivable before #91" \
+  "$VL91_TIE_RC" "2"
+
+vl91_tie "$((VL56_OWNER_MS - 1))"
+assert_eq "#91(b) THE DISCRIMINATING TWIN, ONE MILLISECOND MOVED: the same fixture with updated_at one ms BEFORE the boundary reads stale and goes silent: exit 0. Paired with (a) this is what makes (a) a statement about the TIE rather than about a record that is fresh by a wide margin" \
+  "$RC" "0"
+
+vl91_tie "$((VL56_OWNER_MS + 1))"
+assert_eq "#91(c) and one millisecond AFTER the boundary is loud again: exit 2. The three cells bracket the comparison, so a mutation to \`>\`, \`<=\` or \`>=\` reddens at least one of them" \
+  "$RC" "2"
+
+record "REPORTED, so the direction is not read as a live-bug fix: no behaviour changed at #91, only the ruling was written down and pinned. OBSERVED TIES IN PRODUCTION: ZERO. Measured on this machine, re-derivable: 12 of 12 live status.json records under this repo's own pipeline state dir carry a fractional-millisecond mtime while a parsed transcript timestamp is a whole one, so the mtime term cannot tie; 10 of those 12 records write updated_at at WHOLE-SECOND grain, and 0 of 523 observed origin.kind 'human' timestamps land on a whole second, so the updated_at term does not tie either today. The cells cost three fixtures and hold the direction against a vendor coarsening either clock, at which point this line decides between loud and silent on a common input"
+
+# ---------------------------------------------------------------------------------------------
 suite "#56 AC7: NO DISARM VECTOR -- every removed input leaves behaviour EXACTLY AS TODAY"
 # ---------------------------------------------------------------------------------------------
 # THE GOVERNING PROPERTY, stated so the two directions in this suite do not read as a

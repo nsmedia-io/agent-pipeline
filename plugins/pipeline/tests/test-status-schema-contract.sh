@@ -2,9 +2,11 @@
 # status.schema.json's own contract: the verdict cap (#34) and the current_phase example
 # list (#42).
 #
-# WHY THIS FILE EXISTS. status.schema.json has exactly ONE runtime reader -- voice-lint.mjs:247 (the
-# readFileSync in phaseShapeFailure), which reads properties.current_phase.pattern at :249 and
-# nothing else. The file appears in no
+# WHY THIS FILE EXISTS. status.schema.json has exactly ONE runtime reader -- the readFileSync in
+# voice-lint.mjs's `phaseShapeFailure`, which reads properties.current_phase.pattern out of it and
+# nothing else. CITED BY SYMBOL AND NOT BY LINE (#91): the two line numbers that used to sit here
+# were both stale, having moved three times inside #56's own review, and a stale coordinate sends
+# the next reader to an unrelated line with no signal that it is the wrong one. The file appears in no
 # AGENT_RULES entry in validate-pipeline-artifact.mjs, and that walker does not implement
 # maxLength at all, so a maxLength written into this schema refuses nothing by itself. Both
 # defects this suite pins are the same condition: a constraint nobody reads can be absent
@@ -484,7 +486,7 @@ assert_eq "AC7 CONTROL: and that literal is still present as a negative-control 
 # ---------------------------------------------------------------------------
 suite "AC8: UNCHANGED CONSUMER -- current_phase.pattern is byte-identical"
 # ---------------------------------------------------------------------------
-# voice-lint.mjs:249 (in phaseShapeFailure) reads exactly this one key out of this file and
+# voice-lint.mjs's `phaseShapeFailure` reads exactly this one key out of this file and
 # nothing else. Pinned by
 # VALUE, not by presence: a presence check survives any edit to the regex, which is the thing the
 # only runtime reader actually consumes. The literal below is the pre-change bytes.
@@ -1011,5 +1013,30 @@ assert_eq "AC-54b: ...and every derived anchor really is issue-numbered" \
 assert_eq "AC-54b: the derived union floor from AC2 is still live alongside this one" \
   "$([[ "${CORPUS_FLOOR:-0}" -ge 1 && "${CORPUS_N:-0}" -ge "$CORPUS_FLOOR" ]] && echo enough || echo "union floor lost: $CORPUS_N vs $CORPUS_FLOOR")" "enough"
 
+# ---------------------------------------------------------------------------
+suite "#91: the citations into voice-lint.mjs are SYMBOLS, not line coordinates"
+# ---------------------------------------------------------------------------
+# THE DEFECT, and it had already happened rather than being anticipated. This suite and
+# test-telemetry-exit-attribution.sh each pointed a reader at voice-lint.mjs by LINE NUMBER, and
+# all three coordinates were stale: the cited line moved three times inside #56's own review, and
+# #56's final commit had to apply this same fix to a citation of its own. A stale coordinate is
+# worse than none, because it lands the reader on an unrelated line with nothing to signal that it
+# is the wrong one. `grep -o | wc -l` throughout, never `grep -c`, which counts LINES and would
+# report 1 for a line carrying two coordinates. Precedent and idiom: #53 AC10 in
+# test-gate-phase-entry-drift.sh, which pins the same property against the same file.
+for f in test-status-schema-contract.sh test-telemetry-exit-attribution.sh; do
+  assert_eq "$f cites no line coordinate into voice-lint.mjs" \
+    "$(grep -o 'voice-lint\.mjs:[0-9]' "$TESTS_DIR/$f" | wc -l | tr -d ' ')" "0"
+done
+# ASSEMBLED, NEVER WRITTEN AS ONE TOKEN. This file is inside the population the grep above walks,
+# so a control carrying the coordinate verbatim would make the zero unreachable for a reason that
+# has nothing to do with the subject.
+CTRL_VL_COORD="voice-lint""$(printf '%s' .mjs:247)"
+assert_eq "NON-ZERO CONTROL on that instrument: the same pattern finds a coordinate when one is present, so the zeroes above are measurements and not a pattern that never matches" \
+  "$(printf '%s\n' "$CTRL_VL_COORD" | grep -o 'voice-lint\.mjs:[0-9]' | wc -l | tr -d ' ')" "1"
+# And the symbol the citations now name has to EXIST, or they are a different kind of dangling
+# pointer: one that reads as precise and resolves to nothing.
+assert_contains "and the symbol those citations now name is really defined in voice-lint.mjs" \
+  "$(cat "$VOICE_LINT")" "function phaseShapeFailure("
 
 finish
