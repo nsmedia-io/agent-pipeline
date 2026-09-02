@@ -141,28 +141,69 @@ _js_get() { # <key> <haystack>
   _CUR=$_js_t
   _cut "$_js_lead"
   _js_t=${_CUR#'"'}
+  # THE VALUE IS CUT OUT BY FIELD SPLITTING, FOR THE REASON `_js_unescape` BELOW IS. Walking it
+  # quote to quote cost one whole copy of the remainder per quote, so a JSON-escaped command --
+  # which is what every quote-bearing command arrives as, since JSON spells each `"` as `\"` --
+  # paid (quotes) x (length) on the path that decides a refusal, and a command carrying NO quote
+  # paid the same product once, as a single `_cut` of the whole value through a 512-character
+  # rung ladder that is quadratic in the prefix it drops. Measured on darwin 25.5.0 at 0b354c2,
+  # that pair was the whole of the difference between `_scan` alone and the hook: 748 ms at 78 KB
+  # and 1937 ms at 156 KB. Splitting on `"` is one C-level pass and the walk below calls nothing.
+  #
+  # THE FIELDS RECONSTRUCT THE OLD WALK EXACTLY. `${_js_t%%'"'*}` IS the first field, and what the
+  # old loop left in `_js_t` after cutting it IS the remaining fields joined by `"`. A trailing
+  # IFS delimiter produces no field, so an explicit empty one is appended when the haystack ends
+  # in a quote; without it the closing quote of a value at the very end of the payload would be
+  # read as part of the value.
+  _js_sv=${IFS-}
+  set -f
+  IFS='"'
+  set -- $_js_t
+  IFS=$_js_sv
+  set +f
+  case $_js_t in *'"') set -- "$@" '' ;; esac
+  # THE JOINING QUOTE IS CARRIED IN A VARIABLE RATHER THAN DECIDED BY A FIRST-FIELD TEST, and the
+  # backslash-run parity is reached only through a `case` that most fields fail at their last
+  # character. Both are statement-count fixes: this loop turns once per `"` in the command, which
+  # in a JSON-escaped payload is once per quote the author WROTE, and the interpreter charges about
+  # 16 us a statement.
   _js_acc=''
-  while :; do
-    case $_js_t in
-      *'"'*) ;;
-      *) return 1 ;; # unterminated string
-    esac
-    _js_seg=${_js_t%%'"'*}
-    _CUR=$_js_t
-    _cut "$_js_seg"
-    _js_t=${_CUR#'"'}
+  _js_sml=''
+  _js_post=''
+  _js_state=0
+  _js_j=''
+  for _js_f do
+    if [ "$_js_state" = 1 ]; then
+      _js_post=$_js_post$_js_j$_js_f
+      _js_j='"'
+      continue
+    fi
+    _js_sml=$_js_sml$_js_j$_js_f
+    _js_j='"'
+    # TWO TIERS, BECAUSE ONE ACCUMULATOR IS QUADRATIC IN ITS OWN OUTPUT. `x=$x$f` copies x, so
+    # appending k fields into one string costs (length)^2 / (field length). The small tier is
+    # flushed at a fixed width, which bounds both terms: (length x 4096 / field length) for the
+    # small tier and (length^2 / 8192) for the big one.
+    if [ ${#_js_sml} -ge 4096 ]; then
+      _js_acc=$_js_acc$_js_sml
+      _js_sml=''
+    fi
     # An even-length run of backslashes before the quote leaves the quote unescaped, and the
     # string ends there. An odd run means the quote is part of the value.
-    _js_bs=${_js_seg##*[!\\]}
-    _js_n=${#_js_bs}
-    _js_acc=$_js_acc$_js_seg
-    if [ $((_js_n % 2)) -eq 0 ]; then
-      break
-    fi
-    _js_acc=$_js_acc'"'
+    case $_js_f in
+      *'\')
+        _js_bs=${_js_f##*[!\\]}
+        [ $(( ${#_js_bs} % 2 )) -eq 0 ] && { _js_state=1; _js_j=''; }
+        ;;
+      *)
+        _js_state=1
+        _js_j=''
+        ;;
+    esac
   done
-  _JS_VAL=$_js_acc
-  _JS_POST=$_js_t
+  [ "$_js_state" = 1 ] || return 1 # unterminated string
+  _JS_VAL=$_js_acc$_js_sml
+  _JS_POST=$_js_post
   _JS_OK=1
   return 0
 }
@@ -182,50 +223,60 @@ _js_get() { # <key> <haystack>
 # lone backslash leaves no field at all and so produces nothing, which is what the previous walk
 # did. Verified identical on bash 3.2 in sh mode, `bash --posix` and dash over `a\nb`, `a\\b`,
 # `a\\\\b`, `\nfoo`, `foo\`, `foo\\`, `a\n\nb`, the empty string and a value with no escape.
+#
+# THE OUTPUT IS ACCUMULATED IN TWO TIERS for the reason `_js_get` is: `_ue_o=$_ue_o$_ue_f` copies
+# `_ue_o`, so appending one field per escape costs (length)^2 / (bytes per escape), and an
+# ordinary multi-line command carries one `\n` escape per line. Measured on darwin 25.5.0 over the
+# 117 KB prose heredoc this issue's re-take builds: 2508 appends averaging half the output.
 _js_unescape() { # <escaped> -> _UNESC
   _ue_o=''
+  _ue_s=''
   _ue_sv=${IFS-}
   set -f
   IFS='\'
   set -- $1
   IFS=$_ue_sv
   set +f
-  _ue_first=1
+  # THE TEXT BEFORE THE FIRST ESCAPE IS TAKEN OFF THE LIST RATHER THAN TESTED FOR ON EVERY FIELD.
+  # One `shift` costs one pass over the list; a `_ue_first` test costs a statement per escape, and
+  # a multi-line command carries one escape per line.
+  [ $# -gt 0 ] || { _UNESC=''; return 0; }
+  _ue_s=$1
+  shift
   _ue_lit=0
   for _ue_f do
-    if [ "$_ue_first" = 1 ]; then
-      _ue_first=0
-      _ue_o=$_ue_o$_ue_f # the text before the first escape
-      continue
+    if [ ${#_ue_s} -ge 4096 ]; then
+      _ue_o=$_ue_o$_ue_s
+      _ue_s=''
     fi
     if [ "$_ue_lit" = 1 ]; then
       _ue_lit=0
-      _ue_o=$_ue_o$_ue_f # the field behind an escaped backslash is text, not an escape
+      _ue_s=$_ue_s$_ue_f # the field behind an escaped backslash is text, not an escape
       continue
     fi
     # The arms enumerate every escape RFC 8259 admits. The last one keeps the old reading of a
     # malformed escape -- the escape character stands for itself -- which is affordable because a
     # runtime that emits this payload emits valid JSON, so nothing reaches it in production.
     case $_ue_f in
-      n*) _ue_o=$_ue_o$_NL${_ue_f#?} ;;
-      t*) _ue_o=$_ue_o$_TAB${_ue_f#?} ;;
-      r* | b* | f*) _ue_o=$_ue_o${_ue_f#?} ;;
+      n*) _ue_s=$_ue_s$_NL${_ue_f#?} ;;
+      t*) _ue_s=$_ue_s$_TAB${_ue_f#?} ;;
+      r* | b* | f*) _ue_s=$_ue_s${_ue_f#?} ;;
       u*)
         # A \uXXXX escape cannot spell any token this matcher decides on, so it collapses to one
         # placeholder rather than being decoded: a decoder here would be a second, unreviewed
         # unescaper on the path that decides a refusal.
-        _ue_o=$_ue_o'?'${_ue_f#?????}
+        _ue_s=$_ue_s'?'${_ue_f#?????}
         ;;
-      '"'*) _ue_o=$_ue_o'"'${_ue_f#?} ;;
-      /*) _ue_o=$_ue_o'/'${_ue_f#?} ;;
+      '"'*) _ue_s=$_ue_s'"'${_ue_f#?} ;;
+      /*) _ue_s=$_ue_s'/'${_ue_f#?} ;;
       '')
-        _ue_o=$_ue_o'\'
+        _ue_s=$_ue_s'\'
         _ue_lit=1
         ;;
-      *) _ue_o=$_ue_o$_ue_f ;;
+      *) _ue_s=$_ue_s$_ue_f ;;
     esac
   done
-  _UNESC=$_ue_o
+  _UNESC=$_ue_o$_ue_s
 }
 
 # ---- the forbidden CLASS, decided over flag semantics rather than over spellings ---------------
@@ -265,15 +316,16 @@ _js_unescape() { # <escaped> -> _UNESC
 #   _ist       head -> global -> arg, the three regions the old walk used three loops for
 #   _idead     this invocation cannot stage anything; every later word is inert
 #   _valnext   the previous word was an option that takes the NEXT word as its value
+#   _blanket   an all-tracked flag: -a/--all for commit, -A/-u/--all/--update for add
+#   _pathspec  any operand that narrows what is staged
+#
+# ONE COMMAND, EIGHT ASSIGNMENTS, AND THAT IS A MEASUREMENT. This runs once per TOP-LEVEL
+# SEPARATOR, so a heredoc body pays it per line; at about 16 us per statement in the interpreter
+# that runs this file, eight statements is 130 us a line and 325 ms over a 2500-line document. A
+# POSIX simple command may carry any number of assignments and no command word, and all of them
+# take effect, so the whole reset is one statement.
 _inv_reset() {
-  _ist=head
-  _idead=0
-  _valnext=0
-  _verb=''
-  _blanket=0    # an all-tracked flag: -a/--all for commit, -A/-u/--all/--update for add
-  _pathspec=0   # any operand that narrows what is staged
-  _blanketspec=0
-  _endopts=0
+  _ist=head _idead=0 _valnext=0 _verb='' _blanket=0 _pathspec=0 _blanketspec=0 _endopts=0
 }
 
 _inv_words() { # <closed word>...
@@ -282,7 +334,13 @@ _inv_words() { # <closed word>...
       _redir=0 # a redirection TARGET is not an operand
       continue
     fi
-    [ "$_idead" = 0 ] || continue
+    # BREAK, NOT CONTINUE, AND THAT IS THE COST FIX AT THE OTHER END OF THE SAME ARGUMENT
+    # `_run_words` makes. `_idead` is set only in the two arms below and cleared only by
+    # `_inv_reset` at a top-level separator, so once it is 1 no later word of THIS invocation can
+    # be read by anything -- including `_redir`, whose whole job is to skip a word nothing reads.
+    # Walking the rest to conclude that cost two statements a word, and to this scanner every line
+    # of a heredoc body is an invocation: 12 words a line, 5008 lines, ~350 us of nothing per line.
+    [ "$_idead" = 0 ] || break
     case $_ist in
       head)
         # WHICH WORD NAMES THE COMMAND.
@@ -539,48 +597,215 @@ _lit1() {
   _sc=${_sc#?}
 }
 
-# WORDS ARE SPLIT IN BULK, AND THAT IS WHAT MAKES THE COST LINEAR RATHER THAN QUADRATIC.
+# THE SCAN READS A BOUNDED WINDOW, REFILLED FROM AN UNTOUCHED REMAINDER, AND THAT IS WHAT MAKES
+# THE COST LINEAR RATHER THAN A PRODUCT.
 #
-# THE COST WAS NOT THEORETICAL, AND IT WAS NOT WHERE THE PREVIOUS ROUND SAID IT WAS. Every cursor
-# move over the remaining command copies the whole remainder, so the scan cost is (number of
-# cursor moves) x (command length) -- driven by WORD-BOUNDARY COUNT, not by character count. A
-# fixture padded with one unbroken run of one character has a word-boundary count of O(1) and
-# cannot construct this at all, which is why the length-axis cells added in the previous round
-# were green over it. Measured on darwin 25.5.0 before this change: `echo <5000 short words> ;
-# git add -A` spent 3305 ms in the scan with NO git invocation needed to trigger it (the same
-# prose with no git at all measured 3247 ms), against 346 ms at 1000 words. Past the 5-second
-# `timeout` hooks.json declares, the hook is killed, a killed PreToolUse hook emits nothing, and
-# the staging on the far side of the `;` is ALLOWED.
+# EVERY READ OF A SHELL VARIABLE COPIES WHAT IS IN IT. `${s%%[$_STRUCT]*}`, `${s#?}` and even
+# `case $s in` each cost the LENGTH OF WHAT IS LEFT, and the scan has to turn once per STRUCTURAL
+# character -- a quote, a backslash, a `#`, a redirection operator, a top-level separator. Walking
+# the whole remainder therefore cost
 #
-# So the loop advances once per STRUCTURAL character -- a quote, a backslash, a `#`, a redirection
-# operator, a separator -- and never once per word. Everything between two structural characters
-# is one run, cut out in one move and handed to `_inv_words` UNQUOTED, so the shell's own field
-# splitting does the tokenizing in one C-level pass. `git add <N paths>` holds no structural
-# character at all and is now two cursor moves whatever N is.
+#     (structural-character count)  x  (command length)
 #
-# `set -f` and an explicit IFS are load-bearing, not tidiness: without `-f` the split would
-# PATHNAME-EXPAND a run containing `*` or `?` against the caller's working directory, and IFS is
-# pinned to space and tab because a run cannot contain a newline (a newline is structural).
+# which is linear for the three shapes #106 round 3 closed (one long token, many short words, many
+# operands: all carry O(1) structural characters) and SUPERLINEAR for a command carrying many of
+# them. Whitespace is deliberately not structural, which is what makes the bulk word split linear
+# -- and is also why a fixture padded with quote-free tokens cannot construct the expensive
+# subject. Density, not size, is the axis: a double quote costs about 3x a newline, and the shapes
+# an agent really writes range over 24x.
 #
-# WHAT THIS DOES NOT CLOSE, AND WHERE TO READ THE REST OF IT: issue #116, filed with its curve and
-# its re-takeable command BEFORE this shipped, because a residual recorded only in the file that
-# has it is readable only by someone already looking at the defect. Once per structural character
-# is not once per COMMAND, so a string carrying MANY of them is still (structural characters) x
-# (length).
+# THE COST WAS NOT THEORETICAL AND THE SUBJECT WAS THIS REPOSITORY'S OWN WORK. Measured on darwin
+# 25.5.0 / bash 3.2.57(1) in sh mode / node v24.19.0 at 0b354c2, driving the shipped hook against
+# the 5 s its hooks.json entry declares: quote-dense text (`echo "a" "a" ... ; git add -A`) took
+# 5101 ms at 12.0 KB, ordinary pretty-printed JSON 5095 ms at 29.0 KB, quote-free prose 5094 ms at
+# 116.9 KB -- each killed at the timeout, each emitting nothing, and A PRETOOLUSE HOOK THAT EMITS
+# NOTHING FAILS OPEN, so past those points the blanket staging on the far side of the heredoc was
+# ALLOWED. The non-synthetic instance: heredoc-writing `.pipeline/106/peer-review.json` (81.3 KB,
+# the merged Phase 4 panel record of the issue that shipped this gate) and staging it in the same
+# Bash call measured 3373-4500 ms, 67-90% of the budget, and doubling the file crossed.
 #
-# THE REACHABLE SIZE IS SIZE x DENSITY, NOT SIZE, and quoting the size alone understates it by up
-# to 8x -- which is the correction #116 now carries and the reason this paragraph no longer quotes
-# one curve. Whitespace is deliberately NOT structural, so density ranges over 24x between the
-# shapes an agent really writes. Measured on darwin 25.5.0 against the declared 5 s, for a document
-# written and staged in one call: quote-free PROSE crosses at ~110 KB (78 KB 3186 ms, 117 KB
-# 5656 ms), ordinary JSON at 25-30 KB (19 KB 2791 ms, 34 KB 6837 ms), and quote-dense text at
-# ~13 KB (12 KB 4771 ms, 14 KB 5962 ms). The concrete instance is this repository's own work:
-# heredoc-writing `.pipeline/106/peer-review.json` (85 KB) and staging it in one call measured
-# 3373-4134 ms over four runs, 67-83% of the budget.
+# SO `_sc` NEVER HOLDS MORE THAN A WINDOW. The rest of the command sits in a QUEUE built by the
+# shell's own field splitting, which is the only O(n) primitive this language offers. The queue has
+# two levels and the second is built ONLY when the first produced a piece too big to scan:
 #
-# Closing it needs a BOUNDED scan window refilled from an untouched remainder, with refill points
-# inside both quote loops and the backslash arm, which is a redesign rather than a fix.
+#   1. WORDS. `IFS=<space><tab>` splits the command in one C-level pass and adjacent words are
+#      regrouped with ONE space between them until the group reaches `_CW`. Whitespace RUN LENGTH
+#      is the only thing lost and it is a term in no test `_inv_words` applies: collapsing never
+#      removes ALL the whitespace from a word, so no word becomes `.`, `./`, `:/` or the empty
+#      string. Whether the command OPENED and CLOSED with whitespace is restored explicitly,
+#      because those are word boundaries and an unterminated quote makes the trailing one visible.
+#   2. PIECES, for a word longer than `_CMAX`. The word is split on the first delimiter that cuts
+#      it into small enough pieces and that delimiter is put back between them, so the
+#      reconstruction is byte-for-byte. A newline is tried first, since a heredoc body carrying no
+#      space at all is one word to level 1 and its newlines are its structure.
+#
+# NEWLINE IS THE ONE DELIMITER THAT CANNOT BE USED BLIND, AND THE DIFFERENTIAL FOUND IT RATHER THAN
+# THIS COMMENT PREDICTING IT. A newline is an IFS WHITESPACE character, so a RUN of them collapses
+# to one field boundary and cannot be reconstructed. That is verdict-neutral everywhere but one
+# place: `echo a\<newline><newline>git add -A` is a line continuation followed by a SEPARATOR, and
+# collapsing the pair leaves a continuation that swallows the separator, joins `a` to `git`, and
+# turns a blanket stage into an `echo` invocation -- an ALLOW, from a live input, which is exactly
+# the tokenizer-vs-shell divergence class #106's own backslash-newline bypass belonged to. A first
+# draft of this queue split on newlines at level 1 and moved 6 verdicts of 38312 that way. So the
+# newline delimiter is taken only when no backslash stands in front of one, which is checkable in
+# a single pattern match, and a leading newline is restored by hand because a whitespace IFS drops
+# it and a dropped leading separator MERGES two invocations.
+#
+# WHY THE LEVELS ARE BUILT LAZILY, AND NEVER FROM INSIDE A FIELD WALK. A shell function call SAVES
+# AND RESTORES THE POSITIONAL PARAMETERS, and the cost is per STRING in that list, not per byte:
+# measured on this host, 200 calls to a `:` function cost 88 ms with one 100 KB parameter and
+# 3183 ms with 20000 five-byte ones, against an 80 ms instrument floor. A refill helper called once
+# per field is therefore the trap #106 round 3 fell into once already, when a draft made the
+# 5000-word case slower than the thing it replaced. So every loop below that walks `$@` calls
+# NOTHING, and writes the queue with `eval` instead -- `eval` runs in the current context and does
+# not touch `$@` (measured: 156 ms for 8000 evals inside an 8000-element walk, against 47585 ms for
+# 8000 function calls in the same walk).
+#
+# `set -f` and an explicit IFS are load-bearing at every split, not tidiness: without `-f` a field
+# containing `*` or `?` would be PATHNAME-EXPANDED against the caller's working directory.
+
+_CW=512    # the window the scan works in, and the size the queue groups pieces up to
+_CMAX=1024 # a queue entry at or over this is split one level finer before it is scanned
+
+_wordchunk() { # <queue entry at or over _CMAX> : fills _T1.._TN with windows
+  # A TRAILING SPACE IS APPENDED BEFORE THE SPLIT AND NEVER REMOVED. A trailing IFS delimiter
+  # produces no field at all, so without it a word ending in the chosen delimiter would silently
+  # lose that delimiter. The space itself is inert: level 1 hands a word here only when whitespace
+  # or the end of the command follows it, so the word ends in the same place either way, and the
+  # entry is at least _CMAX long so no test that reads an EMPTY operand can see the difference.
+  _wc_w=$1' '
+  _TN=0
+  _TI=1
+  _wc_need=$(( ${#_wc_w} / _CW ))
+  [ "$_wc_need" -lt 2 ] && _wc_need=2
+  _wc_d=''
+  _wc_any=''
+  _wc_lead=''
+  _wc_sv=${IFS-}
+  # NEWLINE FIRST, AND ONLY BEHIND ITS GUARD. A heredoc body that carries no space is one word to
+  # level 1 and every newline in it is a top-level separator, so this is the delimiter that matters
+  # most -- but it is an IFS whitespace character, so a RUN of newlines collapses to one boundary
+  # and a LEADING run is dropped entirely. Collapsing is verdict-neutral except in front of a
+  # backslash, where it converts a continuation-plus-separator into a continuation that eats the
+  # separator; the guard refuses the delimiter outright in that case rather than trying to tell the
+  # two apart. A dropped LEADING newline is never neutral -- it merges two invocations -- so it is
+  # restored by hand. The trailing one is restored by the appended space above.
+  case $_wc_w in
+    *'\'"$_NL"*) ;;
+    *"$_NL"*)
+      IFS=$_NL
+      set -- $_wc_w
+      IFS=$_wc_sv
+      if [ $# -ge "$_wc_need" ]; then
+        _wc_d=$_NL
+        case $_wc_w in "$_NL"*) _wc_lead=$_NL ;; esac
+      fi
+      ;;
+  esac
+  # A delimiter is ACCEPTED when it cuts the entry into enough pieces to average under one window.
+  # If none does, every one of them occurs fewer than (length / _CW) times, so the entry's total
+  # structural density is bounded by the size of `_DELIMS` and the first delimiter present is good
+  # enough; if NONE is present the entry carries no structural character at all, and the scan
+  # crosses it in a single move whatever its length.
+  if [ -z "$_wc_d" ]; then
+    _wc_rest=$_DELIMS
+    while [ -n "$_wc_rest" ]; do
+      _wc_c=${_wc_rest%"${_wc_rest#?}"}
+      _wc_rest=${_wc_rest#?}
+      case $_wc_w in
+        *"$_wc_c"*) ;;
+        *) continue ;;
+      esac
+      [ -n "$_wc_any" ] || _wc_any=$_wc_c
+      IFS=$_wc_c
+      set -- $_wc_w
+      IFS=$_wc_sv
+      if [ $# -ge "$_wc_need" ]; then
+        _wc_d=$_wc_c
+        break
+      fi
+    done
+    if [ -z "$_wc_d" ]; then
+      if [ -z "$_wc_any" ]; then
+        _TN=1
+        _T1=$_wc_w
+        return 0
+      fi
+      _wc_d=$_wc_any
+      IFS=$_wc_d
+      set -- $_wc_w
+      IFS=$_wc_sv
+    fi
+  fi
+  _wc_acc=$_wc_lead
+  _wc_first=1
+  for _wc_p do
+    if [ "$_wc_first" = 1 ]; then
+      _wc_first=0
+      _wc_acc=$_wc_acc$_wc_p
+    else
+      _wc_acc=$_wc_acc$_wc_d$_wc_p # the delimiter belongs BEFORE every piece but the first
+    fi
+    if [ ${#_wc_acc} -ge "$_CW" ]; then
+      _TN=$((_TN + 1))
+      eval "_T$_TN=\$_wc_acc"
+      _wc_acc=''
+    fi
+  done
+  if [ -n "$_wc_acc" ]; then
+    _TN=$((_TN + 1))
+    eval "_T$_TN=\$_wc_acc"
+  fi
+  [ "$_TN" -gt 0 ] || { _TN=1; _T1=$_wc_w; }
+  return 0
+}
+
+_fill() { # append the next window to _sc; return 1 when the command is exhausted
+  while :; do
+    if [ "$_TI" -le "$_TN" ]; then
+      eval "_fl=\$_T$_TI"
+      _TI=$((_TI + 1))
+    elif [ "$_QI" -le "$_QN" ]; then
+      eval "_fl=\$_Q$_QI"
+      _QI=$((_QI + 1))
+      if [ ${#_fl} -ge "$_CMAX" ]; then
+        # Level 2 is built HERE and never from inside the level-1 walk, because `$@` holds every
+        # word of the command while that walk runs and a call would save and restore all of them.
+        _wordchunk "$_fl"
+        continue
+      fi
+    else
+      return 1
+    fi
+    [ -n "$_fl" ] || continue
+    _sc=$_sc$_fl
+    return 0
+  done
+}
+
 _run_words() { # the run is in _run, already cut from _sc
+  # A DEAD INVOCATION READS NO WORDS AT ALL, AND THIS IS THE SECOND HALF OF THE COST FIX. Once the
+  # head word of an invocation is not `git`, nothing later in it can stage, so every word after it
+  # is inert -- and the walk that proves each one inert costs more than everything else on this
+  # path put together. The interpreter this file runs in charges about 16 us PER STATEMENT
+  # (measured on darwin 25.5.0, bash 3.2.57(1) in sh mode: 50000 turns of a bare `while` loop with
+  # one arithmetic assignment, 794 ms, plus 412 ms for a function call, 379 ms for a `case`, 513 ms
+  # for `${#var}`), so cost here is STATEMENT COUNT and not bytes. A heredoc body is the shape that
+  # makes it visible: to this scanner every line of it is an invocation headed by an ordinary word,
+  # so 30000 words of prose were 30000 trips through the flag-and-operand walk to conclude nothing.
+  #
+  # ONLY THE WORD-BOUNDARY STATE SURVIVES, because the comment and redirection arms ask whether a
+  # word is open. The word's CONTENT cannot be read by anything while `_idead` is 1: `_inv_words`
+  # returns on it, `_inv_finish` returns on it, and the flush in `_sep_done` runs BEFORE the
+  # `_inv_reset` that clears it -- so `_w` is consumed while still dead, every time.
+  if [ "$_idead" = 1 ]; then
+    _w=''
+    case $_run in
+      *' ' | *"$_TAB") _has=0 ;;
+      *) _has=1 ;;
+    esac
+    return 0
+  fi
   # A word left OPEN before this run either closes here or absorbs the run's first field --
   # `foo"bar"baz` is one word, and the quoted middle is why the field cannot simply be re-split.
   case $_run in
@@ -593,9 +818,13 @@ _run_words() { # the run is in _run, already cut from _sc
           return 0
         fi
         _w=$_w$_seg
-        _CUR=$_run
-        _cut "$_seg"
-        _run=$_CUR
+        if [ ${#_seg} -lt 64 ]; then
+          _run=${_run#"$_seg"} # one pass over the run, against the ladder's copy per 512 characters
+        else
+          _CUR=$_run
+          _cut "$_seg"
+          _run=$_CUR
+        fi
       fi
       ;;
   esac
@@ -610,11 +839,29 @@ _run_words() { # the run is in _run, already cut from _sc
       _inv_words $_run # every field closed by the run's own trailing whitespace
       ;;
     *)
-      # The last field has no whitespace behind it, so it stays open for whatever follows.
-      _w=${_run##*[$_WS]}
+      # The last field has no whitespace behind it, so it stays open for whatever follows -- which
+      # is also how a word survives a window boundary, since a window ends where a field does.
+      # `${_run##*[$_WS]}` IS QUADRATIC AND THIS IS THE THIRD PLACE IN THIS FILE THAT SENTENCE HAS
+      # BEEN TRUE. A `##` asks for the LONGEST prefix, so the shell tries prefix lengths from the
+      # whole string DOWNWARD and re-runs `*[$_WS]` -- itself a scan -- at each one. When the last
+      # whitespace is at the FRONT of the run, which is exactly where the queue puts it, that is
+      # length^2. It is the density axis's own `run` cell that found it: a 24 KB unbroken word as a
+      # heredoc body measured 40.5 s in `_scan` at 0b354c2 and 39.6 s with the window in place,
+      # because the window fixed the SCAN and this line is not in the scan. Field splitting answers
+      # the same question in one pass, and `$@` is empty on this path (`_scan_go` cleared it), so
+      # the positional list this borrows costs one string per word and no save-and-restore.
       _has=1
       case $_run in
-        *[$_WS]*) _inv_words ${_run%[$_WS]*} ;;
+        *[$_WS]*)
+          IFS=$_WS
+          set -- $_run
+          _nw=$#
+          [ "$_nw" -gt 1 ] && shift $((_nw - 1))
+          _w=$1
+          set --
+          _inv_words ${_run%[$_WS]*}
+          ;;
+        *) _w=$_run ;;
       esac
       ;;
   esac
@@ -637,45 +884,157 @@ _sep_done() {
 }
 
 _scan_go() { # <command string> -> _VERDICT
-  _sc=$1
+  # LEVEL 1 OF THE QUEUE. Built inline rather than in a helper because `$@` holds every word of the
+  # command while this walk runs, and a call here would pay for all of them.
+  #
+  # TWO STATEMENTS PER WORD, AND THE COUNT IS THE WHOLE DESIGN OF THIS LOOP. It turns once per
+  # word of the command whatever the shape, so at ~16 us a statement it is the floor every other
+  # figure sits on: 60000 words of prose cost 1.3 s here at two statements and 2.6 s at four.
+  #
+  # SO EVERY WORD IS PREFIXED WITH ONE SPACE, unconditionally, rather than testing for the first.
+  # A leading space on the whole command is inert -- no word is open at the start, so the run
+  # `_run_words` sees splits into no fields at all -- while the space BETWEEN two words is a word
+  # boundary that must be there. Whitespace RUN LENGTH and tabs collapse to that one space; the
+  # verdict reads neither.
+  #
+  # THE TRAILING RUN IS THE ONE THAT HAS TO BE RESTORED BY HAND, because field splitting drops it
+  # and an unterminated quote at the end of a command makes it VISIBLE: a real shell hands
+  # `git add -A '<spaces>` the operand `<spaces>`, which NARROWS, and the empty operand without it,
+  # which does not. That is a verdict, so it is read from the command before the split.
+  _QN=0
+  _QI=1
+  _TN=0
+  _TI=1
+  case $1 in
+    *[$_WS]) _qacc=$_SP ;;
+    *) _qacc='' ;;
+  esac
+  _qtail=$_qacc
+  _qacc=''
+  IFS=$_WS
+  set -- $1
+  for _ql do
+    _qacc=$_qacc$_SP$_ql
+    if [ ${#_qacc} -ge "$_CW" ]; then
+      _QN=$((_QN + 1))
+      eval "_Q$_QN=\$_qacc"
+      _qacc=''
+    fi
+  done
+  _qacc=$_qacc$_qtail
+  if [ -n "$_qacc" ]; then
+    _QN=$((_QN + 1))
+    eval "_Q$_QN=\$_qacc"
+  fi
+  set -- # from here on every call is free of the positional-parameter save and restore
+
+  _sc=''
+  _eof=0
   _VERDICT=clear
   _w=''
   _has=0
   _redir=0
   _inv_reset
-  # EVERY READ OF `_sc` COSTS A COPY OF WHAT IS LEFT, so the loop is written to make as few of
-  # them per structural character as it can: the emptiness test lives in the dispatch's own `''`
-  # arm rather than in a `while` condition and a second `|| break`, which is two fewer copies per
-  # turn. What survives is one `%%`, one cut, one dispatch and one single-character drop.
   while :; do
+    # TWO CHARACTERS, NOT ONE, AND THE SECOND ONE IS LOAD-BEARING. `&&`, `||`, `;;`, `((`, `))`,
+    # `>>` and the `&` of `2>&1` are each decided by a PAIR, so a window that ended between them
+    # would read one operator as two. Every such pair happens to be inert when split -- two
+    # separators judge one empty invocation, which `_inv_finish` returns from without a verdict --
+    # except `>&`, where the `&` would end the invocation instead of being consumed as part of the
+    # redirection. Keeping two characters in the window while any input remains closes all of them
+    # at once rather than one spelling at a time.
+    #
+    # THE GUARD IS A `case` AND NOT TWO `[`s, AND SO IS EVERY OTHER TEST ON THIS PATH. `case`
+    # measured 379 ms per 50000 turns against 513 ms for `${#var}` and 794 ms for the bare loop
+    # itself, so replacing `[ ${#_sc} -lt 2 ] && [ "$_eof" = 0 ]` with one anchored pattern takes
+    # about 25 us off EVERY turn of the scan.
+    case $_sc in
+      ??*) ;;
+      *)
+        while [ "$_eof" = 0 ]; do
+          _fill || _eof=1
+          case $_sc in ??*) break ;; esac
+        done
+        [ -n "$_sc" ] || break
+        ;;
+    esac
     _run=${_sc%%[$_STRUCT]*}
     if [ -n "$_run" ]; then
-      _cut_sc "$_run"
+      # A SHORT RUN IS DROPPED BY NAME AND A LONG ONE THROUGH THE LADDER, and the split is bought
+      # by both measurements this file already carries. `${s#"$pre"}` costs one pass over the
+      # SUBJECT and is quadratic in the PREFIX, so it is right here, where the subject is one
+      # bounded window; the rung ladder costs a whole copy of the window per 512 characters, so it
+      # is right only for a prefix long enough to make its own quadratic worse -- which happens
+      # only inside an oversized window, the giant-token shape `git commit -a -m "c <200000 y>"`.
+      # Below the cut, this replaces a function call and its loop (six statements) with two.
+      if [ ${#_run} -lt 64 ]; then
+        _sc=${_sc#"$_run"}
+      elif [ "$_run" = "$_sc" ]; then
+        _sc=''
+      else
+        _cut_sc "$_run"
+      fi
       _run_words
       [ "$_VERDICT" = blanket ] && return 0
+      continue
     fi
     case $_sc in
       '') break ;;
       "'"*)
         _sc=${_sc#?}
         _has=1
-        _seg=${_sc%%\'*}
-        _w=$_w$_seg
-        _cut_sc "$_seg"
-        _sc=${_sc#\'}
+        while :; do
+          _seg=${_sc%%\'*}
+          if [ "$_seg" = "$_sc" ]; then
+            _w=$_w$_seg # the closing quote is not in this window
+            _sc=''
+            _fill || break
+            continue
+          fi
+          _w=$_w$_seg
+          if [ ${#_seg} -lt 64 ]; then
+            _sc=${_sc#"$_seg"}
+          else
+            _cut_sc "$_seg"
+          fi
+          _sc=${_sc#\'}
+          break
+        done
         ;;
       '"'*)
         _sc=${_sc#?}
         _has=1
-        while [ -n "$_sc" ]; do
+        # ONE TURN PER QUOTED SEGMENT, NOT TWO. The bulk slice and the character that ENDED it are
+        # taken in the same iteration, because `"a"` -- one token of the quote-dense shape that
+        # crossed the timeout at 12 KB -- otherwise costs a second trip through the refill guard,
+        # the `%%` and the dispatch to conclude that the next character is the closing quote.
+        while :; do
           _seg=${_sc%%[$_META_DQ]*}
           if [ -n "$_seg" ]; then
             _w=$_w$_seg
-            _cut_sc "$_seg"
-            [ -n "$_sc" ] || break
+            if [ ${#_seg} -lt 64 ]; then
+              _sc=${_sc#"$_seg"}
+            elif [ "$_seg" = "$_sc" ]; then
+              _sc=''
+            else
+              _cut_sc "$_seg"
+            fi
           fi
+          # `_seg` stopped at a member of `_META_DQ` or ran the window out, so exactly three cases
+          # remain: the closing quote, the window edge, and a backslash.
           case $_sc in
-            '\'*)
+            '"'*)
+              _sc=${_sc#?} # the closing quote
+              break
+              ;;
+            '')
+              while [ "$_eof" = 0 ]; do
+                _fill || _eof=1
+                case $_sc in ?*) break ;; esac
+              done
+              [ -n "$_sc" ] || break
+              ;;
+            *)
               # The backslash is dropped and the character behind it is inert. Only `\"` and `\\`
               # need taking here: any other escaped character is not in `_META_DQ`, so the next
               # bulk slice absorbs it and the word comes out the same. `\<newline>` is the one
@@ -683,19 +1042,26 @@ _scan_go() { # <command string> -> _VERDICT
               # quotes exactly as it is outside them.
               _sc=${_sc#?}
               case $_sc in
+                '')
+                  while [ "$_eof" = 0 ]; do
+                    _fill || _eof=1 # the escaped character can open the next window
+                    case $_sc in ?*) break ;; esac
+                  done
+                  ;;
+              esac
+              case $_sc in
                 "$_NL"*) _sc=${_sc#?} ;;
                 '"'* | '\'*) _lit1 ;;
               esac
-              ;;
-            *)
-              _sc=${_sc#?} # the closing quote
-              break
               ;;
           esac
         done
         ;;
       '\'*)
         _sc=${_sc#?}
+        if [ -z "$_sc" ] && [ "$_eof" = 0 ]; then
+          _fill || _eof=1 # the escaped character can be the first one of the next window
+        fi
         case $_sc in
           "$_NL"*)
             # A LINE CONTINUATION IS DELETED, NOT ESCAPED, and the difference was a live bypass.
@@ -728,8 +1094,15 @@ _scan_go() { # <command string> -> _VERDICT
           _sc=${_sc#?}
         else
           _sc=${_sc#?}
-          _seg=${_sc%%"$_NL"*}
-          _cut_sc "$_seg"
+          while :; do
+            _seg=${_sc%%"$_NL"*}
+            if [ "$_seg" != "$_sc" ]; then
+              _cut_sc "$_seg"
+              break
+            fi
+            _sc='' # the comment runs past this window
+            _fill || break
+          done
         fi
         ;;
       '>'* | '<'*)
@@ -793,8 +1166,23 @@ _STRUCT="$_NL'\"\\\\;&|()<>#"
 _META_DQ="\"\\\\"
 _WS=" $_TAB"
 _SEP=";&|()$_NL"
+_SP=" "
 _Q64="$_Q8$_Q8$_Q8$_Q8$_Q8$_Q8$_Q8$_Q8"
 _Q512="$_Q64$_Q64$_Q64$_Q64$_Q64$_Q64$_Q64$_Q64"
+
+# THE CANDIDATE WINDOW BOUNDARIES FOR A WORD TOO LONG TO SCAN WHOLE, most useful first. These are
+# not a security list and nothing is decided by membership: a delimiter here only says WHERE the
+# queue may cut, and whichever is chosen is put straight back between the pieces, so the string the
+# scanner sees is byte-for-byte the one the payload carried. `_STRUCT`'s members lead because
+# structural density is the term that makes a window expensive; the six after them bound a window
+# in minified data (JSON, a base64 blob, a long URL) that carries no structural character to cut
+# on. Built by concatenation rather than spelled as one literal, because a string holding a quote,
+# an apostrophe and a backslash at once is exactly the shape #106 already shipped a silent
+# deny-to-allow in. No newline: level 1 has already split on those, so no word can hold one.
+_DELIMS='"'
+_DELIMS=$_DELIMS"'"
+_DELIMS=$_DELIMS'\'
+_DELIMS=$_DELIMS';&|()<>#,:=./-'
 
 _INPUT=''
 while IFS= read -r _line || [ -n "$_line" ]; do
