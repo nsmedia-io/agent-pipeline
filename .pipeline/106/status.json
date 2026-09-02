@@ -251,6 +251,16 @@
       "phase": "4-review",
       "verdict": "delta-dispatched",
       "at": "2026-09-01T16:25:00Z"
+    },
+    {
+      "phase": "4-review",
+      "verdict": "REQUEST_CHANGES",
+      "at": "2026-09-01T16:50:00Z"
+    },
+    {
+      "phase": "4-review",
+      "verdict": "ORCH_RED_COMMIT_BUG_FIXED",
+      "at": "2026-09-01T16:55:00Z"
     }
   ],
   "flags": [
@@ -495,13 +505,28 @@
       "summary": "Fixed backslash-newline phantom operand (POSIX splice) + empty-pathspec twin. Fixed cost to be linear regardless of shape (3 separate quadratics found+fixed: list rebuild, per-word fn-call overhead, unescaper). 100 new assertions, all independently verified red-before/green-after. Residual (multiline >~110KB) filed as #116, not fixed, per owner's scoped-fix choice. DBA's 2 notes closed as tests, no new mechanism invented",
       "summary_note": "orchestrator independently reproduced both key fixes directly against the real hook (backslash-newline: now denies; 5000-word bypass: 0.39s and denies, was 6+s and allowed) before accepting this report",
       "at": "2026-09-01T16:20:00Z"
+    },
+    {
+      "phase": "4-review",
+      "agent": "secops",
+      "verdict": "REQUEST_CHANGES",
+      "summary": "round 3: both round-2 findings closed (12,998-row differential, 0 regressions). NEW HIGH: phantom-operand fix only closed literal '' case; git add -A $VAR (empty/unset var) still bypasses -- the ordinary shape is the dangerous one. NEW: reviewed commit RED (orchestrator's own bug). NEW: #116 understates real reachability ~4.7x, quote density not accounted for",
+      "at": "2026-09-01T19:37:00Z"
+    },
+    {
+      "phase": "4-review",
+      "agent": "qa",
+      "verdict": "REQUEST_CHANGES",
+      "summary": "round 3: both round-2 blockers closed, independently reverified. BLOCKER: reviewed commit RED, same orchestrator bug as SecOps found, caused by orchestrator's own main->worktree sync clobbering Dev's earlier fix -- 2nd occurrence this session. MAJOR: #116 reachability is 8x cheaper than filed; this run's own 79KB peer-review.json sits at 79% of the timeout budget already",
+      "at": "2026-09-01T20:06:00Z"
     }
   ],
   "orchestrator_process_notes": [
     "Round 5's review.json merge was skipped by the orchestrator (four shards existed, dba/devops/secops/qa, but the merge command still only handled three from the round-1-4 era). review.json sat at round-4 content, missing the qa key entirely, from 2026-09-01T06:10 until caught by BA reading the shards directly and flagging it at round 6 (2026-09-01T06:40). Fixed by re-running the merge with all four shards once the gap was found; no findings were lost since BA and the orchestrator both worked from the individual shard files, not the stale merge, in the interim.",
     "Phase 0.5 (deep map) was not run as a separate dispatch. The blast radius for this issue (activeIssueDir, gate-phase-entry.mjs, hooks.json, the ten replicated doc files) was established organically through six rounds of adversarial Phase 2 review, each citing and re-deriving the actual shared code -- arguably more thoroughly than a single map pass would have. Recorded as a deviation, not silently skipped.",
     "Phase 2.5 (design bake-off) was skipped by explicit owner decision. After six rounds of adversarial spec iteration there was one viable design left (R4 as finally stated), not two genuinely different approaches to bake off; running the phase would have meant manufacturing a second sketch that did not need to exist.",
-    "Phase 4 round 1: BA's and DBA's REQUEST_CHANGES prose reads as 'the shipped gate is deterministically inert in production,' citing a suite run at passed=64/83 failed=3/83. The orchestrator independently reproduced this before accepting it: running the exact suite from plugins/pipeline/tests/ (the actual documented invocation, which run.sh's own line 9 cd's into regardless of caller cwd) gives clean 147/0 and 67/0; running the SAME file from the worktree root reproduces BA's exact numbers. DevOps independently diagnosed the same phenomenon as transient CPU contention from 5+ concurrent panelist run.sh processes on one host, not present on isolated CI runners, and got clean repeatable results once contention eased. QA independently ran both cwds, confirmed the split (147/0 vs 83/147), correctly characterized it as a non-hermetic test fixture (fixtures/*.mjs leaks process.cwd() into the synthetic payload) rather than a production defect, and separately, explicitly evaluated and REJECTED 'the gate abstains because #106 and #98 are both in-flight right now' as a finding at all -- it is the R4 design six rounds of Phase 2 review deliberately arrived at (abstain, unconditionally, on 2+ ambiguous candidates with no marker), already recorded in spec.json's open_questions[4]/R4(3)/AC42(i), with the marker's own missing producer already tracked as #111. DBA's realpath-vs-issue-dir-name dedup finding (a worktree and its main checkout both resolving to a directory named '106' inflating the candidate set) is judged a separate, real, NOT-previously-litigated gap and is carried into the delta round on that narrower ground, not on the 'gate is inert' framing. None of this discards BA's or DBA's verdicts -- both remain REQUEST_CHANGES and are owed a real response in the delta round -- but the round is NOT being treated as proof the shipped suite fails as documented, because directly re-running the documented command shows it does not."
+    "Phase 4 round 1: BA's and DBA's REQUEST_CHANGES prose reads as 'the shipped gate is deterministically inert in production,' citing a suite run at passed=64/83 failed=3/83. The orchestrator independently reproduced this before accepting it: running the exact suite from plugins/pipeline/tests/ (the actual documented invocation, which run.sh's own line 9 cd's into regardless of caller cwd) gives clean 147/0 and 67/0; running the SAME file from the worktree root reproduces BA's exact numbers. DevOps independently diagnosed the same phenomenon as transient CPU contention from 5+ concurrent panelist run.sh processes on one host, not present on isolated CI runners, and got clean repeatable results once contention eased. QA independently ran both cwds, confirmed the split (147/0 vs 83/147), correctly characterized it as a non-hermetic test fixture (fixtures/*.mjs leaks process.cwd() into the synthetic payload) rather than a production defect, and separately, explicitly evaluated and REJECTED 'the gate abstains because #106 and #98 are both in-flight right now' as a finding at all -- it is the R4 design six rounds of Phase 2 review deliberately arrived at (abstain, unconditionally, on 2+ ambiguous candidates with no marker), already recorded in spec.json's open_questions[4]/R4(3)/AC42(i), with the marker's own missing producer already tracked as #111. DBA's realpath-vs-issue-dir-name dedup finding (a worktree and its main checkout both resolving to a directory named '106' inflating the candidate set) is judged a separate, real, NOT-previously-litigated gap and is carried into the delta round on that narrower ground, not on the 'gate is inert' framing. None of this discards BA's or DBA's verdicts -- both remain REQUEST_CHANGES and are owed a real response in the delta round -- but the round is NOT being treated as proof the shipped suite fails as documented, because directly re-running the documented command shows it does not.",
+    "Phase 4 round 3 finding by BOTH QA and SecOps: the reviewed commit was RED (test-status-schema-contract.sh, 2 suites). Root cause was entirely the orchestrator's own process, not the gate: the orchestrator wrote a 33-char verdict label ('PAUSED_FOR_OWNER_ROUND_3_DECISION') into status.json BEFORE dispatching Dev for round 3, over the 32-char schema cap. Dev found it as pre-existing red, fixed it in the worktree (commit 6eefeb6), and reported the fix. The orchestrator, working from ITS OWN main-checkout copy of status.json (which still carried the original 33-char string, since Dev's fix was only ever applied in the worktree) then did a routine main-to-worktree sync as part of its own subsequent checkpoint commits, blindly overwriting Dev's fix with the orchestrator's own stale content -- reintroducing the exact bug in commit adce70c, the sha the round-3 delta panel actually reviewed. This is the SECOND time in this run the 32-char cap was violated by the orchestrator's own writes (the first was 7 pre-existing labels found and fixed before Phase 4 round 1). Fixed again (commit 077fa7d on main, c8573b0 on the feature branch) with an explicit diff check between the two copies before re-syncing this time, to confirm nothing else would be clobbered. QA's own suggestion -- a write-time check that refuses an over-cap token before the orchestrator ever commits it, rather than relying on the orchestrator to remember -- is a reasonable process improvement and is being considered as a follow-up issue, separate from #106's own scope."
   ],
   "round_6_flags": [
     {
@@ -555,17 +580,17 @@
       "1": 16380000,
       "2": 12720000,
       "3": 18600000,
-      "4": 11100000,
+      "4": 12900000,
       "2.5": 300000
     },
-    "total_lead_time_ms": 59700000,
+    "total_lead_time_ms": 61500000,
     "unattributed_ms": 600000,
     "unattributed_events": 1,
     "untimed_events": 0,
     "review_rounds": 3,
-    "review_rounds_observed": 2,
-    "review_rounds_recorded_delta": 1,
-    "events_counted": 47,
+    "review_rounds_observed": 3,
+    "review_rounds_recorded_delta": 0,
+    "events_counted": 49,
     "attribution": "exit"
   },
   "effective_config": {
