@@ -213,6 +213,93 @@ function redactAbsolutePaths(value, rootAbs, counter) {
   return walk(value);
 }
 
+// ---------------------------------------------------------------------------
+// CREDENTIAL MATERIAL (#71). Refused HERE, at the archive write, because this is the last
+// moment before the string enters a committed tree.
+//
+// WHY HERE AND NOT ON THE WRITERS. #52 stated a no-secrets rule for status.json's five
+// free-text fields and stated it on the WRITER, in commands/pipeline.md. That is the right
+// document for the orchestrator, and it does not scale: review.json and peer-review.json are
+// both in ARCHIVE_ARTIFACTS, their free-text fields (concerns[].description, concerns[]
+// .location, notes, compliance_flags[].concern, vulnerabilities[].description) are written by
+// five different subagents from five different contracts, and `advisory_notes` is archived
+// while being declared in NO schema at all -- so no per-field annotation could ever have
+// covered it. Same argument redactAbsolutePaths makes twenty lines up, for the same reason:
+// a rule stated on the writers has to be restated for every future artifact, and a rule
+// stated here does not.
+//
+// THE POPULATION IS DERIVED, NOT LISTED. The walk is over the assembled `archive` object,
+// which archiveIssue builds from ARCHIVE_ARTIFACTS. Every field of every archived artifact is
+// therefore in scope by construction -- including fields nobody has written yet -- so a new
+// free-text field is covered the day it appears rather than the day somebody remembers it.
+//
+// THE SHARP CASES ARE THE ERROR-BEARING ONES, exactly as #52 named for status.json's `error`:
+// the natural content of a `location` or of a reproduction-bearing `description` is COPIED
+// MACHINE OUTPUT. A failed psql echoing a DSN, a curl echoing an Authorization header, an
+// .env line quoted from a stack trace. Measured on origin/main before this guard existed:
+// four planted credentials in one review.json archived VERBATIM at exit 0, and the run
+// reported "absolute paths redacted: 1" while doing it -- the redactor rewrote the leading
+// /etc/app.env path in a concerns[].location and left DATABASE_PASSWORD=s3cr3tvalue standing
+// in the same string. Redaction counting a hit is not redaction covering it.
+//
+// WHAT THIS REFUSES, NAMED, because a guardrail whose refused-correct-work is unnamed has not
+// been costed: knowledge/issue-archive/34.json. #34's SecOps shard quotes the planted
+// `pg://u:p4ssw0rdlong@h/db` DSN it used as its OWN non-zero control while measuring this very
+// exposure -- a fake, in a security report, hand-checked twice already (the same string is the
+// single allowlisted hit in test-status-schema-contract.sh's AC-52c). Re-archiving #34 now
+// throws. That is the correct direction: a hand-check, not a silent pass. ALLOW_CREDENTIALS_ENV
+// is how you record having made it, and it is never silent.
+//
+// WHAT IT DOES NOT DO, stated rather than left to be discovered. It matches SHAPES from the
+// class list below, so a secret that looks like prose ("the password is hunter2") passes it,
+// and so does a provider token in a format nobody has enumerated. It is a floor under the
+// writer's own judgement, not a replacement for it -- which is why the rule in
+// commands/pipeline.md and the field notes on the review schemas stay, and say so.
+//
+// ONE TABLE, TWO CONSUMERS, SEAM ASSERTED. test-status-schema-contract.sh's AC-52c carries its
+// own copy of this class list and drives it over the committed corpus. The two are kept in
+// step by an assertion over the class NAMES in both sources (test-archive-credential-guard.sh),
+// not by sharing an import: AC-52c re-derives the classifier independently, which is what makes
+// it an oracle rather than a restatement, and a shared import would have both go quiet together.
+const CREDENTIAL_CLASSES = [
+  ["aws_akid",     /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/],
+  ["github_pat",   /\bgh[pousr]_[A-Za-z0-9]{36,}\b/],
+  ["slack_token",  /\bxox[abprs]-[A-Za-z0-9-]{10,}\b/],
+  ["sk_key",       /\bsk-(?:ant-)?[A-Za-z0-9_-]{16,}\b/],
+  ["bearer",       /\bBearer\s+[A-Za-z0-9._~+/-]{16,}={0,2}/],
+  ["jwt",          /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/],
+  ["pem_private",  /-----BEGIN(?: [A-Z]+)* PRIVATE KEY-----/],
+  ["db_url_creds", /\b(?:pg|postgres|postgresql|mysql|mongodb(?:\+srv)?|redis|amqp):\/\/[^\s:/@]+:[^\s@]+@/],
+  ["env_line",     /\b[A-Z][A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL)[A-Z0-9_]*=[^\s"']+/],
+  ["assignment",   /\b(?:api[_-]?key|apikey|secret|password|passwd|access[_-]?key|auth[_-]?token)\b\s*[=:]\s*["']?[A-Za-z0-9._\-\/+]{12,}/i],
+  // Mixed-case AND a digit are both required, which is what keeps this off the git SHAs this
+  // corpus is largely made of: hex is single-case. Widen the character class and every
+  // reviewed_commit / merge_base / qa_contract_sha in the archive becomes a refusal.
+  ["high_entropy", /\b(?=[A-Za-z0-9+/]*[a-z])(?=[A-Za-z0-9+/]*[A-Z])(?=[A-Za-z0-9+/]*[0-9])[A-Za-z0-9+/]{40,}={0,2}\b/],
+];
+const ALLOW_CREDENTIALS_ENV = "PIPELINE_ARCHIVE_ALLOW_CREDENTIAL_SHAPES";
+
+// Walks any JSON value and reports every credential-shaped string in it, by json path and
+// class. KEYS ARE WALKED TOO: a credential pasted as an object key reaches the same tree.
+// `scanned` is returned and PRINTED by the caller on the clean path, so "the walk found
+// nothing" and "the walk never ran" are different outputs rather than the same silence.
+export function findCredentialMaterial(value) {
+  const hits = [];
+  let scanned = 0;
+  const walk = (v, p) => {
+    if (typeof v === "string") {
+      scanned++;
+      for (const [name, re] of CREDENTIAL_CLASSES) if (re.test(v)) hits.push({ path: p || "<root>", class: name });
+      return;
+    }
+    if (Array.isArray(v)) return v.forEach((x, i) => walk(x, `${p}[${i}]`));
+    if (v && typeof v === "object")
+      return Object.entries(v).forEach(([k, x]) => { walk(k, `${p}.<key>`); walk(x, `${p}.${k}`); });
+  };
+  walk(value, "");
+  return { hits, scanned };
+}
+
 // Key order is not a difference. Both copies are written by JSON.stringify from the same
 // authors, but a re-serialized artifact can legitimately reorder keys, and a staleness check
 // that HALTS archival must not halt on that.
@@ -297,11 +384,45 @@ export function archiveIssue({ root, issue, from }) {
 
   const counter = { count: 0 };
   const redacted = redactAbsolutePaths(archive, rootAbs, counter);
+
+  // REFUSE CREDENTIAL MATERIAL before writing anything, and scan the REDACTED document rather
+  // than the raw one: redaction sits between the artifact and the file, so the redacted copy is
+  // the bytes that actually land on disk. Scanning the raw copy would report on text the write
+  // never contains, which is a refusal the operator cannot act on.
+  //
+  // No early return and no `continue` on this path: the scan runs on every archive, and its
+  // result is reported on the clean path too (see cmdArchive), so a walk that inspected nothing
+  // is distinguishable in the output from a walk that inspected 3000 strings and found nothing.
+  const { hits, scanned } = findCredentialMaterial(redacted);
+  if (hits.length > 0) {
+    const detail = hits.map((h) => `${h.path} [${h.class}]`).join("\n    ");
+    if (!process.env[ALLOW_CREDENTIALS_ENV]) {
+      throw new Error(
+        `archive refused: credential-shaped material in the artifacts for #${issue}.\n` +
+        `  This file is COMMITTED. A fix-forward commit does not remove a secret from history,\n` +
+        `  so redact it in the source artifact under ${fromDir} and archive again -- and if it\n` +
+        `  already reached a commit, AMEND that commit rather than fixing forward.\n` +
+        `    ${detail}\n` +
+        `  If a hit is a FAKE you hand-checked (a planted DSN quoted in a security report is the\n` +
+        `  case that exists), set ${ALLOW_CREDENTIALS_ENV}=1 -- and say in the run record that ` +
+        `you did.`,
+      );
+    }
+    // Overridden, never silent, on the same principle as the staleness override above: stderr,
+    // and it names every hit, so the override cannot be exercised without the hits being read.
+    console.error(
+      `Warning: archiving CREDENTIAL-SHAPED material (${ALLOW_CREDENTIALS_ENV} is set).\n    ${detail}`,
+    );
+  }
+
   const outDir = join(rootAbs, "knowledge", "issue-archive");
   mkdirSync(outDir, { recursive: true });
   const outPath = join(outDir, `${issue}.json`);
   writeFileSync(outPath, JSON.stringify(redacted, null, 2) + "\n"); // idempotent overwrite
-  return { outPath, found, redactions: counter.count, stalenessChecked: checked, stale };
+  return {
+    outPath, found, redactions: counter.count, stalenessChecked: checked, stale,
+    stringsScanned: scanned, credentialHits: hits.length,
+  };
 }
 
 function cmdArchive(args) {
@@ -309,8 +430,15 @@ function cmdArchive(args) {
   if (issue === true || issue === undefined) fail("--archive-issue requires an issue number");
   if (typeof args.from !== "string") fail("--archive-issue requires --from <artifact-dir>");
   try {
-    const { outPath, found, redactions } = archiveIssue({ root: rootDir(args), issue, from: args.from });
-    console.log(`Archived issue #${issue} -> ${outPath}\n  artifacts: ${found.join(", ")}\n  absolute paths redacted: ${redactions}`);
+    const { outPath, found, redactions, stringsScanned, credentialHits } =
+      archiveIssue({ root: rootDir(args), issue, from: args.from });
+    // The credential line is printed on the CLEAN path too, with the denominator. "0 hits" over
+    // 0 strings and "0 hits" over 3000 are different results, and a scan that has never reported
+    // its population is indistinguishable from one that did not run.
+    console.log(
+      `Archived issue #${issue} -> ${outPath}\n  artifacts: ${found.join(", ")}\n` +
+      `  absolute paths redacted: ${redactions}\n` +
+      `  credential-shaped strings: ${credentialHits} (of ${stringsScanned} strings scanned)`);
   } catch (e) { fail(e.message); }
 }
 

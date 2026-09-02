@@ -43,13 +43,18 @@ function main() {
       : join(resolve(root), ".pipeline", String(issue));
 
   try {
-    const { outPath, found, redactions } = archiveIssue({ root, issue, from });
+    const { outPath, found, redactions, stringsScanned, credentialHits } =
+      archiveIssue({ root, issue, from });
     console.log(`Archived issue #${issue} -> ${outPath}`);
     console.log(`  artifacts: ${found.join(", ")}`);
     // The archive is a committed file, so archiveIssue rewrites absolute paths on the way in.
     // Counted and printed rather than done in silence: a redaction nobody can see is one
     // nobody notices stopping, and the count is the operator's cue to check what it caught.
     console.log(`  absolute paths redacted: ${redactions}`);
+    // #71's credential scan, reported WITH ITS DENOMINATOR and on the clean path too: a scan
+    // that never says how much it walked is indistinguishable from one that did not run. This
+    // line is byte-identical to knowledge-store.mjs's, which the re-dispatch contract requires.
+    console.log(`  credential-shaped strings: ${credentialHits} (of ${stringsScanned} strings scanned)`);
   } catch (e) {
     console.error(`Error: ${e.message}`);
     process.exit(1);
