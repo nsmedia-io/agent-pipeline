@@ -152,4 +152,184 @@ hook "{\"agent_type\":\"librarian\",\"cwd\":\"$TEMP_PROJECT\",\"active_issue\":\
 assert_eq "an agent with no artifact written yet exits 0" "$RC" "0"
 assert_eq "an agent with no artifact written yet emits nothing" "$OUT" ""
 
+suite "validate-pipeline-artifact: a fail-open path SAYS it failed open (#66 property 2)"
+
+# THE DEFECT, measured on the shipped hook at 856a5d0 before this change: an agent_type with no
+# AGENT_RULES entry and an agent whose artifacts are genuinely CLEAN both produced 0 bytes of
+# stdout and exit 0 -- byte-identical, so "I never checked" and "I checked and it was fine" were
+# the same observation. stdout is asserted UNCHANGED here (it is the hook's decision channel and
+# must stay pure JSON or nothing); the discrimination lives on stderr.
+printf '%s' "$VALID_REPORT" > "$TEMP_ISSUE_DIR/impl-report.json"
+hook "$PAYLOAD_DEV"
+CLEAN_OUT="$OUT"; CLEAN_ERR="$ERR"
+assert_eq "a clean run still writes nothing to stdout" "$CLEAN_OUT" ""
+assert_contains "a clean run reports verdict=checked on stderr" "$CLEAN_ERR" "verdict=checked"
+assert_contains "and names the issue dir it checked" "$CLEAN_ERR" "issue=$ISSUE"
+
+hook "{\"agent_type\":\"art-director\",\"cwd\":\"$TEMP_PROJECT\",\"active_issue\":\"$ISSUE\"}"
+assert_eq "an unregistered agent still writes nothing to stdout" "$OUT" ""
+assert_contains "an unregistered agent reports verdict=no-rules on stderr" "$ERR" "verdict=no-rules"
+# The whole point: the two zero-failure cases must not be the same bytes.
+assert_eq "the lookup miss and the clean pass are DISTINGUISHABLE" \
+  "$([[ "$CLEAN_OUT$CLEAN_ERR" != "$OUT$ERR" ]] && echo distinguishable || echo identical)" "distinguishable"
+
+# GRADED, not merely reported: a shipped agent that owns no artifact is a different event from a
+# name nobody registered. Deriving that from the shipped agent list is #66 property 3's
+# configuration-not-history half.
+assert_contains "a shipped artifact-less agent is graded as such" "$ERR" "owns no schema-validated artifact"
+hook "{\"agent_type\":\"wizard\",\"cwd\":\"$TEMP_PROJECT\",\"active_issue\":\"$ISSUE\"}"
+assert_contains "an unknown name is graded differently" "$ERR" "is not a shipped pipeline agent"
+
+# THE SILENCE THAT MUST SURVIVE. A session that owns no .pipeline at all is the genuinely ad-hoc
+# case the fail-open exists for, and it must not be taxed a line per subagent stop. This is the
+# non-zero control for the announcement: the same agent_type that announced above says nothing
+# here, so the line is a signal and not an unconditional print.
+new_tmpdir || exit 90
+ADHOC="$NEW_TMPDIR"
+ADHOC_ERR=$(printf '{"agent_type":"secops","cwd":"%s"}' "$ADHOC" \
+  | ( cd "$ADHOC" && CLAUDE_PROJECT_DIR="$ADHOC" node "$VALIDATOR" ) 2>&1 >/dev/null)
+assert_eq "an ad-hoc session with no .pipeline announces NOTHING" "$ADHOC_ERR" ""
+
+suite "validate-pipeline-artifact: an unnamable run dir is checked, not skipped (#115)"
+
+# ISSUE_DIR_RE admits only <number> and exp-<slug>. ba.md duty 8 sanctions no third naming path,
+# so `gh issue create` failing outside EXPERIMENT_MODE (tracker down, auth expired, offline) left
+# BA improvising a name that silently opted the whole run out of every check issueDirs() feeds.
+# Measured before this change: this exact fixture emitted 1180 bytes under `.pipeline/9001` and
+# 0 bytes under `.pipeline/tracker-unreachable-20260902`. The name was the only difference.
+new_tmpdir || exit 90
+ORPHAN_ROOT="$NEW_TMPDIR"
+ORPHAN_DIR="$ORPHAN_ROOT/.pipeline/tracker-unreachable-20260902"
+mkdir -p "$ORPHAN_DIR"
+RUN_RECORD='{"current_phase":"2-review","started_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T00:00:00Z","branch":"b","events":[]}'
+printf '%s' "$RUN_RECORD" > "$ORPHAN_DIR/status.json"
+printf '%s' '{"verdict":"NOT_A_VERDICT"}' > "$ORPHAN_DIR/peer-review.secops.json"
+
+orphan_hook() {
+  local outf="$ORPHAN_ROOT/out.txt" errf="$ORPHAN_ROOT/err.txt"
+  printf '{"agent_type":"pipeline:secops","cwd":"%s"}' "$ORPHAN_ROOT" \
+    | ( cd "$ORPHAN_ROOT" && CLAUDE_PROJECT_DIR="$ORPHAN_ROOT" node "$VALIDATOR" ) \
+      >"$outf" 2>"$errf"
+  RC=$?
+  OUT=$(cat "$outf")
+  ERR=$(cat "$errf")
+}
+
+orphan_hook
+assert_eq "an unnamable run dir still exits 0" "$RC" "0"
+assert_contains "its defective artifact NOW blocks (was silent)" "$OUT" '"decision":"block"'
+assert_contains "the block names the artifact" "$OUT" "peer-review.secops.json"
+assert_contains "stderr reports verdict=unnamed-run" "$ERR" "verdict=unnamed-run"
+assert_contains "and names the directory that could not be named" "$ERR" "tracker-unreachable-20260902"
+
+# NON-ZERO CONTROL, the other direction: the same unnamable dir with a VALID artifact must pass.
+# Without this the block above could be an unconditional refusal of any unnamed dir.
+printf '%s' '{"verdict":"APPROVE","reviewed_at":"2026-01-01T00:00:00Z","concerns":[],"notes":"n"}' \
+  > "$ORPHAN_DIR/peer-review.secops.json"
+orphan_hook
+assert_eq "a VALID artifact in an unnamable dir does NOT block" "$OUT" ""
+assert_contains "but the naming gap is still reported" "$ERR" "verdict=unnamed-run"
+printf '%s' '{"verdict":"NOT_A_VERDICT"}' > "$ORPHAN_DIR/peer-review.secops.json"
+
+# A NON-RUN sibling is not adopted. `_archived` is a real name in this repo's own .pipeline.
+# NOTE ON ORDERING: every case below only ever ADDS a fixture or overwrites a file in place.
+# Nothing here removes a directory, deliberately -- harness.sh owns the single guarded rm -rf in
+# these suites, and test-harness.sh refuses a hand-rolled one (a path from a failed mktemp is
+# set-and-EMPTY, which `set -u` does not catch, so `rm -rf "$dir"/...` reaches the filesystem
+# root). So the "a named dir wins" case is stated LAST, where it needs no teardown.
+mkdir -p "$ORPHAN_ROOT/.pipeline/_archived"
+printf '%s' '{"x":1}' > "$ORPHAN_ROOT/.pipeline/_archived/status.json"
+orphan_hook
+assert_contains "a status.json with no phase is not mistaken for a run" "$ERR" "tracker-unreachable-20260902"
+assert_contains "so the real orphan is still the one checked" "$OUT" '"decision":"block"'
+
+# A current_phase that IS a string but is not phase-SHAPED, which is the case that makes the
+# status-schema pattern clause load-bearing rather than dead weight.
+printf '%s' '{"current_phase":"archived"}' > "$ORPHAN_ROOT/.pipeline/_archived/status.json"
+orphan_hook
+assert_contains "a non-phase-shaped current_phase is not a run either" "$ERR" "tracker-unreachable-20260902"
+assert_contains "so the real orphan is STILL the one checked" "$OUT" '"decision":"block"'
+
+# TWO unnamable runs: abstain rather than guess, and say so. Same rule as activeIssueDir's mtime
+# tie -- two candidates are the absence of a signal, not a weaker one.
+printf '%s' "$RUN_RECORD" > "$ORPHAN_ROOT/.pipeline/_archived/status.json"
+orphan_hook
+assert_eq "two unnamable runs block nothing (fail open)" "$OUT" ""
+assert_contains "and the abstention is named" "$ERR" "verdict=unnamed-run-ambiguous"
+assert_contains "naming both candidates" "$ERR" "_archived"
+
+# WHICH RUN WINS. The rule is the validator's existing one -- the newest status.json -- so both
+# directions are asserted, not only the one that flatters the change. Mtimes are set with an
+# EXPLICIT `touch -t` rather than by write order: two files written microseconds apart do not
+# reliably differ on Linux's coarser clock, and leaving the ordering to the host is #27 (green on
+# APFS, red as a group on ubuntu-latest, at a fixed commit).
+# Reset _archived to a NON-run first: the ambiguity case above left it holding a run record, and
+# with two unnamable candidates the uniqueness rule refuses to pick either -- which would make the
+# cases below pass for the wrong reason.
+printf '%s' '{"x":1}' > "$ORPHAN_ROOT/.pipeline/_archived/status.json"
+mkdir -p "$ORPHAN_ROOT/.pipeline/777"
+printf '%s' "$RUN_RECORD" > "$ORPHAN_ROOT/.pipeline/777/status.json"
+touch -t 202701010000 "$ORPHAN_ROOT/.pipeline/777/status.json"          # named is NEWER
+touch -t 202601010000 "$ORPHAN_DIR/status.json"
+orphan_hook
+assert_contains "a NEWER named issue dir wins over the unnamable ones" "$ERR" "issue=777"
+assert_eq "so the unnamable dir's defect does not block" "$OUT" ""
+
+# The realistic adopting-project shape, and the one a last-resort-only fallback got WRONG: a
+# finished numeric run from last month, plus today's unnamable one. Measured before this rule:
+# 0 bytes on a fixture carrying real violations, because the stale named dir masked today's run.
+touch -t 202601010000 "$ORPHAN_ROOT/.pipeline/777/status.json"          # named is now STALE
+touch -t 202701010000 "$ORPHAN_DIR/status.json"                        # today's run is NEWER
+orphan_hook
+assert_contains "a NEWER unnamable run is no longer masked by a stale named one" "$ERR" "issue=tracker-unreachable-20260902"
+assert_contains "and its defect is visible at last" "$OUT" '"decision":"block"'
+
+# An EXPLICIT marker is never overridden, however new the unnamable dir is.
+MARKED_ERR=$(printf '{"agent_type":"pipeline:secops","cwd":"%s","active_issue":"777"}' "$ORPHAN_ROOT" \
+  | ( cd "$ORPHAN_ROOT" && CLAUDE_PROJECT_DIR="$ORPHAN_ROOT" node "$VALIDATOR" ) 2>&1 >/dev/null)
+assert_contains "an explicit active_issue marker is never overridden" "$MARKED_ERR" "issue=777"
+
+suite "validate-pipeline-artifact: every SHIPPED agent is classified (#66 property 3)"
+
+# THE CHECK THAT WOULD HAVE REDDENED ON DAY ONE. Nothing in this repo noticed that the validator
+# had been inert since its first release commit; detecting it took a 353,907-line cross-machine
+# transcript census. The reason is that liveness was only ever derivable from HISTORY -- what had
+# been validated -- and inferring what SHOULD run from what HAS run makes an inert gate look like
+# a smaller working one.
+#
+# So this derives the expectation from CONFIGURATION instead: the `name:` frontmatter of every
+# agents/*.md the plugin ships. Each one must be either registered in AGENT_RULES or declared
+# artifact-less. Adding an agent file without deciding which reddens here, as does deleting one,
+# as does a namespaced dispatch resolving differently from a bare one.
+# Paths arrive as argv, NOT interpolated into the script body: nesting shell quoting inside a
+# node -e string is a second escaping layer under the thing being measured, and a path that
+# happened to contain a quote or a space would corrupt the program rather than the result.
+MANIFEST=$(node -e '
+const [scriptsDir, agentsDir] = process.argv.slice(1);
+import("file://" + scriptsDir + "/validate-pipeline-artifact.mjs").then(async (m) => {
+  const fs = await import("node:fs");
+  const path = await import("node:path");
+  const shipped = fs.readdirSync(agentsDir)
+    .filter((f) => f.endsWith(".md"))
+    .map((f) => {
+      const head = fs.readFileSync(path.join(agentsDir, f), "utf8").split("\n").slice(0, 10);
+      const line = head.find((l) => l.startsWith("name:"));
+      return line ? line.slice(5).trim() : "";
+    })
+    .filter(Boolean)
+    .sort();
+  const classified = [...new Set([...m.registeredAgents(), ...m.ARTIFACTLESS_AGENTS])].sort();
+  const missing = shipped.filter((a) => !classified.includes(a));
+  const extra = classified.filter((a) => !shipped.includes(a));
+  // Every shipped agent must also resolve identically bare and plugin-namespaced.
+  const drift = shipped.filter((a) =>
+    m.checkArtifacts(a, {}, Date.now(), []).verdict !== m.checkArtifacts("pipeline:" + a, {}, Date.now(), []).verdict);
+  process.stdout.write(JSON.stringify({ shipped: shipped.length, missing, extra, drift }));
+});
+' "$SCRIPTS_DIR" "$PLUGIN_ROOT/agents" 2>&1)
+assert_contains "the manifest check ran and enumerated the shipped agents" "$MANIFEST" '"shipped":9'
+assert_contains "every shipped agent is registered or declared artifact-less" "$MANIFEST" '"missing":[]'
+assert_contains "and nothing is classified that the plugin does not ship" "$MANIFEST" '"extra":[]'
+assert_contains "bare and plugin-namespaced dispatch agree for every shipped agent" "$MANIFEST" '"drift":[]'
+
 finish

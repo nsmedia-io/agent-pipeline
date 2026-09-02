@@ -27,7 +27,17 @@ VALIDATOR="$PLUGIN_ROOT/scripts/validate-pipeline-artifact.mjs"
 [[ -f "$VALIDATOR" ]] || exit 0
 
 # Pass the project dir explicitly so the validator locates the user's .pipeline/ regardless of cwd.
-OUT=$(printf '%s' "$INPUT" | CLAUDE_PROJECT_DIR="$PROJECT_DIR" node "$VALIDATOR" 2>/dev/null) || exit 0
+#
+# STDERR IS NOT DISCARDED, and that is the fix rather than an oversight (#66 property 2). This
+# used to end `2>/dev/null`, which threw away the only channel the validator has for saying what
+# it DID. With it discarded, "no rules matched this agent" and "this agent's artifacts are valid"
+# reached the operator as the same thing -- 0 bytes of stdout and exit 0 -- and a gate that has
+# never fired was indistinguishable from a gate that has never had cause to. Only stdout carries
+# the decision, so letting stderr through cannot corrupt the JSON contract below; and the
+# validator writes NOTHING at all in a project with no .pipeline dir, so an ad-hoc session pays
+# no line. A validator CRASH now also surfaces its trace here instead of vanishing, which is the
+# same trade in the same direction: still exit 0, still fail open, but no longer in silence.
+OUT=$(printf '%s' "$INPUT" | CLAUDE_PROJECT_DIR="$PROJECT_DIR" node "$VALIDATOR") || exit 0
 
 # A non-empty payload is the decision:block JSON; pass it through to Claude Code.
 [[ -n "$OUT" ]] && printf '%s' "$OUT"
