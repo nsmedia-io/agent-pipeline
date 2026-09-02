@@ -295,6 +295,44 @@ node -e '
 stop "$J"
 assert_eq "E2: a 48h-stale unnamable run is not this stop's owner, so it blocks nothing" "$(blocked)" "no"
 
+# E3 the SOLE unnamable run, undatable. Counted as a candidate (E4 needs that) and never the
+# owner, which is the same two-sided ruling section C asserts for a named run.
+node -e '
+  const fs = require("fs");
+  fs.writeFileSync(process.argv[1], JSON.stringify({
+    current_phase: "2-review", started_at: "2026-01-01T00:00:00Z",
+    updated_at: "not-a-date", branch: "b", events: [],
+  }));' "$J/.pipeline/tracker-unreachable-20260902/status.json"
+stop "$J"
+assert_eq "E3: an UNDATABLE unnamable run is never the resolved owner either" "$(blocked)" "no"
+
+# E4 and it still COUNTS: an undatable unnamable run beside an in-flight one is two candidates,
+# so neither is adopted. Without the counting half, the in-flight one would be adopted as the
+# sole orphan and a stop would be blocked on a guess.
+mkdir -p "$J/.pipeline/tracker-unreachable-20260901"
+node -e '
+  const fs = require("fs");
+  fs.writeFileSync(process.argv[1], JSON.stringify({
+    current_phase: "2-review", started_at: "2026-09-01T00:00:00Z",
+    updated_at: new Date(Date.now() - 60000).toISOString(), branch: "b", events: [],
+  }));' "$J/.pipeline/tracker-unreachable-20260901/status.json"
+mkinvalid "$J/.pipeline/tracker-unreachable-20260901"
+stop "$J"
+assert_eq "E4: an undatable unnamable run still COUNTS, so two of them abstain" "$(blocked)" "no"
+assert_contains "E4: and the abstention names both" "$ERR" "unnamed-run-ambiguous"
+
+# E4 CONTROL: remove the undatable one from the candidate set by CONCLUDING it, and the in-flight
+# orphan is the sole candidate again -- so E4's silence is the counting rule and not a dead path.
+node -e '
+  const fs = require("fs");
+  fs.writeFileSync(process.argv[1], JSON.stringify({
+    current_phase: "2-review", started_at: "2026-01-01T00:00:00Z",
+    updated_at: "not-a-date", branch: "b", events: [], final_verdict: "APPROVE",
+  }));' "$J/.pipeline/tracker-unreachable-20260902/status.json"
+stop "$J"
+assert_eq "E4 CONTROL: concluding it narrows the set to one and the deny returns" "$(blocked)" "yes"
+assert_eq "E4 CONTROL: scoped to the in-flight unnamable run" "$(scoped)" "tracker-unreachable-20260901"
+
 # =============================================================================================
 suite "#109 F: the sentinel that asks the resolver 'with no marker' is declared ONCE"
 # =============================================================================================
