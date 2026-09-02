@@ -441,7 +441,9 @@ suite "AC27: the two suites that already own this hook are UNCHANGED consumers"
 # 9 labels added, 2 "removed", and both of those two are the SAME population-report lines carrying
 # their own count in the label (95 -> 101 mtime stamps, 81 -> 84 exit codes), re-baselined by the
 # three extra lint runs. 0 real removals, 0 renames. THIS COUNT IS RE-DERIVED FROM A RUN, never
-# incremented by hand -- measured passed=267 failed=0 at the commit that adds it.
+# incremented by hand -- measured passed=267 failed=0 at the commit that adds it, and re-derived
+# to passed=272 failed=0 at #91, which added five cells (a premise, the tie, its one-millisecond
+# twin either side, and a reported measurement) and removed none.
 #
 # AND THE IRONY, recorded as a pointer rather than acted on here: this cell is a bare exact-count
 # pin over another suite's whole population, which is the class #33 retired elsewhere in Lane 1.
@@ -462,7 +464,7 @@ run_suite_counts test-stop-hook.sh
 assert_eq "test-stop-hook.sh still passes exactly its 18 pre-existing assertions" "${SUITE_PASSED:-<none>}" "18"
 assert_eq "  with none failing" "${SUITE_FAILED:-<none>}" "0"
 run_suite_counts test-voice-lint.sh
-assert_eq "test-voice-lint.sh still passes exactly its 267 assertions (41 pre-existing + 7 from #27 + 26 from #53, less 3 retired by #53, + 186 from #56's authored contract, + 3 from #56's Phase-4 gap closure, + 7 from #56's Phase-4 residual (ix) pin -- see the note above)" "${SUITE_PASSED:-<none>}" "267"
+assert_eq "test-voice-lint.sh still passes exactly its 272 assertions (41 pre-existing + 7 from #27 + 26 from #53, less 3 retired by #53, + 186 from #56's authored contract, + 3 from #56's Phase-4 gap closure, + 7 from #56's Phase-4 residual (ix) pin, + 5 from #91's turn-boundary tie block -- see the note above)" "${SUITE_PASSED:-<none>}" "272"
 assert_eq "  with none failing" "${SUITE_FAILED:-<none>}" "0"
 
 # ---------------------------------------------------------------------------

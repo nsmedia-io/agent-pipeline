@@ -154,8 +154,14 @@
  *          31 observed carry BOTH origin.kind 'peer' AND isMeta true. sessionId is NOT a third
  *          guard, and that is measured rather than assumed: all 31 are stamped with the
  *          RECEIVING session's own id, so an equality test cannot see them. DIRECTION: none left
- *          open (excluded twice over, by origin.kind and by isMeta independently); no residual
- *          EXPIRY applies.
+ *          open by a drift in EITHER label alone, because the two exclusions are independent.
+ *          WHAT IS NOT CLOSED, and this sentence is corrected at #91 because the line it replaces
+ *          read "no residual EXPIRY applies" and that OVERCLAIMED: isMeta is a vendor-controlled
+ *          label exactly as origin.kind is, so this class sits INSIDE (iv)'s already-declared
+ *          scope rather than outside it. Two independent guards make the class robust to either
+ *          label drifting alone; they do not take it out of the vendor's hands. EXPIRY: (iv)'s,
+ *          and no separate one -- re-run the origin.kind census over a fresh corpus, and check
+ *          isMeta on the peer class in the same pass.
  *   (vi)   On clients predating the origin field the predicate finds no human turn, the boundary
  *          is unresolvable, and the lint fires unconditionally, which is today's behaviour.
  *          Measured: 8 of 84 transcripts (9.5%) contain no origin.kind 'human' record at all,
@@ -375,6 +381,24 @@ function readJson(file) {
  * divergence table compares (the two derivations return different types, so comparing their
  * return values directly would be vacuous). Precedence, the strict-mtime winner and the tie
  * abstention are byte-for-byte what they were.
+ *
+ * THE WRAPPER IS BEHAVIOUR-PRESERVING ONLY BECAUSE THIS EXPORT HAS ONE PRODUCTION IMPORTER, and
+ * a second one expires that premise (#91). This used to return a bare `null` where it now
+ * returns `{ status, dir, mtimeMs }`, and the two are NOT interchangeable in general, because
+ * `status` may itself be null: the fallback branch hands back `readJson(newest)`, which is null
+ * when the newest record is unparseable. So `resolveStatus(...) === null` is true on the FOUR
+ * no-record paths (no .pipeline dir, an unreadable .pipeline dir, an mtime tie, no candidate at
+ * all) and FALSE on an unparseable record, while "there is no usable phase" is true on all five.
+ * run() is written for exactly that -- it reads `resolved?.status?.current_phase` and treats a
+ * falsy phase as no phase -- so the difference is invisible TO IT and to nothing else. A new
+ * importer writing `if (!resolveStatus(...)) return;` silently treats a record it COULD NOT READ
+ * as a record it read, which is a fail-open path that looks like a guard. Test the field you
+ * mean: check `.status`, or `.status?.current_phase`, never the wrapper's truthiness.
+ *
+ * THE MTIME TIE HERE ABSTAINS AND run()'s TURN-BOUNDARY TIE REFUSES, i.e. the two resolve
+ * OPPOSITE WAYS, deliberately. The ruling and its reasoning sit at the comparison in run(); this
+ * pointer exists because #91 was filed by a reader who found the asymmetry and no statement of
+ * it. AC9(e) in tests/test-voice-lint.sh pins this half, the #91 cells pin the other.
  */
 export function resolveStatus(projectDir, envIssue) {
   const base = path.join(projectDir, ".pipeline");
@@ -628,6 +652,31 @@ export function run(payload, projectDir, scriptDir = SCRIPT_DIR) {
   // it is downstream of the two unusable-transcript returns above, so no input that is silent
   // today acquires a new refusal. A null boundary skips the block entirely: an unresolvable
   // boundary can never silence a refusal this code would otherwise have produced.
+  //
+  // THE TIE IS RULED ON, AND IT RESOLVES THE OPPOSITE WAY FROM resolveStatus's MTIME TIE. The
+  // asymmetry is deliberate and #91 filed it because nothing here said so. THE TWO ARE DIFFERENT
+  // QUESTIONS, which is why matching them would be the mistake. resolveStatus ties BETWEEN TWO
+  // CANDIDATE RECORDS, where picking either means picking by readdirSync order -- hash order on
+  // ext4, insertion order on APFS (#27) -- so it abstains rather than let the filesystem decide
+  // whose run gets voice-checked. This compares ONE record against ONE boundary: there is no
+  // second candidate and nothing arbitrary to refuse, and equality means the record was touched
+  // at the instant the turn began. So the turn window is HALF-OPEN, [humanTurnMs, now], and a
+  // record dated exactly at the boundary is IN the turn.
+  //
+  // WHY STRICT `<` AND NOT `<=`, in this file's own terms: this comparison is the ONLY new
+  // suppressor #56 added, and the governing direction above says this change must never be the
+  // reason for silence. `<=` would make an exactly-tied record read stale and silence a refusal
+  // the pre-#56 code produced, on an input whose ordering is not established. resolveStatus's
+  // abstention is not the counter-example it looks like: it predates #56 and is byte-for-byte
+  // what it was, so its silence is not this change's silence.
+  //
+  // REACHABILITY, MEASURED, because a direction nobody can reach is a comment and this one is
+  // pinned by tests. mtimeMs is fractional here (12 of 12 live .pipeline records) while a parsed
+  // transcript timestamp is a whole millisecond, so the tie is reachable only through the
+  // updated_at term -- and 10 of those 12 records write updated_at at WHOLE-SECOND grain, while
+  // 0 of 523 observed origin.kind 'human' timestamps land on a whole second. OBSERVED TIES:
+  // ZERO. The direction is pinned anyway, at the cost of three cells, because a vendor
+  // coarsening either clock makes ties common overnight and this line would then decide silence.
   if (humanTurnMs !== null && recordFreshnessMs(resolved.mtimeMs, resolved.status?.updated_at) < humanTurnMs) {
     return { failures: [], phase };
   }
