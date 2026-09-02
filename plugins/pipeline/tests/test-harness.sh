@@ -487,4 +487,50 @@ assert_not_contains "a non test-*.sh file never runs" "$OUT" "helper-not-a-suite
 assert_contains "run.sh still discovers via the test-*.sh glob" "$(cat "$TESTS_DIR/run.sh")" 'for t in test-*.sh'
 assert_contains "run.sh still invokes each suite with bash" "$(cat "$TESTS_DIR/run.sh")" 'bash "$t"'
 
+suite "run.sh: the final summary NAMES the failing suites, not only how many (#91)"
+
+# WHY THE CELL ABOVE DID NOT ALREADY COVER THIS, because that is the whole point of adding one.
+# "the failing suite is named in the run" is satisfied by the `== <name> ==` banner run.sh prints
+# BEFORE it runs each suite, which says nothing about the outcome and appears identically for
+# every green suite. So it passed against a summary that reported a bare count, and finding which
+# of ~40 suites failed meant grepping back through a transcript. Everything below is asserted
+# against the SUMMARY BLOCK ALONE -- the text after the count line -- so a banner cannot satisfy
+# it. Mutation: delete the name-printing line from run.sh and the first two cells here go red
+# while every cell in the AC2 suite above stays green.
+summary_block() {  # <full run.sh output> -> the text AFTER the count line
+  printf '%s' "${1##*FAILED.}"
+}
+
+new_tmpdir || exit 90
+NAMEDIR="$NEW_TMPDIR"
+cp "$TESTS_DIR/run.sh" "$NAMEDIR/run.sh"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$NAMEDIR/test-alpha-green.sh"
+printf '#!/usr/bin/env bash\nexit 1\n' > "$NAMEDIR/test-bravo-red.sh"
+OUT=$(bash "$NAMEDIR/run.sh" 2>&1); RC=$?
+NAMED="$(summary_block "$OUT")"
+assert_eq "PREMISE: the fixture tree is one green suite and one red one, so run.sh exits 1" "$RC" "1"
+assert_contains "the summary block names the suite that FAILED" "$NAMED" "test-bravo-red.sh"
+assert_not_contains "and it does NOT name a suite that passed, so the block is a verdict and not a roster" \
+  "$NAMED" "test-alpha-green.sh"
+# Without this, the not_contains above would pass just as well on an EMPTY block, which is
+# exactly what run.sh printed before #91. It also proves the extractor sliced the banners off
+# rather than handing back the whole transcript.
+assert_not_contains "CONTROL ON THE EXTRACTOR: the block is the summary, carrying none of the per-suite banners" \
+  "$NAMED" "=="
+assert_contains "CONTROL: the green suite DID run, so its absence from the block is a choice and not a suite that never executed" \
+  "$OUT" "== test-alpha-green.sh =="
+
+printf '#!/usr/bin/env bash\nexit 1\n' > "$NAMEDIR/test-charlie-red.sh"
+OUT=$(bash "$NAMEDIR/run.sh" 2>&1)
+NAMED="$(summary_block "$OUT")"
+assert_contains "with TWO failures the count still reports both" "$OUT" "2 suite(s) FAILED."
+assert_contains "and the block names the first of them" "$NAMED" "test-bravo-red.sh"
+assert_contains "and the second, so the list is not truncated to whichever failed last" \
+  "$NAMED" "test-charlie-red.sh"
+
+rm -f "$NAMEDIR/test-bravo-red.sh" "$NAMEDIR/test-charlie-red.sh"
+OUT=$(bash "$NAMEDIR/run.sh" 2>&1); RC=$?
+assert_eq "and the SAME tree exits 0 once the red suites are removed" "$RC" "0"
+assert_not_contains "a green run prints no name list at all" "$OUT" "test-bravo-red.sh"
+
 finish
