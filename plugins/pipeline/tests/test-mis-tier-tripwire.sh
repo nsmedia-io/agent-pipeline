@@ -392,6 +392,11 @@ for cand in $(grep -oE 'scripts/[a-zA-Z0-9_-]+\.mjs' "$PIPELINE_MD" | sort -u); 
     # handing this suite a script that resolves no model. See the twin in
     # test-dispatch-model-resolver.sh.
     check-status-record.mjs) continue ;;
+    # #74's in-flight/datability leaf, newly REFERENCED from pipeline.md by #110's clearing rule.
+    # The file itself is not new (#106 added it); only its first mention in pipeline.md is, so a
+    # REFERENCE rather than a script tripped the halt here. It resolves no model. See the twin in
+    # test-dispatch-model-resolver.sh.
+    run-candidates.mjs) continue ;;
   esac
   CANDIDATES_REL+=("$cand")
 done

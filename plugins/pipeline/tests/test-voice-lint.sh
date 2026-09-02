@@ -364,8 +364,8 @@ assert_eq "  CONTROL on the injection itself: dropping a phase the tables never 
 # assignment the derivation misses). UNCLASSIFIED must be EMPTY and is reported BY NAME.
 #
 # The EXCLUDED bucket is a sorted occurrence-text MULTISET, asserted; its SIZE is only reported.
-# Never `sort -u`: three of the five excluded LINES carry two occurrences each with identical
-# text, so a set would turn 8 entries into 5 and re-open the bypass. Line numbers are REPORTED
+# Never `sort -u`: three of the seven excluded LINES carry two occurrences each with identical
+# text, so a set would turn 10 entries into 7 and re-open the bypass. Line numbers are REPORTED
 # beside the entries and never asserted -- pipeline.md is edited by a lane that does not own this
 # suite, and a coordinate pin is #68's shape.
 # ===========================================================================================
@@ -423,9 +423,15 @@ tp_exfp() { printf '%s' "$1" | sed -n '/^--EXFP--$/,$p' | sed '1d'; }
 # What it costs is stated in the assertion label below rather than left to be inferred: two
 # occurrences that share a fingerprint can be exchanged invisibly, so this cell catches an
 # ADDITION or a REMOVAL and not every conceivable swap.
-EXCLUDED_MULTISET_8='133|- **User interrupts mid-phase**: status.json preserves position. `/pipel
+# ONE ENTRY CARRIES AN APOSTROPHE, spliced as '\''. The pinned block is a single-quoted shell
+# literal, and #110's prose is the first pinned occurrence to contain a `'` -- without the splice
+# the assignment terminates mid-entry and the file stops parsing. Future pipeline.md edits will
+# hit this again, so the splice is the fixture's limitation being handled, not the prose bending.
+EXCLUDED_MULTISET_10='1253|**Rows 2 and 3 loop back for remediation, and the write that DOES the lo
+133|- **User interrupts mid-phase**: status.json preserves position. `/pipel
 285|- If starts with `--resume <issue>`: set `ISSUE=<issue>`, read `.pipelin
 285|- If starts with `--resume <issue>`: set `ISSUE=<issue>`, read `.pipelin
+397|Nothing is lost by clearing. The panel'\''s result is durable in `events[]`
 461|**`events[]` entries are EXIT markers and `current_phase` is an ENTRY ma
 461|**`events[]` entries are EXIT markers and `current_phase` is an ENTRY ma
 479|`status.json` is the `/pipeline --resume <issue>` checkpoint, so it must
@@ -448,9 +454,9 @@ assert_eq "UNCLASSIFIED is EMPTY: no assignment the WIDER pattern can see is mis
 assert_eq "the derived label SET is exactly the 26 concrete literals pipeline.md writes, \`0-setup\` among them -- and it is the SAME sorted list the drift suite pins, so a narrowing in either copy reddens in that copy" \
   "$(vl "$TP_REAL" LITERALS)" "$PHASE_LITERALS_26"
 assert_eq "and the EXCLUDED bucket's MEMBERSHIP is asserted -- the sorted occurrence-text MULTISET, so an occurrence cannot be ADDED to or REMOVED from this bucket at constant bucket sizes. NARROWED deliberately from \"cannot move between buckets\": the key is a length-plus-72-character FINGERPRINT and it is non-injective (pipeline.md already holds a colliding pair, see above), so a swap BETWEEN two occurrences sharing one fingerprint is invisible here. The add/remove form is what this cell supports; the bucket-swap fixture that exercises it lives in the drift suite, which carries the full fixture matrix, and not in this copy" \
-  "$(tp_exfp "$TP_REAL")" "$EXCLUDED_MULTISET_8"
-assert_eq "MULTISET, NOT A SET: \`sort -u\` collapses those 8 entries to 5, which is measured here rather than asserted absent by inspection" \
-  "$(tp_exfp "$TP_REAL" | sort -u | grep -c . | tr -d ' ')/$(tp_exfp "$TP_REAL" | grep -c . | tr -d ' ')" "5/8"
+  "$(tp_exfp "$TP_REAL")" "$EXCLUDED_MULTISET_10"
+assert_eq "MULTISET, NOT A SET: \`sort -u\` collapses those 10 entries to 7, which is measured here rather than asserted absent by inspection" \
+  "$(tp_exfp "$TP_REAL" | sort -u | grep -c . | tr -d ' ')/$(tp_exfp "$TP_REAL" | grep -c . | tr -d ' ')" "7/10"
 
 # ---------------------------------------------------------------------------
 suite "#53 AC13: RUNTIME NEUTRALITY -- what the lint says is byte-unchanged by this change"

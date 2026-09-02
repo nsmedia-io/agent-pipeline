@@ -23,10 +23,10 @@
  * among the issue dirs. Two consequences are load-bearing and neither is hypothetical:
  *   - The Stop hook is PROJECT-scoped, not run-scoped, so without a recency ceiling an
  *     abandoned run parked at a guarded phase would refuse every turn in that project forever.
- *     Hence the in-flight predicate below (R6). Its 24h / no-final-verdict window is a SECOND
- *     copy of the one pipeline-status.mjs holds in its `stuck` filter, not a shared symbol: see
- *     the drift note above `inFlight`, which is where that duplication lives and where #74
- *     tracks it.
+ *     Hence the in-flight predicate below (R6). Its 24h / no-final-verdict window WAS a second
+ *     copy of the one pipeline-status.mjs held in its `stuck` filter, sharing no symbol with it;
+ *     #74 closed that, and both predicates now come out of the leaf run-candidates.mjs. See the
+ *     note above `inFlight` for what the unification does and does not make identical.
  *   - An explicit signal (CLAUDE_PIPELINE_ACTIVE_ISSUE / PIPELINE_ACTIVE_ISSUE) must not be
  *     able to NARROW the subject: pointing it at a satisfied dir would be the env-var opt-out
  *     the design rejected, and it would leave no trace in the archived record. So both the
@@ -129,6 +129,21 @@ const PREREQUISITES = {
   "2-review-complete": { file: "review.json", tokens: ["2"] },
   "2.5-design-complete": { file: "design.json", tokens: ["2.5"] },
   "3-impl-complete": { file: "impl-report.json", tokens: ["3", "3b"] },
+  // STRUCTURALLY UNREACHABLE THROUGH THIS GUARD, AND KEPT ANYWAY. Raised by #110 and decided
+  // here rather than left for a reader to rediscover. commands/pipeline.md writes
+  // `current_phase: "4-review-complete"` in the SAME status.json update as `final_verdict`, and
+  // this guard only ever evaluates a record `inFlight` admits, which requires NO final verdict.
+  // So this row cannot fire. MEASURED over the committed corpus rather than reasoned from the
+  // instruction: every one of the 7 records ever committed at `4-review-complete` carries a
+  // `final_verdict`, and 0 do not.
+  //
+  // KEPT, for two reasons. It is the EXIT half of `3-impl-complete`'s entry/exit pair, which
+  // GUARDED and the entry/exit split below both derive from this one table, so deleting the row
+  // would silently change what that derivation covers. And the unreachability is a property of
+  // pipeline.md's write, not of this file: if that instruction is ever split into two writes,
+  // the row starts working and nothing here needs to change. tests/test-gate-phase-entry.sh
+  // pins the co-occurrence so the split reddens and this comment gets revisited, instead of the
+  // row quietly coming alive under a note that says it cannot.
   "4-review-complete": { file: "peer-review.json", tokens: ["4"] },
 };
 
@@ -517,34 +532,31 @@ function prerequisiteSatisfied(issueDir, row, events) {
  * with no readable `updated_at` is not in flight: the guard cannot date it, and a control that
  * cannot date a record must not hold a project's turns open on it.
  *
- * DRIFT RISK, LIVE AND UNRESOLVED, TRACKED IN #74. The window below is this module's OWN
- * literal. pipeline-status.mjs holds an independent copy of the same number in its `stuck`
- * filter, to call a run "possibly stuck", and on the AGE term those two comparisons are
- * complements. Neither predicate is the negation of the other even so, and the DATABILITY term
- * is where they part -- not in agreement, as an earlier draft of this comment had it. This
- * guard dates a record from its OWN `updated_at` and abstains when that will not parse;
- * pipeline-status.mjs substitutes the status.json FILE MTIME for an ABSENT or NULL one first
- * (`updated_at: status?.updated_at ?? mtime`). So a record carrying no `updated_at` at all is
- * NOT in flight here and IS listed "possibly stuck" there as soon as the file is a day old.
- * Measured, not reasoned. An unparseable STRING is the one undatable spelling the two still
- * agree on, because `??` does not fire on it.
+ * THE DRIFT RISK THIS NOTE USED TO RECORD IS CLOSED (#74 s1), and what closed it is worth
+ * stating precisely, because the shape recurs. pipeline-status.mjs used to hold an INDEPENDENT
+ * copy of the window and of the no-final-verdict term (`age > 24 * 60 * 60 * 1000 &&
+ * !r.final_verdict`), sharing no symbol with this module, so the two literals could diverge
+ * while both compiled and every suite stayed green. Both predicates now come out of the leaf
+ * run-candidates.mjs: this guard reads its `inFlight`, the reporter reads its `stuck`, and both
+ * are derived from ONE `ceilingMs` term inside that function. The unification is checked rather
+ * than asserted -- tests/test-pipeline-status.sh mutates the leaf's IN_FLIGHT_MS and requires
+ * the reporter's suite AND the PreToolUse gate's suite to redden together, so a unification that
+ * bit only one consumer would not pass for one that bit both.
  *
- * They also DATE the field differently -- `Date.parse` here, `new Date(...).getTime()` there --
- * and MEASURED, those two agree on every STRING, not only the ISO ones status.schema.json
- * requires: `new Date(string)` delegates to `Date.parse`, so "March 3, 2020", "2020/03/03" and
- * "not-a-date" all land identically in both. They part only on values that are NOT strings,
- * where `Date.parse` coerces to string first and the constructor does not. `updated_at: 12345`
- * reads here as the year 12345, so the record is permanently in flight, while
- * pipeline-status.mjs never classifies it at all: its `stuck` filter is not reached on any
- * path. Markdown mode always throws before it -- in `listActive`'s sort comparator or in
- * `renderMarkdown`'s table loop, depending on where the offending row lands in readdir order --
- * and `--json` never calls `renderMarkdown` at all, so the filter does not run there even when
- * nothing throws. Nothing in this tree pins either spelling.
- *
- * That mtime-for-updated_at substitution is the same grain mismatch #74 records against
- * session-start.sh, in a second module #74 does not yet count. No symbol is shared either, so
- * the numbers agree only for as long as nobody moves one of them, and nothing in this tree
- * fails if one does.
+ * TWO DIFFERENCES SURVIVE ON PURPOSE, and neither is a second spelling of the number.
+ *   - DATABILITY. `stuck` and `inFlight` are not complements. A record this guard cannot date is
+ *     NOT in flight, and it is NOT stuck either: both terms require `datable`, because "has not
+ *     moved in a day" is a claim about elapsed time that an undatable record does not support.
+ *     The reporter names those records in their own section instead of silently dropping them.
+ *   - THE MTIME SUBSTITUTION IS GONE FROM THE DECISION. pipeline-status.mjs used to substitute
+ *     the status.json FILE MTIME for an absent `updated_at` before judging (`updated_at:
+ *     status?.updated_at ?? mtime`), so a record carrying no `updated_at` was not in flight here
+ *     and WAS listed "possibly stuck" there as soon as the FILE was a day old. Measured, not
+ *     reasoned. That substitution now feeds only the report's DISPLAY column; the `stuck`
+ *     decision reads a separate `updated_at_claimed` field that is null when the record makes no
+ *     claim. Same grain fix, and for the same reason, as the one #74 s2 records against
+ *     session-start.sh: a fresh clone rewrites every mtime, so mtime is a property of the
+ *     checkout and `updated_at` is the run's own claim about itself.
  */
 function inFlight(status, now) {
   // The predicate itself moved to the leaf run-candidates.mjs, which #106's PreToolUse gate is
