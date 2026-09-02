@@ -28,11 +28,13 @@ suite "AC1: the PreToolUse declaration, and its timeout in SECONDS"
 #
 # THE UNIT IS FIXED BY THE RUNTIME, NOT BY THE FILE'S NEIGHBOURS. Claude Code 2.1.85's hook-exec
 # path computes `E = H.timeout ? H.timeout*1000 : EL` with `EL = 600000`, so `timeout` is SECONDS
-# and the implicit ceiling is 600 s. The three already-shipped entries (10000, 120000, 15000) are
-# therefore 2.8 h, 33.3 h and 4.2 h -- every one of them ABOVE the platform's own default -- so
-# "smaller than Stop's 120000" bounds nothing and is refused here as a comparison. That
-# seconds/milliseconds defect in the shipped three is #108 and is NOT fixed by this issue, which
-# is why the assertion below is written against 600 and not against the neighbours.
+# and the implicit ceiling is 600 s. At the commit this file was authored against, the three
+# already-shipped entries (10000, 120000, 15000) were therefore 2.8 h, 33.3 h and 4.2 h -- every
+# one of them ABOVE the platform's own default -- so "smaller than Stop's 120000" bounded nothing
+# and was refused here as a comparison; the assertion below was written against 600 for that
+# reason and stays written against 600 now that #108 has corrected the three neighbours (20, 600,
+# 15) below, since PreToolUse's own bound must independently hold regardless of what the other
+# three declare.
 #
 # Version recorded beside the assertion, per the measurement rule: the ceiling is a property of
 # the runtime under test, so a host on another version produces a different recorded number
@@ -87,18 +89,20 @@ assert_eq "and is a plausible bound for one node start plus one git subprocess (
   "$("$GATE_REAL_NODE" -e 'const t=Number(process.argv[1]); process.stdout.write(Number.isFinite(t)&&t>0&&t<=30?"in-range":"OUT-OF-RANGE: "+process.argv[1])' "${DECLARED_TIMEOUT:-NaN}" 2>/dev/null)" \
   "in-range"
 
-# The three existing event keys are unchanged IN CONTENT. Pinned as the exact serialization of
-# each, so a change to a command or a timeout reddens here rather than only in whichever suite
-# happens to drive that hook.
-assert_eq "SessionStart entry is unchanged in content" \
+# The three existing event keys are pinned as the exact serialization of each, so a change to a
+# command or a timeout reddens here rather than only in whichever suite happens to drive that
+# hook. #108 corrected all three from a milliseconds-shaped value to the SECONDS value the
+# runtime actually reads (10000->20, 120000->600, 15000->15; see #108's PR for the per-entry
+# measurement each bound is derived from), so the pinned content changes here too.
+assert_eq "SessionStart entry carries #108's corrected (seconds) timeout" \
   "$(gate_hook_probe 'JSON.stringify(h.hooks.SessionStart)')" \
-  '[{"hooks":[{"type":"command","command":"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh","timeout":10000}]}]'
-assert_eq "Stop entry is unchanged in content" \
+  '[{"hooks":[{"type":"command","command":"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh","timeout":20}]}]'
+assert_eq "Stop entry carries #108's corrected (seconds) timeout" \
   "$(gate_hook_probe 'JSON.stringify(h.hooks.Stop)')" \
-  '[{"hooks":[{"type":"command","command":"${CLAUDE_PLUGIN_ROOT}/hooks/stop.sh","timeout":120000}]}]'
-assert_eq "SubagentStop entry is unchanged in content" \
+  '[{"hooks":[{"type":"command","command":"${CLAUDE_PLUGIN_ROOT}/hooks/stop.sh","timeout":600}]}]'
+assert_eq "SubagentStop entry carries #108's corrected (seconds) timeout" \
   "$(gate_hook_probe 'JSON.stringify(h.hooks.SubagentStop)')" \
-  '[{"hooks":[{"type":"command","command":"${CLAUDE_PLUGIN_ROOT}/hooks/subagent-stop.sh","timeout":15000}]}]'
+  '[{"hooks":[{"type":"command","command":"${CLAUDE_PLUGIN_ROOT}/hooks/subagent-stop.sh","timeout":15}]}]'
 
 # The declared command must actually be EXECUTABLE by the runtime, which runs the string through a
 # shell. A declaration pointing at a file that is not there is the #106 shape one level up.
