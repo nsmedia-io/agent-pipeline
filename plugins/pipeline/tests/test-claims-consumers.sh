@@ -196,9 +196,24 @@ assert_eq "AC29 CONTROL: the Upgrading section was found and has numbered bullet
 # The parse is compound-aware and returns NUMBERS, so the comparison is against $BULLETS itself
 # rather than against a spelling. The anti-vacuity control below is the half that was missing:
 # a lead paragraph the parser reads NOTHING out of must be a failure, not a pass.
-COUNT_NUMS=$(printf '%s\n' "$UPGRADE" | sed -n '1,4p' | tr '\n' ' ' | xargs -0 node "$TESTS_DIR/fixtures/count-words.mjs")
+#
+# AND THE WINDOW IS DERIVED, NOT COUNTED. It was `sed -n '1,4p'`, and a hand-picked line count
+# is the same outgrowable bound the vocabulary was: measured on this file's own README, moving
+# the second sentence into its own paragraph puts it on section line 5, where a stale `twelve`
+# under 25 bullets passed green while the first word still satisfied the anti-vacuity control
+# above. The lead is now everything before the first numbered bullet, so the assertion's "every
+# count word in the lead paragraph" is the population it actually scans.
+LEAD=$(printf '%s\n' "$UPGRADE" | awk '/^[0-9]+\. /{exit} {print}')
+COUNT_NUMS=$(printf '%s\n' "$LEAD" | tr '\n' ' ' | xargs -0 node "$TESTS_DIR/fixtures/count-words.mjs")
 assert_eq "AC29 CONTROL: the lead paragraph actually yields a spelled count (an unparsed lead is not a pass)" \
   "$([[ -n "$COUNT_NUMS" ]] && echo found || echo "NOTHING PARSED: the assertion below would range over an empty set")" "found"
+# The vocabulary is finite, so the check must refuse an input it cannot evaluate rather than
+# report a mismatch that reads as a stale README. Above the parser's range "one hundred" reduces
+# to 1, which is a wrong number wearing a parse's authority. The bound is asked of the parser,
+# so extending its table is what moves this.
+WORD_MAX=$(node "$TESTS_DIR/fixtures/count-words.mjs" --max)
+assert_eq "AC29 CONTROL: the bullet count is inside the count-word vocabulary's range" \
+  "$([[ "${BULLETS:-0}" -le "${WORD_MAX:-0}" ]] && echo ok || echo "bullets=$BULLETS exceeds the largest spellable count ($WORD_MAX): extend count-words.mjs")" "ok"
 assert_eq "AC29: every count word in the lead paragraph matches the bullet count" \
   "$COUNT_NUMS" "$BULLETS"
 # The two new bullets, asserted INDEPENDENTLY of the count so each can redden alone.

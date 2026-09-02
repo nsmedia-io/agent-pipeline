@@ -8,6 +8,12 @@ const WORD = Object.keys(UNITS).concat(Object.keys(TENS)).sort((a,b)=>b.length-a
 // A compound is tens-hyphen-unit; the alternation puts it first so "twenty-five" is not read
 // as "twenty" followed by a separate "five".
 const RE = new RegExp(`\\b(?:(${Object.keys(TENS).join("|")})-(${Object.keys(UNITS).join("|")})|(${WORD}))\\b`, "gi");
+// The largest integer this table can denote in valid English, DERIVED from the table rather
+// than written down, so extending either map moves it. A caller asserts its own input against
+// this: a bullet count above it cannot be spelled here, and a parse that silently reduces
+// "one hundred" to 1 must be reported as out of range, not as a stale README.
+const MAX = Math.max(...Object.values(TENS)) + Math.max(...Object.values(UNITS).filter((n) => n <= 9));
+if (process.argv[2] === "--max") { console.log(MAX); process.exit(0); }
 const text = process.argv[2] || "";
 const out = new Set();
 for (const m of text.matchAll(RE)) {
