@@ -45,7 +45,16 @@ assert_eq "and the leaf's declaration is the same source text, so a reformat of 
 
 # NON-ZERO CONTROL. The grep must be able to report a MISS, or the two 1s above are a statement
 # about a pattern that matches anything.
-PLANTED="$TMPDIR/pretooluse-ceiling-control.$$"
+#
+# `new_tmpdir` and NOT a bare "$TMPDIR": TMPDIR is set by launchd on macOS and UNSET on a stock
+# Linux, so under this harness's `set -u` the bare expansion aborted the whole file at this line
+# -- no `passed=` line, rc 1, and a suite that reads as SILENT rather than failed. That is worse
+# than a red cell: run.sh counts it as a failure while test-issue17-integration.sh's population
+# check reports only "42 of 43 suites reported a result" with no name attached. MEASURED on
+# ubuntu-latest (runs 33585245871 and 33586982176) and reproduced in node:22-bookworm. The
+# harness helper registers the dir for cleanup and refuses an empty path.
+new_tmpdir || exit 90
+PLANTED="$NEW_TMPDIR/pretooluse-ceiling-control.$$"
 printf 'export const IN_FLIGHT_MS = 2 * 60 * 60 * 1000;\n' > "$PLANTED"
 assert_eq "NON-ZERO CONTROL: the same grep reports 0 against a rewritten ceiling" \
   "$(grep -c '^export const IN_FLIGHT_MS = 24 \* 60 \* 60 \* 1000;$' "$PLANTED" | tr -d ' ')" "0"
