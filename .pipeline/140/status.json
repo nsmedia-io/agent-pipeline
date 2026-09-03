@@ -1,0 +1,16 @@
+{
+  "issue_number": 140,
+  "current_phase": "1-ba",
+  "started_at": "2026-09-03T18:54:53Z",
+  "updated_at": "2026-09-03T18:55:00Z",
+  "branch": "main",
+  "ask_text": "--issue 140: an unbalanced quote defeats the blanket-staging gate in 59 bytes with no timeout, and the test suite documents the bypass as correct behaviour.",
+  "events": [
+    {
+      "phase": "0-setup",
+      "verdict": "CLEAN",
+      "at": "2026-09-03T18:55:00Z"
+    }
+  ],
+  "flags": []
+}
