@@ -2,7 +2,7 @@
   "issue_number": 132,
   "current_phase": "3-impl-gate-failed",
   "started_at": "2026-09-03T00:55:30Z",
-  "updated_at": "2026-09-03T16:53:41Z",
+  "updated_at": "2026-09-03T17:13:30Z",
   "branch": "main",
   "ask_text": "--issue 132: the PreToolUse staging gate's scan is linear in command length but its constant is a shell interpreter's; a large enough command still outruns the declared 5s and a killed hook fails open.",
   "events": [
@@ -70,6 +70,12 @@
       "verdict": "MATERIALIZE_FIX_PUSHED",
       "at": "2026-09-03T16:53:41Z",
       "note": "tb_materialize fix committed 62792e6 and pushed. Dev's fresh-clone reproduction (the same 163->164 inflation occurred INSIDE test-issue17-integration.sh's own git clone at the SAME CI run, which carries only committed content) proves this is not one suite's missing cleanup but tb_materialize's own design being fragile against any incidental uncommitted state, wherever it originates. Fix: default to HEAD, git stash create only via explicit TB_MATERIALIZE_WORKING_TREE=1 opt-in. Independently verified myself (not relayed): clean tree -> HEAD; dirtied tree, default mode -> still HEAD (ignores dirt); dirtied tree + opt-in -> distinct sha. AC4 ENUMERATION line now reads 163 files in materialized tree bcb7bc7 exactly. Waiting on CI confirmation at 62792e6 before restoring GATE_PASSED."
+    },
+    {
+      "phase": "3-impl",
+      "verdict": "CI_ROOT_CAUSE_CORRECTED",
+      "at": "2026-09-03T17:13:30Z",
+      "note": "CORRECTION: the tb_materialize fix (62792e6) did NOT resolve CI red as expected -- MATERIALIZED from 1acd5705, confirmed byte-for-byte via git ls-remote to be refs/pull/141/merge, GitHubs auto-generated PR-merged-into-current-main preview commit. actions/checkout@v4 had no ref pinned; on pull_request events it defaults to the merge preview, not the branch head. This also reframes (does not invalidate) Devs fresh-clone evidence: that clone inherited the already-merge-previewed checkout, so it never proved checkout-independence. Root cause: every push to this PR was silently graded against mains CURRENT state at CI-start, which moved 3 times over several hours while this PR sat open, explaining the identical wrong numbers reproducing across pushes. Fix: pinned ref: github.event.pull_request.head.sha || github.sha on both tests.yml and manifests.yml checkout steps, committed 714e643, pushed. tb_materializes own hardening stays as a real local-dev improvement, it was just answering a different question than CI asked. Waiting on this commits CI to confirm the real reviewed commit now materializes correctly."
     }
   ],
   "flags": [
