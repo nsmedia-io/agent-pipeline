@@ -252,3 +252,201 @@ tb_rank() {
     process.stdout.write(rows.map((r) => r[0] + "\t" + r[1] + "\t" + (Number.isFinite(r[2]) ? r[2].toFixed(2) : "inf") + "\t" + r[3]).join("\n"));
   ' "$root" "$floor" 2>/dev/null
 }
+
+# ---- sizing a probe body: a BOUNDED CLIMB, never one long extrapolation (#132 blocker B1) --------
+#
+# WHAT WENT WRONG WITH THE FIRST METHOD, MEASURED RATHER THAN ARGUED. AC11's pair needs a command
+# the gate cannot decide inside the declared timeout, and the first version of this fixture found
+# that length by fitting a STRAIGHT LINE through two calibration points at 26,506 and 105,910 bytes
+# and solving it for the target. On darwin that lands: 266 copies, 1,760,160 bytes, aimed at 45,000
+# ms and measured 49,276. On ubuntu-latest, where `sh` is dash, it does not: CI run 33747342504
+# solved the same line for 3,500 copies = 23,159,538 bytes, aimed at 45,000 ms and MEASURED 700,683
+# -- eleven minutes and forty seconds, a 15.6x miss, paid twice per CI job because
+# test-issue17-integration.sh re-runs run.sh inside a clone.
+#
+# The line was not wrong about the points it was fitted to. It was extrapolated 219x BEYOND them,
+# and the scan's per-byte cost is not constant over that range: 1.93 microseconds per byte at the
+# calibration sizes against 30.3 at the fitted size, a factor of 15.7. #116 established linearity
+# over KILOBYTES; nothing had measured it over tens of megabytes until this issue did.
+#
+# SO THE MODEL IS NEVER ASKED TO PREDICT FAR FROM WHERE IT WAS MEASURED. Four properties, and the
+# first two are the ones the straight line lacked:
+#
+#   RE-FIT LOCALLY. Every step re-estimates the exponent from the TWO MOST RECENT measured points,
+#   with the gate's fixed overhead subtracted first (two node starts and a resolver run happen
+#   before the gate reads a byte, so the term that scales with length is ms MINUS that floor; a
+#   power law fitted to the raw milliseconds reads the overhead as sub-linear growth and asks for
+#   more copies than the straight line did).
+#
+#   CAP THE STEP. A candidate is never more than <cap> times the largest count actually MEASURED.
+#   Against the worst curve this issue recorded (per-byte cost rising as c^0.44), a 32x step costs
+#   2.8x more than a linear model predicts -- which the probe bound below absorbs -- where the 219x
+#   step cost 15.6x more, which nothing absorbed.
+#
+#   BOUND EVERY PROBE'S WALL CLOCK. A probe is killed at its bound and reported as killed rather
+#   than allowed to run for eleven minutes. A killed probe still carries information: it fixes an
+#   upper BRACKET on the copy count, and the climb halves the gap instead of growing.
+#
+#   CLAMP TO THE CEILING BEFORE WRITING, NOT AFTER RUNNING. The old fixture asserted its 6 MB
+#   ceiling AFTER the 23 MB body had already been built and driven, so the ceiling was a verdict on
+#   work already paid for. <max-copies> is inverted from the ceiling and clamps every candidate, and
+#   what the suite asserts instead is the climb's STOP REASON: it must stop because it REACHED the
+#   target, not because it ran out of room.
+
+# tb_fit_floor <c1> <ms1> <c2> <ms2> -> the two-point line's INTERCEPT, in ms, clamped to
+# [0, ms1/2] when the pair is too noisy to separate a constant from a slope.
+#
+# This is the term that does not scale with the command's length: two node starts and a resolver run
+# happen before the gate reads a byte. It is taken from the SAME two points the exponent is
+# estimated from, rather than from a separate bare-command probe, because the two must be consistent
+# for the estimate to mean anything: subtract an independently measured constant that differs from
+# this line's intercept and the exponent comes out different from 1 at a scale where the cost really
+# is linear, which is a spurious curve invented by the arithmetic. The independently measured floor
+# is kept beside it in the transcript as a control on this one, not as its replacement.
+tb_fit_floor() {
+  local c1="$1" ms1="$2" c2="$3" ms2="$4" f
+  if [[ "$c2" -le "$c1" || "$ms2" -le "$ms1" ]]; then printf '0'; return 0; fi
+  f=$(( ms1 - (ms2 - ms1) * c1 / (c2 - c1) ))
+  [[ "$f" -lt 0 ]] && f=0
+  [[ "$f" -ge "$ms1" ]] && f=$(( ms1 / 2 ))
+  printf '%s' "$f"
+}
+
+# tb_next_copies <c1> <ms1> <c2> <ms2> <floor-ms> <aim-ms> <cap-x100> <max-copies>
+#   -> the next copy count to probe.
+#
+# Floats, so node and not bash: bash 3.2 has no logarithm and the exponent is the whole point.
+tb_next_copies() {
+  "$TB_REAL_NODE" -e '
+    const [c1, m1, c2, m2, floor, aim, capX100, maxc] = process.argv.slice(1).map(Number);
+    const cap = capX100 / 100;
+    const EPS = 1;
+    // The term that scales with length is the milliseconds ABOVE the gate fixed overhead.
+    const a1 = Math.max(m1 - floor, EPS), a2 = Math.max(m2 - floor, EPS);
+    const want = Math.max(aim - floor, EPS);
+    let p = 1;
+    if (c2 > c1 && a2 > a1) p = Math.log(a2 / a1) / Math.log(c2 / c1);
+    if (!Number.isFinite(p) || p < 0.5) p = 0.5;   // a degenerate fit must not explode 1/p
+    if (p > 4) p = 4;
+    let next = c2 * Math.pow(want / a2, 1 / p);
+    if (!Number.isFinite(next)) next = c2 * cap;
+    next = Math.min(next, c2 * cap, maxc);
+    next = Math.ceil(next);
+    if (next < 1) next = 1;
+    process.stdout.write(String(next));
+  ' "$@" 2>/dev/null
+}
+
+# tb_climb <probe-fn> <c-prev> <ms-prev> <c-cur> <ms-cur> <floor-ms> <aim-ms> <accept-ms> \
+#          <cap-x100> <max-copies> <max-steps>
+#
+# <probe-fn> is called as `<probe-fn> <copies>` and MUST set TB_PROBE_MS and TB_PROBE_KILLED (1 when
+# the probe hit its own wall-clock bound and produced no decision). It is called WITHOUT a command
+# substitution on purpose: a probe that has to print its result cannot also hand back the decision
+# and the stdout byte count the caller asserts on.
+#
+# Sets: TB_CLIMB_COPIES TB_CLIMB_MS TB_CLIMB_STOP TB_CLIMB_TRACE TB_CLIMB_STEPS TB_CLIMB_PROBES
+#   TB_CLIMB_STOP is one of:
+#     target   -- a probe measured at or above <accept-ms>. This is the only success.
+#     ceiling  -- the climb reached <max-copies> without reaching the target: the pair is not
+#                 constructible from this corpus at this declaration inside the size ceiling.
+#     bracket  -- a killed probe and a measured one closed on adjacent counts.
+#     steps    -- <max-steps> probes were spent without reaching the target.
+tb_climb() {
+  local fn="$1" cp="$2" mp="$3" cc="$4" mc="$5" floor="$6" aim="$7" accept="$8" cap="$9"
+  local maxc="${10}" maxsteps="${11}"
+  local step=0 next hi=0
+  TB_CLIMB_COPIES="$cc"; TB_CLIMB_MS="$mc"; TB_CLIMB_TRACE=""; TB_CLIMB_STEPS=0
+  TB_CLIMB_PROBES=0; TB_CLIMB_STOP=""
+  if [[ "$mc" -ge "$accept" ]]; then TB_CLIMB_STOP="target"; return 0; fi
+  while :; do
+    step=$(( step + 1 ))
+    if [[ "$step" -gt "$maxsteps" ]]; then TB_CLIMB_STOP="steps"; break; fi
+    next="$(tb_next_copies "$cp" "$mp" "$cc" "$mc" "$floor" "$aim" "$cap" "$maxc")"
+    [[ "$next" =~ ^[0-9]+$ ]] || { TB_CLIMB_STOP="steps"; break; }
+    # An upper BRACKET from a killed probe: never re-probe at or above a count already known to
+    # outrun the bound. Halve the gap instead, which is the only direction that can still land.
+    if [[ "$hi" -gt 0 && "$next" -ge "$hi" ]]; then next=$(( (cc + hi) / 2 )); fi
+    if [[ "$next" -le "$cc" ]]; then
+      if [[ "$hi" -gt 0 ]]; then TB_CLIMB_STOP="bracket"; else TB_CLIMB_STOP="ceiling"; fi
+      break
+    fi
+    TB_PROBE_MS=0; TB_PROBE_KILLED=0
+    "$fn" "$next"
+    TB_CLIMB_PROBES=$(( TB_CLIMB_PROBES + 1 ))
+    TB_CLIMB_STEPS="$step"
+    if [[ "$TB_PROBE_KILLED" == "1" ]]; then
+      TB_CLIMB_TRACE="$TB_CLIMB_TRACE [step${step} ${next}copies KILLED at ${TB_PROBE_MS}ms]"
+      hi="$next"
+      continue
+    fi
+    TB_CLIMB_TRACE="$TB_CLIMB_TRACE [step${step} ${next}copies ${TB_PROBE_MS}ms]"
+    cp="$cc"; mp="$mc"; cc="$next"; mc="$TB_PROBE_MS"
+    TB_CLIMB_COPIES="$cc"; TB_CLIMB_MS="$mc"
+    if [[ "$mc" -ge "$accept" ]]; then TB_CLIMB_STOP="target"; break; fi
+  done
+  [[ -n "$TB_CLIMB_STOP" ]] || TB_CLIMB_STOP="steps"
+  return 0
+}
+
+# tb_gate_bounded <payload> <cwd> <bound-seconds>
+#   -> TB_GB_MS TB_GB_KILLED TB_GB_OUT_BYTES TB_GB_OUT TB_GB_DECISION
+#
+# ONE RUNNER FOR BOTH OF AC11's ARMS, which is what makes the pair a pair: the same resolved hook
+# command from hooks.json, the same payload, the same environment, driven twice with two different
+# wall-clock bounds. Arm one runs under a bound it does not hit and emits a decision; arm two runs
+# under the DECLARED bound, is killed there, and emits nothing -- and a PreToolUse hook that emits
+# nothing fails open. Before #132's B1 fix the two arms went through two different drivers, so the
+# only thing making them the same call was that two blocks of the suite agreed.
+#
+# The child enumeration is `ps -o pid=,ppid=` filtered in awk rather than `ps -P`, because `-P`
+# means "parent pid" on BSD and "add a PSR column" on procps: on Linux the BSD spelling enumerates
+# nothing, the shell is killed, and its `sh`/`node` grandchildren survive to keep scanning a
+# multi-megabyte command with nobody waiting for them.
+tb_gate_bounded() {
+  local payload="$1" cwd="$2" secs="$3"
+  local tpl root cmd of pid limit waited kid gkid a b parsed
+  TB_GB_MS=0; TB_GB_KILLED=0; TB_GB_OUT_BYTES=0; TB_GB_OUT=""; TB_GB_DECISION="GATE-UNDECLARED"
+  tpl="$(gate_declaration_template_cached)"
+  [[ -n "$tpl" ]] || return 0
+  root="$GATE_PLUGIN_DIR"
+  cmd="${tpl//\$\{CLAUDE_PLUGIN_ROOT\}/$root}"
+  of="${TEMP_PROJECT:-${TMPDIR:-/tmp}}/tb-gate-bounded.out"
+  : > "$of"
+  a="$("$TB_REAL_NODE" -e 'process.stdout.write(String(Date.now()))')"
+  ( cd "$cwd" 2>/dev/null || exit 126
+    printf '%s' "$payload" | env "CLAUDE_PROJECT_DIR=$cwd" "CLAUDE_PLUGIN_ROOT=$root" "PATH=$PATH" \
+      sh -c "$cmd" ) > "$of" 2>/dev/null &
+  pid=$!
+  limit=$(( secs * 5 ))          # the poll is 200 ms, so the kill lands within 200 ms of the bound
+  waited=0
+  while kill -0 "$pid" 2>/dev/null; do
+    if [[ "$waited" -ge "$limit" ]]; then TB_GB_KILLED=1; break; fi
+    sleep 0.2
+    waited=$(( waited + 1 ))
+  done
+  if [[ "$TB_GB_KILLED" == "1" ]]; then
+    # Kill by EXPLICIT PID only, never by pattern: children first, then the shell that started them.
+    for kid in $(ps -o pid=,ppid= 2>/dev/null | awk -v p="$pid" '$2==p {print $1}'); do
+      for gkid in $(ps -o pid=,ppid= 2>/dev/null | awk -v p="$kid" '$2==p {print $1}'); do
+        kill -KILL "$gkid" 2>/dev/null
+      done
+      kill -KILL "$kid" 2>/dev/null
+    done
+    kill -KILL "$pid" 2>/dev/null
+  fi
+  wait "$pid" 2>/dev/null
+  b="$("$TB_REAL_NODE" -e 'process.stdout.write(String(Date.now()))')"
+  TB_GB_MS=$(( b - a ))
+  TB_GB_OUT_BYTES="$(wc -c < "$of" 2>/dev/null | tr -d ' ')"
+  [[ -n "$TB_GB_OUT_BYTES" ]] || TB_GB_OUT_BYTES=0
+  TB_GB_OUT="$(cat "$of" 2>/dev/null)"
+  if [[ "$TB_GB_KILLED" == "1" ]]; then
+    TB_GB_DECISION="KILLED"
+  else
+    parsed="$(printf '%s' "$TB_GB_OUT" | "$TB_REAL_NODE" "$DECISION_MJS" 2>/dev/null)"
+    TB_GB_DECISION="${parsed%%	*}"
+    [[ -n "$TB_GB_DECISION" ]] || TB_GB_DECISION="none"
+  fi
+  return 0
+}

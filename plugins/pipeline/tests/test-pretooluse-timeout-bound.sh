@@ -295,130 +295,275 @@ DENSEST_DENS="$(tb_density "$STRUCT_CLASS" "$MAT/$DENSEST_REL")"
 DENSEST_BYTES="$(printf '%s' "$DENSEST_DENS" | awk '{print $1}')"
 record "AC3 DENSE END selected at run time: $DENSEST_REL -- $DENSEST_DENS (bytes struct B/struct)"
 
-# Quote parity. An unbalanced quote earlier in the command defeats the blanket-staging refusal
-# entirely (issue #140), so a `.sh`-bodied fixture that does not balance its quotes reports a
-# spurious `none` and would be a fixture asserting an ALLOW for a gate that is working.
-DENSEST_QUOTES="$( "$GATE_REAL_NODE" -e '
-  const fs = require("node:fs");
-  const s = fs.readFileSync(process.argv[1]).toString("latin1");
-  const d = (s.match(/"/g) || []).length, q = (s.match(/'"'"'/g) || []).length;
-  process.stdout.write(d + " " + q);
-' "$MAT/$DENSEST_REL" )"
-DENSE_PAD="$( "$GATE_REAL_NODE" -e '
-  const [d, q] = process.argv[1].split(" ").map(Number);
-  process.stdout.write("\"".repeat(d % 2) + "'"'"'".repeat(q % 2));
-' "$DENSEST_QUOTES" )"
-record "QUOTE PARITY of the dense source: $DENSEST_QUOTES (double single); the fixture appends ${#DENSE_PAD} balancing character(s), because an unbalanced quote makes the gate report a spurious none (#140)"
-
+# ---- THE BODY: one file, one pad settled by outcome, and a size found by a BOUNDED CLIMB --------
+#
 # The command is built into a FILE, never into an argv. The pair AC11 needs is megabytes at the
-# raised bound, and the shared argv-based payload builder fails silently above the exec limit: a
-# 3,111,437-byte command came back as an EMPTY payload and the gate answered `none` in 352 ms --
-# a fixture reporting an ALLOW for a gate that was working.
+# raised bound, and the shared argv-based payload builder fails silently above Linux's
+# MAX_ARG_STRLEN: a 3,111,437-byte command came back as an EMPTY payload and the gate answered
+# `none` in 352 ms -- a fixture reporting an ALLOW for a gate that was working.
 DENSE_CMD_FILE="$TEMP_PROJECT/dense.cmd"
 DENSE_MAX_BYTES=6000000
-dense_write() {  # <copies> -> writes the command to DENSE_CMD_FILE and prints its byte count
+DENSE_PAD=""
+dense_write() {  # <copies> [pad] -> writes the command to DENSE_CMD_FILE and prints its byte count
   "$GATE_REAL_NODE" -e '
     const fs = require("node:fs");
     const q = String.fromCharCode(39);
     const src = fs.readFileSync(process.argv[1]).toString("latin1");
-    const body = src.repeat(Number(process.argv[2])) + process.argv[3];
+    const body = (src + process.argv[3]).repeat(Number(process.argv[2]));
     const cmd = "cat > notes.md <<" + q + "EOF" + q + "\n" + body + "\nEOF\ngit add -A";
     fs.writeFileSync(process.argv[4], Buffer.from(cmd, "latin1"));
     process.stdout.write(String(Buffer.byteLength(cmd, "latin1")));
-  ' "$MAT/$DENSEST_REL" "$1" "$DENSE_PAD" "$DENSE_CMD_FILE"
-}
-DR_MS=""; DR_DECISION=""; DR_OUT_BYTES=""
-dense_run() {  # -> DR_MS, DR_DECISION, DR_OUT_BYTES
-  local a b
-  gate_reset_env "$P4"
-  a="$(now_ms)"
-  run_gate "$(tb_payload_file "$DENSE_CMD_FILE" "$P4" agent_id=sub-panelist-1 agent_type=pipeline:qa)"
-  b="$(now_ms)"
-  DR_MS=$(( b - a )); DR_DECISION="$GATE_DECISION"; DR_OUT_BYTES="${#GATE_OUT}"
+  ' "$MAT/$DENSEST_REL" "$1" "${2-$DENSE_PAD}" "$DENSE_CMD_FILE"
 }
 
-# CALIBRATION IS TWO-POINT, NOT ONE-POINT, and the reason is the fixed overhead. Every probe pays
-# two node starts and a resolver run before it reads a byte, so a single small cell extrapolated
-# from the ORIGIN systematically UNDER-shoots: measured here, a one-point fit from 4 copies aimed
-# at 8000 ms and landed at 5702. Two points separate the constant from the slope. #116 made the
-# scan cost linear in command length, which is what makes a two-point fit the right model.
+# THE TWO ARMS SHARE ONE RUNNER (tb_gate_bounded): the same resolved hook command from hooks.json,
+# the same payload, the same environment, two different wall-clock bounds. Before #132's B1 fix arm
+# one went through run_gate and arm two through a separate killer, so the only thing making them
+# the same call was that two blocks of the suite agreed about it.
+dense_bounded() {  # <bound-seconds> -> TB_GB_MS TB_GB_KILLED TB_GB_DECISION TB_GB_OUT_BYTES
+  tb_gate_bounded \
+    "$(tb_payload_file "$DENSE_CMD_FILE" "$P4" agent_id=sub-panelist-1 agent_type=pipeline:qa)" \
+    "$P4" "$1"
+}
+
+# WHAT THE PAIR NEEDS, AND WHAT THE FIT AIMS AT, ARE TWO DIFFERENT NUMBERS.
+#
+#   ACCEPT is the property. Arm two runs the same body under the declared kill and must not finish
+#   inside it. Arm one and arm two are two runs on one host, so the margin arm two needs over arm
+#   one is the SAME-HOST LOAD SPREAD this suite already carries from spec.json's measured_state
+#   (1.42, the figure LOAD_SPREAD_X100 holds). Below that margin a quieter moment could let arm two
+#   finish and emit bytes, and the pair would go red for a gate that is working.
+#
+#   AIM is deliberately ABOVE accept (1.5x the declaration), because a probe that lands just under
+#   accept costs a whole further probe of the same size, while one that lands above it costs only
+#   the difference.
+TARGET_MS=$(( DECLARED_MS * 15 / 10 ))
+ACCEPT_MS=$(( DECLARED_MS * LOAD_SPREAD_X100 / 100 ))
+DENSE_CAP_X100=3200        # no candidate is more than 32x the largest count actually MEASURED
+DENSE_MAX_STEPS=6
+DENSE_PROBE_BOUND_S=$(( TARGET_MS * 2 / 1000 ))
+[[ "$DENSE_PROBE_BOUND_S" -lt 1 ]] && DENSE_PROBE_BOUND_S=1
+
+# QUOTE PARITY IS SETTLED BY OUTCOME AND CARRIED PER COPY, NEVER COUNTED. An unbalanced quote
+# earlier in the command defeats the blanket-staging refusal entirely (#140), so a body the scanner
+# reads as quote-open answers `none` and would be recorded as a gate that is working. The obvious
+# guard -- count `"` and `'` in the raw bytes and append one of each when the count is odd -- is on
+# the WRONG SIDE OF THE TRANSFORMATION and was measured to break what it guards: the scanner
+# resolves backslash escapes before it counts, knowledge/issue-archive/106.json carries an ODD raw
+# double-quote count and is refused correctly, and appending a balancing quote to it flipped a
+# working `deny` into `none`.
+#
+# AND THE PAD GOES INSIDE THE REPEATED UNIT, which is the half a per-body pad gets wrong. This body
+# is one source file repeated N times. A pad computed from ONE copy and appended ONCE is correct
+# only when N is odd: at an even N the concatenation is already balanced and the pad UNBALANCES it.
+# Padding the UNIT instead makes the property hold for every N, and the outcome search below proves
+# the unit is balanced at the smallest N the fixture ever drives.
+DENSE_PAD_TRIED=""
+DENSE_PAD_FOUND="no"
 CAL_C1=4; CAL_C2=16
-CAL_B1="$(dense_write "$CAL_C1")"; dense_run; CAL_MS1="$DR_MS"; CAL_D1="$DR_DECISION"
-CAL_B2="$(dense_write "$CAL_C2")"; dense_run; CAL_MS2="$DR_MS"; CAL_D2="$DR_DECISION"
+CAL_B1=""; CAL_MS1=""; CAL_D1=""
+for _pad in "" '"' "'" "\"'"; do
+  CAL_B1="$(dense_write "$CAL_C1" "$_pad")"
+  dense_bounded "$DENSE_PROBE_BOUND_S"
+  CAL_MS1="$TB_GB_MS"; CAL_D1="$TB_GB_DECISION"
+  DENSE_PAD_TRIED="$DENSE_PAD_TRIED [pad=[${_pad}] -> ${CAL_D1} in ${CAL_MS1}ms]"
+  if [[ "$CAL_D1" == "deny" ]]; then DENSE_PAD="$_pad"; DENSE_PAD_FOUND="yes"; break; fi
+done
+record "AC11 PAD SEARCH on $DENSEST_REL:$DENSE_PAD_TRIED -- kept [${DENSE_PAD}] (${#DENSE_PAD} character(s), carried once per copy). A row needing a pad is a live #140 instance on tracked content"
+assert_eq "AC11 PAD: the fixture's quote parity is settled by OUTCOME -- some pad in the searched set makes the smallest cell DENY. Counting raw quotes sits on the wrong side of the scanner's escape resolution and was measured to break the very refusal it guards (#140)" \
+  "$DENSE_PAD_FOUND" "yes"
+
+# THE CEILING IS INVERTED INTO A COPY COUNT AND CLAMPS EVERY CANDIDATE BEFORE IT IS WRITTEN. The
+# body is exactly (source + pad) x N inside a fixed wrapper, so the inversion is algebra and not a
+# fit: two writes with no gate run give the unit and the wrapper. The old fixture asserted this
+# ceiling AFTER building and driving a 23,159,538-byte body, so the ceiling was a verdict on work
+# already paid for -- eleven minutes and forty seconds of it, twice per CI job.
+DENSE_B_ONE="$(dense_write 1)"
+DENSE_B_TWO="$(dense_write 2)"
+DENSE_UNIT_BYTES=$(( DENSE_B_TWO - DENSE_B_ONE ))
+DENSE_WRAP_BYTES=$(( DENSE_B_ONE - DENSE_UNIT_BYTES ))
+DENSE_MAX_COPIES=0
+[[ "$DENSE_UNIT_BYTES" -gt 0 ]] && DENSE_MAX_COPIES=$(( (DENSE_MAX_BYTES - DENSE_WRAP_BYTES) / DENSE_UNIT_BYTES ))
+assert_eq "AC11 CEILING PREMISE: the ${DENSE_MAX_BYTES}-byte ceiling inverts to $DENSE_MAX_COPIES copies of a ${DENSE_UNIT_BYTES}-byte unit plus a ${DENSE_WRAP_BYTES}-byte wrapper, which leaves the climb room above its ${CAL_C2}-copy calibration" \
+  "$([[ "$DENSE_MAX_COPIES" -gt "$CAL_C2" ]] && echo "room-above-calibration" || echo "ONLY $DENSE_MAX_COPIES COPIES FIT, against a $CAL_C2 copy calibration")" \
+  "room-above-calibration"
+
+# The second calibration point. Two points separate the constant from the slope; the FLOOR above
+# separates the gate's start-up from both.
+CAL_B2="$(dense_write "$CAL_C2")"
+dense_bounded "$DENSE_PROBE_BOUND_S"
+CAL_MS2="$TB_GB_MS"; CAL_D2="$TB_GB_DECISION"
 assert_eq "CALIBRATION NON-VACUITY: both calibration cells DENY (a 'none' here means the fixture -- an unbalanced quote or a truncated payload -- and every extrapolation from it would be wrong)" \
   "$CAL_D1/$CAL_D2" "deny/deny"
 assert_eq "CALIBRATION NON-VACUITY: the larger cell costs measurably more than the smaller ($CAL_MS1 -> $CAL_MS2 ms). A flat pair means the instrument is measuring its own floor and the fit below is meaningless" \
   "$([[ "$CAL_MS2" -gt "$CAL_MS1" && "$CAL_MS1" -ge 50 ]] && echo "slope-present" || echo "FLAT OR TOO FAST: ${CAL_MS1} -> ${CAL_MS2} ms")" \
   "slope-present"
-# ms = F + k*copies, solved in integer arithmetic (bash 3.2 has no floats), aimed at 2.0x the
-# declared timeout so the killed arm sits comfortably inside the deciding arm on either host.
-# 1.5x rather than 2x: enough headroom that the fit's error cannot land the deciding arm inside
-# the kill, without paying for a body larger than the discrimination needs. The retry loop below
-# is what covers a host where even 1.5x undershoots.
-TARGET_MS=$(( DECLARED_MS * 15 / 10 ))
-K_X1000=$(( (CAL_MS2 - CAL_MS1) * 1000 / (CAL_C2 - CAL_C1) ))
-[[ "$K_X1000" -lt 1 ]] && K_X1000=1
-F_X1000=$(( CAL_MS1 * 1000 - K_X1000 * CAL_C1 ))
-DENSE_COPIES=$(( (TARGET_MS * 1000 - F_X1000) / K_X1000 + 1 ))
-[[ "$DENSE_COPIES" -lt "$CAL_C2" ]] && DENSE_COPIES="$CAL_C2"
-DENSE_BYTES="$(dense_write "$DENSE_COPIES")"
-record "AC11 CALIBRATION: $CAL_C1 copies = $CAL_B1 bytes in $CAL_MS1 ms and $CAL_C2 copies = $CAL_B2 bytes in $CAL_MS2 ms at load $(tb_loadavg); fit ms = $(( F_X1000 / 1000 )) + $(( K_X1000 / 1000 )).$(( (K_X1000 % 1000) / 100 )) per copy; $DENSE_COPIES copies = $DENSE_BYTES bytes for a target of $TARGET_MS ms (1.5x the declared ${DECLARED_MS} ms)"
 
-# ARM ONE: unbounded. deny, with NON-EMPTY stdout. Up to two growth retries, because AC11 requires
-# the discrimination to be constructible at SOME length and a fit can undershoot on a faster host;
-# the attempts are recorded either way, so a green row always says which length produced it.
-DENSE_ATTEMPTS=""
-for _try in 1 2 3; do
-  dense_run
-  DENSE_MS="$DR_MS"; DENSE_DECISION="$DR_DECISION"; DENSE_OUT_BYTES="$DR_OUT_BYTES"
-  DENSE_ATTEMPTS="$DENSE_ATTEMPTS [try$_try ${DENSE_COPIES}copies/${DENSE_BYTES}B/${DENSE_MS}ms/${DENSE_DECISION}]"
-  [[ "$DENSE_MS" -gt "$DECLARED_MS" ]] && break
-  [[ "$_try" == "3" ]] && break
-  DENSE_COPIES=$(( DENSE_COPIES * 2 ))
-  DENSE_BYTES="$(dense_write "$DENSE_COPIES")"
-  [[ "$DENSE_BYTES" -gt "$DENSE_MAX_BYTES" ]] && break
-done
+# THE TERM THAT DOES NOT SCALE WITH LENGTH, taken from the same two points the exponent is estimated
+# from. Two node starts and a resolver run happen before the gate reads a byte, and a power law
+# fitted to the RAW milliseconds reads that overhead as sub-linear growth: on this host's own
+# calibration that spurious curve asks for MORE copies than the straight line it replaces.
+# INDEPENDENTLY MEASURED BESIDE IT, and recorded rather than substituted: a bare `git add -A` with
+# no body at all, which is the same deny branch with the length term removed. The two are different
+# observations of one quantity and the transcript carries both, so a reader can see when they part.
+DENSE_FIT_FLOOR="$(tb_fit_floor "$CAL_C1" "$CAL_MS1" "$CAL_C2" "$CAL_MS2")"
+DENSE_FLOOR_FILE="$TEMP_PROJECT/dense.floor.cmd"
+printf 'git add -A' > "$DENSE_FLOOR_FILE"
+tb_gate_bounded \
+  "$(tb_payload_file "$DENSE_FLOOR_FILE" "$P4" agent_id=sub-panelist-1 agent_type=pipeline:qa)" \
+  "$P4" "$DENSE_PROBE_BOUND_S"
+DENSE_FLOOR_MS="$TB_GB_MS"; DENSE_FLOOR_DECISION="$TB_GB_DECISION"
+record "AC11 GATE FLOOR: the two-point line's intercept is $DENSE_FIT_FLOOR ms and is what the fit subtracts; a bare \`git add -A\` with no body measured $DENSE_FLOOR_MS ms ($DENSE_FLOOR_DECISION) at load $(tb_loadavg) as the independent observation of the same quantity"
+assert_eq "AC11 FLOOR NON-VACUITY: the independently measured overhead took the SAME deny branch the sized cells take (a floor measured on the allow branch would be the wrong constant) and is cheaper than the smallest sized cell ($DENSE_FLOOR_MS ms against $CAL_MS1 ms)" \
+  "$([[ "$DENSE_FLOOR_DECISION" == "deny" && "$DENSE_FLOOR_MS" -lt "$CAL_MS1" ]] && echo "below-the-smallest-cell" || echo "GOT $DENSE_FLOOR_DECISION in $DENSE_FLOOR_MS ms against a ${CAL_MS1} ms 4-copy cell")" \
+  "below-the-smallest-cell"
+assert_eq "AC11 FIT-FLOOR PREMISE: the intercept the fit subtracts is a fraction of the smallest measured cell, not the whole of it ($DENSE_FIT_FLOOR ms of $CAL_MS1 ms) -- an intercept at or above the cell means the two calibration points could not separate a constant from a slope" \
+  "$([[ "$DENSE_FIT_FLOOR" -ge 0 && "$DENSE_FIT_FLOOR" -lt "$CAL_MS1" ]] && echo "separated" || echo "INTERCEPT $DENSE_FIT_FLOOR ms against a ${CAL_MS1} ms smallest cell")" \
+  "separated"
+
+# THE CLIMB. Each step re-estimates the exponent from the two most recent MEASURED points with the
+# floor subtracted, caps the candidate at 32x the largest measured count and at the ceiling, and
+# runs it under a wall-clock bound of twice the aim. A killed probe is not a stall: it fixes an
+# upper bracket and the climb halves the gap. See fixtures/timeout-bound-lib.sh for the recorded
+# reason the single straight-line solve this replaces cannot be salvaged by lowering the target.
+DENSE_DECISION=""; DENSE_OUT_BYTES=0; DENSE_BYTES="$CAL_B2"
+dense_probe() {  # <copies> -> tb_climb's contract (TB_PROBE_MS/TB_PROBE_KILLED) plus this fixture's
+  local b
+  b="$(dense_write "$1")"
+  dense_bounded "$DENSE_PROBE_BOUND_S"
+  TB_PROBE_MS="$TB_GB_MS"; TB_PROBE_KILLED="$TB_GB_KILLED"
+  # A killed probe emits no decision, so it must not overwrite the last cell that produced one.
+  if [[ "$TB_GB_KILLED" != "1" ]]; then
+    DENSE_BYTES="$b"; DENSE_DECISION="$TB_GB_DECISION"; DENSE_OUT_BYTES="$TB_GB_OUT_BYTES"
+  fi
+}
+DENSE_DECISION="$CAL_D2"; DENSE_OUT_BYTES=1
+tb_climb dense_probe "$CAL_C1" "$CAL_MS1" "$CAL_C2" "$CAL_MS2" "$DENSE_FIT_FLOOR" \
+  "$TARGET_MS" "$ACCEPT_MS" "$DENSE_CAP_X100" "$DENSE_MAX_COPIES" "$DENSE_MAX_STEPS"
+DENSE_COPIES="$TB_CLIMB_COPIES"; DENSE_MS="$TB_CLIMB_MS"; DENSE_STOP="$TB_CLIMB_STOP"
+# Re-write the ACCEPTED body, so arm two below drives the identical command whatever the last probe
+# in the climb happened to be.
+DENSE_BYTES="$(dense_write "$DENSE_COPIES")"
 DENSE_ADJ=$(( DENSE_MS * LOAD_SPREAD_X100 * HOST_SPREAD_X100 / 10000 ))
-record "AC11 ARM-ONE ATTEMPTS:$DENSE_ATTEMPTS against a ${DECLARED_MS} ms kill, load $(tb_loadavg)"
+record "AC11 CALIBRATION: $CAL_C1 copies = $CAL_B1 bytes in $CAL_MS1 ms and $CAL_C2 copies = $CAL_B2 bytes in $CAL_MS2 ms, over a ${DENSE_FIT_FLOOR} ms fitted gate floor (${DENSE_FLOOR_MS} ms measured independently), at load $(tb_loadavg); aim ${TARGET_MS} ms (1.5x the declared ${DECLARED_MS}), accept ${ACCEPT_MS} ms (the declared timeout x the 1.42 same-host load spread)"
+record "AC11 CLIMB: stop=$DENSE_STOP after $TB_CLIMB_PROBES probe(s), cap 32x per step, ceiling $DENSE_MAX_COPIES copies, per-probe wall-clock bound ${DENSE_PROBE_BOUND_S}s --$TB_CLIMB_TRACE"
 record "AC3 CONSTRUCTED DENSE CELL: $DENSE_COPIES concatenated copies of $DENSEST_REL = $DENSE_BYTES command bytes at $(printf '%s' "$DENSEST_DENS" | awk '{print $3}') B/struct -> $DENSE_DECISION in $DENSE_MS ms (adjusted $DENSE_ADJ ms) at load $(tb_loadavg) on $(uname -sr)"
 assert_eq "AC11 ARM ONE (unbounded): the ${DENSE_BYTES}-byte dense cell DECIDES, and emits a non-empty decision ($DENSE_OUT_BYTES bytes of stdout)" \
   "$([[ "$DENSE_DECISION" == "deny" && "$DENSE_OUT_BYTES" -gt 0 ]] && echo "deny-with-output" || echo "GOT $DENSE_DECISION with $DENSE_OUT_BYTES bytes -- a 'none' at this size is the fixture (payload truncation or quote parity), not the gate")" \
   "deny-with-output"
-assert_eq "AC11 SIZE CEILING: the pair was constructed within the fixture's own ${DENSE_MAX_BYTES}-byte command ceiling, so a red above is the gate and not the harness running out of room" \
-  "$([[ "$DENSE_BYTES" -le "$DENSE_MAX_BYTES" ]] && echo "within-ceiling" || echo "NEEDED $DENSE_BYTES BYTES, over the ${DENSE_MAX_BYTES} ceiling -- AC11's pair is no longer constructible from this corpus at this declaration")" \
+assert_eq "AC11 SIZE CEILING: the climb stopped because it REACHED the length the pair needs, not because it ran out of room -- accepted at $DENSE_BYTES of the ${DENSE_MAX_BYTES}-byte ceiling, $DENSE_MS ms against the ${ACCEPT_MS} ms accept. A 'ceiling' here means AC11's pair is no longer constructible from this corpus at this declaration" \
+  "$DENSE_STOP" "target"
+assert_eq "AC11 CEILING ARITHMETIC: the accepted body really is inside the ceiling the copy cap was inverted from, so the clamp is a bound on work PERFORMED and not a verdict on work already paid for ($DENSE_BYTES bytes at $DENSE_COPIES copies)" \
+  "$([[ "$DENSE_BYTES" -le "$DENSE_MAX_BYTES" && "$DENSE_COPIES" -le "$DENSE_MAX_COPIES" ]] && echo "within-ceiling" || echo "NEEDED $DENSE_BYTES BYTES AT $DENSE_COPIES COPIES, over the ${DENSE_MAX_BYTES} / ${DENSE_MAX_COPIES} ceiling")" \
   "within-ceiling"
 
-# ARM TWO: the same command through the same resolved hook command, killed at the DECLARED timeout.
-# ZERO BYTES of stdout, which is what makes the call fall open.
-gate_kill_at() {  # <payload> <seconds> -> sets KILL_BYTES
-  local payload="$1" secs="$2" tpl root cmd of pid kid gkid
-  tpl="$(gate_declaration_template_cached)"
-  KILL_BYTES="GATE-UNDECLARED"
-  [[ -n "$tpl" ]] || return 0
-  root="$GATE_PLUGIN_DIR"
-  cmd="${tpl//\$\{CLAUDE_PLUGIN_ROOT\}/$root}"
-  of="$TEMP_PROJECT/killed.out"
-  : > "$of"
-  ( printf '%s' "$payload" | env "CLAUDE_PROJECT_DIR=$P4" "CLAUDE_PLUGIN_ROOT=$root" "PATH=$PATH" \
-      sh -c "$cmd" ) > "$of" 2>/dev/null &
-  pid=$!
-  sleep "$secs"
-  # Kill by EXPLICIT PID only, parent first then each child it started, enumerated with ps -o pid=.
-  for kid in $(ps -o pid= -P "$pid" 2>/dev/null); do
-    for gkid in $(ps -o pid= -P "$kid" 2>/dev/null); do kill -KILL "$gkid" 2>/dev/null; done
-    kill -KILL "$kid" 2>/dev/null
-  done
-  kill -KILL "$pid" 2>/dev/null
-  wait "$pid" 2>/dev/null
-  KILL_BYTES="$(wc -c < "$of" | tr -d ' ')"
-}
-KILL_BYTES=""
-gate_kill_at "$(tb_payload_file "$DENSE_CMD_FILE" "$P4" agent_id=sub-panelist-1 agent_type=pipeline:qa)" "${DECLARED_S:-5}"
+# ARM TWO: the same command through the same runner and the same resolved hook command, killed at
+# the DECLARED timeout. ZERO BYTES of stdout, which is what makes the call fall open.
+dense_bounded "${DECLARED_S:-5}"
+KILL_BYTES="$TB_GB_OUT_BYTES"; KILL_KILLED="$TB_GB_KILLED"; KILL_MS="$TB_GB_MS"
 assert_eq "AC11 ARM TWO (killed at the declared ${DECLARED_S:-?} s): the SAME command through the SAME resolved hook command emits ZERO BYTES -- and a PreToolUse hook that emits nothing FAILS OPEN, so the blanket staging is allowed" \
   "$KILL_BYTES" "0"
+assert_eq "AC11 ARM TWO was really KILLED at ${DECLARED_S:-?} s rather than finishing early and happening to print nothing (${KILL_MS} ms). Without this the zero above is equally consistent with a gate that returned silently" \
+  "$KILL_KILLED" "1"
 assert_eq "AC11 DISCRIMINATION: the pair discriminates -- arm one emitted $DENSE_OUT_BYTES bytes at $DENSE_MS ms, arm two emitted $KILL_BYTES at the ${DECLARED_S:-?} s kill. If arm one finished INSIDE the kill the pair proves nothing" \
   "$([[ "$DENSE_MS" -gt "$DECLARED_MS" ]] && echo discriminates || echo "ARM ONE FINISHED IN $DENSE_MS ms, INSIDE the ${DECLARED_MS} ms kill -- no discrimination at this length")" \
   "discriminates"
+
+# ===============================================================================================
+suite "AC11 SIZING METHOD: the climb driven against KNOWN cost curves, including the recorded one"
+# ===============================================================================================
+#
+# THE ROWS ABOVE MEASURE THIS HOST. These rows measure the METHOD, and they are the non-zero
+# controls for it: a sizing search whose failure modes have never been watched to fire is a search
+# nobody has checked. The oracle is not invented. It is the ubuntu-latest curve CI actually
+# recorded on run 33747342504, reconstructed to pass through all three of its measured points:
+#
+#     ms(c) = 137 + 18.375c                     for c <= 16     (Dev's fit: 137 ms + 18.4 per copy,
+#     ms(c) = 137 + 294 (c/16)^1.4432           for c >  16      6617 bytes per copy)
+#
+#   c=4    -> 210 ms      the first calibration cell   (26,506 bytes)
+#   c=16   -> 431 ms      the second                   (105,910 bytes)
+#   c=3500 -> 700,560 ms  against the 700,683 the run recorded, 0.02% out -- what the straight line
+#                         through those two points ASKED FOR, and got
+#
+# so the third point is the eleven-minute measurement itself. Anyone can re-derive the curve from
+# the three figures; nothing here is fitted to the answer this block wants.
+SYN_FLOOR=0   # derived per scenario by tb_fit_floor, exactly as the real climb derives it
+syn_ms() {  # <copies> <high-exponent-x10000> -> the modelled milliseconds
+  "$GATE_REAL_NODE" -e '
+    const c = Number(process.argv[1]), p = Number(process.argv[2]) / 10000;
+    const A = 18.375, F = 137, B = 16;
+    const ms = c <= B ? F + A * c : F + A * B * Math.pow(c / B, p);
+    process.stdout.write(String(Math.round(ms)));
+  ' "$1" "$2"
+}
+SYN_P=14432          # the recorded curve
+SYN_BOUND_MS=0
+SYN_KILLS=0
+SYN_MAX_FACTOR_X100=0
+SYN_LAST_OK=0
+syn_probe() {  # <copies>
+  local c="$1" ms f
+  ms="$(syn_ms "$c" "$SYN_P")"
+  if [[ "$SYN_LAST_OK" -gt 0 ]]; then
+    f=$(( c * 100 / SYN_LAST_OK ))
+    [[ "$f" -gt "$SYN_MAX_FACTOR_X100" ]] && SYN_MAX_FACTOR_X100="$f"
+  fi
+  if [[ "$SYN_BOUND_MS" -gt 0 && "$ms" -gt "$SYN_BOUND_MS" ]]; then
+    TB_PROBE_MS="$SYN_BOUND_MS"; TB_PROBE_KILLED=1; SYN_KILLS=$(( SYN_KILLS + 1 ))
+  else
+    TB_PROBE_MS="$ms"; TB_PROBE_KILLED=0; SYN_LAST_OK="$c"
+  fi
+}
+syn_climb() {  # <high-exponent-x10000> <max-copies> <bound-ms>
+  local m1 m2
+  SYN_P="$1"; SYN_BOUND_MS="$3"; SYN_KILLS=0; SYN_MAX_FACTOR_X100=0; SYN_LAST_OK=16
+  m1="$(syn_ms 4 "$SYN_P")"; m2="$(syn_ms 16 "$SYN_P")"
+  # The floor comes through tb_fit_floor, exactly as the real climb above derives it, so this block
+  # drives the same code path and not a simplified copy of it. On this oracle it returns 137, which
+  # is the intercept the recorded ubuntu-latest fit had.
+  SYN_FLOOR="$(tb_fit_floor 4 "$m1" 16 "$m2")"
+  tb_climb syn_probe 4 "$m1" 16 "$m2" "$SYN_FLOOR" 45000 42600 3200 "$2" 6
+}
+
+# The ceiling in copies at the recorded 6617 bytes per copy: 6000000 / 6617 = 906.
+SYN_MAXC=906
+# WHAT THE METHOD THIS REPLACES WOULD HAVE ASKED FOR, from the SAME two points: solve the straight
+# line ms = 137 + 18.375c for 45000 and you get 2442 copies = 16.2 MB, over the ceiling and 15.6x
+# past the target in time. That is the defect, stated as a number this row re-derives.
+SYN_LINEAR="$("$GATE_REAL_NODE" -e 'process.stdout.write(String(Math.ceil((45000 - 137) / 18.375)))')"
+syn_climb "$SYN_P" "$SYN_MAXC" 90000
+record "AC11 METHOD on the recorded ubuntu-latest curve: stop=$TB_CLIMB_STOP at $TB_CLIMB_COPIES copies / $TB_CLIMB_MS ms in $TB_CLIMB_PROBES probe(s), largest step ${SYN_MAX_FACTOR_X100}/100 x;$TB_CLIMB_TRACE -- the straight line through the same two points asked for $SYN_LINEAR copies"
+assert_eq "AC11 METHOD: on the curve ubuntu-latest actually measured, the climb REACHES the target inside the ceiling ($TB_CLIMB_COPIES copies of $SYN_MAXC, $TB_CLIMB_MS ms)" \
+  "$([[ "$TB_CLIMB_STOP" == "target" && "$TB_CLIMB_COPIES" -le "$SYN_MAXC" && "$TB_CLIMB_MS" -ge 42600 ]] && echo "reached" || echo "stop=$TB_CLIMB_STOP at $TB_CLIMB_COPIES copies / $TB_CLIMB_MS ms")" \
+  "reached"
+assert_eq "AC11 METHOD: and it gets there in at most three probes ($TB_CLIMB_PROBES), which is the whole cost argument -- the row this replaces spent ONE probe of 700,683 ms, twice per CI job" \
+  "$([[ "$TB_CLIMB_PROBES" -le 3 ]] && echo "cheap" || echo "$TB_CLIMB_PROBES PROBES")" "cheap"
+assert_eq "AC11 METHOD CONTROL, and the reason this block exists: the SINGLE straight-line solve through the identical two points asks for $SYN_LINEAR copies, which is OVER the $SYN_MAXC-copy ceiling. The old fixture built and drove that body before checking" \
+  "$([[ "$SYN_LINEAR" -gt "$SYN_MAXC" ]] && echo "over-the-ceiling" || echo "$SYN_LINEAR copies, inside the ceiling -- this control has lost its subject")" \
+  "over-the-ceiling"
+assert_eq "AC11 METHOD: no step of that climb exceeded the 32x cap on the largest MEASURED count (largest ${SYN_MAX_FACTOR_X100}/100 x)" \
+  "$([[ "$SYN_MAX_FACTOR_X100" -le 3200 ]] && echo "capped" || echo "STEPPED ${SYN_MAX_FACTOR_X100}/100 x")" "capped"
+
+# NON-ZERO CONTROL FOR THE `AC11 SIZE CEILING` ROW ABOVE. That row asserts stop=target; unless
+# stop=ceiling has been watched to happen, it is a row nobody has seen fail. Same curve, a ceiling
+# that cannot reach the target.
+syn_climb "$SYN_P" 100 90000
+record "AC11 METHOD (ceiling control): a 100-copy ceiling on the same curve -> stop=$TB_CLIMB_STOP at $TB_CLIMB_COPIES copies / $TB_CLIMB_MS ms;$TB_CLIMB_TRACE"
+assert_eq "AC11 METHOD CONTROL: with a ceiling too small to reach the target the climb reports 'ceiling' and stops, rather than clamping silently and reporting a pair it never built" \
+  "$TB_CLIMB_STOP" "ceiling"
+
+# NON-ZERO CONTROL FOR THE PER-PROBE WALL-CLOCK BOUND. A curve that is linear where the calibration
+# looks and cubic beyond it: the capped first step overruns the bound, is killed, and the climb has
+# to bracket DOWN to land. Without this the kill branch is code no run has ever taken.
+syn_climb 26000 "$SYN_MAXC" 90000
+record "AC11 METHOD (kill/bracket control): a c^2.6 curve beyond the calibration -> stop=$TB_CLIMB_STOP at $TB_CLIMB_COPIES copies / $TB_CLIMB_MS ms after $TB_CLIMB_PROBES probes, $SYN_KILLS killed;$TB_CLIMB_TRACE"
+assert_eq "AC11 METHOD CONTROL: on a curve steeper than the calibration can see, at least one probe HITS its wall-clock bound and is killed -- which is the difference between a bounded search and the 700,683 ms stall it replaces" \
+  "$([[ "$SYN_KILLS" -ge 1 ]] && echo "bounded" || echo "NO PROBE WAS KILLED, so the bound never fired and this control validates nothing")" \
+  "bounded"
+assert_eq "AC11 METHOD CONTROL: and the climb still lands on the target after bracketing down from that kill (stop=$TB_CLIMB_STOP, $TB_CLIMB_COPIES copies, $TB_CLIMB_MS ms)" \
+  "$([[ "$TB_CLIMB_STOP" == "target" && "$TB_CLIMB_MS" -ge 42600 ]] && echo "recovered" || echo "stop=$TB_CLIMB_STOP at $TB_CLIMB_MS ms")" \
+  "recovered"
 
 # AC3's disclosure obligation, evaluated as the CONDITIONAL it is: a cell that fails AC2's
 # inequality must appear in the operator-facing disclosure with its milliseconds AND its density.
