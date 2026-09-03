@@ -20,6 +20,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Pin the PR's own head commit, not actions/checkout's pull_request default (GitHub's
+          # synthetic refs/pull/<N>/merge against whatever main is at CI-start time). Same gap,
+          # same fix, as tests.yml -- see that file's checkout step for the full incident (#132).
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       # No package.json, no dependencies, no install step. The check is one file of plain Node using
       # only node:fs, so the runner's bundled Node is enough. Keeping it dependency-free is
       # deliberate: a release gate that can break on someone else's package is a gate that gets

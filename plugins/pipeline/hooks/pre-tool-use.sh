@@ -49,9 +49,12 @@ _note() {
 # pattern match per candidate position, so a pattern that GROWS with the subject costs its square.
 #
 # THE COST WAS NOT THEORETICAL. A subagent's `git commit -a -m "<2.5 KB message>"` took 5.014 s
-# and was killed at this hook's own 5-second declared timeout, and a killed PreToolUse hook FAILS
-# OPEN -- so the identical forbidden staging was DENIED with a short message and ALLOWED with a
-# long one. Length is not a privilege, and it must not buy a bypass.
+# and was killed at this hook's own 5-second declared timeout -- a superseded figure, and the era
+# it describes is the tree before this change, since #132 raised that declaration to 30 s -- and a
+# killed PreToolUse hook FAILS OPEN, so the identical forbidden staging was DENIED with a short
+# message and ALLOWED with a long one. Length is not a privilege, and it must not buy a bypass.
+# The DIRECTION is not superseded: a killed PreToolUse hook still emits nothing and still falls
+# open, and README item 27 cost (4) publishes where the crossing sits at the current bound.
 #
 # So every cursor move below drops a prefix in FIXED-WIDTH steps whose patterns are compile-time
 # constants, and every first-character read is an ANCHORED `case` instead of a suffix subtraction.
@@ -92,6 +95,8 @@ _cut() { # <prefix> : drop exactly as many leading characters from _CUR as <pref
 # every cut -- two more whole-string copies per structural character, on top of the one the cut
 # itself needs. On a 78 KB heredoc, whose every line-ending newline is a structural character,
 # that was three copies per line rather than one and measured 4064 ms against a 5000 ms bound.
+# ERA: that 5000 ms bound is the pre-#132 declaration, superseded by 30 s; the 4064 ms is the
+# measurement it was taken against and is unchanged by the raise.
 _cut_sc() { # <prefix> : drop exactly as many leading characters from _sc as <prefix> has
   _ct=$1
   while [ -n "$_ct" ]; do
@@ -213,7 +218,9 @@ _js_get() { # <key> <haystack>
 # (number of escapes) x (length) -- and a MULTI-LINE command carries one `\n` escape per line, so
 # an ordinary heredoc lands squarely in it: measured on darwin 25.5.0, 215 ms over a 20 KB value,
 # 609 ms over 40 KB and 2165 ms over 80 KB, on the path that decides a refusal, against the
-# 5-second `timeout` hooks.json declares. Splitting on the escape character with the shell's own
+# 5-second `timeout` hooks.json declared before this change (superseded: #132 raised it to 30 s,
+# and the three measurements above are unaffected -- what grew is the margin they left).
+# Splitting on the escape character with the shell's own
 # field splitting is one C-level pass, and the walk below makes no function call, so the whole
 # thing is linear.
 #
@@ -298,7 +305,8 @@ _js_unescape() { # <escaped> -> _UNESC
 #     hoard with `set -- "$@" "$_w"`, an append that rebuilds the whole list. That append ALONE
 #     measured 347 ms at 500 words, 1195 at 1000, 4807 at 2000, 19658 at 4000 and 78780 at 8000,
 #     which is why `git add . <2000 operands>` took 8.3 s and crossed the 5-second `timeout`
-#     hooks.json declares.
+#     hooks.json declared prior to #132. ERA: the declaration is 30 s now, so that particular
+#     8.3 s row no longer crosses; the shape it names is why the append was removed regardless.
 #   * one call PER WORD is worse, not better, and that is the trap this file walked into once.
 #     A function call SAVES AND RESTORES THE POSITIONAL PARAMETERS, so calling anything while a
 #     large list is live costs the length of that list: a `for` walk over k fields calling one
@@ -614,13 +622,20 @@ _lit1() {
 # subject. Density, not size, is the axis: a double quote costs about 3x a newline, and the shapes
 # an agent really writes range over 24x.
 #
-# THE COST WAS NOT THEORETICAL AND THE SUBJECT WAS THIS REPOSITORY'S OWN WORK. Measured on darwin
-# 25.5.0 / bash 3.2.57(1) in sh mode / node v24.19.0 at 0b354c2, driving the shipped hook against
-# the 5 s its hooks.json entry declares: quote-dense text (`echo "a" "a" ... ; git add -A`) took
-# 5101 ms at 12.0 KB, ordinary pretty-printed JSON 5095 ms at 29.0 KB, quote-free prose 5094 ms at
-# 116.9 KB -- each killed at the timeout, each emitting nothing, and A PRETOOLUSE HOOK THAT EMITS
-# NOTHING FAILS OPEN, so past those points the blanket staging on the far side of the heredoc was
-# ALLOWED. The non-synthetic instance: heredoc-writing `.pipeline/106/peer-review.json` (81.3 KB,
+# THE COST WAS NOT THEORETICAL AND THE SUBJECT WAS THIS REPOSITORY'S OWN WORK. Every figure in this
+# paragraph describes the tree at 0b354c2, before the bounded window below existed and before #132
+# raised the declaration, and all three crossings it states are superseded twice over. They are
+# kept because they are what the window was built to answer, not as current figures.
+# Measured on darwin 25.5.0 / bash 3.2.57(1) in sh mode / node v24.19.0 at 0b354c2, driving the
+# then-shipped hook against the 5 s its hooks.json entry declared at that commit -- superseded, and
+# the era it describes is the tree before this change -- quote-dense text (`echo "a" "a" ... ;
+# git add -A`) took 5101 ms at 12.0 KB, ordinary pretty-printed JSON 5095 ms at 29.0 KB, and
+# quote-free prose 5094 ms at 116.9 KB. Those three KB figures are superseded and describe the
+# pre-#116 scan; each was killed at the timeout, each emitted nothing, and A PRETOOLUSE HOOK THAT
+# EMITS NOTHING FAILS OPEN, so past those points the blanket staging on the far side of the heredoc
+# was ALLOWED. WHERE THE CROSSING SITS NOW, re-derived at #132 against the current 30 s declaration
+# and the current scan: README item 27 cost (4) carries it at both ends of the density range, with
+# the lengths, the densities and the cells that remain uncovered. The non-synthetic instance: heredoc-writing `.pipeline/106/peer-review.json` (81.3 KB,
 # the merged Phase 4 panel record of the issue that shipped this gate) and staging it in the same
 # Bash call measured 3373-4500 ms, 67-90% of the budget, and doubling the file crossed.
 #

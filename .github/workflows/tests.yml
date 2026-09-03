@@ -18,6 +18,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          # PIN THE ACTUAL REVIEWED COMMIT, not actions/checkout's default for pull_request
+          # events. Discovered at #132: with no `ref` set, a `pull_request`-triggered run checks
+          # out GitHub's own synthetic `refs/pull/<N>/merge` commit -- the PR head merged into
+          # whatever `main` is AT THE MOMENT CI STARTS, not the PR branch's own head. Confirmed
+          # byte-for-byte: CI run 33781300231 (PR #141, head 62792e6) materialized a tree from
+          # sha 1acd5705..., and `git ls-remote ... refs/pull/141/merge` returns that EXACT sha.
+          # Every suite that measures "the tracked corpus" (#132's AC1/AC3/AC4 sizing block, whose
+          # published README figures are compared against a fresh count) was silently grading
+          # against a moving target: main's own state at CI-start time, which shifts every time
+          # ANYTHING ELSE merges to main while this PR sits open, with no code change in the PR
+          # itself. `github.event.pull_request.head.sha` is the PR's own commit; on a plain
+          # `push` (this workflow's other trigger) that field does not exist, so `|| github.sha`
+          # falls back to the pushed commit, which was already correct on that trigger.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           # FULL history, not the action's default fetch-depth: 1. Several suites are ABOUT the
           # commit series -- that each commit reverts cleanly on its own, that the CI commit
           # lands before the surface module -- and they find their commits by subject through

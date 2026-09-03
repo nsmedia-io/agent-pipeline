@@ -18,6 +18,7 @@
 
 . "$(dirname "${BASH_SOURCE[0]}")/harness.sh"
 . "$(dirname "${BASH_SOURCE[0]}")/fixtures/pretooluse-gate-lib.sh"
+. "$(dirname "${BASH_SOURCE[0]}")/fixtures/timeout-bound-lib.sh"
 require_node
 
 make_temp_project 106 || exit 90
@@ -387,13 +388,65 @@ suite "AC7 LENGTH AXIS: a forbidden command stays forbidden however long its ope
 # they go red, and it is asserted rather than only recorded.
 LEN_TIMEOUT_S="$(gate_declared_timeout)"
 [[ "$LEN_TIMEOUT_S" =~ ^[0-9]+$ ]] || LEN_TIMEOUT_S=0
-LEN_BOUND_MS=$(( LEN_TIMEOUT_S * 1000 ))
+BYPASS_BOUND_MS=$(( LEN_TIMEOUT_S * 1000 ))
 assert_eq "VACUITY: hooks.json declares a positive PreToolUse timeout to bound against (read, not transcribed): ${LEN_TIMEOUT_S}s" \
-  "$([[ "$LEN_BOUND_MS" -gt 0 ]] && echo declared || echo "MISSING: [$LEN_TIMEOUT_S]")" "declared"
+  "$([[ "$BYPASS_BOUND_MS" -gt 0 ]] && echo declared || echo "MISSING: [$LEN_TIMEOUT_S]")" "declared"
+
+# ---- THE SECOND BOUND, AND WHY IT IS NOT THE FIRST ONE TIMES A CONSTANT (#132) -----------------
+#
+# The four timing blocks below (LENGTH, WORD-BOUNDARY, DENSITY, DENSITY-GROWTH) used to apply ONE
+# bound, `LEN_BOUND_MS=$(( LEN_TIMEOUT_S * 1000 ))`, read from the declaration. That is the right
+# bound for the question "did this call get KILLED", and it is the wrong bound for the question
+# "did this gate get SLOWER", and the two have different remedies. Leaving them merged means the
+# one-integer edit in hooks.json that #132 makes -- 5 to 30 -- silently widens all four regression
+# guards by a factor of six, with nothing anywhere going red to say so. So the two are separated:
+#
+#   BYPASS       -- over the DECLARED timeout. The runtime kills the hook there, it emits nothing,
+#                   and a PreToolUse hook that emits nothing FAILS OPEN, so the forbidden staging
+#                   is ALLOWED. This is a security failure and it moves with hooks.json.
+#   REGRESSION   -- over the ABSOLUTE budget below. The gate still decided, and still refused, but
+#                   it took longer than its recorded derivation permits. This is a performance
+#                   failure, it does not move with hooks.json, and it is the guard #116's linear
+#                   scan is held to.
+#
+# THE BUDGET IS ABSOLUTE AND ITS DERIVATION IS RECORDED HERE. Every probe below pays two node
+# starts and a resolver run before it reads a byte of the command, so the figure is a whole-probe
+# wall clock and not a scan cost. Worst observed per block, min-of-3 where a block runs more than
+# one cell:
+#
+#   MEASURED ON darwin 25.5.0 / bash 3.2.57(1) in sh mode / node v24.19.0, at load 2.57-2.79:
+#     LENGTH 397 ms, WORD-BOUNDARY 1147 ms, DENSITY 982 ms,
+#     DENSITY-GROWTH 1028 ms.
+#     Command: bash plugins/pipeline/tests/run.sh (this suite reads its own `record` lines back).
+#
+#   MEASURED ON ubuntu-latest, WHICH IS THE HOST THE GUARD IS EVALUATED ON.
+#   .github/workflows/tests.yml:17,60 runs `bash plugins/pipeline/tests/run.sh` on ubuntu-latest
+#   for every pull_request and every push to main, so these four blocks execute there on every
+#   change and the figures below were read off that run rather than estimated from the darwin ones:
+#     LENGTH 119 ms, WORD-BOUNDARY 175 ms, DENSITY 154 ms,
+#     DENSITY-GROWTH 156 ms.
+#     Command: bash plugins/pipeline/tests/run.sh, on ubuntu-latest, run id 33747342504 (Linux
+#     6.17.0-1022-azure, load 2.00). The earlier run 33744488416 of the same four blocks read
+#     174/265/205/214 ms; both are recorded because the spread between two runs of one host is the
+#     thing a single figure hides. ubuntu-latest is FASTER than the darwin host above by roughly
+#     3x to 6x on these blocks, not slower, so the budget's binding constraint is darwin.
+#
+# WHY 5000 AND NOT A ROUNDED MULTIPLE OF THE WORST FIGURE. It is the millisecond value these four
+# guards effectively carried before this change, when the declaration they read was the superseded
+# 5 s -- so the number is a historical one deliberately frozen. Pinning it there
+# makes the property structural rather than numerical: raising hooks.json cannot widen these four
+# guards, because the number they compare against is the one they already had. It also sits above
+# every figure recorded above with a stated margin -- 4.4x the worst darwin block -- rather than
+# padded to cover a host nobody measured, because padding blind is the same loss of discrimination
+# the separation exists to prevent. A red on a REGRESSION row means the scan got slower; a red on a
+# BYPASS row means a call is falling open.
+REGRESSION_BUDGET_MS=5000
+record "REGRESSION BUDGET: ${REGRESSION_BUDGET_MS} ms absolute, declared separately from the ${LEN_TIMEOUT_S}s (${BYPASS_BOUND_MS} ms) bypass bound read from hooks.json, on $(uname -sr) at load $(uptime | sed 's/.*averages*: //')"
 
 len_now_ms() { "$GATE_REAL_NODE" -e 'process.stdout.write(String(Date.now()))'; }
 LEN_WORST_MS=0
 LEN_SLOW=""
+LEN_REGRESS=""
 len_probe() {  # <label> <command> <expected-verdict>
   local a b el
   a="$(len_now_ms)"
@@ -401,7 +454,9 @@ len_probe() {  # <label> <command> <expected-verdict>
   b="$(len_now_ms)"
   el=$(( b - a ))
   [[ "$el" -gt "$LEN_WORST_MS" ]] && LEN_WORST_MS="$el"
-  [[ "$el" -lt "$LEN_BOUND_MS" ]] || LEN_SLOW="$LEN_SLOW
+  [[ "$el" -lt "$BYPASS_BOUND_MS" ]] || LEN_SLOW="$LEN_SLOW
+$1 -> ${el} ms"
+  [[ "$el" -lt "$REGRESSION_BUDGET_MS" ]] || LEN_REGRESS="$LEN_REGRESS
 $1 -> ${el} ms"
   assert_eq "AC7 LENGTH: $1 -> $3" "$v" "$3"
 }
@@ -415,9 +470,11 @@ for n in 200 1000 2000 4000 8000 32000; do
   len_probe "git add <path> with a ${n}-char -m operand" \
     "git add plugins/pipeline/agents/dba.md && git commit -m \"chore: $PAD\"" "none"
 done
-assert_eq "AC7 LENGTH: every probe above returned inside the ${LEN_TIMEOUT_S}s the declaration commits to (worst ${LEN_WORST_MS} ms). A hook killed at its declared timeout emits nothing and the call is ALLOWED, so a row over this bound is a bypass, not a slow test" \
+assert_eq "AC7 LENGTH BYPASS: every probe above returned inside the ${LEN_TIMEOUT_S}s the declaration commits to (worst ${LEN_WORST_MS} ms). A hook killed at its declared timeout emits nothing and the call is ALLOWED, so a row over this bound is a BYPASS, not a slow test" \
   "$LEN_SLOW" ""
-record "LENGTH AXIS worst observed: ${LEN_WORST_MS} ms against a declared bound of ${LEN_BOUND_MS} ms, on $(uname -sr)"
+assert_eq "AC7 LENGTH REGRESSION: and inside the ${REGRESSION_BUDGET_MS} ms absolute budget this suite derives for itself (worst ${LEN_WORST_MS} ms). A row over THIS bound is a REGRESSION -- the gate still decided and still refused, it just got slower than its derivation permits -- and its remedy is the scan, not hooks.json" \
+  "$LEN_REGRESS" ""
+record "LENGTH AXIS worst observed: ${LEN_WORST_MS} ms against a bypass bound of ${BYPASS_BOUND_MS} ms and a regression budget of ${REGRESSION_BUDGET_MS} ms, on $(uname -sr)"
 
 # ===============================================================================================
 suite "AC7 WORD-BOUNDARY AXIS: the cost is driven by boundary COUNT, and the block above cannot see it"
@@ -442,6 +499,7 @@ suite "AC7 WORD-BOUNDARY AXIS: the cost is driven by boundary COUNT, and the blo
 # figures are RECORDED rather than asserted for that reason -- a multiple would measure the runner.
 WB_WORST_MS=0
 WB_SLOW=""
+WB_REGRESS=""
 wb_probe() {  # <label> <command> <expected-verdict>
   local a b el v
   a="$(len_now_ms)"
@@ -449,7 +507,9 @@ wb_probe() {  # <label> <command> <expected-verdict>
   b="$(len_now_ms)"
   el=$(( b - a ))
   [[ "$el" -gt "$WB_WORST_MS" ]] && WB_WORST_MS="$el"
-  [[ "$el" -lt "$LEN_BOUND_MS" ]] || WB_SLOW="$WB_SLOW
+  [[ "$el" -lt "$BYPASS_BOUND_MS" ]] || WB_SLOW="$WB_SLOW
+$1 -> ${el} ms"
+  [[ "$el" -lt "$REGRESSION_BUDGET_MS" ]] || WB_REGRESS="$WB_REGRESS
 $1 -> ${el} ms"
   WB_LAST_MS="$el"
   assert_eq "AC7 BOUNDARY: $1 -> $3" "$v" "$3"
@@ -503,13 +563,15 @@ $LINES
 EOF
 git add plugins/pipeline/agents/dba.md" "none"
 done
-assert_eq "AC7 BOUNDARY: every probe above returned inside the ${LEN_TIMEOUT_S}s the declaration commits to (worst ${WB_WORST_MS} ms). This is the axis that was live at the reviewed commit: a hook killed at its declared timeout emits nothing and the call is ALLOWED" \
+assert_eq "AC7 BOUNDARY BYPASS: every probe above returned inside the ${LEN_TIMEOUT_S}s the declaration commits to (worst ${WB_WORST_MS} ms). This is the axis that was live at the reviewed commit: a hook killed at its declared timeout emits nothing and the call is ALLOWED, so a row over this bound is a BYPASS" \
   "$WB_SLOW" ""
+assert_eq "AC7 BOUNDARY REGRESSION: and inside the ${REGRESSION_BUDGET_MS} ms absolute budget (worst ${WB_WORST_MS} ms). Over THIS bound the gate still decided and the failure is a REGRESSION in the scan, not a bypass" \
+  "$WB_REGRESS" ""
 # WHAT THE MARGIN ABOVE IS A MARGIN OVER, said plainly so it is not read as more than it is. Every
 # pad here is quote-free -- `wb_pad` emits `w<n>` tokens, so its densest mode is one newline per
 # ~48 bytes. This record therefore says the BOUNDARY-COUNT mechanism is closed and says nothing
 # about structural DENSITY, which is #116's and is the block below.
-record "WORD-BOUNDARY AXIS worst observed: ${WB_WORST_MS} ms against a declared bound of ${LEN_BOUND_MS} ms over a QUOTE-FREE population (density is the block below), on $(uname -sr);${WB_GROWTH}"
+record "WORD-BOUNDARY AXIS worst observed: ${WB_WORST_MS} ms against a bypass bound of ${BYPASS_BOUND_MS} ms and a regression budget of ${REGRESSION_BUDGET_MS} ms over a QUOTE-FREE population (density is the block below), on $(uname -sr);${WB_GROWTH}"
 
 # ===============================================================================================
 suite "AC7 DENSITY AXIS (#116): at FIXED length, cost must not follow structural density"
@@ -586,9 +648,21 @@ dens_pad() { # <kind> <bytes> -> a body of exactly that length in the named stru
     process.stdout.write(core + (odd(core, "\"") ? "\"" : "z") + (odd(core, SQ) ? SQ : "z"));
   ' "$1" "$2"
 }
+# THE CLASS IS THE HOOK'S OWN VALUE, NOT A COPY OF IT AND NOT ITS SOURCE TEXT (#132). This
+# function used to carry a hand-transcribed twelve-member set. A transcription tracks the
+# transcriber's attention rather than the code: mutate _STRUCT in pre-tool-use.sh and every number
+# this block reports stays exactly where it was, so the density rows would go on agreeing with a
+# hook that had stopped counting what they say it counts. Reading the source LINE instead is worse
+# than the copy, and measurably so: `_STRUCT` is assigned from a double-quoted string opening with
+# the variable reference $_NL and carrying a deliberately doubled backslash, so the source TEXT is a
+# FIFTEEN member set that adds `$ _ N L` and loses the NEWLINE. tb_struct_class evaluates the
+# assignment with $_NL bound, so what is held here is the value the hook computes.
+GATE_STRUCT_CLASS="$(tb_struct_class "$GATE_PLUGIN_DIR/hooks/pre-tool-use.sh" || printf '')"
+assert_eq "VACUITY for every density figure below: the hook's own _STRUCT evaluates to a 12-member class (a red here means the assignment MOVED SHAPE -- e.g. was refactored into a concatenation, the form _DELIMS already uses -- not that the density figures are wrong)" \
+  "$(tb_struct_distinct "$GATE_STRUCT_CLASS")" "12"
 dens_struct() { # <string> -> how many characters of it are in the hook's own structural set
-  "$GATE_REAL_NODE" -e '
-    const S = new Set(["\n", "'"'"'", "\"", "\\", ";", "&", "|", "(", ")", "<", ">", "#"]);
+  TB_CLASS="$GATE_STRUCT_CLASS" "$GATE_REAL_NODE" -e '
+    const S = new Set(Array.from(process.env.TB_CLASS || ""));
     let n = 0; for (const c of process.argv[1]) if (S.has(c)) n++;
     process.stdout.write(String(n));
   ' "$1"
@@ -606,6 +680,7 @@ record "DENSITY AXIS same-run floor (the identical driver and decision on a comm
 
 DENS_KINDS=(quotes minified json code prose run)
 DENS_SLOW=""
+DENS_REGRESS=""
 DENS_WORST=0
 DENS_MIN_MS=""
 DENS_MAX_MS=""
@@ -631,7 +706,9 @@ git add -A")"
   DENS_B="$(len_now_ms)"
   DENS_MS=$(( DENS_B - DENS_A ))
   [[ "$DENS_MS" -gt "$DENS_WORST" ]] && DENS_WORST="$DENS_MS"
-  [[ "$DENS_MS" -lt "$LEN_BOUND_MS" ]] || DENS_SLOW="$DENS_SLOW
+  [[ "$DENS_MS" -lt "$BYPASS_BOUND_MS" ]] || DENS_SLOW="$DENS_SLOW
+${k} (${BODY_STRUCT} structural chars in ${BODY_LEN} bytes) -> ${DENS_MS} ms"
+  [[ "$DENS_MS" -lt "$REGRESSION_BUDGET_MS" ]] || DENS_REGRESS="$DENS_REGRESS
 ${k} (${BODY_STRUCT} structural chars in ${BODY_LEN} bytes) -> ${DENS_MS} ms"
   assert_eq "AC7 DENSITY: a ${DENS_TARGET}-byte '${k}' body (${BODY_STRUCT} structural chars), then git add -A -> deny" \
     "$DENS_V" "deny"
@@ -652,6 +729,8 @@ done
 
 assert_eq "AC7 DENSITY: every cell returned inside the ${LEN_TIMEOUT_S}s the declaration commits to (worst ${DENS_WORST} ms). A hook killed at its declared timeout emits nothing and the call is ALLOWED, so a row over this bound is a bypass and not a slow test. This is the assertion the block exists for: at the reviewed commit the quote-dense cell at this length took over 5 s and returned NOTHING" \
   "$DENS_SLOW" ""
+assert_eq "AC7 DENSITY REGRESSION: and every cell returned inside the ${REGRESSION_BUDGET_MS} ms absolute budget (worst ${DENS_WORST} ms). This is the row that would notice #116's linear scan going quadratic again: over THIS bound the gate still decided, so it is a REGRESSION and not a BYPASS, and the remedy is the scan rather than the declaration" \
+  "$DENS_REGRESS" ""
 
 DENS_SPAN=$(( DENS_MAX_D - DENS_MIN_D ))
 DENS_SPREAD_X10=$(( DENS_MAX_MS * 10 / (DENS_MIN_MS < 1 ? 1 : DENS_MIN_MS) ))
@@ -698,6 +777,7 @@ suite "AC7 DENSITY AXIS (#116): and the cost is LINEAR in length at each fixed d
 # density range, the gate still decides, and still decides inside the timeout the runtime kills at.
 DENS_GROWTH=""
 DENS_GROW_SLOW=""
+DENS_GROW_REGRESS=""
 for k in quotes prose; do
   GROW_MS=()
   for mult in 1 4; do
@@ -712,15 +792,19 @@ git add -A")"
     GTHIS=$(( GB - GA ))
     GROW_MS+=( "$GTHIS" )
     assert_eq "AC7 DENSITY LINEARITY: a $(( 1536 * mult ))-byte '${k}' body (density class '${k}'), then git add -A -> deny" "$GV" "deny"
-    [[ "$GTHIS" -lt "$LEN_BOUND_MS" ]] || DENS_GROW_SLOW="$DENS_GROW_SLOW
+    [[ "$GTHIS" -lt "$BYPASS_BOUND_MS" ]] || DENS_GROW_SLOW="$DENS_GROW_SLOW
+${k} at $(( 1536 * mult )) bytes -> ${GTHIS} ms"
+    [[ "$GTHIS" -lt "$REGRESSION_BUDGET_MS" ]] || DENS_GROW_REGRESS="$DENS_GROW_REGRESS
 ${k} at $(( 1536 * mult )) bytes -> ${GTHIS} ms"
   done
   GROWTH_X10=$(( GROW_MS[1] * 10 / (GROW_MS[0] < 1 ? 1 : GROW_MS[0]) ))
   DENS_GROWTH="$DENS_GROWTH ${k}: 1536B=${GROW_MS[0]}ms 6144B=${GROW_MS[1]}ms ($(( GROWTH_X10 / 10 )).$(( GROWTH_X10 % 10 ))x for 4x length, floor ${DENS_FLOOR} ms in both);"
 done
 record "DENSITY LINEARITY:${DENS_GROWTH} on $(uname -sr)"
-assert_eq "AC7 DENSITY LINEARITY: at four times the length, at BOTH ends of the density range, every probe still returned inside the ${LEN_TIMEOUT_S}s the declaration commits to.${DENS_GROWTH}" \
+assert_eq "AC7 DENSITY LINEARITY BYPASS: at four times the length, at BOTH ends of the density range, every probe still returned inside the ${LEN_TIMEOUT_S}s the declaration commits to, so none of them was killed and fell open.${DENS_GROWTH}" \
   "$DENS_GROW_SLOW" ""
+assert_eq "AC7 DENSITY LINEARITY REGRESSION: and inside the ${REGRESSION_BUDGET_MS} ms absolute budget, which is the bound that does NOT move when hooks.json does.${DENS_GROWTH}" \
+  "$DENS_GROW_REGRESS" ""
 
 # ===============================================================================================
 suite "AC7 FLOOR: two spellings nobody enumerated, whose effect is identical"
@@ -1048,5 +1132,162 @@ MENTION-ROW [$c] -> $r"
 done
 assert_eq "AC17: every forbidden row ESCALATES and DENIES, every mention row does NEITHER -- element-wise, no mismatches" \
   "$MISMATCHES" ""
+
+# ===============================================================================================
+suite "AC1/AC3/AC4 (#132): the sizing corpus is ENUMERATED from the tree at check time, and DRIVEN"
+# ===============================================================================================
+#
+# WHAT THIS BLOCK IS AND WHY IT IS NOT A LIST OF FILENAMES. The declared timeout is sized against
+# the largest and densest things this repository can put into one Bash call, and Phase 5 writes one
+# knowledge/issue-archive/<n>.json per issue FOREVER -- so a bound sized against today's largest
+# file is a ratchet against a moving target. A frozen list of filenames would keep reporting a
+# clean scan while the corpus outgrew the bound. The population is therefore a RULE evaluated at
+# check time, and its enumerated count is published in README item 27 cost (4) and compared here:
+# when the corpus outgrows what was measured, this block reddens instead of the gate falling open.
+#
+# THREE PROPERTIES OF THE RULE, each of which a cheaper rule gets wrong:
+#
+#   CONTENT-ONLY. `find -type f -size` over a materialized tree, no git call anywhere. AC1's corpus
+#   is `git archive | tar x`, which has no .git, so any rule expressed in `git ls-files` or
+#   `git check-ignore` enumerates ZERO there and reports a clean scan -- and that is the tree CI
+#   runs against, so the failure is not hypothetical.
+#
+#   EXTENSION-OPEN. The densest tracked file in this repository is NOT a .json: it is a .sh, and so
+#   are ranks 3 and 4. A rule restricted to .json already selects the wrong rank-1 density row.
+#
+#   TWO RAW AXES, NOT ONE SCALAR. Cost is driven by LENGTH and by STRUCTURAL DENSITY and the two do
+#   not compress into one ordering without losing rows: a measured pair 1% apart on a composite key
+#   sat 2.1x apart on cost, in the wrong direction. So the driven set is the union of the top rows
+#   on each RAW axis, plus SENTINELS drawn from outside both, whose job is to fail if a row the
+#   ranking does not see is slower than every row it does.
+CORPUS_FLOOR=2000
+CORPUS_TOP_K=5
+new_tmpdir || exit 90
+CORPUS_ROOT="$NEW_TMPDIR/corpus"
+mkdir -p "$CORPUS_ROOT"
+if tb_materialize "$CORPUS_ROOT"; then CORPUS_MAT=ok; else CORPUS_MAT="FAILED: $TB_MAT_ERR"; fi
+assert_eq "AC1: the tracked tree materializes into an empty directory via \`git archive | tar x\`" "$CORPUS_MAT" "ok"
+CORPUS_FILES="$(tb_mat_file_count "$CORPUS_ROOT")"
+assert_eq "AC1 VACUITY: the materialized corpus is non-empty (an empty tree makes every enumeration below report a clean zero)" \
+  "$([[ "${CORPUS_FILES:-0}" -ge 100 ]] && echo populated || echo "ONLY ${CORPUS_FILES} FILES")" "populated"
+git -C "$CORPUS_ROOT" rev-parse HEAD >/dev/null 2>&1; CORPUS_GIT_RC=$?
+assert_eq "AC1: inside that corpus \`git rev-parse\` FAILS, which is why the rule below is content-only -- a git-expressed population would enumerate nothing here and call it clean" \
+  "$([[ "$CORPUS_GIT_RC" -ne 0 ]] && echo fails || echo "SUCCEEDED rc=$CORPUS_GIT_RC")" "fails"
+assert_eq "AC1 NON-ZERO CONTROL for the row above: the same command in the real checkout SUCCEEDS, so the failure is the missing .git and not a broken invocation" \
+  "$(git -C "$GATE_REPO_ROOT" rev-parse HEAD >/dev/null 2>&1 && echo 0 || echo NONZERO)" "0"
+
+CORPUS_ENUM="$(tb_enumerate_count "$CORPUS_ROOT" "$CORPUS_FLOOR")"
+CORPUS_BY_DENSITY="$(tb_rank "$GATE_STRUCT_CLASS" "$CORPUS_ROOT" "$CORPUS_FLOOR")"
+CORPUS_BY_LENGTH="$(tb_enumerate "$CORPUS_ROOT" "$CORPUS_FLOOR" | sort -rn)"
+record "AC4 ENUMERATION: ${CORPUS_ENUM} files at or above ${CORPUS_FLOOR} bytes in the materialized tree ${TB_MAT_SHA:-<none>}, ranked on two raw axes; top-${CORPUS_TOP_K} of each is driven"
+assert_eq "AC4 VACUITY: the two rankings are non-empty and agree on the population size (a ranking that silently dropped rows would make the selection below a subset of a subset)" \
+  "$(_d="$(printf '%s' "$CORPUS_BY_DENSITY" | grep -c .)"; _l="$(printf '%s' "$CORPUS_BY_LENGTH" | grep -c .)"; \
+     if [[ "$_d" == "$CORPUS_ENUM" && "$_l" == "$CORPUS_ENUM" && "$CORPUS_ENUM" -ge 50 ]]; then echo agree; else echo "density=$_d length=$_l enumerated=$CORPUS_ENUM"; fi)" \
+  "agree"
+
+# THE SELECTION: top-K on each RAW axis, unioned. Recorded, per AC4, because a top-K selection is
+# only honest when K and the ordering it is taken over are both published.
+CORPUS_SELECTED="$( { printf '%s\n' "$CORPUS_BY_DENSITY" | head -"$CORPUS_TOP_K" | cut -f4
+                      printf '%s\n' "$CORPUS_BY_LENGTH" | head -"$CORPUS_TOP_K" | cut -f2; } | sort -u )"
+# THE SENTINELS, one per axis, drawn from OUTSIDE both top-K sets: the sparsest row above the floor
+# and the shortest. They exist because the two axes do not rank WORD COUNT, which the hook's own
+# header names as a third term in the scan's cost, so a row that is long, sparse and word-dense
+# could be the true worst row and be selected by neither. If either sentinel outruns the slowest
+# selected row, the ranking missed something and the assertion below says so.
+CORPUS_SENTINELS="$( { printf '%s\n' "$CORPUS_BY_DENSITY" | tail -1 | cut -f4
+                       printf '%s\n' "$CORPUS_BY_LENGTH" | tail -1 | cut -f2; } | sort -u )"
+CORPUS_SENTINELS="$(comm -23 <(printf '%s\n' "$CORPUS_SENTINELS") <(printf '%s\n' "$CORPUS_SELECTED") | grep -v '^$')"
+assert_eq "AC4 SENTINEL PREMISE: at least one sentinel row is genuinely OUTSIDE both top-${CORPUS_TOP_K} sets (a sentinel that is also a selected row validates nothing)" \
+  "$([[ "$(printf '%s' "$CORPUS_SENTINELS" | grep -c .)" -ge 1 ]] && echo outside || echo "EVERY SENTINEL IS ALSO SELECTED")" "outside"
+
+# Every driven row is the same shape: the file's content as a heredoc body, then the blanket stage
+# the gate refuses. QUOTE PARITY IS PART OF THIS FIXTURE AND IT IS SETTLED BY OUTCOME, NEVER BY
+# COUNTING. An unbalanced quote earlier in the command defeats the blanket-staging refusal outright
+# (#140), so a body the scanner reads as quote-open answers \`none\` and would be recorded as a gate
+# that is working. The obvious guard -- count \`"\` and \`'\` in the raw bytes and append one of each
+# when the count is odd -- is on the WRONG SIDE OF THE TRANSFORMATION, and that was measured here
+# rather than argued: knowledge/issue-archive/106.json carries 9387 raw double quotes, an ODD
+# number, and the gate refuses it correctly, because the scanner resolves backslash escapes before
+# it counts and what the raw count calls open the scanner calls closed. Appending a balancing quote
+# to that body flipped a working \`deny\` into \`none\`: the fixture broke the thing it was guarding.
+# So the pad is SEARCHED rather than computed. Each row is driven with no pad first and the first
+# pad that produces a decision is the one kept, which observes what the scanner did instead of
+# predicting it from the bytes. The pad each row needed is recorded, because a row that needs one is
+# a live instance of #140 on tracked content and the transcript should say which rows those are.
+CORPUS_DRIVEN=0
+CORPUS_WORST_SELECTED=0
+CORPUS_ROWS=""
+CORPUS_MISVERDICT=""
+CORPUS_UNDISCLOSED=""
+CORPUS_SENTINEL_SLOW=""
+CORPUS_PADDED=""
+CORPUS_PADS=( "" "\"" "'" "\"'" )
+corpus_drive() { # <relative-path> <selected|sentinel> -> sets CD_MS CD_BYTES CD_DENS CD_PAD
+  local rel="$1" kind="$2" body a b pad v deny allow
+  body="$(cat "$CORPUS_ROOT/$rel")"
+  CD_DENS="$(tb_density "$GATE_STRUCT_CLASS" "$CORPUS_ROOT/$rel" | awk '{print $3}')"
+  CD_PAD=""; CD_MS=0; CD_BYTES=0; v=""
+  for pad in "${CORPUS_PADS[@]}"; do
+    deny="cat > notes.md <<'PIPELINE_CORPUS_EOF'
+${body}${pad}
+PIPELINE_CORPUS_EOF
+git add -A"
+    CD_BYTES="${#deny}"
+    a="$(len_now_ms)"; v="$(sub_verdict "$P4" "$deny")"; b="$(len_now_ms)"
+    CD_MS=$(( b - a ))
+    CD_PAD="$pad"
+    [[ "$v" == "deny" ]] && break
+  done
+  allow="cat > notes.md <<'PIPELINE_CORPUS_EOF'
+${body}${CD_PAD}
+PIPELINE_CORPUS_EOF
+git add plugins/pipeline/agents/dba.md"
+  local av; av="$(sub_verdict "$P4" "$allow")"
+  [[ -n "$CD_PAD" ]] && CORPUS_PADDED="$CORPUS_PADDED ${rel}"
+  [[ "$v" == "deny" && "$av" == "none" ]] || CORPUS_MISVERDICT="$CORPUS_MISVERDICT
+${rel} (${kind}) -> blanket=${v} narrowed=${av} after trying every pad, expected deny/none. A row that answers none for BOTH is #140 on tracked content: an unbalanced quote earlier in the command defeats the refusal outright."
+  CORPUS_DRIVEN=$(( CORPUS_DRIVEN + 1 ))
+  CORPUS_ROWS="$CORPUS_ROWS ${rel}=${CD_BYTES}B/${CD_DENS}Bps/${CD_MS}ms(${kind});"
+  # AC2's inequality, applied to the NUMBER: min-of-1 here (the floor row is the one #132's own
+  # suite takes a min-of-3 over), both spreads applied, compared against the DECLARED bound.
+  local adj=$(( CD_MS * 142 * 132 / 10000 ))
+  if [[ "$adj" -gt "$BYPASS_BOUND_MS" ]] && ! grep -q -- "$rel" "$GATE_PLUGIN_DIR/README.md"; then
+    CORPUS_UNDISCLOSED="$CORPUS_UNDISCLOSED
+${rel} at ${CD_MS} ms (${adj} ms adjusted) exceeds the declared ${BYPASS_BOUND_MS} ms and is not named in README.md"
+  fi
+}
+for rel in $CORPUS_SELECTED; do
+  corpus_drive "$rel" selected
+  [[ "$CD_MS" -gt "$CORPUS_WORST_SELECTED" ]] && CORPUS_WORST_SELECTED="$CD_MS"
+done
+for rel in $CORPUS_SENTINELS; do
+  corpus_drive "$rel" sentinel
+  [[ "$CD_MS" -le "$CORPUS_WORST_SELECTED" ]] || CORPUS_SENTINEL_SLOW="$CORPUS_SENTINEL_SLOW
+${rel} (outside both top-${CORPUS_TOP_K} sets) measured ${CD_MS} ms against the slowest SELECTED row's ${CORPUS_WORST_SELECTED} ms"
+done
+record "#140 REACH on this corpus: the rows needing a balancing quote before the gate would decide at all:${CORPUS_PADDED:- none}"
+record "AC3/AC4 DRIVEN SET (${CORPUS_DRIVEN} rows of ${CORPUS_ENUM} enumerated, top-${CORPUS_TOP_K} by raw length unioned with top-${CORPUS_TOP_K} by raw B/struct, plus sentinels):${CORPUS_ROWS} worst selected ${CORPUS_WORST_SELECTED} ms, on $(uname -sr) at load $(tb_loadavg)"
+assert_eq "AC3 NON-VACUITY: every driven row DENIES the blanket stage and ALLOWS the narrowed one at the identical body -- a row that returned none for both would be a fixture defect (quote parity, #140) reported as a passing measurement" \
+  "$CORPUS_MISVERDICT" ""
+assert_eq "AC4 ORDERING VALIDATION: no row from OUTSIDE both top-${CORPUS_TOP_K} sets is slower than the slowest row inside them. This is the only thing standing between a two-axis ranking and a silent miss on an axis it does not rank" \
+  "$CORPUS_SENTINEL_SLOW" ""
+assert_eq "AC3: every driven row whose adjusted cost exceeds the DECLARED timeout is named in the operator-facing disclosure, so an uncovered cell cannot be measured and then left unpublished" \
+  "$CORPUS_UNDISCLOSED" ""
+assert_eq "AC4 DRIVEN COUNT is non-zero and is what the record line above reports (a scan that inspected nothing produces the same clean output as one that inspected everything)" \
+  "$([[ "$CORPUS_DRIVEN" -ge 1 ]] && echo driven || echo "DROVE NOTHING")" "driven"
+
+# THE PUBLISHED RULE MUST BE THE RULE THAT RAN. README item 27 cost (4) states the floor, the
+# enumerated count and the driven count; all three are re-derived here from the materialized tree
+# rather than trusted. A frozen count diverges the moment the corpus grows, which is the tripwire.
+CORPUS_README="$(grep -n '^27\. ' "$GATE_PLUGIN_DIR/README.md" | head -1 | cut -d: -f1)"
+CORPUS_README_TEXT="$(sed -n "${CORPUS_README:-1}p" "$GATE_PLUGIN_DIR/README.md")"
+assert_eq "VACUITY: README item 27 was located and is long enough to be the disclosure (a grep that found nothing makes the three rows below pass on an empty string)" \
+  "$([[ "${#CORPUS_README_TEXT}" -gt 2000 ]] && echo located || echo "ONLY ${#CORPUS_README_TEXT} BYTES")" "located"
+assert_eq "AC4: the published size FLOOR is the floor this block enumerated over" \
+  "$(printf '%s' "$CORPUS_README_TEXT" | grep -oE 'at or above [0-9]+ bytes' | grep -oE '[0-9]+' | head -1)" "$CORPUS_FLOOR"
+assert_eq "AC4: the published ENUMERATED count is the count this block measured -- when the tracked corpus grows past what was sized, this row reddens instead of the gate falling open" \
+  "$(printf '%s' "$CORPUS_README_TEXT" | grep -oE 'enumerated [0-9]+' | grep -oE '[0-9]+' | head -1)" "$CORPUS_ENUM"
+assert_eq "AC4: and the published DRIVEN count is the number of rows actually driven above" \
+  "$(printf '%s' "$CORPUS_README_TEXT" | grep -oE 'drove [0-9]+' | grep -oE '[0-9]+' | head -1)" "$CORPUS_DRIVEN"
 
 finish
