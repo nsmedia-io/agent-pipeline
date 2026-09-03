@@ -1,8 +1,8 @@
 {
   "issue_number": 132,
-  "current_phase": "4-review",
+  "current_phase": "3-impl-gate-failed",
   "started_at": "2026-09-03T00:55:30Z",
-  "updated_at": "2026-09-03T15:21:30Z",
+  "updated_at": "2026-09-03T15:34:49Z",
   "branch": "main",
   "ask_text": "--issue 132: the PreToolUse staging gate's scan is linear in command length but its constant is a shell interpreter's; a large enough command still outruns the declared 5s and a killed hook fails open.",
   "events": [
@@ -58,6 +58,12 @@
       "verdict": "GATE_PASSED",
       "at": "2026-09-03T15:21:30Z",
       "note": "Pre-Phase-4 gate passed after fixing 5 schema violations in impl-report.json (met:string->boolean x2, checks_passed string->boolean x2 with explanation moved to _error siblings, qa_signoff.verdict prose->enum token with prose moved to notes) and adding an explicit AC9 coverage note to R1. Frontend gate SKIP. Reviewed HEAD: bcb7bc7ccf1cc242ef8efca7449b47fd04e98b7e"
+    },
+    {
+      "phase": "4-review",
+      "verdict": "CI_FAILURE_FOUND",
+      "at": "2026-09-03T15:34:49Z",
+      "note": "Phase 4 panel run wf_57a4c16c-060 stopped mid-flight: user instructed dropping opus models to sonnet. Before restarting, DevOps's own already-written shard (preserved) surfaced that CI at the reviewed HEAD bcb7bc7 is FAILING, contradicting the orchestrator's own GATE_PASSED/ALREADY_CORRECT_NO_CHANGE claims. Root-caused independently: tb_materialize() in timeout-bound-lib.sh prefers git stash create over HEAD; on CI this returns a non-empty stash sha (1a8aca65, confirmed via CI log MATERIALIZED line), meaning some earlier suite in the same run.sh execution leaves a tracked file dirty before this suite runs, so the corpus gets built from a phantom uncommitted snapshot rather than the actual reviewed commit. Locally the tree is genuinely clean so it correctly falls back to HEAD, which is why darwin measured the true state. Dispatched Dev (sonnet) to find the exact dirtying suite and fix tb_materialize's CI behavior. GATE_PASSED status from earlier this phase is WITHDRAWN pending this fix and a green CI run at the true HEAD."
     }
   ],
   "flags": [
