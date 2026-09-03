@@ -162,7 +162,7 @@ assert_eq "and every text-half member was readable" "$(sfield "$CORPUS" unreadab
 # DOUBLE-covering and its vacuity assertion starts reddening on an unparseable sidecar -- the
 # exact failure #125 says to avoid. Pinned so the widening cannot happen quietly.
 assert_eq "AC-52c's population is still the *.json glob, so the two halves stay disjoint" \
-  "$(grep -c "ls -1 knowledge/issue-archive/\*\.json" "$STATUS_SUITE" | tr -d ' ')" "1"
+  "$(grep -cF 'ls -1 knowledge/issue-archive/*.json' "$STATUS_SUITE" | tr -d ' ')" "1"
 record "MEASURED at this commit: $(sfield "$CORPUS" entries) entries = $(sfield "$CORPUS" json) json + $(sfield "$CORPUS" text) sidecars, $(sfield "$CORPUS" bytes) bytes / $(sfield "$CORPUS" lines) lines of raw text"
 
 
@@ -183,8 +183,19 @@ assert_eq "VACUITY: and inspected lines" \
   "$([[ "$(sfield "$CORPUS" lines)" -ge 1000 ]] && echo inspected || echo "only $(sfield "$CORPUS" lines) lines")" "inspected"
 assert_eq "VACUITY: with the canonical plant set actually extracted (an empty set would silently widen this)" \
   "$([[ "$(sfield "$CORPUS" plants)" -ge 10 ]] && echo extracted || echo "only $(sfield "$CORPUS" plants) plants: the sed in this suite matched nothing")" "extracted"
-CORPUS_UNEXPECTED="$(printf '%s\n' "$(sfield "$CORPUS" hits)" | sed 's/ ;; /\n/g' | sed 's/^ *//;s/ *$//' \
-  | grep -v '^$' | { [[ -n "$SIDECAR_ALLOW" ]] && grep -vxF "$SIDECAR_ALLOW" || cat; } | tr '\n' ' ' | sed 's/ *$//')"
+# TWO STATEMENTS, NOT ONE PIPELINE, and the reason is honest rather than a bug fix. The compact
+# `[[ -n "$ALLOW" ]] && grep -vxF ... || cat` form LOOKS wrong once the allowlist has an entry:
+# `grep -v` exits 1 when it emits nothing, so a fully-allowlisted corpus falls through to `cat`.
+# MEASURED, because a predicted defect is not a defect: both forms return the empty string on a
+# corpus whose every hit is allowlisted, since grep has already drained stdin by the time `cat`
+# runs. The compact form is therefore correct BY ACCIDENT of a drained pipe rather than by
+# intent, on the one branch nobody can exercise today. This spelling does not depend on that.
+CORPUS_HITS_RAW="$(printf '%s\n' "$(sfield "$CORPUS" hits)" | sed 's/ ;; /\n/g' | sed 's/^ *//;s/ *$//' | grep -v '^$')"
+if [[ -n "$SIDECAR_ALLOW" ]]; then
+  CORPUS_UNEXPECTED="$(printf '%s\n' "$CORPUS_HITS_RAW" | grep -vxF "$SIDECAR_ALLOW" | tr '\n' ' ' | sed 's/^ *//;s/ *$//')"
+else
+  CORPUS_UNEXPECTED="$(printf '%s\n' "$CORPUS_HITS_RAW" | tr '\n' ' ' | sed 's/^ *//;s/ *$//')"
+fi
 assert_eq "no unallowlisted credential-shaped line in any committed sidecar" "$CORPUS_UNEXPECTED" ""
 assert_eq "  and the hand-checked allowlist still holds exactly $SIDECAR_ALLOW_N entries" \
   "$(printf '%s\n' "$SIDECAR_ALLOW" | grep -c . | tr -d ' ')" "$SIDECAR_ALLOW_N"
@@ -367,13 +378,22 @@ ROOT_PATH="$(STORE_URL="file://$STORE" node --input-type=module -e '
 assert_eq "a BARE STRING reports the <root> path, so the branch #71 called a theorem is live" \
   "$ROOT_PATH" "<root> | .a | 1"
 assert_eq "  and the shipped text pass is the caller that reaches it" \
-  "$(grep -c 'findCredentialMaterial(lines\[i\])' "$STORE" | tr -d ' ')" "1"
+  "$(grep -cF 'findCredentialMaterial(lines[i])' "$STORE" | tr -d ' ')" "1"
 # ASSERTED POSITIVELY, not as an absence. #71's battery record is kept rather than deleted -- the
 # seven mutations that reddened are still the record of what it covered -- so what must be true is
 # that the entry is marked RETIRED and points at the cell above. An absence check would also be
 # satisfied by somebody deleting the paragraph, and it would fire on a note that merely QUOTED the
 # old wording, which is the quotation-versus-claim failure this repo has already shipped once.
-CRED_SUITE_HDR="$(sed -n '1,60p' "$TESTS_DIR/test-archive-credential-guard.sh")"
+#
+# THE WINDOW IS ANCHORED ON CONTENT, NOT ON LINE NUMBERS. The first draft read that file's first
+# sixty lines, and test-moving-ref-population.sh caught it: an absolute `sed -n 'N,Mp'` into a
+# document this suite does not own has its population decided by everybody else's edits, and
+# thirteen lines added anywhere ABOVE the region silently move the paragraph out of the window.
+# The paragraph's own heading and the blank line that closes it are the boundary that MOVES WITH
+# the text, so this reads the right paragraph wherever it sits.
+CRED_SUITE_HDR="$(sed -n '/^# THE SURVIVOR THIS BATTERY DECLARED/,/^$/p' "$TESTS_DIR/test-archive-credential-guard.sh")"
+assert_eq "VACUITY: that paragraph was found at all (an empty window would pass both cells below)" \
+  "$([[ -n "$CRED_SUITE_HDR" ]] && echo found || echo "NOT FOUND: the anchor moved in test-archive-credential-guard.sh")" "found"
 assert_contains "  and #71's own record marks that survivor RETIRED rather than leaving it standing" \
   "$CRED_SUITE_HDR" "RETIRED BY #125"
 assert_contains "  and points at the cell that replaced it, so the claim is followable" \
