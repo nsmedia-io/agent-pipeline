@@ -229,6 +229,18 @@ gate_payload() {
     mkdir -p "$hermetic"
   fi
   local cmd="$1"; shift
+  # A LARGE COMMAND GOES THROUGH A FILE, because Linux caps one argv string at 131072 bytes while
+  # macOS does not: above that the exec fails, the payload comes back empty, and the gate answers
+  # `none` fast -- an ALLOW reported for a gate that was working, and only on the host CI runs.
+  # The threshold is in CHARACTERS (bash 3.2 has no byte length operator) and is set low enough
+  # that even a four-byte-per-character command stays under the kernel's limit. Below it the argv
+  # path is unchanged, and the two paths are asserted byte-identical in the declaration suite.
+  if [[ "${#cmd}" -ge 30000 ]]; then
+    local cf="${TEMP_PROJECT:-${TMPDIR:-/tmp}}/.gate-payload-command"
+    printf '%s' "$cmd" > "$cf" || return 90
+    GATE_PAYLOAD_COMMAND_FILE="$cf" "$GATE_REAL_NODE" "$PAYLOAD_MJS" "" "cwd=$hermetic" "$@"
+    return $?
+  fi
   "$GATE_REAL_NODE" "$PAYLOAD_MJS" "$cmd" "cwd=$hermetic" "$@"
 }
 

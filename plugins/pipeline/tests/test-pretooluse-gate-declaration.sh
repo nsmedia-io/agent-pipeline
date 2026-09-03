@@ -571,4 +571,37 @@ assert_eq "AC36(c): importing validate-pipeline-artifact.mjs prints nothing on s
 assert_eq "AC36(c): and nothing on stderr" "$SIDE_ERR" ""
 assert_eq "AC36(c): and creates no file in its cwd or TMPDIR" "$(gate_sink_count "$SIDE_MANIFEST" "$SIDE_DIR")" "0"
 
+# ===============================================================================================
+suite "#132: the payload builder's two input paths are the same payload"
+# ===============================================================================================
+#
+# gate_payload hands the command to pretooluse-payload.mjs as an argv string below 30000
+# characters and through a file at or above it, because Linux caps ONE argv string at 131072 bytes
+# (MAX_ARG_STRLEN) while macOS does not -- so a 461 KB fixture failed the exec on ubuntu-latest,
+# came back as an EMPTY payload, and the gate answered `none` in 110 ms while the same fixture
+# measured 7004 ms and a real `deny` on darwin. A fixture reporting an ALLOW for a working gate,
+# on the only host CI evaluates.
+#
+# TWO PATHS MEAN TWO THINGS THAT CAN DIVERGE, so they are compared here on a subject built to
+# break a naive one: quotes of both kinds, a backslash, embedded newlines and a multi-byte
+# character, at a length that crosses the threshold.
+PAY_CMD="$("$GATE_REAL_NODE" -e '
+  const unit = "git commit -a -m \"a\x27b\\\\c \u00d7 d\"\n";
+  process.stdout.write(unit.repeat(2000));
+')"
+PAY_ROOT="$TEMP_PROJECT/payload-equivalence"
+mkdir -p "$PAY_ROOT"
+assert_eq "PREMISE: the subject is over gate_payload's file-path threshold, so the two rows below really compare two DIFFERENT paths" \
+  "$([[ "${#PAY_CMD}" -ge 30000 ]] && echo over || echo "ONLY ${#PAY_CMD} CHARACTERS")" "over"
+PAY_VIA_FILE="$(GATE_CWD="$PAY_ROOT" gate_payload "$PAY_CMD" agent_id=sub-1)"
+PAY_VIA_ARGV="$("$GATE_REAL_NODE" "$PAYLOAD_MJS" "$PAY_CMD" "cwd=$PAY_ROOT" agent_id=sub-1)"
+assert_eq "the FILE path and the ARGV path build a byte-identical payload for a command carrying both quote kinds, a backslash, newlines and a multi-byte character" \
+  "$([[ "$PAY_VIA_FILE" == "$PAY_VIA_ARGV" ]] && echo identical || echo "DIVERGED: file=${#PAY_VIA_FILE} argv=${#PAY_VIA_ARGV} bytes")" \
+  "identical"
+assert_eq "NON-ZERO CONTROL for the row above: the comparison is not two empty strings -- the payload carries the command back out" \
+  "$("$GATE_REAL_NODE" -e '
+     const p = JSON.parse(process.argv[1]);
+     process.stdout.write(p.tool_input.command.length >= 30000 && p.tool_input.command.indexOf(String.fromCharCode(215)) > 0 ? "carried" : "EMPTY-OR-MANGLED");
+   ' "$PAY_VIA_FILE")" "carried"
+
 finish

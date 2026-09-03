@@ -423,9 +423,9 @@ assert_eq "VACUITY: hooks.json declares a positive PreToolUse timeout to bound a
 #   .github/workflows/tests.yml:17,60 runs `bash plugins/pipeline/tests/run.sh` on ubuntu-latest
 #   for every pull_request and every push to main, so these four blocks execute there on every
 #   change and the figures below were read off that run rather than estimated from the darwin ones:
-#     LENGTH UBUNTU_LEN ms, WORD-BOUNDARY UBUNTU_WB ms, DENSITY UBUNTU_DENS ms,
-#     DENSITY-GROWTH UBUNTU_GROW ms.
-#     Command: bash plugins/pipeline/tests/run.sh, on ubuntu-latest, run id UBUNTU_RUN_ID.
+#     LENGTH 174 ms, WORD-BOUNDARY 265 ms, DENSITY 205 ms,
+#     DENSITY-GROWTH 214 ms.
+#     Command: bash plugins/pipeline/tests/run.sh, on ubuntu-latest, run id 33744488416 (Linux 6.17.0-1022-azure, load 2.07/1.51/0.93).
 #
 # WHY 5000 AND NOT A ROUNDED MULTIPLE OF THE WORST FIGURE. It is the millisecond value these four
 # guards effectively carried before this change, when the declaration they read was the superseded

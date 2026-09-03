@@ -26,7 +26,21 @@
 // The payload's SHAPE follows Claude Code 2.1.85: hook_event_name, session_id, tool_name,
 // tool_input.command, and agent_id present ONLY for a subagent-originated call.
 
-const [, , cmd, ...rest] = process.argv;
+// THE COMMAND ARRIVES BY FILE WHEN IT IS LARGE, AND THE REASON IS A KERNEL LIMIT, NOT A STYLE
+// CHOICE. Linux caps a SINGLE argv string at MAX_ARG_STRLEN (32 pages, 131072 bytes) independently
+// of the much larger total ARG_MAX, so a fixture that hands a 461 KB command to this script as
+// argv[2] does not fail loudly on Linux: the exec fails, the payload comes back EMPTY, and the gate
+// answers `none` in about a tenth of a second. MEASURED ON ubuntu-latest (run 33744488416): the
+// 461795-byte floor fixture reported 110 ms min-of-3 and ZERO bytes of stdout, against 7004 ms and
+// a real `deny` on darwin -- a fixture reporting an ALLOW for a gate that was working, on the one
+// host CI actually evaluates. macOS has no comparable per-argument cap, which is why it went unseen.
+// The path is passed in the ENVIRONMENT rather than in argv because the environment carries a path
+// and not the command, and the shape below stays the single definition either way.
+import { readFileSync } from "node:fs";
+
+const [, , argvCmd, ...rest] = process.argv;
+const cmdFile = process.env.GATE_PAYLOAD_COMMAND_FILE || "";
+const cmd = cmdFile ? readFileSync(cmdFile, "utf8") : argvCmd;
 
 if (!rest.some((kv) => kv.startsWith("cwd="))) {
   process.stderr.write(
