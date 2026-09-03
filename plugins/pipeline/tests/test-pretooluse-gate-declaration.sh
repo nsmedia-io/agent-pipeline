@@ -36,8 +36,9 @@ suite "AC1: the PreToolUse declaration, and its timeout in SECONDS"
 # 15) below, since PreToolUse's own bound must independently hold regardless of what the other
 # three declare. #138 (below, AC1b) is the same defect one hook over: #108's own "600" for Stop
 # multiplied to EL byte-for-byte, so the declaration bounded nothing tighter than omitting the
-# field -- corrected there to 120, re-derived from #108's own pre-conversion intent (120000ms)
-# rather than picked fresh, with a measured margin recorded beside it.
+# field -- corrected there to 120, a fresh measurement against Stop's two MANDATORY local steps
+# (NOT #108's own intent: #108 deliberately pinned 600 to protect a slow checkCommand's headroom,
+# see AC1b below), with the resulting margin recorded beside it.
 #
 # Version recorded beside the assertion, per the measurement rule: the ceiling is a property of
 # the runtime under test, so a host on another version produces a different recorded number
@@ -107,15 +108,18 @@ assert_eq "and is a plausible bound for one node start plus one git subprocess (
 # measurement each bound is derived from), so the pinned content changed here too. #138 corrects
 # Stop a second time (600->120): #108's "600" is byte-identical to `EL` (600000 ms, the runtime's
 # own no-declaration default -- see the AC1 header above), so it bounded nothing tighter than
-# omitting the field. SessionStart's 20 is UNCHANGED: it shares #108's same unexplained-widening
-# defect (the pre-#108 value was 10000ms, i.e. an intended 10s, and #108 shipped 20s with no
-# recorded basis for either number), but SessionStart's own worst-case cost is dominated by two
-# network calls this hook does not control (`git fetch origin <integrationBranch>`, and a `gh
-# issue view` call when the branch name carries an issue number) that have no bounded worst case
-# to measure against -- unlike Stop's, whose worst case is two local, deterministic node
-# invocations over files already on disk (see AC1b below). Sizing a network-bound hook's timeout
-# from a same-host, good-network measurement would record a number this suite could not honestly
-# defend, so #138 leaves it at 20 rather than replace one unexplained widening with another.
+# omitting the field -- despite #108 choosing it deliberately, not by accident (#108 measured this
+# repo's own checkCommand battery at 399-458s across 3 clean CI runs and pinned Stop at the
+# platform ceiling specifically to protect that headroom; #138 is a fresh decision to prioritize a
+# tight bound on Stop's two MANDATORY local steps over that protection, see AC1b below).
+# SessionStart's 20 is UNCHANGED, and #108 gave it a real recorded basis (0.9-1.5s measured,
+# ~13-16x headroom) -- it stays at 20 not because that basis was missing, but because #138 has no
+# fresh measurement of its own two network calls this hook does not control (`git fetch origin
+# <integrationBranch>`, and a `gh issue view` call when the branch name carries an issue number)
+# that have no bounded worst case to measure against -- unlike Stop's, whose worst case is two
+# local, deterministic node invocations over files already on disk (see AC1b below). Sizing a
+# network-bound hook's timeout from a same-host, good-network measurement would record a number
+# this suite could not honestly defend, so #138 leaves #108's own measured 20 in place.
 assert_eq "SessionStart entry is UNCHANGED (#138 did not establish a measured basis to replace it)" \
   "$(gate_hook_probe 'JSON.stringify(h.hooks.SessionStart)')" \
   '[{"hooks":[{"type":"command","command":"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh","timeout":20}]}]'
@@ -139,12 +143,20 @@ suite "AC1b: Stop's declared timeout is a REAL bound (#138), not a second copy o
 # relationship (strictly under the platform default) rather than only the literal.
 #
 # THE NEW VALUE, 120, is not picked by analogy with another hook (the #138 issue body forbids
-# that) or copied as a round number. It is #108's OWN pre-conversion intent: `git log --follow`
-# on this file (re-derive with `git log --format=%H --follow -- plugins/pipeline/hooks/hooks.json
-# | tail -1` then `git show <that sha>:plugins/pipeline/hooks/hooks.json`) shows Stop at 120000
-# immediately before #108, a millisecond-shaped value #108's own commit message says it was
-# converting to seconds -- so 120000ms -> 120s is the number #108 meant to ship and 600 is the
-# widening #108 actually shipped, unexplained in its commit, its tests or its issue.
+# that) or copied as a round number. It is NOT #108's own pre-conversion intent, despite 120000ms
+# appearing immediately before #108 in `git log --follow` on this file: #108's own PR (#127,
+# commit d4a61e4) measured this repo's own checkCommand battery (`bash
+# plugins/pipeline/tests/run.sh`) at 399-458s across 3 clean ubuntu-latest CI runs and
+# DELIBERATELY pinned Stop at 600, the platform's own ceiling, in its own words because "a smaller
+# number would routinely kill this repo's own legitimate check" and "going lower trades real
+# coverage for cosmetic tightness" -- not an accident of unit conversion. #138 is a fresh,
+# deliberate decision to prioritize a tight bound on Stop's two MANDATORY local steps
+# (gate-phase-entry.mjs, voice-lint.mjs) over the checkCommand headroom #108 chose to protect --
+# see "WHAT THIS MEASUREMENT DELIBERATELY EXCLUDES" below for what that tradeoff costs an adopting
+# project. One thing HAS changed since #108: this repository's own checkCommand
+# (`pipeline.config.json` -> `tests/run.sh`) is now measured at 13+ minutes, already past even
+# #108's deliberately-chosen 600s ceiling before #138 touched anything -- so the headroom #108
+# built for THIS repo's own check had already lapsed.
 #
 # THE MARGIN, measured rather than assumed, because a historical number without a fresh
 # measurement beside it is exactly the "picked by analogy" failure this issue exists to correct.
