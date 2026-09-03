@@ -1,8 +1,8 @@
 {
   "issue_number": 140,
-  "current_phase": "2-review",
+  "current_phase": "3-impl",
   "started_at": "2026-09-03T18:54:53Z",
-  "updated_at": "2026-09-03T20:20:00Z",
+  "updated_at": "2026-09-03T20:35:00Z",
   "branch": "main",
   "ask_text": "--issue 140: an unbalanced quote defeats the blanket-staging gate in 59 bytes with no timeout, and the test suite documents the bypass as correct behaviour.",
   "events": [
@@ -46,6 +46,12 @@
       "verdict": "SPEC_REWORKED",
       "at": "2026-09-03T20:18:00Z",
       "note": "Round 3 (VETO rework): added AC12 verbatim per SecOps's required_minimum_spec_change -- for an unquoted heredoc introducer, deny outright if the body contains a literal $(, backtick, or ${ before the real terminator; quoted-delimiter bodies stay fully opaque per AC1/R1, unchanged. 4 fixture cells added, all taken verbatim from SecOps's own real-gate-driver-plus-real-zsh reproduction. 12 ACs total, falsifiability-clean, contiguous. R1-R8/AC1-AC11 confirmed byte-identical, q1 not reopened, design.json/sketches untouched (additive-only, no redesign needed)."
+    },
+    {
+      "phase": "2-review",
+      "verdict": "APPROVE_WITH_NOTES",
+      "at": "2026-09-03T20:35:00Z",
+      "note": "Round 3 closed clean, scoped confirmation only (not a full re-review of AC1-AC11, already approved twice). DBA APPROVE: confirmed AC12 touches no schema/migration/access-policy surface. DevOps APPROVE: confirmed AC12 is in-process only, no subprocess/network/CI/deploy surface. SecOps VETO LIFTED, APPROVE_WITH_NOTES: AC12 checked field-by-field against SecOps's own required_minimum_spec_change (scope condition, three literal sequences, coarse fail-closed minimum, non-weakening of quoted-delimiter opacity, all 4 fixture cells) -- faithful match, no drift or scope narrowing. One non-blocking note: ${ has no dedicated real-shell repro cell (unlike $( and backtick), a fail-closed defense-in-depth choice under R1 rather than a proven-exploit cell -- recommended as a nice-to-have 5th regression cell for QA, not a gate. Phase 2.5 does not re-run (design.json/sketches stand, additive-only per BA's and the judge's own synthesis); proceeding directly to Phase 3."
     }
   ],
   "flags": [],
