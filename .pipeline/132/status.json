@@ -2,7 +2,7 @@
   "issue_number": 132,
   "current_phase": "3-impl",
   "started_at": "2026-09-03T00:55:30Z",
-  "updated_at": "2026-09-03T12:48:39Z",
+  "updated_at": "2026-09-03T14:04:27Z",
   "branch": "main",
   "ask_text": "--issue 132: the PreToolUse staging gate's scan is linear in command length but its constant is a shell interpreter's; a large enough command still outruns the declared 5s and a killed hook fails open.",
   "events": [
@@ -131,6 +131,13 @@
       "verdict": "CROSS_PLATFORM_DEFECT",
       "summary": "Linux MAX_ARG_STRLEN truncated the 461KB fixture: empty payload, gate said none in 110ms - a fixture recording ALLOW for a working gate",
       "at": "2026-09-03T12:48:39Z"
+    },
+    {
+      "phase": "3b-ci",
+      "agent": "orchestrator",
+      "verdict": "CORPUS_DISCLOSURE_STALE",
+      "summary": "CI ubuntu run 33760464874: AC4 enumerated 164 published vs 163 actual, AC11 ceiling-not-target. Root cause: README disclosure derived at a84ebc0, before QAs two later commits grew tracked test files. AC4 tripwire working as designed. Needs one final re-derivation AFTER Librarian lands.",
+      "at": "2026-09-03T14:04:27Z"
     }
   ],
   "risk_tier": "architectural",
