@@ -144,7 +144,8 @@ cat > "$FIXDIR/review.json" <<'FIX'
  "concerns":[{"severity":"info","description":"OPTIONAL_BLANKS","must_satisfy":"x",
               "location":"","rationale_not_checked":""},
              {"severity":"nit","description":"MISSING_KEY"},
-             {"severity":"","description":"BLANK_ENUM","must_satisfy":"x"}],
+             {"severity":"","description":"BLANK_ENUM","must_satisfy":"x"},
+             {"severity":"nit","description":"WRONG_TYPE","must_satisfy":7}],
  "notes":"ok",
  "vulnerabilities":[{"severity":"info","description":"no security impact","remediation":"none required"}]},
  "dba":{"verdict":"APPROVE","reviewed_at":"","concerns":[],"notes":"ok"}}
@@ -165,6 +166,14 @@ assert_not_contains "an OPTIONAL rationale_not_checked left blank is NOT reporte
 # (c) A MISSING required key is a different defect with a different owner.
 assert_not_contains "a MISSING required must_satisfy is not reported as a BLANK one" \
   "$ERR" ".review.secops.concerns[1].must_satisfy"
+# (c') THE PREMISE OF A DECLARED THEOREM, pinned. The hasOwnProperty guard in blanksAgainstSchema
+# is an EQUIVALENT mutation -- a missing key reads as undefined and the type guard on the next
+# line rejects it -- and it is declared as such in test-archive-sidecar-scan.sh's header. That
+# equivalence holds only while the type guard really does reject every non-string, non-array
+# value a missing key could also be. This is that guard, asserted: widen it and the theorem
+# becomes a real coverage gap, and this cell is where a reader finds out.
+assert_not_contains "a required field holding a NUMBER is not reported (the type guard theorem 2 rests on)" \
+  "$ERR" ".review.secops.concerns[3].must_satisfy"
 # (d) STRUCTURAL EXCLUSION, not an exemption list, and it has TWO halves because free text is
 # defined by the ABSENCE of two things. reviewed_at carries format date-time; severity carries an
 # enum. Neither is free text, both are required, and a blank in either is a SCHEMA violation the

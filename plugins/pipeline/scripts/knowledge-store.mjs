@@ -436,6 +436,15 @@ function blanksAgainstSchema(schema, doc, rootPath) {
       if (!isFreeTextSchema(field)) continue;
       // PRESENT-BUT-BLANK is the subject. An absent key is the validator's business, and a
       // value of the wrong type is a schema violation rather than a blank one.
+      //
+      // THE FIRST LINE IS AN EQUIVALENT MUTATION AND IS KEPT ANYWAY, declared rather than left
+      // for a later battery to rediscover. Removing it changes no verdict: a missing key reads
+      // as `undefined`, which the type guard on the line below already rejects, and both paths
+      // `continue` before `checked++` so even the denominator is unmoved. Measured directly over
+      // twelve probes (missing key, inherited `toString`/`constructor`, explicit null, explicit
+      // number) with no divergence. It stays because it STATES the predicate -- "present" is
+      // half of what this check is about -- and it stops being a theorem the moment the type
+      // guard below is widened to accept anything a missing key could also be.
       if (!Object.prototype.hasOwnProperty.call(value, name)) continue;
       const v = value[name];
       if (typeof v !== "string" && !Array.isArray(v)) continue;

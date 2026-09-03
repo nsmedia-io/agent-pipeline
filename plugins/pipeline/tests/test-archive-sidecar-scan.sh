@@ -43,13 +43,26 @@
 # Suite F asserts the three residual false-positive CLASSES that remain, by name, so the cost of
 # this check is measured in the suite rather than asserted in a comment.
 #
-# THE MUTATION BATTERY, AND THE ONE MUTATION DECLARED TO SURVIVE -- because a battery where
-# everything reddens cannot tell coverage from a rubber stamp. Full matrix in the PR. The
-# SURVIVOR is the `String(text)` coercion in findCredentialMaterialInText: every caller today
-# reads its input with readFileSync(..., "utf8") and hands over a string already, so removing the
-# coercion changes no verdict. That is a THEOREM about the callers, not lost coverage, and it
-# stops being one the day a caller passes a Buffer -- at which point it needs a cell, exactly the
-# way #71's `<root>` theorem needed one and got it in suite G below.
+# THE MUTATION BATTERY, AND THE TWO MUTATIONS DECLARED TO SURVIVE -- because a battery where
+# everything reddens cannot tell coverage from a rubber stamp. Eighteen mutations across both
+# halves of this change, sixteen red, and the full matrix is in the PR. Both survivors are
+# THEOREMS with their premises written down, not coverage gaps:
+#
+#   (1) the `String(text)` coercion in findCredentialMaterialInText. Every caller today reads its
+#       input with readFileSync(..., "utf8") and hands over a string already, so removing the
+#       coercion changes no verdict. It stops being a theorem the day a caller passes a Buffer.
+#   (2) the `hasOwnProperty` guard in knowledge-store.mjs's blanksAgainstSchema. A missing key
+#       reads as `undefined`, which the type guard on the very next line already rejects, and
+#       both paths `continue` before the denominator moves -- verified over twelve probes
+#       (missing key, inherited toString/constructor, explicit null, explicit number) with no
+#       divergence. It stops being a theorem if that type guard is ever widened.
+#
+# THIS WAS NOT THE PREDICTION. (2) was expected to REDDEN and did not, which is the whole reason
+# the rule asks for a survivor: the prediction was wrong about the code, and only running the
+# mutation could say so. It is recorded as measured rather than re-labelled after the fact.
+#
+# One earlier declared survivor was RETIRED by this change: #71's `<root>` path fallback, which
+# this suite now covers with a cell (suite G).
 
 . "$(dirname "${BASH_SOURCE[0]}")/harness.sh"
 require_node
