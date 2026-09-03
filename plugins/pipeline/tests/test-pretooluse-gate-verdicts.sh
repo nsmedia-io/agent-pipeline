@@ -423,9 +423,13 @@ assert_eq "VACUITY: hooks.json declares a positive PreToolUse timeout to bound a
 #   .github/workflows/tests.yml:17,60 runs `bash plugins/pipeline/tests/run.sh` on ubuntu-latest
 #   for every pull_request and every push to main, so these four blocks execute there on every
 #   change and the figures below were read off that run rather than estimated from the darwin ones:
-#     LENGTH 174 ms, WORD-BOUNDARY 265 ms, DENSITY 205 ms,
-#     DENSITY-GROWTH 214 ms.
-#     Command: bash plugins/pipeline/tests/run.sh, on ubuntu-latest, run id 33744488416 (Linux 6.17.0-1022-azure, load 2.07/1.51/0.93).
+#     LENGTH 119 ms, WORD-BOUNDARY 175 ms, DENSITY 154 ms,
+#     DENSITY-GROWTH 156 ms.
+#     Command: bash plugins/pipeline/tests/run.sh, on ubuntu-latest, run id 33747342504 (Linux
+#     6.17.0-1022-azure, load 2.00). The earlier run 33744488416 of the same four blocks read
+#     174/265/205/214 ms; both are recorded because the spread between two runs of one host is the
+#     thing a single figure hides. ubuntu-latest is FASTER than the darwin host above by roughly
+#     3x to 6x on these blocks, not slower, so the budget's binding constraint is darwin.
 #
 # WHY 5000 AND NOT A ROUNDED MULTIPLE OF THE WORST FIGURE. It is the millisecond value these four
 # guards effectively carried before this change, when the declaration they read was the superseded
