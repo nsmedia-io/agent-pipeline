@@ -2,7 +2,7 @@
   "issue_number": 132,
   "current_phase": "3-impl",
   "started_at": "2026-09-03T00:55:30Z",
-  "updated_at": "2026-09-03T05:37:46Z",
+  "updated_at": "2026-09-03T12:48:39Z",
   "branch": "main",
   "ask_text": "--issue 132: the PreToolUse staging gate's scan is linear in command length but its constant is a shell interpreter's; a large enough command still outruns the declared 5s and a killed hook fails open.",
   "events": [
@@ -46,6 +46,12 @@
       "verdict": "DESIGN_LOCKED",
       "at": "2026-09-03T03:20:25Z",
       "note": "owner_decision required=false; packaging-only divergence settled by the standing scope instruction"
+    },
+    {
+      "phase": "3-impl",
+      "verdict": "IMPL_COMPLETE",
+      "at": "2026-09-03T12:48:39Z",
+      "note": "Dev landed 8 commits on QA contract 78afb93, HEAD a84ebc0, PR 141 draft. AC1-AC14+AC16 met; AC15 clause 2 met, absolute-green clause pending the Librarian commit; AC17-19 check complete and discriminating, record not yet moved. Blocker B1 routed back to QA. RESUME NOTE: Phase 3 dispatches are DONE - on resume go to the pre-Phase-4 gate, do not re-dispatch QA 3a or Dev 3b."
     }
   ],
   "flags": [
@@ -111,9 +117,24 @@
       "verdict": "CONTRACT_COMMITTED",
       "summary": "30 failed / 69 passed at base; two reverted reference impls proved it passable at 99/0; AC2 measured flaking under load",
       "at": "2026-09-03T05:37:46Z"
+    },
+    {
+      "phase": "3b-dev",
+      "agent": "dev",
+      "verdict": "IMPL_COMPLETE_1_BLOCKER",
+      "summary": "T=30 from 6 observations binding to worst; PR 141 draft at a84ebc0; B1 raised in QAs AC11 fixture, not edited",
+      "at": "2026-09-03T12:48:39Z"
+    },
+    {
+      "phase": "3b-dev",
+      "agent": "dev",
+      "verdict": "CROSS_PLATFORM_DEFECT",
+      "summary": "Linux MAX_ARG_STRLEN truncated the 461KB fixture: empty payload, gate said none in 110ms - a fixture recording ALLOW for a working gate",
+      "at": "2026-09-03T12:48:39Z"
     }
   ],
   "risk_tier": "architectural",
   "review_rounds": 0,
-  "phase3_qa_test_commit": "78afb93af579c870d7211dbb371a53d4fae03c45"
+  "phase3_qa_test_commit": "78afb93af579c870d7211dbb371a53d4fae03c45",
+  "pr_url": "https://github.com/nsmedia-io/agent-pipeline/pull/141"
 }
