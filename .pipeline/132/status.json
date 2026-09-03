@@ -1,8 +1,8 @@
 {
   "issue_number": 132,
-  "current_phase": "2.5-design-complete",
+  "current_phase": "3-impl",
   "started_at": "2026-09-03T00:55:30Z",
-  "updated_at": "2026-09-03T03:02:38Z",
+  "updated_at": "2026-09-03T03:20:25Z",
   "branch": "main",
   "ask_text": "--issue 132: the PreToolUse staging gate's scan is linear in command length but its constant is a shell interpreter's; a large enough command still outruns the declared 5s and a killed hook fails open.",
   "events": [
@@ -40,6 +40,12 @@
       "verdict": "SKETCH_A_WITH_GRAFTS",
       "at": "2026-09-03T03:02:38Z",
       "note": "Judge picked A, grafted Bs struct-class PROPERTY while refusing its argv-branch mechanism, and Bs subject-anchored matcher whole. Caught two self-defeating assertions in A: a grep-derived struct set that ranks the dense-end file 47th instead of 2nd, and a knowledge-store anchor on the very sentence AC19 makes the Librarian rewrite. owner_decision required=false."
+    },
+    {
+      "phase": "2.5-design",
+      "verdict": "DESIGN_LOCKED",
+      "at": "2026-09-03T03:20:25Z",
+      "note": "owner_decision required=false; packaging-only divergence settled by the standing scope instruction"
     }
   ],
   "flags": [
