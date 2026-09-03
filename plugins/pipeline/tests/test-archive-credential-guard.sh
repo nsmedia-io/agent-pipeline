@@ -40,14 +40,19 @@
 # (9); trimming a class from the shipped table (5, via the seam); stripping the note off one
 # schema field (2); reverting the writer-copy widening (1).
 #
-# THE SURVIVOR, DECLARED: mutating the `p || "<root>"` fallback in findCredentialMaterial changes
-# no verdict, and it is a THEOREM rather than lost coverage. archiveIssue always builds `archive`
-# as an OBJECT ({issue_number, archived_at, ...}), so a string leaf is never at path "" and that
-# branch is unreachable from the only caller that writes a file. It is reachable only by an
-# external caller passing a bare string to the exported function -- verified directly:
-# findCredentialMaterial("AKIA...") returns path "<root>", findCredentialMaterial({a:"AKIA..."})
-# returns ".a". If a caller is ever added that hands it a bare string, this stops being a theorem
-# and needs a cell.
+# THE SURVIVOR THIS BATTERY DECLARED, AND ITS RETIREMENT. The `<root>` path fallback in
+# findCredentialMaterial was declared an expected survivor here: archiveIssue always builds
+# `archive` as an OBJECT ({issue_number, archived_at, ...}), so a string leaf is never at path ""
+# and that branch was unreachable from the only caller that wrote a file. The declaration wrote
+# down the condition that would end it -- if a caller is ever added that hands the function a
+# bare string, it stops being a theorem and needs a cell.
+#
+# RETIRED BY #125, which added exactly that caller: findCredentialMaterialInText scans a text
+# sidecar one LINE at a time, and a line IS a bare string. The cell that now covers it lives in
+# tests/test-archive-sidecar-scan.sh ("#71's <root> theorem, retired"), which pins both the bare
+# and the wrapped path in one assertion. This paragraph is kept rather than deleted because the
+# battery above is a historical record: seven of its eight mutations reddened, and the eighth is
+# no longer among them.
 
 . "$(dirname "${BASH_SOURCE[0]}")/harness.sh"
 require_node
