@@ -1,8 +1,8 @@
 {
   "issue_number": 132,
-  "current_phase": "2.5-design",
+  "current_phase": "2.5-design-complete",
   "started_at": "2026-09-03T00:55:30Z",
-  "updated_at": "2026-09-03T02:43:46Z",
+  "updated_at": "2026-09-03T03:02:38Z",
   "branch": "main",
   "ask_text": "--issue 132: the PreToolUse staging gate's scan is linear in command length but its constant is a shell interpreter's; a large enough command still outruns the declared 5s and a killed hook fails open.",
   "events": [
@@ -34,6 +34,12 @@
       "verdict": "APPROVE_WITH_NOTES",
       "at": "2026-09-03T02:43:46Z",
       "note": "Round 2 closed: all three APPROVE_WITH_NOTES, 0 blocking. DevOps re-verified the ten-file span digest at 62d7a17 and widened DBAs git-128 finding: AC1 mandates a git-less tree and that is the same suite CI runs, so a git-expressed enumeration would report 0 on every CI run."
+    },
+    {
+      "phase": "2.5-design",
+      "verdict": "SKETCH_A_WITH_GRAFTS",
+      "at": "2026-09-03T03:02:38Z",
+      "note": "Judge picked A, grafted Bs struct-class PROPERTY while refusing its argv-branch mechanism, and Bs subject-anchored matcher whole. Caught two self-defeating assertions in A: a grep-derived struct set that ranks the dense-end file 47th instead of 2nd, and a knowledge-store anchor on the very sentence AC19 makes the Librarian rewrite. owner_decision required=false."
     }
   ],
   "flags": [
@@ -85,6 +91,13 @@
       "verdict": "APPROVE_WITH_NOTES",
       "summary": "AC6 closed, both routes verified; git-128 in a git-less tree would make a git-expressed AC4 report 0 on EVERY CI run",
       "at": "2026-09-03T02:43:46Z"
+    },
+    {
+      "phase": "2.5-judge",
+      "agent": "dev",
+      "verdict": "SKETCH_A_WITH_GRAFTS",
+      "summary": "A wins; 3 grafts + AC6 sharpened to read ubuntu figures off the PRs own CI run; densest tracked file is a .sh not a .json",
+      "at": "2026-09-03T03:02:38Z"
     }
   ],
   "risk_tier": "architectural",
