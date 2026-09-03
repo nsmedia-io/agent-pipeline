@@ -3,7 +3,7 @@
 // .pipeline/<n>/*.json artifacts into knowledge/issue-archive/<n>.json. No network.
 
 import { join, resolve } from "node:path";
-import { archiveIssue } from "./knowledge-store.mjs";
+import { archiveIssue, blankFieldReportLine } from "./knowledge-store.mjs";
 
 function parseArgs(argv) {
   const out = {};
@@ -43,7 +43,7 @@ function main() {
       : join(resolve(root), ".pipeline", String(issue));
 
   try {
-    const { outPath, found, redactions, stringsScanned, credentialHits } =
+    const { outPath, found, redactions, stringsScanned, credentialHits, blankFields } =
       archiveIssue({ root, issue, from });
     console.log(`Archived issue #${issue} -> ${outPath}`);
     console.log(`  artifacts: ${found.join(", ")}`);
@@ -55,6 +55,11 @@ function main() {
     // that never says how much it walked is indistinguishable from one that did not run. This
     // line is byte-identical to knowledge-store.mjs's, which the re-dispatch contract requires.
     console.log(`  credential-shaped strings: ${credentialHits} (of ${stringsScanned} strings scanned)`);
+    // #122's blank-required-field line, from the SHARED formatter in knowledge-store.mjs rather
+    // than a second copy of the format string: the byte-identical-stdout contract this file is
+    // under is exactly what a hand-copied template drifts out of on its first edit. WARN, never
+    // refuse -- the archive above is already written by the time this prints, deliberately.
+    console.log(blankFieldReportLine(blankFields));
   } catch (e) {
     console.error(`Error: ${e.message}`);
     process.exit(1);

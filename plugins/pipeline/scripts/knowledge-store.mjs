@@ -4,7 +4,8 @@
 
 import { readdirSync, readFileSync, writeFileSync, mkdirSync, existsSync, statSync } from "node:fs";
 import { isMain as isMainScript, assertPathSegment } from "./lib.mjs";
-import { join, resolve, relative, basename, isAbsolute, sep } from "node:path";
+import { join, resolve, relative, basename, isAbsolute, dirname, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const COLLECTIONS = ["living-context", "issue-archive", "decisions"];
 // Pipeline artifacts folded into an issue archive, in phase order; each read only if present.
@@ -300,6 +301,193 @@ export function findCredentialMaterial(value) {
   return { hits, scanned };
 }
 
+// A LINE-ORIENTED RAW-TEXT PASS over the same class table (#125). knowledge/issue-archive/ is a
+// committed directory and archiveIssue writes only <n>.json into it, so the agent-authored
+// *.md and *.sh sidecars beside those archives -- 403,389 bytes at 73ee2aa -- were reached by
+// neither this guard nor test-status-schema-contract.sh's AC-52c, whose population is
+// `ls -1 knowledge/issue-archive/*.json`. Both scopings are by CONSTRUCTION rather than by
+// oversight, which is why widening either was the wrong instrument: AC-52c's vacuity assertion
+// requires every file in its population to JSON.parse, so feeding it a .sh reddens it for the
+// wrong reason.
+//
+// THE CLASS TABLE IS SHARED, NOT COPIED. This calls findCredentialMaterial once per LINE rather
+// than re-deriving the regexes, so there is exactly one shipped predicate and a narrowing of it
+// narrows both passes together. Per line and not per file because the operator needs a
+// location: on a 137 KB verify battery, `[env_line]` with no line number is not actionable.
+//
+// THIS IS THE CALLER #71 ANTICIPATED. Its battery declared the `p || "<root>"` fallback in
+// findCredentialMaterial an expected SURVIVOR -- a theorem, because archiveIssue always hands
+// that function an OBJECT, so a string leaf is never at path "" -- and wrote down the condition
+// that would end it: "If a caller is ever added that hands it a bare string, this stops being a
+// theorem and needs a cell." This is that caller, and the cell is in
+// tests/test-archive-sidecar-scan.sh.
+export function findCredentialMaterialInText(text) {
+  const hits = [];
+  let scanned = 0;
+  // String() is a coercion every current caller makes unnecessary (all of them read the file as
+  // utf8 first). It is here for the caller that hands this a Buffer, and it is the documented
+  // EXPECTED SURVIVOR of this change's mutation battery: removing it changes no verdict today,
+  // which is a theorem about the callers rather than a coverage gap. It stops being one the day
+  // a caller passes anything that is not already a string.
+  const lines = String(text).split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    scanned++;
+    for (const h of findCredentialMaterial(lines[i]).hits)
+      hits.push({ line: i + 1, class: h.class, text: lines[i].trim() });
+  }
+  return { hits, scanned };
+}
+
+// ---------------------------------------------------------------------------
+// BLANK REQUIRED FREE-TEXT FIELDS (#122), which is #71's property 3: "whatever distinguishes a
+// present-but-empty value from a meaningful one is applied at the moment of writing, by
+// something that runs, and its failure to run is distinguishable in the output from a clean
+// pass." A MISSING key is genuinely refused where the validator runs; a present-but-EMPTY one
+// is not, and the walker in validate-pipeline-artifact.mjs implements no minLength. Same actor,
+// same outcome, one keystroke cheaper.
+//
+// WHY HERE, AND NOT WHERE #122 SAID. #122 named validate-pipeline-artifact.mjs as the only
+// write-time seat and recorded itself blocked on #66, which records that validator as inert
+// under namespaced agent dispatch -- the shipping default. That framing was incomplete: THIS
+// write runs unconditionally in every deployment mode, and #71 demonstrated it as a working
+// write-time seat by putting the credential refusal here. So the check sits where its green is
+// a fact about the RECORD rather than about the deployment mode, and #122 does not wait on #66.
+//
+// THE FAIL DIRECTION IS *WARN*, AND IT IS NOT A STYLE PREFERENCE. By the time this runs the run
+// is FINISHED and this archive is its only durable copy. The credential guard four hundred
+// lines up REFUSES because shipping the secret IS the harm; here refusing IS the harm -- it
+// would destroy the record in order to punish a blank field. So this never throws, never skips
+// the write, and reports instead, on stdout every time and on stderr when it finds something.
+// Do NOT "fix" it into a refusal by analogy with the credential guard.
+//
+// WHAT IT REFUSES: nothing, ever. WHAT IT NOISES UP, named, because a guardrail whose cost is
+// unnamed has not been costed -- and here a false positive is the whole risk, since the
+// population is clean today (0 blanks over 31,520 committed strings at 73ee2aa):
+//   - an `info` vulnerabilities[] row whose honest remediation is "none required" is NOT
+//     reported. It is non-blank, and a check demanding a PROPERTY-shaped remediation would
+//     refuse correct work. This is the case #122 names, and it has its own cell.
+//   - an OPTIONAL free-text field left as "" is NOT reported. Where the schema does not require
+//     the field, "" and absent say the same thing and neither is a defect. The asymmetry #122
+//     is about exists only where the schema REQUIRES the field.
+//   - a MISSING required key is NOT reported. That half is already refused wherever the
+//     validator runs, and restating it here would be noise on the one path that cannot refuse.
+//
+// THE POPULATION IS DERIVED FROM THE SHIPPED SCHEMAS, never listed here -- the same argument
+// the credential walk makes for ARCHIVE_ARTIFACTS. A field that becomes required tomorrow is
+// covered the day the schema says so. Two consequences worth stating rather than leaving to be
+// discovered:
+//   - peer-review.json contributes almost NOTHING today, because its concerns[] subschema has
+//     no required list at all (#38): #panelVerdict requires only `verdict`, which is an enum.
+//     123 of the 230 concerns[] rows #122 measured live in that half. Closing #38 widens this
+//     check automatically, with no edit here, which is what a derived population buys.
+//   - free text is identified STRUCTURALLY -- a required property typed string (or
+//     string-or-array) with no enum and no date-time format -- so `verdict` and `reviewed_at`
+//     are out by construction rather than by an exemption list somebody has to maintain.
+const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
+// Schemas ship WITH the plugin (../schemas), independent of the user's project -- the same
+// resolution gate-pre-phase4.mjs, validate-pipeline-artifact.mjs and voice-lint.mjs use.
+const SCHEMA_DIR = resolve(SCRIPT_DIR, "..", "schemas");
+
+const isFreeTextSchema = (n) => {
+  if (!n || typeof n !== "object") return false;
+  const t = n.type;
+  const isStr = t === "string" || (Array.isArray(t) && t.includes("string"));
+  return isStr && !n.enum && n.format !== "date-time";
+};
+
+// GUARD WHERE IT LANDED, NOT HOW IT WAS SPELLED. "" and "   " are the same non-signal, and so
+// is [] (and [""] ) for a field the schema types as string-OR-array, which `notes` is. Covering
+// only the first spelling would leave the others as a one-keystroke bypass of the same check.
+const isBlankValue = (v) =>
+  typeof v === "string"
+    ? v.trim() === ""
+    : Array.isArray(v)
+      ? v.every((x) => typeof x === "string" && x.trim() === "")
+      : false;
+
+// Applies one artifact schema to one artifact document and reports every REQUIRED free-text
+// property that is present and blank. Draft-07 subset, matching what these schemas actually
+// use: $ref (local), allOf, properties, items, required.
+function blanksAgainstSchema(schema, doc, rootPath) {
+  const blanks = [];
+  let checked = 0;
+  const deref = (n) => {
+    for (let hops = 0; n && typeof n === "object" && typeof n.$ref === "string"; hops++) {
+      // A $ref cycle is not a reason to hang the Phase 5 write. Bounded, and the bound being
+      // hit yields "unresolvable" (no hits) rather than a throw, on this path's WARN posture.
+      if (hops > 10 || !n.$ref.startsWith("#/")) return null;
+      let cur = schema;
+      for (const seg of n.$ref.slice(2).split("/")) cur = cur == null ? cur : cur[seg];
+      n = cur;
+    }
+    return n;
+  };
+  const walk = (rawNode, value, path, depth) => {
+    if (depth > 40) return;
+    const node = deref(rawNode);
+    if (!node || typeof node !== "object" || value === null || typeof value !== "object") return;
+    if (Array.isArray(value)) {
+      if (node.items) value.forEach((v, i) => walk(node.items, v, `${path}[${i}]`, depth + 1));
+      return;
+    }
+    for (const sub of node.allOf || []) walk(sub, value, path, depth + 1);
+    for (const name of Array.isArray(node.required) ? node.required : []) {
+      const field = deref((node.properties || {})[name]);
+      if (!isFreeTextSchema(field)) continue;
+      // PRESENT-BUT-BLANK is the subject. An absent key is the validator's business, and a
+      // value of the wrong type is a schema violation rather than a blank one.
+      if (!Object.prototype.hasOwnProperty.call(value, name)) continue;
+      const v = value[name];
+      if (typeof v !== "string" && !Array.isArray(v)) continue;
+      checked++;
+      if (isBlankValue(v)) blanks.push(`${path}.${name}`);
+    }
+    for (const [k, sub] of Object.entries(node.properties || {}))
+      if (Object.prototype.hasOwnProperty.call(value, k)) walk(sub, value[k], `${path}.${k}`, depth + 1);
+  };
+  walk(schema, doc, rootPath, 0);
+  return { blanks, checked };
+}
+
+// Walks the assembled archive document against the shipped artifact schemas. `checked` is
+// returned and PRINTED by the caller on the clean path, so "no blank required field" and "the
+// walk never ran" are different outputs rather than the same silence -- the clause #122's
+// property 3 asks for, in the shape #71's credential line already established.
+export function findBlankRequiredFields(archive, schemaDir = SCHEMA_DIR) {
+  const blanks = [];
+  const unreadable = [];
+  let checked = 0, schemasRead = 0, schemasExpected = 0;
+  for (const name of ARCHIVE_ARTIFACTS) {
+    if (!Object.prototype.hasOwnProperty.call(archive, name)) continue;
+    schemasExpected++;
+    const schema = readJson(join(schemaDir, `${name}.schema.json`));
+    if (!schema) { unreadable.push(`${name}.schema.json`); continue; }
+    schemasRead++;
+    const r = blanksAgainstSchema(schema, archive[name], `.${name}`);
+    checked += r.checked;
+    for (const b of r.blanks) blanks.push(b);
+  }
+  return { blanks, checked, schemasRead, schemasExpected, unreadable, schemaDir };
+}
+
+// The one place the report line is spelled, because archive-pipeline.mjs is contractually a
+// BYTE-IDENTICAL re-dispatch of the CLI (tests/test-archive-pipeline.sh pins the two stdouts
+// against each other) and a second hand-written copy of a format string is a divergence waiting
+// for its first edit.
+//
+// THE INCOMPLETE BRANCH IS THE POINT, not a defensive flourish. A walk that could read no
+// schema reports `0 blank` truthfully and vacuously, and two suites already copy this script
+// into a scratch dir WITHOUT its ../schemas sibling, so the degraded path is reachable rather
+// than hypothetical. It says NOT CHECKED, names the directory it looked in, and is therefore
+// distinguishable in the output from a clean pass.
+export function blankFieldReportLine(r) {
+  return r.schemasRead === r.schemasExpected
+    ? `  blank required free-text fields: ${r.blanks.length} (of ${r.checked} present, from ` +
+      `${r.schemasRead}/${r.schemasExpected} artifact schemas)`
+    : `  blank required free-text fields: NOT CHECKED (${r.blanks.length} found in ${r.checked} ` +
+      `present; only ${r.schemasRead}/${r.schemasExpected} artifact schemas readable under ${r.schemaDir})`;
+}
+
 // Key order is not a difference. Both copies are written by JSON.stringify from the same
 // authors, but a re-serialized artifact can legitimately reorder keys, and a staleness check
 // that HALTS archival must not halt on that.
@@ -415,13 +603,43 @@ export function archiveIssue({ root, issue, from }) {
     );
   }
 
+  // REPORT -- NEVER REFUSE -- A BLANK REQUIRED FREE-TEXT FIELD (#122). Deliberately AFTER the
+  // two refusals above and deliberately not one of them: the run is over by now and this
+  // archive is its only durable copy, so refusing here would destroy the record to punish a
+  // blank field. The scan runs on every archive and its denominator is reported on the clean
+  // path too (see blankFieldReportLine), so a walk that inspected nothing is distinguishable
+  // from one that inspected 47 required fields and found nothing.
+  const blank = findBlankRequiredFields(redacted);
+  if (blank.blanks.length > 0) {
+    // Loud, and on stderr, on the same principle as the two overrides above -- and NOT on
+    // stdout, which archive-pipeline.mjs must be able to reproduce byte for byte.
+    console.error(
+      `Warning: ${blank.blanks.length} REQUIRED free-text field(s) present but BLANK in the ` +
+      `archive for #${issue}.\n  The archive WAS written: by this point the run is finished and ` +
+      `the record is the thing of value,\n  so refusing would destroy it to punish a blank ` +
+      `field (#122). A blank required field is a\n  QUALITY defect, not a safety one -- fill it ` +
+      `in the source artifact under ${fromDir} and\n  archive again to correct the record.\n    ` +
+      blank.blanks.join("\n    "),
+    );
+  }
+  if (blank.schemasRead !== blank.schemasExpected) {
+    // A zero over an unread schema set is not a result. Announced rather than refused, on this
+    // path's WARN posture, and the stdout line says NOT CHECKED for the same reason.
+    console.error(
+      `Warning: the blank-required-field scan read only ${blank.schemasRead} of ` +
+      `${blank.schemasExpected} artifact schemas under ${blank.schemaDir}` +
+      `${blank.unreadable.length ? ` (missing: ${blank.unreadable.join(", ")})` : ""}.\n` +
+      `  Its count is NOT a clean result; treat it as unchecked.`,
+    );
+  }
+
   const outDir = join(rootAbs, "knowledge", "issue-archive");
   mkdirSync(outDir, { recursive: true });
   const outPath = join(outDir, `${issue}.json`);
   writeFileSync(outPath, JSON.stringify(redacted, null, 2) + "\n"); // idempotent overwrite
   return {
     outPath, found, redactions: counter.count, stalenessChecked: checked, stale,
-    stringsScanned: scanned, credentialHits: hits.length,
+    stringsScanned: scanned, credentialHits: hits.length, blankFields: blank,
   };
 }
 
@@ -430,15 +648,17 @@ function cmdArchive(args) {
   if (issue === true || issue === undefined) fail("--archive-issue requires an issue number");
   if (typeof args.from !== "string") fail("--archive-issue requires --from <artifact-dir>");
   try {
-    const { outPath, found, redactions, stringsScanned, credentialHits } =
+    const { outPath, found, redactions, stringsScanned, credentialHits, blankFields } =
       archiveIssue({ root: rootDir(args), issue, from: args.from });
     // The credential line is printed on the CLEAN path too, with the denominator. "0 hits" over
     // 0 strings and "0 hits" over 3000 are different results, and a scan that has never reported
-    // its population is indistinguishable from one that did not run.
+    // its population is indistinguishable from one that did not run. #122's blank-field line
+    // carries its denominator for the same reason, from the same shared formatter.
     console.log(
       `Archived issue #${issue} -> ${outPath}\n  artifacts: ${found.join(", ")}\n` +
       `  absolute paths redacted: ${redactions}\n` +
-      `  credential-shaped strings: ${credentialHits} (of ${stringsScanned} strings scanned)`);
+      `  credential-shaped strings: ${credentialHits} (of ${stringsScanned} strings scanned)\n` +
+      blankFieldReportLine(blankFields));
   } catch (e) { fail(e.message); }
 }
 
