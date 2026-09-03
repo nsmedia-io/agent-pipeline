@@ -2,7 +2,7 @@
   "issue_number": 132,
   "current_phase": "3-impl",
   "started_at": "2026-09-03T00:55:30Z",
-  "updated_at": "2026-09-03T14:04:27Z",
+  "updated_at": "2026-09-03T14:22:42Z",
   "branch": "main",
   "ask_text": "--issue 132: the PreToolUse staging gate's scan is linear in command length but its constant is a shell interpreter's; a large enough command still outruns the declared 5s and a killed hook fails open.",
   "events": [
@@ -138,6 +138,13 @@
       "verdict": "CORPUS_DISCLOSURE_STALE",
       "summary": "CI ubuntu run 33760464874: AC4 enumerated 164 published vs 163 actual, AC11 ceiling-not-target. Root cause: README disclosure derived at a84ebc0, before QAs two later commits grew tracked test files. AC4 tripwire working as designed. Needs one final re-derivation AFTER Librarian lands.",
       "at": "2026-09-03T14:04:27Z"
+    },
+    {
+      "phase": "librarian-pre-merge",
+      "agent": "librarian",
+      "verdict": "RECORD_CORRECTED",
+      "summary": "c6b6d29: 5s/5000ms -> 30s/30000ms, tiny-framing removed. 3 PHASE-5 rows green; 9 anchor-premise rows now stale by design (QA documented this), need re-anchoring",
+      "at": "2026-09-03T14:22:42Z"
     }
   ],
   "risk_tier": "architectural",
