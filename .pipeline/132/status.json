@@ -1,8 +1,8 @@
 {
   "issue_number": 132,
-  "current_phase": "1-ba-rework-required",
+  "current_phase": "2-review-complete",
   "started_at": "2026-09-03T00:55:30Z",
-  "updated_at": "2026-09-03T01:46:24Z",
+  "updated_at": "2026-09-03T02:38:40Z",
   "branch": "main",
   "ask_text": "--issue 132: the PreToolUse staging gate's scan is linear in command length but its constant is a shell interpreter's; a large enough command still outruns the declared 5s and a killed hook fails open.",
   "events": [
@@ -22,6 +22,12 @@
       "verdict": "REQUEST_CHANGES",
       "at": "2026-09-03T01:46:24Z",
       "note": "DBA + SecOps REQUEST_CHANGES, DevOps APPROVE_WITH_NOTES. Round 1. Central fixture is gitignored AND not the worst real command; a tracked archive file measures 10407ms = 208% of the current budget today. Orchestrator repaired one invalid JSON escape in the devops shard (literal backslash-semicolon in a find -exec string); content unchanged."
+    },
+    {
+      "phase": "2-review",
+      "verdict": "APPROVE_WITH_NOTES",
+      "at": "2026-09-03T02:38:40Z",
+      "note": "Round 2: DBA and SecOps both cleared their round-1 blockers; DevOps carried from round 1 pending an AC6 re-check. SecOps filed a live out-of-scope fail-open, written up as #140 before merge."
     }
   ],
   "flags": [
@@ -52,6 +58,20 @@
       "verdict": "REQUEST_CHANGES",
       "summary": "window [15,30] contains values that still fail open: code shape at the spec fixture length = 16511ms; archive file = 208% of budget",
       "at": "2026-09-03T01:46:24Z"
+    },
+    {
+      "phase": "2-dba-r2",
+      "agent": "dba",
+      "verdict": "APPROVE_WITH_NOTES",
+      "summary": "blocker closed w/ control; .sh sidecar = 63% of worst row struct work but unenumerated; AC4 has no non-empty floor",
+      "at": "2026-09-03T02:38:40Z"
+    },
+    {
+      "phase": "2-secops-r2",
+      "agent": "secops",
+      "verdict": "APPROVE_WITH_NOTES",
+      "summary": "halves clause discharges; cross-check 0.5% is an algebraic identity not corroboration; filed quote-parity bypass",
+      "at": "2026-09-03T02:38:40Z"
     }
   ],
   "risk_tier": "architectural",
