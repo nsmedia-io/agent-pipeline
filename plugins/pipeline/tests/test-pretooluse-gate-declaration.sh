@@ -82,9 +82,17 @@ assert_eq "and is STRICTLY LESS than the platform default ceiling of 600 SECONDS
   "$("$GATE_REAL_NODE" -e 'const t=Number(process.argv[1]); process.stdout.write(Number.isFinite(t)&&t<600?"under-600":"AT-OR-OVER-600: "+process.argv[1])' "${DECLARED_TIMEOUT:-NaN}" 2>/dev/null)" \
   "under-600"
 
-# The magnitude R1 argues for: 66.68 ms node cold start plus one git subprocess on the escalation
-# branch. A single-digit number of seconds. Asserted as a FLOOR too, so a `timeout: 0.001` that
-# technically satisfies "< 600" but times the gate out on every escalation is caught.
+# WHAT FIXES THE UPPER END, RE-DERIVED AT #132. R1's magnitude -- a 66.68 ms node cold start plus
+# one git subprocess -- fixes the FLOOR and cannot stand alone as the justification: it is the cost
+# of STARTING the gate, not of the gate READING the command it was handed, and the second term is
+# the one that grew. The ceiling is fixed by the largest tracked artifact this repository stages in
+# one Bash call: knowledge/issue-archive/106.json as a heredoc body followed by `git add -A` is
+# 461795 command bytes at 23.92 B/struct (461758 file bytes over 19307 structural characters,
+# counted over the hook's own _STRUCT set at pre-tool-use.sh:1195), decided `deny` in 8272 ms
+# min-of-3 at load 1.95-2.42 on darwin 25.5.0 / node v24.19.0. Under the two spreads #132 records
+# (same-host load 1.42, cross-host 1.32) that row is 15507 ms adjusted, so a declaration under 16 s
+# is a bypass on this corpus today and one under about 23 s is a bypass on a loaded shared runner.
+# A killed PreToolUse hook emits nothing and FAILS OPEN, so this ceiling is a security bound.
 assert_eq "and is a plausible bound for one node start plus one git subprocess (0 < t <= 30 s)" \
   "$("$GATE_REAL_NODE" -e 'const t=Number(process.argv[1]); process.stdout.write(Number.isFinite(t)&&t>0&&t<=30?"in-range":"OUT-OF-RANGE: "+process.argv[1])' "${DECLARED_TIMEOUT:-NaN}" 2>/dev/null)" \
   "in-range"
@@ -103,6 +111,20 @@ assert_eq "Stop entry carries #108's corrected (seconds) timeout" \
 assert_eq "SubagentStop entry carries #108's corrected (seconds) timeout" \
   "$(gate_hook_probe 'JSON.stringify(h.hooks.SubagentStop)')" \
   '[{"hooks":[{"type":"command","command":"${CLAUDE_PLUGIN_ROOT}/hooks/subagent-stop.sh","timeout":15}]}]'
+
+# AND THE FOURTH ENTRY, WHICH USED TO BE THE ONLY ONE CHECKED BY A RANGE (#132). PreToolUse was
+# left to the `0 < t <= 30` row above while the other three were pinned exactly, so every value in
+# that window was interchangeable to this suite: at 5, 15, 19 and 30 it reported 68 passed / 0
+# failed, and the ONE entry nobody could edit without a red was the security-critical one. The
+# range row stays -- it carries the derivation and it catches a value outside the window -- and
+# this pin is what makes an edit INSIDE the window visible, printing the expected and the found
+# value side by side the way the other three do. The fail-open tail is pinned with it: it is the
+# clause that decides what happens when the gate is unavailable, and it has never been asserted
+# anywhere. Its own non-zero control is the SubagentStop row above, which the #132 contract drives
+# with a 15->20 edit to show this suite can see a timeout change at all.
+assert_eq "PreToolUse entry carries #132's raised (seconds) timeout and its fail-open tail, pinned exactly" \
+  "$(gate_hook_probe 'JSON.stringify(h.hooks.PreToolUse)')" \
+  '[{"matcher":"Bash","hooks":[{"type":"command","command":"${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-use.sh || { echo \"agent-pipeline PreToolUse: gate unavailable (rc $?); allowing\" >&2; exit 0; }","timeout":30}]}]'
 
 # The declared command must actually be EXECUTABLE by the runtime, which runs the string through a
 # shell. A declaration pointing at a file that is not there is the #106 shape one level up.
@@ -434,11 +456,14 @@ assert_eq "AC36(a): a FUNCTION-SCOPE reverse edge is still a cycle and is still 
 
 # The module count is a present-tense fact, so a stale expectation fails loudly rather than
 # passing confidently: 16 at the reviewed commit, 17 once R6's leaf module landed, 18 with
-# #117's check-status-record.mjs. It went red on schedule when that eighteenth module landed,
-# which is the behaviour this pin is for -- bump the number, do not soften it to a floor.
+# #117's check-status-record.mjs, 19 with #132's check-knowledge-timeout-literals.mjs. It went
+# red on schedule when the eighteenth module landed and again when the nineteenth did, which is the
+# behaviour this pin is for -- bump the number, do not soften it to a floor. The assertion NAME is
+# left as it stands apart from the count: #132's AC15 compares this suite's row names against
+# origin/main with digits normalised, so a reworded row reads there as a DELETED one.
 MODULE_N="$(printf '%s' "$GRAPH_OUT" | sed -n 's/modules=\([0-9]*\).*/\1/p' | head -1)"
-assert_eq "AC36: scripts/ holds 18 modules -- R6's LEAF module plus #117's check-status-record.mjs, not the reviewed commit's 16" \
-  "$MODULE_N" "18"
+assert_eq "AC36: scripts/ holds 19 modules -- R6's LEAF module plus #117's check-status-record.mjs, not the reviewed commit's 16" \
+  "$MODULE_N" "19"
 
 # ===============================================================================================
 suite "AC36(b): three entry directions, PAIRED SAME-RUN CAPTURE against the reviewed commit"
