@@ -87,7 +87,7 @@ assert_eq "VACUITY: the materialized tree carries the living-context store (an e
 
 # The eight controls are asserted to be PRESENT in the tree before any of them is used as a
 # control. A control anchored to text that is not there is a zero result about the harness.
-for lit in '5-SECOND' '5000ms' '600s' '66.68ms' '4.45ms' '9-13ms'; do
+for lit in '30-SECOND' '30000ms' '600s' '66.68ms' '4.45ms' '9-13ms'; do
   assert_eq "CONTROL PREMISE: the literal \`$lit\` is live in $STORE_REL (if this is false the record was rewritten and the control below needs a new subject)" \
     "$(grep -c -- "$lit" "$KS_ROOT/$STORE_REL" 2>/dev/null | tr -d ' \n')" "1"
 done
@@ -191,7 +191,7 @@ assert_eq "AC17 SELF-CONSISTENCY: the reported COMPARED-COUNT equals the number 
 # wrong value but is byte-identical between 'compared one and agreed' and 'found nothing to
 # compare' does not satisfy AC17, and that is the shape a future Librarian edit would silence.
 ks_clone strip; KS_D_STRIP="$KS_CLONE"
-KS_STRIP_N="$(ks_edit "$KS_D_STRIP" "$STORE_REL" 'with a 5-SECOND timeout (not 5000ms -- the declaration is genuinely tiny' 'with a declaration whose value this sentence no longer states (and nothing here is genuinely tiny')"
+KS_STRIP_N="$(ks_edit "$KS_D_STRIP" "$STORE_REL" 'with a declared 30-SECOND timeout (30000ms, raised from the original figure by commit 54cf51e for #132), still under' 'with a declaration whose value this sentence no longer states, still under')"
 assert_eq "MUTATION LANDED: the timeout clause was removed from the strip copy exactly once" "$KS_STRIP_N" "1"
 ks_run "$KS_D_STRIP"
 assert_eq "AC17 SELF-CONSISTENCY (strip copy): the reported COMPARED-COUNT still equals the number of COMPARED lines printed" \
@@ -225,8 +225,8 @@ ks_positive() {  # <label> <from> <to> <expect-named>
   assert_contains "AC18 $1: the check names the mutated literal \`$4\` as a MISMATCH" \
     "$KS_MISMATCHES" "$4"
 }
-ks_positive "5-SECOND alone" '5-SECOND timeout' '997-SECOND timeout' '997'
-ks_positive "5000ms alone" '(not 5000ms' '(not 993000ms' '993000'
+ks_positive "30-SECOND alone" '30-SECOND timeout' '997-SECOND timeout' '997'
+ks_positive "30000ms alone" '30000ms' '993000ms' '993000'
 
 # The six DISCRIMINATING CONTROLS. Each must leave the reported MISMATCH set unchanged: none of
 # them states THIS hook's declared timeout, and a check that reddens on any of them is wider than
@@ -322,16 +322,35 @@ assert_eq "[PHASE-5] AC19: the record does NOT frame the declaration as adequate
 # TWO CONTROLS IN THE MUST-GO-GREEN DIRECTION. Without them "AC19 is satisfied" and "the check
 # always fires" are the same output, and the second would refuse every honest Librarian rewrite.
 ks_clone noadq; KS_D_NOADQ="$KS_CLONE"
-KS_NOADQ_N="$(ks_edit "$KS_D_NOADQ" "$STORE_REL" ' (not 5000ms -- the declaration is genuinely tiny against the platform' ' (not 5000ms; the platform')"
-assert_eq "MUTATION LANDED: the adequacy clause was removed from the no-adequacy copy" "$KS_NOADQ_N" "1"
+# Direct construction, not a find/replace: the live record's adequacy claim is already retired
+# (Librarian's #132 pass removed it), so there is no "genuinely tiny" clause left to strip. This
+# now tests the boundary the section header names directly: NEITHER adequacy NOR residual present
+# must still satisfy AC19, since a record can legitimately say nothing about either.
+"$GATE_REAL_NODE" -e '
+  const fs = require("node:fs");
+  const p = process.argv[1];
+  const rec = JSON.parse(fs.readFileSync(p, "utf8"));
+  rec.content = "The PreToolUse hook has a declared timeout. This sentence carries neither an adequacy claim nor a residual disclosure, so AC19 must not flag it.";
+  fs.writeFileSync(p, JSON.stringify(rec, null, 2));
+' "$KS_D_NOADQ/$STORE_REL"
 ks_run "$KS_D_NOADQ"
 KS_ADQ2="$(printf '%s\n' "$KS_OUT" | awk -F'\t' -v f="$STORE_REL" '$1=="ADEQUACY" && $2==f {print $3}' | head -1)"
 assert_eq "AC19 CONTROL (must go GREEN): a record carrying NO adequacy statement satisfies AC19 even with no residual" \
   "$KS_ADQ2" "absent"
 
 ks_clone resid; KS_D_RESID="$KS_CLONE"
-KS_RESID_N="$(ks_edit "$KS_D_RESID" "$STORE_REL" 'and an explicit fail-open tail' 'A LARGE ENOUGH COMMAND STILL OUTRUNS THE DECLARED PreToolUse TIMEOUT: the hook is killed, emits nothing, and the call is ALLOWED -- see README item 27 cost (4) for the lengths and densities where that begins. There is also an explicit fail-open tail')"
-assert_eq "MUTATION LANDED: the residual sentence was added to the residual copy" "$KS_RESID_N" "1"
+# Direct construction, not a find/replace: the live record already carries residual language
+# (Librarian's #132 pass added it) with no adequacy claim left to "leave standing" beside it.
+# This now directly constructs a sentence carrying BOTH an adequacy claim and a full residual
+# disclosure, testing that the two together still read "consistent" -- only adequacy WITHOUT
+# residual is the violation AC19 exists to catch.
+"$GATE_REAL_NODE" -e '
+  const fs = require("node:fs");
+  const p = process.argv[1];
+  const rec = JSON.parse(fs.readFileSync(p, "utf8"));
+  rec.content = "The PreToolUse hook has a declared timeout that is genuinely tiny; a large enough command still outruns it and the hook is killed.";
+  fs.writeFileSync(p, JSON.stringify(rec, null, 2));
+' "$KS_D_RESID/$STORE_REL"
 ks_run "$KS_D_RESID"
 KS_RES2="$(printf '%s\n' "$KS_OUT" | awk -F'\t' -v f="$STORE_REL" '$1=="RESIDUAL" && $2==f {print $3}' | head -1)"
 assert_eq "AC19 CONTROL (must go GREEN): adding the residual sentence to the record satisfies AC19 with the adequacy statement left standing" \
@@ -354,8 +373,8 @@ ks_clone rewrite; KS_D_RW="$KS_CLONE"
 # own sentence contains an apostrophe and a single-quoted `node -e` body cannot carry one. A
 # shell-escaping layer stacked underneath a mutation is how a battery reports that it planted an
 # edit it never planted.
-KS_RW_FROM="with a 5-SECOND timeout (not 5000ms -- the declaration is genuinely tiny against the platform's 600s default)"
-KS_RW_TO="with a declared timeout of 977 seconds (the field is SECONDS, not milliseconds, against the platform's 600s default). A large enough command still outruns that declaration: the hook is killed, emits nothing, and the call is ALLOWED -- README item 27 cost (4) carries the lengths and densities where the crossing begins"
+KS_RW_FROM="a declared 30-SECOND timeout (30000ms, raised from the original figure by commit 54cf51e for #132)"
+KS_RW_TO="a declared timeout of 977 seconds (the field is SECONDS, not milliseconds)"
 KS_RW_STATUS="$(KS_FROM="$KS_RW_FROM" KS_TO="$KS_RW_TO" "$GATE_REAL_NODE" -e '
   const fs = require("node:fs");
   const p = process.argv[1];
