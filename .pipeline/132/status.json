@@ -2,7 +2,7 @@
   "issue_number": 132,
   "current_phase": "3-impl",
   "started_at": "2026-09-03T00:55:30Z",
-  "updated_at": "2026-09-03T14:22:42Z",
+  "updated_at": "2026-09-03T15:04:10Z",
   "branch": "main",
   "ask_text": "--issue 132: the PreToolUse staging gate's scan is linear in command length but its constant is a shell interpreter's; a large enough command still outruns the declared 5s and a killed hook fails open.",
   "events": [
@@ -145,6 +145,13 @@
       "verdict": "RECORD_CORRECTED",
       "summary": "c6b6d29: 5s/5000ms -> 30s/30000ms, tiny-framing removed. 3 PHASE-5 rows green; 9 anchor-premise rows now stale by design (QA documented this), need re-anchoring",
       "at": "2026-09-03T14:22:42Z"
+    },
+    {
+      "phase": "3b-orchestrator-fix",
+      "agent": "orchestrator",
+      "verdict": "REANCHORED",
+      "summary": "bcb7bc7: 7 sites re-anchored, 2 sub-tests redesigned onto direct construction. 50/0 + 124/0, reproduced. Non-zero control fires. Orchestrator-authored after 4x consecutive 529 killed QA opus dispatch - flagged for extra Phase 4 scrutiny.",
+      "at": "2026-09-03T15:04:10Z"
     }
   ],
   "risk_tier": "architectural",
