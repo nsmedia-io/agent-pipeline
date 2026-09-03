@@ -1,8 +1,8 @@
 {
   "issue_number": 140,
-  "current_phase": "2-review",
+  "current_phase": "2.5-design",
   "started_at": "2026-09-03T18:54:53Z",
-  "updated_at": "2026-09-03T19:20:29Z",
+  "updated_at": "2026-09-03T19:28:09Z",
   "branch": "main",
   "ask_text": "--issue 140: an unbalanced quote defeats the blanket-staging gate in 59 bytes with no timeout, and the test suite documents the bypass as correct behaviour.",
   "events": [
@@ -28,6 +28,12 @@
       "verdict": "SPEC_REWORKED",
       "at": "2026-09-03T19:20:29Z",
       "note": "Round 2: AC1 widened to 12 cells crossing delimiter-introducer spelling as its own axis; AC9/AC10/AC11 added. 11 ACs, falsifiability clean, contiguous. Orchestrator independently reproduced the <<-EOF composition claim in real bash."
+    },
+    {
+      "phase": "2-review",
+      "verdict": "APPROVE_WITH_NOTES",
+      "at": "2026-09-03T19:28:09Z",
+      "note": "Round 2 closed clean: DBA APPROVE, DevOps and SecOps APPROVE_WITH_NOTES, 0 blocking. SecOps re-verified against literal cell definitions (not the summary), independently caught <<\\EOF was untested and verified it live, found AC10 omits a low-risk <<\\EOF narrow-stage cell. DevOps independently re-confirmed main is still red on the corpus-drift issue across 3 consecutive runs."
     }
   ],
   "flags": [],
