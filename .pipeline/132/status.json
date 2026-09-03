@@ -1,8 +1,8 @@
 {
   "issue_number": 132,
-  "current_phase": "3-impl-gate-failed",
+  "current_phase": "4-review",
   "started_at": "2026-09-03T00:55:30Z",
-  "updated_at": "2026-09-03T17:13:30Z",
+  "updated_at": "2026-09-03T17:30:59Z",
   "branch": "main",
   "ask_text": "--issue 132: the PreToolUse staging gate's scan is linear in command length but its constant is a shell interpreter's; a large enough command still outruns the declared 5s and a killed hook fails open.",
   "events": [
@@ -76,6 +76,12 @@
       "verdict": "CI_ROOT_CAUSE_CORRECTED",
       "at": "2026-09-03T17:13:30Z",
       "note": "CORRECTION: the tb_materialize fix (62792e6) did NOT resolve CI red as expected -- MATERIALIZED from 1acd5705, confirmed byte-for-byte via git ls-remote to be refs/pull/141/merge, GitHubs auto-generated PR-merged-into-current-main preview commit. actions/checkout@v4 had no ref pinned; on pull_request events it defaults to the merge preview, not the branch head. This also reframes (does not invalidate) Devs fresh-clone evidence: that clone inherited the already-merge-previewed checkout, so it never proved checkout-independence. Root cause: every push to this PR was silently graded against mains CURRENT state at CI-start, which moved 3 times over several hours while this PR sat open, explaining the identical wrong numbers reproducing across pushes. Fix: pinned ref: github.event.pull_request.head.sha || github.sha on both tests.yml and manifests.yml checkout steps, committed 714e643, pushed. tb_materializes own hardening stays as a real local-dev improvement, it was just answering a different question than CI asked. Waiting on this commits CI to confirm the real reviewed commit now materializes correctly."
+    },
+    {
+      "phase": "3-impl",
+      "verdict": "GATE_PASSED",
+      "at": "2026-09-03T17:30:59Z",
+      "note": "CI genuinely green at HEAD 714e643ced874e3901cc20bdee875e8e16aeb79f - verified MATERIALIZED from matches exactly, both workflows success, 13min for tests. GATE_PASSED restored, earned this time. impl-report.json commits array updated 8 -> 14 to cover QA, Librarian, orchestrator and Dev commits since the original Phase 3 report. Discarded 3 stale peer-review shards from the earlier stopped panel run (diff grew 2 commits since). Re-dispatching fresh 6-role panel, all at sonnet per owner instruction."
     }
   ],
   "flags": [
