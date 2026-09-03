@@ -2,7 +2,7 @@
   "issue_number": 132,
   "current_phase": "3-impl-gate-failed",
   "started_at": "2026-09-03T00:55:30Z",
-  "updated_at": "2026-09-03T15:34:49Z",
+  "updated_at": "2026-09-03T16:53:41Z",
   "branch": "main",
   "ask_text": "--issue 132: the PreToolUse staging gate's scan is linear in command length but its constant is a shell interpreter's; a large enough command still outruns the declared 5s and a killed hook fails open.",
   "events": [
@@ -64,6 +64,12 @@
       "verdict": "CI_FAILURE_FOUND",
       "at": "2026-09-03T15:34:49Z",
       "note": "Phase 4 panel run wf_57a4c16c-060 stopped mid-flight: user instructed dropping opus models to sonnet. Before restarting, DevOps's own already-written shard (preserved) surfaced that CI at the reviewed HEAD bcb7bc7 is FAILING, contradicting the orchestrator's own GATE_PASSED/ALREADY_CORRECT_NO_CHANGE claims. Root-caused independently: tb_materialize() in timeout-bound-lib.sh prefers git stash create over HEAD; on CI this returns a non-empty stash sha (1a8aca65, confirmed via CI log MATERIALIZED line), meaning some earlier suite in the same run.sh execution leaves a tracked file dirty before this suite runs, so the corpus gets built from a phantom uncommitted snapshot rather than the actual reviewed commit. Locally the tree is genuinely clean so it correctly falls back to HEAD, which is why darwin measured the true state. Dispatched Dev (sonnet) to find the exact dirtying suite and fix tb_materialize's CI behavior. GATE_PASSED status from earlier this phase is WITHDRAWN pending this fix and a green CI run at the true HEAD."
+    },
+    {
+      "phase": "3-impl",
+      "verdict": "MATERIALIZE_FIX_PUSHED",
+      "at": "2026-09-03T16:53:41Z",
+      "note": "tb_materialize fix committed 62792e6 and pushed. Dev's fresh-clone reproduction (the same 163->164 inflation occurred INSIDE test-issue17-integration.sh's own git clone at the SAME CI run, which carries only committed content) proves this is not one suite's missing cleanup but tb_materialize's own design being fragile against any incidental uncommitted state, wherever it originates. Fix: default to HEAD, git stash create only via explicit TB_MATERIALIZE_WORKING_TREE=1 opt-in. Independently verified myself (not relayed): clean tree -> HEAD; dirtied tree, default mode -> still HEAD (ignores dirt); dirtied tree + opt-in -> distinct sha. AC4 ENUMERATION line now reads 163 files in materialized tree bcb7bc7 exactly. Waiting on CI confirmation at 62792e6 before restoring GATE_PASSED."
     }
   ],
   "flags": [
