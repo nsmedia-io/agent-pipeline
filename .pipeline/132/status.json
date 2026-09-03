@@ -2,7 +2,7 @@
   "issue_number": 132,
   "current_phase": "3-impl",
   "started_at": "2026-09-03T00:55:30Z",
-  "updated_at": "2026-09-03T03:20:25Z",
+  "updated_at": "2026-09-03T05:37:46Z",
   "branch": "main",
   "ask_text": "--issue 132: the PreToolUse staging gate's scan is linear in command length but its constant is a shell interpreter's; a large enough command still outruns the declared 5s and a killed hook fails open.",
   "events": [
@@ -104,8 +104,16 @@
       "verdict": "SKETCH_A_WITH_GRAFTS",
       "summary": "A wins; 3 grafts + AC6 sharpened to read ubuntu figures off the PRs own CI run; densest tracked file is a .sh not a .json",
       "at": "2026-09-03T03:02:38Z"
+    },
+    {
+      "phase": "3a-qa",
+      "agent": "qa",
+      "verdict": "CONTRACT_COMMITTED",
+      "summary": "30 failed / 69 passed at base; two reverted reference impls proved it passable at 99/0; AC2 measured flaking under load",
+      "at": "2026-09-03T05:37:46Z"
     }
   ],
   "risk_tier": "architectural",
-  "review_rounds": 0
+  "review_rounds": 0,
+  "phase3_qa_test_commit": "78afb93af579c870d7211dbb371a53d4fae03c45"
 }
