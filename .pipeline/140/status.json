@@ -1,9 +1,12 @@
 {
   "issue_number": 140,
-  "current_phase": "3-impl",
+  "current_phase": "4-review",
   "started_at": "2026-09-03T18:54:53Z",
-  "updated_at": "2026-09-03T20:35:00Z",
+  "updated_at": "2026-09-03T21:15:00Z",
   "branch": "main",
+  "pr_url": "https://github.com/nsmedia-io/agent-pipeline/pull/144",
+  "final_verdict": null,
+  "peer_review_verdict_counts": null,
   "ask_text": "--issue 140: an unbalanced quote defeats the blanket-staging gate in 59 bytes with no timeout, and the test suite documents the bypass as correct behaviour.",
   "events": [
     {
@@ -52,6 +55,12 @@
       "verdict": "APPROVE_WITH_NOTES",
       "at": "2026-09-03T20:35:00Z",
       "note": "Round 3 closed clean, scoped confirmation only (not a full re-review of AC1-AC11, already approved twice). DBA APPROVE: confirmed AC12 touches no schema/migration/access-policy surface. DevOps APPROVE: confirmed AC12 is in-process only, no subprocess/network/CI/deploy surface. SecOps VETO LIFTED, APPROVE_WITH_NOTES: AC12 checked field-by-field against SecOps's own required_minimum_spec_change (scope condition, three literal sequences, coarse fail-closed minimum, non-weakening of quoted-delimiter opacity, all 4 fixture cells) -- faithful match, no drift or scope narrowing. One non-blocking note: ${ has no dedicated real-shell repro cell (unlike $( and backtick), a fail-closed defense-in-depth choice under R1 rather than a proven-exploit cell -- recommended as a nice-to-have 5th regression cell for QA, not a gate. Phase 2.5 does not re-run (design.json/sketches stand, additive-only per BA's and the judge's own synthesis); proceeding directly to Phase 3."
+    },
+    {
+      "phase": "3-impl",
+      "verdict": "COMPLETE",
+      "at": "2026-09-03T21:15:00Z",
+      "note": "QA-first (3a/3b). 3a: QA authored 12-AC failing contract at dcc9b4b (671 passed/13 failed pre-implementation, all correctly targeted). 3b: Dev implemented design.json's Sketch A (heredoc bodies as a 4th opaque region, delimiter capture reusing existing quote-aware word-building machinery, AC12's coarse deny-on-sighting guard for unquoted $(/backtick/${). Found and fixed 2 real bugs along the way: a dead-fast-path skip that never captured non-git heredoc delimiters, and a quadratic-cost regression in the body-skip walk (measured 292ms->8833ms at 3072B->65536B, fixed to linear 292ms->884ms). qa_signoff.verdict=APPROVE, no scope drift. PR #144 opened. Local checks green across every suite referencing pre-tool-use.sh, modulo 2 pre-existing/unrelated rows confirmed via git-stash-against-baseline (corpus-drift AC4, and AC12's own explicitly-non-required 5th EXTRA cell, structurally unreachable given an unrelated pre-existing *git* prefilter). Pre-Phase-4 gate initially FAILED (impl-report.json requirement_checks[8] missing required 'notes' field, the AC12-EXTRA SKIP entry which only had 'justification'); orchestrator fixed directly (added notes summarizing the existing justification, a metadata-only fix, no design/implementation judgment involved) and re-ran the gate clean. Frontend gate: SKIP (no frontend surface). Mis-tier tripwire and live-verification gate: not applicable (architectural tier already; no data migration). Separately confirmed: main's own CI (tests.yml) has been failing on every commit since before this issue's own first checkpoint (9d070bf, pre-dating this whole run), root-caused to the same known, deliberately-deferred corpus-drift tripwire -- not caused by #138 or #140's own changes."
     }
   ],
   "phase3_qa_test_commit": "dcc9b4b61e01226a97a07106765bd8c47e074d5b",
