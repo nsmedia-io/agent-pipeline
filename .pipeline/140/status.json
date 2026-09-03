@@ -1,8 +1,8 @@
 {
   "issue_number": 140,
-  "current_phase": "1-ba-rework-required",
+  "current_phase": "2-review",
   "started_at": "2026-09-03T18:54:53Z",
-  "updated_at": "2026-09-03T19:15:08Z",
+  "updated_at": "2026-09-03T19:20:29Z",
   "branch": "main",
   "ask_text": "--issue 140: an unbalanced quote defeats the blanket-staging gate in 59 bytes with no timeout, and the test suite documents the bypass as correct behaviour.",
   "events": [
@@ -22,6 +22,12 @@
       "verdict": "REQUEST_CHANGES",
       "at": "2026-09-03T19:15:08Z",
       "note": "Phase 2 round 1: DBA APPROVE_WITH_NOTES (major: AC1 has no fixture cell for <<- tab-stripped terminators, a genuinely different mechanism than quote parity - independently verified by orchestrator against real bash). DevOps APPROVE_WITH_NOTES (resolved q1: production shell is zsh, confirmed by inspecting its own subprocess; also independently rediscovered the main-branch corpus-drift issue). SecOps REQUEST_CHANGES: core vulnerability confirmed live via two independent oracles with real non-zero controls (26-byte repro, shim-confirmed git invocation), but R1's fixture matrix only crosses one implicit delimiter spelling - SecOps proved <<-EOF and <<'EOF' are ALSO live-exploitable with the identical odd-quote body and are outside AC1's binding matrix, so an implementation could pass every AC while shipping 2 of 3 proven-exploitable spellings. Looping back to BA per the rubric."
+    },
+    {
+      "phase": "1-ba",
+      "verdict": "SPEC_REWORKED",
+      "at": "2026-09-03T19:20:29Z",
+      "note": "Round 2: AC1 widened to 12 cells crossing delimiter-introducer spelling as its own axis; AC9/AC10/AC11 added. 11 ACs, falsifiability clean, contiguous. Orchestrator independently reproduced the <<-EOF composition claim in real bash."
     }
   ],
   "flags": [],
