@@ -54,6 +54,13 @@
       "note": "Round 3 closed clean, scoped confirmation only (not a full re-review of AC1-AC11, already approved twice). DBA APPROVE: confirmed AC12 touches no schema/migration/access-policy surface. DevOps APPROVE: confirmed AC12 is in-process only, no subprocess/network/CI/deploy surface. SecOps VETO LIFTED, APPROVE_WITH_NOTES: AC12 checked field-by-field against SecOps's own required_minimum_spec_change (scope condition, three literal sequences, coarse fail-closed minimum, non-weakening of quoted-delimiter opacity, all 4 fixture cells) -- faithful match, no drift or scope narrowing. One non-blocking note: ${ has no dedicated real-shell repro cell (unlike $( and backtick), a fail-closed defense-in-depth choice under R1 rather than a proven-exploit cell -- recommended as a nice-to-have 5th regression cell for QA, not a gate. Phase 2.5 does not re-run (design.json/sketches stand, additive-only per BA's and the judge's own synthesis); proceeding directly to Phase 3."
     }
   ],
-  "flags": [],
+  "phase3_qa_test_commit": "dcc9b4b61e01226a97a07106765bd8c47e074d5b",
+  "flags": [
+    {
+      "phase": "3-impl",
+      "at": "2026-09-03T20:48:00Z",
+      "summary": "QA authored Phase 3a failing-test contract (12 ACs) at dcc9b4b in worktree .claude/worktrees/140-phase3-20260903-162931, branch fix/140-heredoc-opacity. 671 passed/13 failed pre-implementation: 12 legitimate new-contract failures (11 #140 AC rows + 1 bonus AC7 density-axis exposure from reverting dens_pad's padding), 1 pre-existing unrelated corpus-drift AC4 failure. Dispatching Dev for Phase 3b next."
+    }
+  ],
   "risk_tier": "architectural"
 }
