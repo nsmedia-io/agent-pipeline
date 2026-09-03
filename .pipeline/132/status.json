@@ -1,8 +1,8 @@
 {
   "issue_number": 132,
-  "current_phase": "2-review-complete",
+  "current_phase": "2.5-design",
   "started_at": "2026-09-03T00:55:30Z",
-  "updated_at": "2026-09-03T02:38:40Z",
+  "updated_at": "2026-09-03T02:43:46Z",
   "branch": "main",
   "ask_text": "--issue 132: the PreToolUse staging gate's scan is linear in command length but its constant is a shell interpreter's; a large enough command still outruns the declared 5s and a killed hook fails open.",
   "events": [
@@ -28,6 +28,12 @@
       "verdict": "APPROVE_WITH_NOTES",
       "at": "2026-09-03T02:38:40Z",
       "note": "Round 2: DBA and SecOps both cleared their round-1 blockers; DevOps carried from round 1 pending an AC6 re-check. SecOps filed a live out-of-scope fail-open, written up as #140 before merge."
+    },
+    {
+      "phase": "2-review",
+      "verdict": "APPROVE_WITH_NOTES",
+      "at": "2026-09-03T02:43:46Z",
+      "note": "Round 2 closed: all three APPROVE_WITH_NOTES, 0 blocking. DevOps re-verified the ten-file span digest at 62d7a17 and widened DBAs git-128 finding: AC1 mandates a git-less tree and that is the same suite CI runs, so a git-expressed enumeration would report 0 on every CI run."
     }
   ],
   "flags": [
@@ -72,6 +78,13 @@
       "verdict": "APPROVE_WITH_NOTES",
       "summary": "halves clause discharges; cross-check 0.5% is an algebraic identity not corroboration; filed quote-parity bypass",
       "at": "2026-09-03T02:38:40Z"
+    },
+    {
+      "phase": "2-devops-r2",
+      "agent": "devops",
+      "verdict": "APPROVE_WITH_NOTES",
+      "summary": "AC6 closed, both routes verified; git-128 in a git-less tree would make a git-expressed AC4 report 0 on EVERY CI run",
+      "at": "2026-09-03T02:43:46Z"
     }
   ],
   "risk_tier": "architectural",
