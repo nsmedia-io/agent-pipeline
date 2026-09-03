@@ -34,7 +34,11 @@ suite "AC1: the PreToolUse declaration, and its timeout in SECONDS"
 # and was refused here as a comparison; the assertion below was written against 600 for that
 # reason and stays written against 600 now that #108 has corrected the three neighbours (20, 600,
 # 15) below, since PreToolUse's own bound must independently hold regardless of what the other
-# three declare.
+# three declare. #138 (below, AC1b) is the same defect one hook over: #108's own "600" for Stop
+# multiplied to EL byte-for-byte, so the declaration bounded nothing tighter than omitting the
+# field -- corrected there to 120, a fresh measurement against Stop's two MANDATORY local steps
+# (NOT #108's own intent: #108 deliberately pinned 600 to protect a slow checkCommand's headroom,
+# see AC1b below), with the resulting margin recorded beside it.
 #
 # Version recorded beside the assertion, per the measurement rule: the ceiling is a property of
 # the runtime under test, so a host on another version produces a different recorded number
@@ -101,16 +105,112 @@ assert_eq "and is a plausible bound for one node start plus one git subprocess (
 # command or a timeout reddens here rather than only in whichever suite happens to drive that
 # hook. #108 corrected all three from a milliseconds-shaped value to the SECONDS value the
 # runtime actually reads (10000->20, 120000->600, 15000->15; see #108's PR for the per-entry
-# measurement each bound is derived from), so the pinned content changes here too.
-assert_eq "SessionStart entry carries #108's corrected (seconds) timeout" \
+# measurement each bound is derived from), so the pinned content changed here too. #138 corrects
+# Stop a second time (600->120): #108's "600" is byte-identical to `EL` (600000 ms, the runtime's
+# own no-declaration default -- see the AC1 header above), so it bounded nothing tighter than
+# omitting the field -- despite #108 choosing it deliberately, not by accident (#108 measured this
+# repo's own checkCommand battery at 399-458s across 3 clean CI runs and pinned Stop at the
+# platform ceiling specifically to protect that headroom; #138 is a fresh decision to prioritize a
+# tight bound on Stop's two MANDATORY local steps over that protection, see AC1b below).
+# SessionStart's 20 is UNCHANGED, and #108 gave it a real recorded basis (0.9-1.5s measured,
+# ~13-16x headroom) -- it stays at 20 not because that basis was missing, but because #138 has no
+# fresh measurement of its own two network calls this hook does not control (`git fetch origin
+# <integrationBranch>`, and a `gh issue view` call when the branch name carries an issue number)
+# that have no bounded worst case to measure against -- unlike Stop's, whose worst case is two
+# local, deterministic node invocations over files already on disk (see AC1b below). Sizing a
+# network-bound hook's timeout from a same-host, good-network measurement would record a number
+# this suite could not honestly defend, so #138 leaves #108's own measured 20 in place.
+assert_eq "SessionStart entry is UNCHANGED (#138 did not establish a measured basis to replace it)" \
   "$(gate_hook_probe 'JSON.stringify(h.hooks.SessionStart)')" \
   '[{"hooks":[{"type":"command","command":"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh","timeout":20}]}]'
-assert_eq "Stop entry carries #108's corrected (seconds) timeout" \
+assert_eq "Stop entry carries #138's measured (seconds) timeout" \
   "$(gate_hook_probe 'JSON.stringify(h.hooks.Stop)')" \
-  '[{"hooks":[{"type":"command","command":"${CLAUDE_PLUGIN_ROOT}/hooks/stop.sh","timeout":600}]}]'
+  '[{"hooks":[{"type":"command","command":"${CLAUDE_PLUGIN_ROOT}/hooks/stop.sh","timeout":120}]}]'
 assert_eq "SubagentStop entry carries #108's corrected (seconds) timeout" \
   "$(gate_hook_probe 'JSON.stringify(h.hooks.SubagentStop)')" \
   '[{"hooks":[{"type":"command","command":"${CLAUDE_PLUGIN_ROOT}/hooks/subagent-stop.sh","timeout":15}]}]'
+
+# ===============================================================================================
+suite "AC1b: Stop's declared timeout is a REAL bound (#138), not a second copy of the default"
+# ===============================================================================================
+#
+# #108 shipped Stop's declared timeout as 600, which multiplies to `E = H.timeout*1000 = 600000`
+# -- byte-identical to `EL`, the runtime's own no-declaration default read at the top of this
+# file. A declaration equal to the default bounds nothing tighter than omitting the field, so the
+# exact-serialization pin above is not enough on its own: it would pass equally on a Stop entry
+# that was silently deleted and re-added at 600 by someone "restoring" what looked like the
+# original value. This suite is the row that catches THAT regression specifically: it asserts the
+# relationship (strictly under the platform default) rather than only the literal.
+#
+# THE NEW VALUE, 120, is not picked by analogy with another hook (the #138 issue body forbids
+# that) or copied as a round number. It is NOT #108's own pre-conversion intent, despite 120000ms
+# appearing immediately before #108 in `git log --follow` on this file: #108's own PR (#127,
+# commit d4a61e4) measured this repo's own checkCommand battery (`bash
+# plugins/pipeline/tests/run.sh`) at 399-458s across 3 clean ubuntu-latest CI runs and
+# DELIBERATELY pinned Stop at 600, the platform's own ceiling, in its own words because "a smaller
+# number would routinely kill this repo's own legitimate check" and "going lower trades real
+# coverage for cosmetic tightness" -- not an accident of unit conversion. #138 is a fresh,
+# deliberate decision to prioritize a tight bound on Stop's two MANDATORY local steps
+# (gate-phase-entry.mjs, voice-lint.mjs) over the checkCommand headroom #108 chose to protect --
+# see "WHAT THIS MEASUREMENT DELIBERATELY EXCLUDES" below for what that tradeoff costs an adopting
+# project. One thing HAS changed since #108: this repository's own checkCommand
+# (`pipeline.config.json` -> `tests/run.sh`) is now measured at 13+ minutes, already past even
+# #108's deliberately-chosen 600s ceiling before #138 touched anything -- so the headroom #108
+# built for THIS repo's own check had already lapsed.
+#
+# THE MARGIN, measured rather than assumed, because a historical number without a fresh
+# measurement beside it is exactly the "picked by analogy" failure this issue exists to correct.
+# `hooks/stop.sh` (grepped to confirm, not assumed from the issue body) runs two local, bounded
+# node scripts before anything project-configured: `scripts/gate-phase-entry.mjs` (the
+# phase-entry guard) and `scripts/voice-lint.mjs` (the voice lint), in that order, both reading
+# only files already on disk -- no network, no subprocess of unknown cost.
+#
+#   gate-phase-entry.mjs, driven via `node scripts/gate-phase-entry.mjs --root <dir>` against
+#   THIS repository's own real `.pipeline/` (16 issue dirs; largest `status.json` is
+#   `.pipeline/106/status.json` at 36140 bytes) on darwin 25.5.0 / node v24.19.0: 0.23-0.38 s
+#   wall (min-of-5), effectively all of it node's own cold start (`node -e "1"` alone measured
+#   0.20-0.25 s on the same host in the same run) -- candidateDirs() reads at most two status.json
+#   files regardless of how many issue dirs exist, so this cost does not grow with the tree.
+#
+#   voice-lint.mjs's `scanTranscript`, driven directly (not through main(), to isolate the cost
+#   from node's own start) against the largest real Claude Code transcript found on the
+#   measuring machine: 73185714 bytes, 26460 JSONL records (the same record count voice-lint.mjs's
+#   own header cites for its largest-observed fixture, 69.8 MB there vs 73.2 MB here -- the file
+#   is stable between the two measurements, not regrown). 1267-1678 ms wall (min/max of 5 runs).
+#   This is a property of `readFileSync` + `split("\n")` over the WHOLE file, paid before the
+#   reverse scan ever starts, so it does not shrink when the scan's own break condition (both a
+#   trailing assistant message and the last owner-typed record found) is satisfied early -- on
+#   this fixture the human-turn record was line 26197 of 26460 (99.1% still 1267-1678 ms), which
+#   is why this is a real worst-case-class figure for a transcript of this size and not an
+#   artifact of where the break happened to land.
+#
+# Summed worst case measured: ~1.5-2.1 s (0.23-0.38 s guard + 1267-1678 ms lint, both including
+# their own node start). 120 s is >55x that figure even at its high end -- real margin, not a
+# number chosen to just clear the floor.
+#
+# WHAT THIS MEASUREMENT DELIBERATELY EXCLUDES, stated because omitting it silently would be the
+# same "picked by analogy" defect one level in. `stop.sh` also runs a THIRD step after the guard
+# and the lint: a project-configured `checkCommand` (or, absent one, `npm run typecheck`), but
+# ONLY when `git status --porcelain` is non-empty, and it is gated by the SAME declared timeout.
+# That step is not part of "Stop's actual work" in the sense this suite can measure: it is
+# arbitrary per-project shell, unbounded by construction (this repository's own
+# `pipeline.config.json` points it at the full `tests/run.sh` suite, itself documented at
+# 13+ minutes -- already longer than even the OLD 600 s declaration, so it was never completing
+# inside the Stop budget regardless of this change). A fixed number cannot be sized against an
+# unbounded, per-project command, which is why it is excluded from the measurement above rather
+# than folded into it -- see README.md's Upgrading entry for this change for what that means for
+# an adopting project's own `checkCommand`.
+record "AC1b MEASURED (darwin 25.5.0, node v24.19.0): gate-phase-entry.mjs 0.23-0.38 s vs 16-dir .pipeline/ (largest status.json 36140 B, .pipeline/106); voice-lint.mjs scanTranscript 1267-1678 ms vs a 73185714-byte / 26460-record real transcript; node cold start alone 0.20-0.25 s. Summed worst case ~1.5-2.1 s; declared 120 s is >55x that. checkCommand (a third, project-configured step also gated by this timeout) is DELIBERATELY excluded -- unbounded by construction, see the comment above this record."
+
+DECLARED_STOP_TIMEOUT="$(gate_hook_probe '(h.hooks && h.hooks.Stop && h.hooks.Stop[0] && h.hooks.Stop[0].hooks && h.hooks.Stop[0].hooks[0] || {}).timeout')"
+assert_eq "a Stop \`timeout\` is DECLARED (absent is indistinguishable from taking the 600 s default)" \
+  "$([[ -n "$DECLARED_STOP_TIMEOUT" ]] && echo declared || echo ABSENT)" "declared"
+assert_eq "NON-ZERO CONTROL: Stop's declared timeout is STRICTLY LESS than the platform default ceiling of 600 SECONDS -- \`E=H.timeout?H.timeout*1000:EL\`, \`EL=600000\` (a value of 600 here would multiply to exactly EL and bound nothing, which is the #138 defect; this assertion is what catches EL being reintroduced by accident, not only the exact-serialization pin above)" \
+  "$("$GATE_REAL_NODE" -e 'const t=Number(process.argv[1]); process.stdout.write(Number.isFinite(t)&&t>0&&t<600?"under-600":"AT-OR-OVER-600-OR-INVALID: "+process.argv[1])' "${DECLARED_STOP_TIMEOUT:-NaN}" 2>/dev/null)" \
+  "under-600"
+assert_eq "and carries REAL margin over the measured guard+lint worst case (0 < t, and t >= 10x a 2.1 s high-end measurement, i.e. t >= 21)" \
+  "$("$GATE_REAL_NODE" -e 'const t=Number(process.argv[1]); process.stdout.write(Number.isFinite(t)&&t>0&&t>=21?"in-range":"OUT-OF-RANGE: "+process.argv[1])' "${DECLARED_STOP_TIMEOUT:-NaN}" 2>/dev/null)" \
+  "in-range"
 
 # AND THE FOURTH ENTRY, WHICH USED TO BE THE ONLY ONE CHECKED BY A RANGE (#132). PreToolUse was
 # left to the `0 < t <= 30` row above while the other three were pinned exactly, so every value in
