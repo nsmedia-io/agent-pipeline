@@ -339,6 +339,25 @@ _inv_reset() {
 _inv_words() { # <closed word>...
   for _f do
     if [ "$_redir" = 1 ]; then
+      # A HEREDOC DELIMITER WORD IS CAPTURED HERE INSTEAD OF DISCARDED, and it costs nothing beyond
+      # what the redirect-target discard already paid: `_f` arrives already quote-and-backslash
+      # stripped by the SAME word-building machinery every other word goes through (#140), so bare,
+      # single-quoted, double-quoted and backslash-escaped delimiter spellings all fall out of code
+      # already in this file rather than a second, independently-maintained quote parser -- which is
+      # exactly the class this file's own backslash-newline comment above names as a proven prior
+      # bypass (a second, subtly divergent implementation of one parsing rule).
+      if [ "$_hd" = 1 ]; then
+        _hd=0
+        # An EMPTY delimiter (`<<` immediately followed by whitespace/newline) is a real-bash syntax
+        # error that opens no heredoc at all, so it must not claim any opacity a real shell would not
+        # apply either -- the pending flag is left unset and the scanner falls through to ordinary
+        # scanning of whatever follows.
+        if [ -n "$_f" ]; then
+          _HDDELIM=$_f
+          _HDQ=$_hdq
+          _hdpending=1
+        fi
+      fi
       _redir=0 # a redirection TARGET is not an operand
       continue
     fi
@@ -836,7 +855,14 @@ _run_words() { # the run is in _run, already cut from _sc
   # word is open. The word's CONTENT cannot be read by anything while `_idead` is 1: `_inv_words`
   # returns on it, `_inv_finish` returns on it, and the flush in `_sep_done` runs BEFORE the
   # `_inv_reset` that clears it -- so `_w` is consumed while still dead, every time.
-  if [ "$_idead" = 1 ]; then
+  #
+  # ONE EXCEPTION (#140): a pending heredoc delimiter's TEXT must still reach `_inv_words`'s capture
+  # branch even when the invocation introducing it is dead (`cat <<EOF`, not `git`) -- the body a
+  # heredoc opens has to be opaque regardless of which command owns it, since a live command can
+  # follow the terminator on a LATER line of the same call. `_redir$_hd` is `11` only while THIS
+  # specific word is that delimiter, so every other dead word this scanner meets (the common case a
+  # heredoc BODY line is) still takes the fast path with no added cost.
+  if [ "$_idead" = 1 ] && [ "$_redir$_hd" != 11 ]; then
     _w=''
     case $_run in
       *' ' | *"$_TAB") _has=0 ;;
@@ -906,6 +932,153 @@ _run_words() { # the run is in _run, already cut from _sc
   return 0
 }
 
+# A REAL SHELL NEVER RE-TOKENIZES A HEREDOC BODY; IT COPIES IT VERBATIM TO THE TERMINATOR LINE, and
+# this is that copy, called once per pending heredoc right after the newline that starts its body
+# (#140). No quote, comment, redirection or operator character below can change `_VERDICT` or any
+# scan state other than what this function itself tracks -- that is the opacity the fix adds.
+#
+# THE SAME BULK-SLICE / `_cut_sc` IDIOM THE COMMENT ARM ALREADY USES, extended to run PER LINE
+# instead of to end of command, because a heredoc body ends at a specific line and a comment does
+# not. `_seg`/`_hdnl` name whether the CURRENT WINDOW holds a real newline; when it does not (a
+# single line wider than one refill), the window in hand is cut and discarded immediately rather
+# than accumulated onto `_sc`, which is what keeps this LINEAR rather than quadratic in that line's
+# length -- the DENSITY AXIS `run` fixture (one unbroken run at a fixed length, no internal
+# whitespace or newline) is exactly the adversarial shape that would expose an accumulate-then-scan
+# version of this loop, and is why AC7 re-measures the DENSITY AXIS post-fix rather than assuming
+# the window model alone carries over.
+#
+# A LINE THAT NEVER FIT IN ONE WINDOW CANNOT BE THE TERMINATOR EITHER WAY (`_hdtoolong`), because
+# `_HDDELIM` is a single already-captured word and a real terminator line is exactly that word alone
+# -- so once a line has needed a second refill, its candidacy is settled without assembling its full
+# text, and only the AC12 substring scan (below) still has to see every byte of it.
+#
+# AC12's OWN GUARD RUNS HERE TOO, ONE COARSE CHECK PER WINDOW, gated on `_HDQ` (frozen at capture
+# time: 0 for an unquoted delimiter, 1 for a quoted or backslash-escaped one -- quoted stays fully
+# opaque, per SecOps's non-weakening clause, and never runs this check at all). `_hdtail` carries the
+# last byte of the PREVIOUS window into this one so a two-character trigger split across a refill
+# boundary is still seen; it is cleared at every real newline, because a `$` at the end of one line
+# and a `(` at the start of the next are not adjacent text and must not be read as one.
+#
+# THE TWO TRIGGERS DO NOT GET THE SAME RESPONSE, AND THAT ASYMMETRY IS AC12(b)'S OWN REQUIREMENT.
+# Backtick and `${` are not members of `_STRUCT` at all (confirmed by SecOps via direct grep), so
+# there is no existing mechanism that would ever evaluate what is inside them -- an unquoted body
+# containing either is denied OUTRIGHT here, unconditionally, which is the "genuinely new
+# protection" AC12(c) names. `$(` is different: `(` already IS a `_STRUCT` member and already ends
+# an invocation as an ordinary top-level separator, so the PRE-FIX scanner already evaluates
+# `$(git add -A)` correctly BY ACCIDENT once nothing is holding it opaque (SecOps's VETO evidence).
+# So for `$(` alone this function does the MINIMUM the fix needs -- stop being opaque and hand `_sc`
+# back to `_scan_go`'s own top-level loop exactly where the body was, unconsumed -- and lets that
+# existing mechanism discriminate blanket (AC12(a), `_verb=add` `_blanket=1` `_pathspec=0` ->
+# `_VERDICT=blanket`) from narrow (AC12(b), a pathspec is set so `_inv_finish` never sets a verdict)
+# on its own. Denying on sight of `$(` regardless of content, the same way backtick is handled,
+# would satisfy AC12(a) but fail AC12(b) outright -- this is why the two are not one `case` arm.
+_hd_skip() {
+  _hdtail=''
+  _hdtoolong=0
+  while :; do
+    case $_sc in
+      *"$_NL"*)
+        _seg=${_sc%%"$_NL"*}
+        _hdnl=1
+        ;;
+      *)
+        _seg=$_sc
+        _hdnl=0
+        ;;
+    esac
+    if [ "$_hdnl" = 0 ] && [ "$_eof" = 0 ]; then
+      if [ "$_HDQ" = 0 ]; then
+        case $_hdtail$_seg in
+          *'`'* | *'${'*)
+            _VERDICT=blanket
+            return 0
+            ;;
+          *'$('*) return 0 ;;
+        esac
+      fi
+      _hdtoolong=1
+      # READ THE LAST CHARACTER WITHOUT NAMING A LONG LITERAL. `${_seg#"${_seg%?}"}` -- the file's
+      # own first-character idiom mirrored backwards -- is exactly the `${s#"$long"}` shape its own
+      # header measures at 2.2 s PER CALL over a whole-string prefix (#106); `_seg` is unbounded
+      # here (a `_wordchunk` fallback can hand back one window far past `_CW` for a structural-
+      # character-free run, which is the DENSITY AXIS `run` fixture's own shape), so that idiom is
+      # quadratic in exactly the input this branch exists to handle. Shrunk to under 64 bytes FIRST,
+      # by the same glob-anchored rung ladder `_cut`/`_cut_sc` already use, the identical idiom over
+      # the SHORT remainder costs at most 64^2 -- a rounding error -- which is why it is safe in
+      # `_lit1` (always called on an already-window-bounded `_sc`) and was not safe verbatim here.
+      _hdshrink=$_seg
+      while :; do
+        case $_hdshrink in
+          $_Q512*) _hdshrink=${_hdshrink#$_Q512} ;;
+          $_Q64*) _hdshrink=${_hdshrink#$_Q64} ;;
+          *) break ;;
+        esac
+      done
+      case $_hdshrink in
+        '') ;;
+        *) _hdtail=${_hdshrink#"${_hdshrink%?}"} ;;
+      esac
+      if [ -n "$_seg" ]; then
+        if [ ${#_seg} -lt 64 ]; then
+          _sc=${_sc#"$_seg"}
+        else
+          _cut_sc "$_seg"
+        fi
+      fi
+      _fill || _eof=1
+      continue
+    fi
+    if [ "$_HDQ" = 0 ]; then
+      case $_hdtail$_seg in
+        *'`'* | *'${'*)
+          _VERDICT=blanket
+          return 0
+          ;;
+        *'$('*) return 0 ;;
+      esac
+    fi
+    if [ "$_hdtoolong" = 0 ]; then
+      if [ "$_hddash" = 1 ]; then
+        # STRIPS A LEADING _WS RUN (SPACE-OR-TAB), NOT A BARE TAB, EVEN THOUGH POSIX `<<-` ONLY
+        # STRIPS TABS. `_sc` never sees the raw command text: LEVEL 1's own queue split
+        # (`_scan_go`, `IFS=$_WS`) already collapsed every leading tab run into ONE reconstructed
+        # `_SP` character before this function ever runs, so the tab/space distinction this
+        # candidate is compared on is gone by construction, not by a choice made here. Widening the
+        # strip to cover a reconstructed space is the SAFE side of that loss: it can only make this
+        # function decide the body ended SOONER than a real `<<-` would, handing the (real, still-
+        # part-of-the-body-in-a-real-shell) text that follows to ORDINARY scanning instead of
+        # opacity -- which can only turn inert data into something this scanner denies, never the
+        # reverse. No AC constructs a space-indented terminator that must NOT match under `<<-`.
+        _cand=$_seg
+        while :; do
+          case $_cand in
+            [$_WS]*) _cand=${_cand#?} ;;
+            *) break ;;
+          esac
+        done
+      else
+        _cand=$_seg
+      fi
+    else
+      _cand=''
+    fi
+    if [ -n "$_seg" ]; then
+      if [ ${#_seg} -lt 64 ]; then
+        _sc=${_sc#"$_seg"}
+      else
+        _cut_sc "$_seg"
+      fi
+    fi
+    [ "$_hdnl" = 1 ] && _sc=${_sc#?}
+    if [ "$_hdtoolong" = 0 ] && [ "$_cand" = "$_HDDELIM" ]; then
+      return 0
+    fi
+    _hdtail=''
+    _hdtoolong=0
+    [ "$_hdnl" = 1 ] || return 0
+  done
+}
+
 # A top-level operator ended the invocation: judge it and start the next one. Returns 1 when the
 # verdict is already settled and the caller must stop.
 _sep_done() {
@@ -972,6 +1145,18 @@ _scan_go() { # <command string> -> _VERDICT
   _w=''
   _has=0
   _redir=0
+  # THE FOURTH OPAQUE REGION, ALONGSIDE THE SINGLE-QUOTE/DOUBLE-QUOTE/COMMENT REGIONS ABOVE (#140).
+  # `_hd`/`_hddash`/`_hdq` track the delimiter word CURRENTLY being captured (cleared the moment
+  # that word closes); `_hdpending`/`_HDDELIM`/`_HDQ` are the FROZEN result once it has, read by
+  # `_hd_skip` at the next real newline. Two heredocs introduced on one line (`cat <<A <<B`) share
+  # this scalar state last-writer-wins -- a named, accepted gap (design.json residual_risks), not
+  # this scanner's only unmodeled construct (#118's verb opacity is the other).
+  _hd=0
+  _hddash=0
+  _hdq=0
+  _hdpending=0
+  _HDDELIM=''
+  _HDQ=0
   _inv_reset
   while :; do
     # TWO CHARACTERS, NOT ONE, AND THE SECOND ONE IS LOAD-BEARING. `&&`, `||`, `;;`, `((`, `))`,
@@ -1028,6 +1213,10 @@ _scan_go() { # <command string> -> _VERDICT
       "'"*)
         _sc=${_sc#?}
         _has=1
+        # A quoted heredoc delimiter (`<<'EOF'`) suppresses the body's own $-expansion in a real
+        # shell (POSIX: "if any characters in word are quoted"), which is why AC12's coarse guard
+        # must not apply to it -- `_redir$_hd` is `11` only while THIS word is the pending delimiter.
+        case $_redir$_hd in 11) _hdq=1 ;; esac
         while :; do
           _seg=${_sc%%\'*}
           if [ "$_seg" = "$_sc" ]; then
@@ -1049,6 +1238,7 @@ _scan_go() { # <command string> -> _VERDICT
       '"'*)
         _sc=${_sc#?}
         _has=1
+        case $_redir$_hd in 11) _hdq=1 ;; esac # see the single-quote arm's comment above
         # ONE TURN PER QUOTED SEGMENT, NOT TWO. The bulk slice and the character that ENDED it are
         # taken in the same iteration, because `"a"` -- one token of the quote-dense shape that
         # crossed the timeout at 12 KB -- otherwise costs a second trip through the refill guard,
@@ -1122,6 +1312,7 @@ _scan_go() { # <command string> -> _VERDICT
           '') ;; # a lone trailing backslash: the shell produces no word from it either
           *)
             _has=1
+            case $_redir$_hd in 11) _hdq=1 ;; esac # see the single-quote arm's comment above
             # An escaped ORDINARY character is picked up by the next bulk run; an escaped
             # METAcharacter has to be taken here or it would be read as the operator it is
             # spelled like.
@@ -1150,6 +1341,46 @@ _scan_go() { # <command string> -> _VERDICT
           done
         fi
         ;;
+      '<<<'*)
+        # A here-string's operand is fed to the command's STDIN; it is not part of the invocation's
+        # argv and it opens no multi-line body for this scanner to walk (#140 sibling_causes_
+        # considered). Tested and consumed here, ahead of the heredoc arm below, so a here-string can
+        # never by construction reach the heredoc-body-opacity logic (AC11(a)/(b)) -- this arm is
+        # byte-for-byte the pre-#140 generic redirection handling, unchanged.
+        if [ "$_has" = 1 ]; then
+          case $_w in
+            '' | *[!0-9]*) _inv_words "$_w" ;;
+          esac
+          _w=''
+          _has=0
+        fi
+        _sc=${_sc#?}
+        case $_sc in '>'* | '<'* | '&'* | '|'*) _sc=${_sc#?} ;; esac # >>, >|, >&, <<, <&, <>
+        _redir=1
+        ;;
+      '<<'*)
+        # A heredoc introducer (`<<` or `<<-`). The delimiter word that follows is claimed as an
+        # inert redirect TARGET exactly like any other (`_redir=1`), and is additionally captured
+        # into `_HDDELIM` as a side effect of the SAME discard branch in `_inv_words` -- #140.
+        if [ "$_has" = 1 ]; then
+          case $_w in
+            '' | *[!0-9]*) _inv_words "$_w" ;;
+          esac
+          _w=''
+          _has=0
+        fi
+        _sc=${_sc#??}
+        case $_sc in
+          '-'*)
+            _hddash=1
+            _sc=${_sc#?}
+            ;;
+          *) _hddash=0 ;;
+        esac
+        _hd=1
+        _hdq=0
+        _redir=1
+        ;;
       '>'* | '<'*)
         # A redirection operator ends the current word and claims the next one as its TARGET. A
         # bare digit run immediately before it is an fd designator (`2>`), not an operand.
@@ -1168,9 +1399,27 @@ _scan_go() { # <command string> -> _VERDICT
       # `_STRUCT` has its own arm above. The two-character spellings get their own arm here
       # rather than a second `case` inside the body, because that second read of `_sc` was one
       # more whole-remainder copy per separator and a multi-line command is mostly separators.
-      ';;'* | '&&'* | '||'* | '(('* | '))'* | "$_NL$_NL"*)
+      #
+      # `$_NL$_NL` (a blank line) is DELIBERATELY NOT bundled in here (#140), even though it is a
+      # two-character spelling like the others. A single newline is the one separator a heredoc
+      # BODY actually starts after -- never `;`/`&`/`|`/`(`/`)` -- so it needs its own arm to check
+      # `_hdpending` right after `_sep_done` flushes the delimiter word, on EVERY newline including
+      # the first of a pair. Folding `$_NL$_NL` in here would skip that check whenever the body's
+      # own first line is blank, silently missing the opacity switch. The cost is real and named
+      # rather than assumed: this trades away the paired-newline fast path, so AC7's regression
+      # budget is re-measured post-fix on a many-blank-line corpus rather than carried over.
+      ';;'* | '&&'* | '||'* | '(('* | '))'*)
         _sep_done || return 0
         _sc=${_sc#??}
+        ;;
+      "$_NL"*)
+        _sep_done || return 0
+        _sc=${_sc#?}
+        if [ "$_hdpending" = 1 ]; then
+          _hdpending=0
+          _hd_skip
+          [ "$_VERDICT" = blanket ] && return 0
+        fi
         ;;
       *)
         _sep_done || return 0
