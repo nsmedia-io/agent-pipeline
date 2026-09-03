@@ -1,8 +1,8 @@
 {
   "issue_number": 132,
-  "current_phase": "1-ba",
+  "current_phase": "2-review",
   "started_at": "2026-09-03T00:55:30Z",
-  "updated_at": "2026-09-03T00:55:55Z",
+  "updated_at": "2026-09-03T01:24:20Z",
   "branch": "main",
   "ask_text": "--issue 132: the PreToolUse staging gate's scan is linear in command length but its constant is a shell interpreter's; a large enough command still outruns the declared 5s and a killed hook fails open.",
   "events": [
@@ -10,7 +10,22 @@
       "phase": "0-setup",
       "verdict": "CLEAN",
       "at": "2026-09-03T00:55:55Z"
+    },
+    {
+      "phase": "1-ba",
+      "verdict": "SPEC_SEEDED",
+      "at": "2026-09-03T01:24:20Z",
+      "note": "architectural (3 triggers); 7 reqs / 11 ACs; falsifiability gate returns [] over 11 labelled criteria; candidates 2 and 3 split to their own issues before merge"
     }
   ],
-  "flags": []
+  "flags": [
+    {
+      "phase": "1-ba",
+      "agent": "ba",
+      "verdict": "SPEC_SEEDED",
+      "summary": "raise the bound IN scope; tokenizer-in-resolver and _wordchunk split out. Live: 197KB real command denies at 99.1% of budget.",
+      "at": "2026-09-03T01:24:20Z"
+    }
+  ],
+  "risk_tier": "architectural"
 }
