@@ -1,8 +1,8 @@
 {
   "issue_number": 132,
-  "current_phase": "2-review",
+  "current_phase": "1-ba-rework-required",
   "started_at": "2026-09-03T00:55:30Z",
-  "updated_at": "2026-09-03T01:24:20Z",
+  "updated_at": "2026-09-03T01:46:24Z",
   "branch": "main",
   "ask_text": "--issue 132: the PreToolUse staging gate's scan is linear in command length but its constant is a shell interpreter's; a large enough command still outruns the declared 5s and a killed hook fails open.",
   "events": [
@@ -16,6 +16,12 @@
       "verdict": "SPEC_SEEDED",
       "at": "2026-09-03T01:24:20Z",
       "note": "architectural (3 triggers); 7 reqs / 11 ACs; falsifiability gate returns [] over 11 labelled criteria; candidates 2 and 3 split to their own issues before merge"
+    },
+    {
+      "phase": "2-review",
+      "verdict": "REQUEST_CHANGES",
+      "at": "2026-09-03T01:46:24Z",
+      "note": "DBA + SecOps REQUEST_CHANGES, DevOps APPROVE_WITH_NOTES. Round 1. Central fixture is gitignored AND not the worst real command; a tracked archive file measures 10407ms = 208% of the current budget today. Orchestrator repaired one invalid JSON escape in the devops shard (literal backslash-semicolon in a find -exec string); content unchanged."
     }
   ],
   "flags": [
@@ -25,7 +31,29 @@
       "verdict": "SPEC_SEEDED",
       "summary": "raise the bound IN scope; tokenizer-in-resolver and _wordchunk split out. Live: 197KB real command denies at 99.1% of budget.",
       "at": "2026-09-03T01:24:20Z"
+    },
+    {
+      "phase": "2-devops",
+      "agent": "devops",
+      "verdict": "APPROVE_WITH_NOTES",
+      "summary": "CI runs ubuntu/dash; every measurement behind the bound is darwin-only, so an absolute bound flakes or is padded blind",
+      "at": "2026-09-03T01:38:07Z"
+    },
+    {
+      "phase": "2-dba",
+      "agent": "dba",
+      "verdict": "REQUEST_CHANGES",
+      "summary": "AC1/AC6 rest on a git-ignored fixture absent from the detached worktree where re-verification is mandated; AC11 vacuous 2 ways",
+      "at": "2026-09-03T01:38:07Z"
+    },
+    {
+      "phase": "2-secops",
+      "agent": "secops",
+      "verdict": "REQUEST_CHANGES",
+      "summary": "window [15,30] contains values that still fail open: code shape at the spec fixture length = 16511ms; archive file = 208% of budget",
+      "at": "2026-09-03T01:46:24Z"
     }
   ],
-  "risk_tier": "architectural"
+  "risk_tier": "architectural",
+  "review_rounds": 0
 }
