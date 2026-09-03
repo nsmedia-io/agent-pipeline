@@ -1,8 +1,8 @@
 {
   "issue_number": 132,
-  "current_phase": "3-impl",
+  "current_phase": "4-review",
   "started_at": "2026-09-03T00:55:30Z",
-  "updated_at": "2026-09-03T15:14:22Z",
+  "updated_at": "2026-09-03T15:21:30Z",
   "branch": "main",
   "ask_text": "--issue 132: the PreToolUse staging gate's scan is linear in command length but its constant is a shell interpreter's; a large enough command still outruns the declared 5s and a killed hook fails open.",
   "events": [
@@ -52,6 +52,12 @@
       "verdict": "IMPL_COMPLETE",
       "at": "2026-09-03T12:48:39Z",
       "note": "Dev landed 8 commits on QA contract 78afb93, HEAD a84ebc0, PR 141 draft. AC1-AC14+AC16 met; AC15 clause 2 met, absolute-green clause pending the Librarian commit; AC17-19 check complete and discriminating, record not yet moved. Blocker B1 routed back to QA. RESUME NOTE: Phase 3 dispatches are DONE - on resume go to the pre-Phase-4 gate, do not re-dispatch QA 3a or Dev 3b."
+    },
+    {
+      "phase": "3-impl",
+      "verdict": "GATE_PASSED",
+      "at": "2026-09-03T15:21:30Z",
+      "note": "Pre-Phase-4 gate passed after fixing 5 schema violations in impl-report.json (met:string->boolean x2, checks_passed string->boolean x2 with explanation moved to _error siblings, qa_signoff.verdict prose->enum token with prose moved to notes) and adding an explicit AC9 coverage note to R1. Frontend gate SKIP. Reviewed HEAD: bcb7bc7ccf1cc242ef8efca7449b47fd04e98b7e"
     }
   ],
   "flags": [
@@ -162,7 +168,15 @@
     }
   ],
   "risk_tier": "architectural",
-  "review_rounds": 0,
+  "review_rounds": 1,
   "phase3_qa_test_commit": "78afb93af579c870d7211dbb371a53d4fae03c45",
-  "pr_url": "https://github.com/nsmedia-io/agent-pipeline/pull/141"
+  "pr_url": "https://github.com/nsmedia-io/agent-pipeline/pull/141",
+  "panel_roles": [
+    "ba",
+    "dba",
+    "devops",
+    "secops",
+    "dev",
+    "qa"
+  ]
 }
