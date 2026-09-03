@@ -7,6 +7,15 @@
   "pr_url": "https://github.com/nsmedia-io/agent-pipeline/pull/144",
   "final_verdict": null,
   "peer_review_verdict_counts": null,
+  "panel_roles": [
+    "ba",
+    "dba",
+    "devops",
+    "secops",
+    "dev",
+    "qa"
+  ],
+  "review_rounds": 1,
   "ask_text": "--issue 140: an unbalanced quote defeats the blanket-staging gate in 59 bytes with no timeout, and the test suite documents the bypass as correct behaviour.",
   "events": [
     {
@@ -71,5 +80,106 @@
       "summary": "QA authored Phase 3a failing-test contract (12 ACs) at dcc9b4b in worktree .claude/worktrees/140-phase3-20260903-162931, branch fix/140-heredoc-opacity. 671 passed/13 failed pre-implementation: 12 legitimate new-contract failures (11 #140 AC rows + 1 bonus AC7 density-axis exposure from reverting dens_pad's padding), 1 pre-existing unrelated corpus-drift AC4 failure. Dispatching Dev for Phase 3b next."
     }
   ],
-  "risk_tier": "architectural"
+  "risk_tier": "architectural",
+  "telemetry": {
+    "phase_elapsed_ms": {
+      "1": 1405000,
+      "2": 2084000,
+      "3": 2400000,
+      "2.5": 2511000
+    },
+    "total_lead_time_ms": 8400000,
+    "unattributed_ms": 0,
+    "unattributed_events": 0,
+    "untimed_events": 0,
+    "review_rounds": 1,
+    "review_rounds_observed": 0,
+    "review_rounds_recorded_delta": 1,
+    "events_counted": 9,
+    "attribution": "exit"
+  },
+  "effective_config": {
+    "migration_globs_tripwire": [
+      "**/migrations/**",
+      "**/Migrations/**",
+      "**/db/migrate/**",
+      "**/db/migration/**",
+      "**/db/changelog/**",
+      "**/alembic/versions/**",
+      "**/schema.prisma",
+      "**/prisma/schema/**",
+      "**/drizzle/**",
+      "**/db/schema.ts",
+      "**/db/schema/**",
+      "**/supabase/schemas/**",
+      "**/policies/**.sql",
+      "**/supabase/policies/**",
+      "**/schema.sql"
+    ],
+    "migration_globs_gate": [
+      "**/migrations/**",
+      "**/Migrations/**",
+      "**/db/migrate/**",
+      "**/db/migration/**",
+      "**/db/changelog/**",
+      "**/alembic/versions/**",
+      "**/schema.prisma",
+      "**/prisma/schema/**",
+      "**/drizzle/**",
+      "**/db/schema.ts",
+      "**/db/schema/**",
+      "**/supabase/schemas/**",
+      "**/policies/**.sql",
+      "**/supabase/policies/**",
+      "**/schema.sql"
+    ],
+    "data_layer_globs": [
+      "**/migrations/**",
+      "**/Migrations/**",
+      "**/db/migrate/**",
+      "**/db/migration/**",
+      "**/db/changelog/**",
+      "**/alembic/versions/**",
+      "**/schema.prisma",
+      "**/prisma/schema/**",
+      "**/drizzle/**",
+      "**/db/schema.ts",
+      "**/db/schema/**",
+      "**/supabase/schemas/**",
+      "**/policies/**.sql",
+      "**/supabase/policies/**",
+      "**/schema.sql",
+      "**/db/**",
+      "**/queries/**",
+      "**/policies/**",
+      "**/repositories/**",
+      "**/prisma/**",
+      "**/supabase/**",
+      "**/alembic/**",
+      "**/schema.ts",
+      "**/database.types.ts",
+      "**/*.generated.types.ts"
+    ],
+    "infra_globs": [
+      "**/.github/workflows/**",
+      ".github/**",
+      "**/infra/**",
+      "**/terraform/**",
+      "**/k8s/**",
+      "**/helm/**",
+      "**/deploy/**",
+      "**/deploy.sh",
+      "**/deploy.config",
+      "**/*.tf",
+      "**/*.tfvars",
+      "**/Dockerfile",
+      "**/docker-compose.yml",
+      "**/docker-compose.yaml"
+    ],
+    "models": {
+      "ba": "sonnet",
+      "dev": "sonnet"
+    },
+    "rejected_absolute_globs": 0
+  }
 }
