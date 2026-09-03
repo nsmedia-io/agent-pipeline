@@ -44,17 +44,33 @@ TB_MAT_ERR=""
 #
 # tb_materialize <destdir> -> 0 on success, non-zero with TB_MAT_ERR set otherwise.
 #
-# The SOURCE is the working tree's tracked content, not `HEAD`, because Phase 3 runs this suite
-# against a tree Dev has edited and an assertion evaluated against HEAD would be measuring the
-# commit BEFORE the change on every run but the last. `git stash create` writes a commit object
-# for the working tree without touching the index, the worktree or the stash ref; on a clean tree
-# it prints nothing and HEAD is the right answer. Either way the sha is RECORDED, so a transcript
-# says which tree the figures below were taken over.
+# THE SOURCE IS `HEAD` UNLESS `TB_MATERIALIZE_WORKING_TREE=1` IS SET (re-derived at #132 after a
+# CI-only false-red). `git stash create` writes a commit object for the working tree without
+# touching the index, the worktree or the stash ref -- which is exactly the problem: it answers
+# for ANY uncommitted change to a tracked file, including one this run.sh invocation itself put
+# there a moment earlier in an unrelated suite (a `git add` in a fixture whose own cleanup missed
+# a spot, a mode bit, anything). A one-shot CI job has no Dev sitting at the keyboard mid-edit, so
+# there is nothing legitimate for the stash-preferring read to observe there; every non-empty
+# answer it can give in that context is noise from THIS process's own prior suites, not signal
+# about the tree under test, and it is silent about which -- the CI incident this note replaces
+# measured a materialized corpus one file larger than the committed tree, from a `stash create`
+# sha no `git log` can ever find again because the stash ref was never touched. Two properties this
+# split preserves, stated because a reader who only sees the code cannot tell them apart from the
+# original bug: (1) LOCAL PHASE-3 ITERATION still measures Dev's uncommitted edits, exactly as
+# before, but only when asked for by name (`TB_MATERIALIZE_WORKING_TREE=1`), so an accidental
+# adoption of the same footgun elsewhere in this file's callers has to be spelled out at the call
+# site rather than inherited by default; (2) CI AND PHASE 4 REVIEW always measure the actual
+# reviewed commit, `HEAD`, deterministically, regardless of what any earlier suite in the same
+# `run.sh` invocation left lying around -- never an incidental artifact of test execution order.
+# Either way the sha is RECORDED, so a transcript says which tree the figures below were taken over
+# and which of the two modes produced it.
 tb_materialize() {
   local dest="$1" sha=""
   TB_MAT_ERR=""
   [[ -n "$dest" && -d "$dest" ]] || { TB_MAT_ERR="destination is not a directory: [$dest]"; return 1; }
-  sha="$(git -C "$TB_REPO_ROOT" stash create 2>/dev/null | tr -d ' \n')"
+  if [[ "${TB_MATERIALIZE_WORKING_TREE:-0}" == "1" ]]; then
+    sha="$(git -C "$TB_REPO_ROOT" stash create 2>/dev/null | tr -d ' \n')"
+  fi
   if [[ -z "$sha" ]]; then
     sha="$(git -C "$TB_REPO_ROOT" rev-parse HEAD 2>/dev/null | tr -d ' \n')"
   fi
