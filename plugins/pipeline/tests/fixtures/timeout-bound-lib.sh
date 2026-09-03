@@ -418,12 +418,15 @@ tb_gate_bounded() {
     printf '%s' "$payload" | env "CLAUDE_PROJECT_DIR=$cwd" "CLAUDE_PLUGIN_ROOT=$root" "PATH=$PATH" \
       sh -c "$cmd" ) > "$of" 2>/dev/null &
   pid=$!
-  limit=$(( secs * 5 ))          # the poll is 200 ms, so the kill lands within 200 ms of the bound
-  waited=0
+  # THE BOUND IS WALL CLOCK, NOT A COUNT OF SLEEPS. Counting 200 ms polls makes the bound a FLOOR
+  # that drifts upward with load, because each iteration also pays a fork for `sleep` and whatever
+  # the scheduler adds: measured here, a nominal 90 s bound let a probe run 97.9 s at load 9.7.
+  # `SECONDS` is a bash builtin present in the 3.2 macOS ships, so the elapsed check costs nothing.
+  limit="$secs"
+  waited="$SECONDS"
   while kill -0 "$pid" 2>/dev/null; do
-    if [[ "$waited" -ge "$limit" ]]; then TB_GB_KILLED=1; break; fi
+    if [[ $(( SECONDS - waited )) -ge "$limit" ]]; then TB_GB_KILLED=1; break; fi
     sleep 0.2
-    waited=$(( waited + 1 ))
   done
   if [[ "$TB_GB_KILLED" == "1" ]]; then
     # Kill by EXPLICIT PID only, never by pattern: children first, then the shell that started them.

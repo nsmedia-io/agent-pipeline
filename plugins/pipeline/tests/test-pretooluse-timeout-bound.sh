@@ -413,10 +413,18 @@ tb_gate_bounded \
   "$(tb_payload_file "$DENSE_FLOOR_FILE" "$P4" agent_id=sub-panelist-1 agent_type=pipeline:qa)" \
   "$P4" "$DENSE_PROBE_BOUND_S"
 DENSE_FLOOR_MS="$TB_GB_MS"; DENSE_FLOOR_DECISION="$TB_GB_DECISION"
-record "AC11 GATE FLOOR: the two-point line's intercept is $DENSE_FIT_FLOOR ms and is what the fit subtracts; a bare \`git add -A\` with no body measured $DENSE_FLOOR_MS ms ($DENSE_FLOOR_DECISION) at load $(tb_loadavg) as the independent observation of the same quantity"
-assert_eq "AC11 FLOOR NON-VACUITY: the independently measured overhead took the SAME deny branch the sized cells take (a floor measured on the allow branch would be the wrong constant) and is cheaper than the smallest sized cell ($DENSE_FLOOR_MS ms against $CAL_MS1 ms)" \
-  "$([[ "$DENSE_FLOOR_DECISION" == "deny" && "$DENSE_FLOOR_MS" -lt "$CAL_MS1" ]] && echo "below-the-smallest-cell" || echo "GOT $DENSE_FLOOR_DECISION in $DENSE_FLOOR_MS ms against a ${CAL_MS1} ms 4-copy cell")" \
-  "below-the-smallest-cell"
+record "AC11 GATE FLOOR: the two-point line's intercept is $DENSE_FIT_FLOOR ms and is what the fit subtracts; a bare \`git add -A\` with no body measured $DENSE_FLOOR_MS ms ($DENSE_FLOOR_DECISION) at load $(tb_loadavg) as the independent observation of the same quantity ($(( DENSE_FLOOR_MS * 100 / (DENSE_FIT_FLOOR < 1 ? 1 : DENSE_FIT_FLOOR) ))/100 of it)"
+# THE COMPARISON IS AGAINST THE LARGER CELL, AND THE SMALLER ONE IS WHY. This row first required
+# the measured floor to be under the SMALLEST cell, and that is false on the host CI evaluates:
+# ubuntu-latest run 33757283077 read a 231 ms floor against a 229 ms 4-copy cell, because 26,506
+# bytes of scanning costs dash almost nothing and the smallest cell is then ~100% overhead. That is
+# the expected physics of a fast host, not a broken measurement, and the row was red for it. What
+# the fit actually needs -- an intercept strictly under the smallest cell -- is the FIT-FLOOR
+# PREMISE row below, which is asserted on the quantity the fit uses. This row stays a control on
+# that one: same branch, positive, and under the LARGER cell, so a length term is separable at all.
+assert_eq "AC11 FLOOR NON-VACUITY: the independently measured overhead took the SAME deny branch the sized cells take (a floor measured on the allow branch would be the wrong constant) and sits under the LARGER calibration cell, so a length term is separable at all ($DENSE_FLOOR_MS ms against $CAL_MS2 ms; it is deliberately NOT required to be under the 4-copy cell, which is ~100% overhead on a fast host)" \
+  "$([[ "$DENSE_FLOOR_DECISION" == "deny" && "$DENSE_FLOOR_MS" -gt 0 && "$DENSE_FLOOR_MS" -lt "$CAL_MS2" ]] && echo "below-the-larger-cell" || echo "GOT $DENSE_FLOOR_DECISION in $DENSE_FLOOR_MS ms against a ${CAL_MS2} ms 16-copy cell")" \
+  "below-the-larger-cell"
 assert_eq "AC11 FIT-FLOOR PREMISE: the intercept the fit subtracts is a fraction of the smallest measured cell, not the whole of it ($DENSE_FIT_FLOOR ms of $CAL_MS1 ms) -- an intercept at or above the cell means the two calibration points could not separate a constant from a slope" \
   "$([[ "$DENSE_FIT_FLOOR" -ge 0 && "$DENSE_FIT_FLOOR" -lt "$CAL_MS1" ]] && echo "separated" || echo "INTERCEPT $DENSE_FIT_FLOOR ms against a ${CAL_MS1} ms smallest cell")" \
   "separated"
@@ -665,6 +673,101 @@ UBUNTU_MAX="$(tb_numbers "$UBUNTU_BLOCK" 'ms' | sort -n | tail -1)"
 assert_eq "AC6: the budget EXCEEDS every figure it was measured against but is not padded blind -- worst recorded ubuntu figure ${UBUNTU_MAX:-none} ms against a budget of $BUDGET_MS ms" \
   "$([[ "$BUDGET_MS" -gt 0 && "${UBUNTU_MAX:-0}" -gt 0 && "$BUDGET_MS" -gt "${UBUNTU_MAX:-0}" ]] && echo bounded || echo "budget=$BUDGET_MS worst-ubuntu=${UBUNTU_MAX:-none}")" \
   "bounded"
+
+# ===============================================================================================
+suite "AC5/AC7: the absolute budget is a LIVE guard -- watched to fire, and watched to clear"
+# ===============================================================================================
+#
+# THE GAP THIS CLOSES, NAMED. Four of the five build-failing controls #132 adds carry a recorded
+# plant-red/restore-green pair. REGRESSION_BUDGET_MS carried none, and the reason given was that
+# the only way to push a probe past 5000 ms on demand is to slow the host. There is another way,
+# and it is the one a mutation battery always uses: leave the host alone and move the THRESHOLD,
+# in a copy.
+#
+# WHAT MADE THE OBSERVATION UNAFFORDABLE, AND WHAT MAKES IT AFFORDABLE HERE. The block above
+# declines to re-run test-pretooluse-gate-verdicts.sh, and it is right to: that suite costs 240 s
+# on darwin and a pair costs two of them, twice per run.sh. So this cell does not run that suite.
+# It EXTRACTS the LENGTH block onto the suite's own setup -- byte-identical lines, the real
+# `len_probe`, the real accumulator, the real assertion, read out of the shipped file at check time
+# -- and runs THAT. MEASURED on darwin 25.5.0 at load 9.67: 9.5 s and 23 rows, against 240 s.
+#
+# WHAT ONE BLOCK PROVES ABOUT FOUR. The live observation is on the LENGTH block alone. The other
+# three carry the identical guard, so they are pinned STRUCTURALLY in the same breath: four
+# `-lt "$REGRESSION_BUDGET_MS"` guards and four `-lt "$BYPASS_BOUND_MS"` guards, counted from the
+# shipped source. A refactor that rewires one of them moves that count instead of passing quietly.
+#
+# WHAT IT DOES NOT PROVE, SAID PLAINLY. The red is produced by moving the budget UNDER a real
+# measured probe time, not by making the scan genuinely slower. It observes the accumulator, the
+# comparison and the assertion against real timings; it does not re-time a slower gate, which would
+# cost eighteen probes times whatever latency was added. The threshold is planted at a QUARTER of
+# the millisecond figure this host just measured rather than at 1, so the red is a real probe over
+# a real threshold and cannot be read as a degenerate zero.
+new_tmpdir || exit 90
+RB_ROOT="$NEW_TMPDIR/regbudget"
+cp -R "$MAT" "$RB_ROOT" 2>/dev/null
+RB_SRC="$RB_ROOT/$VERDICTS_REL"
+RB_EXTRACT_REL="plugins/pipeline/tests/rb-length-axis.sh"
+RB_SETUP_LINE="$(grep -n '^sub_verdict() ' "$RB_SRC" 2>/dev/null | head -1 | cut -d: -f1)"
+RB_START="$(grep -n '^suite "AC7 LENGTH AXIS' "$RB_SRC" 2>/dev/null | head -1 | cut -d: -f1)"
+RB_END="$(grep -n '^record "LENGTH AXIS worst observed' "$RB_SRC" 2>/dev/null | head -1 | cut -d: -f1)"
+assert_eq "AC5 EXTRACT PREMISE: the three anchors bounding the extract were each found where the shipped suite puts them (setup :${RB_SETUP_LINE:-none}, block :${RB_START:-none} to :${RB_END:-none}). A missing anchor builds an extract that runs nothing and reports a clean pass" \
+  "$([[ -n "$RB_SETUP_LINE" && -n "$RB_START" && -n "$RB_END" && "$RB_START" -gt "$RB_SETUP_LINE" && "$RB_END" -gt "$RB_START" ]] && echo bounded || echo "setup=${RB_SETUP_LINE:-none} start=${RB_START:-none} end=${RB_END:-none}")" \
+  "bounded"
+RB_PLANT_LANDED="unrun"
+rb_build() {  # [budget] -> rebuild the extract, planting the budget when one is given
+  { sed -n "1,${RB_SETUP_LINE:-1}p" "$RB_SRC"
+    sed -n "${RB_START:-1},${RB_END:-1}p" "$RB_SRC"
+    printf 'finish\n'; } > "$RB_ROOT/$RB_EXTRACT_REL"
+  [[ -n "${1:-}" ]] || return 0
+  # The plant is a literal line replacement and it REPORTS whether it landed: a mutation that
+  # silently matched nothing is a green row about an unmutated file.
+  RB_PLANT_LANDED="$("$GATE_REAL_NODE" -e '
+    const fs = require("node:fs");
+    const p = process.argv[1], s = fs.readFileSync(p, "utf8");
+    const out = s.replace(/^REGRESSION_BUDGET_MS=[0-9]+$/m, "REGRESSION_BUDGET_MS=" + process.argv[2]);
+    fs.writeFileSync(p, out);
+    process.stdout.write(out === s ? "DID-NOT-LAND" : "landed");
+  ' "$RB_ROOT/$RB_EXTRACT_REL" "$1" 2>/dev/null)"
+  return 0
+}
+rb_run() {  # -> RB_OUT
+  RB_OUT="$( cd "$RB_ROOT" 2>/dev/null && bash "$RB_EXTRACT_REL" 2>/dev/null )"
+}
+rb_row() {  # <row-name-substring> -> ok | FAIL | (empty when the row never ran)
+  printf '%s\n' "$RB_OUT" | awk -v k="$1" 'index($0,k)>0 && ($1=="ok"||$1=="FAIL"){print $1; exit}'
+}
+rb_failed() { printf '%s\n' "$RB_OUT" | sed -n 's/^passed=[0-9]* failed=\([0-9]*\)$/\1/p' | head -1; }
+rb_passed() { printf '%s\n' "$RB_OUT" | sed -n 's/^passed=\([0-9]*\) failed=[0-9]*$/\1/p' | head -1; }
+
+rb_build
+rb_run
+RB_G_REG="$(rb_row 'AC7 LENGTH REGRESSION')"
+RB_G_BYP="$(rb_row 'AC7 LENGTH BYPASS')"
+RB_G_FAILED="$(rb_failed)"
+RB_WORST="$(printf '%s\n' "$RB_OUT" | sed -n 's/.*LENGTH AXIS worst observed: \([0-9][0-9]*\) ms.*/\1/p' | head -1)"
+record "AC5 EXTRACT: the LENGTH block of $VERDICTS_REL lifted onto its own setup ($(( RB_END - RB_START + 1 )) lines of the block, ${RB_SETUP_LINE} of setup) -> $(rb_passed) passed / ${RB_G_FAILED} failed, worst probe ${RB_WORST:-none} ms, at load $(tb_loadavg) on $(uname -sr)"
+assert_eq "AC5 RESTORE-GREEN: at the budget the tree ships, the extracted block passes BOTH of its bounds (regression=${RB_G_REG:-ABSENT} bypass=${RB_G_BYP:-ABSENT}, ${RB_G_FAILED:-?} failing rows). Without this half the red below is equally consistent with an extract that never worked" \
+  "${RB_G_REG:-ABSENT}/${RB_G_BYP:-ABSENT}/${RB_G_FAILED:-?}" "ok/ok/0"
+
+RB_PLANT=$(( ${RB_WORST:-0} / 4 ))
+[[ "$RB_PLANT" -lt 1 ]] && RB_PLANT=1
+rb_build "$RB_PLANT"
+rb_run
+RB_R_REG="$(rb_row 'AC7 LENGTH REGRESSION')"
+RB_R_BYP="$(rb_row 'AC7 LENGTH BYPASS')"
+RB_R_FAILED="$(rb_failed)"
+record "AC5 PLANT: budget moved to ${RB_PLANT} ms (a quarter of the ${RB_WORST:-?} ms measured above), plant $RB_PLANT_LANDED -> $(rb_passed) passed / ${RB_R_FAILED} failed"
+assert_eq "AC5 PLANT LANDED: the budget line was really rewritten in the extract (a substitution that matched nothing would make every row below a statement about an unmutated file)" \
+  "$RB_PLANT_LANDED" "landed"
+assert_eq "AC5 PLANT-RED: with the budget under a probe time this host actually measured, the LENGTH REGRESSION row FAILS. This is the control the budget did not have: the host is untouched and the threshold moved, which is what a mutation battery does everywhere else in this contract" \
+  "${RB_R_REG:-ABSENT}" "FAIL"
+assert_eq "AC5 PLANT-RED DISCRIMINATION: and the BYPASS row over the SAME probes stays green while exactly ONE row moves (${RB_G_FAILED:-?} -> ${RB_R_FAILED:-?} failing). The two bounds are genuinely separate -- the budget is absolute, the bypass bound is read from hooks.json -- and a mutation of one does not move the other" \
+  "${RB_R_BYP:-ABSENT}/$(( ${RB_R_FAILED:-0} - ${RB_G_FAILED:-0} ))" "ok/1"
+
+RB_REG_GUARDS="$(grep -c -- '-lt "$REGRESSION_BUDGET_MS"' "$RB_SRC" 2>/dev/null | tr -d ' \n')"
+RB_BYP_GUARDS="$(grep -c -- '-lt "$BYPASS_BOUND_MS"' "$RB_SRC" 2>/dev/null | tr -d ' \n')"
+assert_eq "AC5/AC7: the live observation above is on ONE of the four timing blocks, and the other three are pinned STRUCTURALLY in the same breath -- four guards read the absolute budget and four read the declared bypass bound (found $RB_REG_GUARDS and $RB_BYP_GUARDS). A block rewired to read the declaration moves this count instead of passing quietly" \
+  "$RB_REG_GUARDS/$RB_BYP_GUARDS" "4/4"
 
 # ===============================================================================================
 suite "AC8: the declaration suite's range assertion names the measurement that fixes it"
