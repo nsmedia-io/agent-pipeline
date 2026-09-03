@@ -1,0 +1,16 @@
+{
+  "issue_number": 132,
+  "current_phase": "1-ba",
+  "started_at": "2026-09-03T00:55:30Z",
+  "updated_at": "2026-09-03T00:55:55Z",
+  "branch": "main",
+  "ask_text": "--issue 132: the PreToolUse staging gate's scan is linear in command length but its constant is a shell interpreter's; a large enough command still outruns the declared 5s and a killed hook fails open.",
+  "events": [
+    {
+      "phase": "0-setup",
+      "verdict": "CLEAN",
+      "at": "2026-09-03T00:55:55Z"
+    }
+  ],
+  "flags": []
+}
