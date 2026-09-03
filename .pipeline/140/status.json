@@ -1,8 +1,8 @@
 {
   "issue_number": 140,
-  "current_phase": "2-review",
+  "current_phase": "1-ba-rework-required",
   "started_at": "2026-09-03T18:54:53Z",
-  "updated_at": "2026-09-03T19:05:04Z",
+  "updated_at": "2026-09-03T19:15:08Z",
   "branch": "main",
   "ask_text": "--issue 140: an unbalanced quote defeats the blanket-staging gate in 59 bytes with no timeout, and the test suite documents the bypass as correct behaviour.",
   "events": [
@@ -16,6 +16,12 @@
       "verdict": "SPEC_SEEDED",
       "at": "2026-09-03T19:05:04Z",
       "note": "architectural (mandatory trigger: security domain + hook/gate keywords). 8 reqs/8 ACs, falsifiability clean. Root cause independently verified by orchestrator: the redirection arm at pre-tool-use.sh:1153 marks the heredoc delimiter as a redirect target but never treats the body as an opaque region, so quote-state leaks through. q1 (which shell the Bash tool actually invokes) non-blocking, recorded."
+    },
+    {
+      "phase": "2-review",
+      "verdict": "REQUEST_CHANGES",
+      "at": "2026-09-03T19:15:08Z",
+      "note": "Phase 2 round 1: DBA APPROVE_WITH_NOTES (major: AC1 has no fixture cell for <<- tab-stripped terminators, a genuinely different mechanism than quote parity - independently verified by orchestrator against real bash). DevOps APPROVE_WITH_NOTES (resolved q1: production shell is zsh, confirmed by inspecting its own subprocess; also independently rediscovered the main-branch corpus-drift issue). SecOps REQUEST_CHANGES: core vulnerability confirmed live via two independent oracles with real non-zero controls (26-byte repro, shim-confirmed git invocation), but R1's fixture matrix only crosses one implicit delimiter spelling - SecOps proved <<-EOF and <<'EOF' are ALSO live-exploitable with the identical odd-quote body and are outside AC1's binding matrix, so an implementation could pass every AC while shipping 2 of 3 proven-exploitable spellings. Looping back to BA per the rubric."
     }
   ],
   "flags": [],
