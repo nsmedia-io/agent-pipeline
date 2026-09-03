@@ -1197,41 +1197,51 @@ assert_eq "AC4 SENTINEL PREMISE: at least one sentinel row is genuinely OUTSIDE 
   "$([[ "$(printf '%s' "$CORPUS_SENTINELS" | grep -c .)" -ge 1 ]] && echo outside || echo "EVERY SENTINEL IS ALSO SELECTED")" "outside"
 
 # Every driven row is the same shape: the file's content as a heredoc body, then the blanket stage
-# the gate refuses. QUOTE PARITY IS PART OF THIS FIXTURE AND IT IS CHECKED BY OUTCOME, NOT BY
+# the gate refuses. QUOTE PARITY IS PART OF THIS FIXTURE AND IT IS SETTLED BY OUTCOME, NEVER BY
 # COUNTING. An unbalanced quote earlier in the command defeats the blanket-staging refusal outright
-# (#140), so a body the scanner reads as quote-open reports a spurious \`none\` and would be read as
-# a gate that is working. The obvious guard -- count \`"\` and \`'\` in the raw bytes and append one of
-# each when the count is odd -- is on the WRONG SIDE OF THE TRANSFORMATION and was measured to be
-# so here: knowledge/issue-archive/106.json carries 9387 raw double quotes, an ODD number, and the
-# gate denies it correctly because the scanner resolves backslash escapes before it counts, so what
-# the raw count calls unbalanced the scanner calls closed. Appending a balancing quote to that body
-# flipped a working \`deny\` into \`none\` -- the fixture broke the thing it was guarding. So no body
-# is padded, and the per-row \`deny\`/\`none\` pair asserted below IS the parity check: it observes
-# what the scanner did rather than predicting it from the bytes.
+# (#140), so a body the scanner reads as quote-open answers \`none\` and would be recorded as a gate
+# that is working. The obvious guard -- count \`"\` and \`'\` in the raw bytes and append one of each
+# when the count is odd -- is on the WRONG SIDE OF THE TRANSFORMATION, and that was measured here
+# rather than argued: knowledge/issue-archive/106.json carries 9387 raw double quotes, an ODD
+# number, and the gate refuses it correctly, because the scanner resolves backslash escapes before
+# it counts and what the raw count calls open the scanner calls closed. Appending a balancing quote
+# to that body flipped a working \`deny\` into \`none\`: the fixture broke the thing it was guarding.
+# So the pad is SEARCHED rather than computed. Each row is driven with no pad first and the first
+# pad that produces a decision is the one kept, which observes what the scanner did instead of
+# predicting it from the bytes. The pad each row needed is recorded, because a row that needs one is
+# a live instance of #140 on tracked content and the transcript should say which rows those are.
 CORPUS_DRIVEN=0
 CORPUS_WORST_SELECTED=0
 CORPUS_ROWS=""
 CORPUS_MISVERDICT=""
 CORPUS_UNDISCLOSED=""
 CORPUS_SENTINEL_SLOW=""
-corpus_drive() { # <relative-path> <selected|sentinel> -> sets CD_MS CD_BYTES CD_DENS
-  local rel="$1" kind="$2" body a b
+CORPUS_PADDED=""
+CORPUS_PADS=( "" "\"" "'" "\"'" )
+corpus_drive() { # <relative-path> <selected|sentinel> -> sets CD_MS CD_BYTES CD_DENS CD_PAD
+  local rel="$1" kind="$2" body a b pad v deny allow
   body="$(cat "$CORPUS_ROOT/$rel")"
   CD_DENS="$(tb_density "$GATE_STRUCT_CLASS" "$CORPUS_ROOT/$rel" | awk '{print $3}')"
-  local deny="cat > notes.md <<'PIPELINE_CORPUS_EOF'
-${body}
+  CD_PAD=""; CD_MS=0; CD_BYTES=0; v=""
+  for pad in "${CORPUS_PADS[@]}"; do
+    deny="cat > notes.md <<'PIPELINE_CORPUS_EOF'
+${body}${pad}
 PIPELINE_CORPUS_EOF
 git add -A"
-  local allow="cat > notes.md <<'PIPELINE_CORPUS_EOF'
-${body}
+    CD_BYTES="${#deny}"
+    a="$(len_now_ms)"; v="$(sub_verdict "$P4" "$deny")"; b="$(len_now_ms)"
+    CD_MS=$(( b - a ))
+    CD_PAD="$pad"
+    [[ "$v" == "deny" ]] && break
+  done
+  allow="cat > notes.md <<'PIPELINE_CORPUS_EOF'
+${body}${CD_PAD}
 PIPELINE_CORPUS_EOF
 git add plugins/pipeline/agents/dba.md"
-  CD_BYTES="${#deny}"
-  a="$(len_now_ms)"; local v; v="$(sub_verdict "$P4" "$deny")"; b="$(len_now_ms)"
-  CD_MS=$(( b - a ))
   local av; av="$(sub_verdict "$P4" "$allow")"
+  [[ -n "$CD_PAD" ]] && CORPUS_PADDED="$CORPUS_PADDED ${rel}"
   [[ "$v" == "deny" && "$av" == "none" ]] || CORPUS_MISVERDICT="$CORPUS_MISVERDICT
-${rel} (${kind}) -> blanket=${v} narrowed=${av}, expected deny/none"
+${rel} (${kind}) -> blanket=${v} narrowed=${av} after trying every pad, expected deny/none. A row that answers none for BOTH is #140 on tracked content: an unbalanced quote earlier in the command defeats the refusal outright."
   CORPUS_DRIVEN=$(( CORPUS_DRIVEN + 1 ))
   CORPUS_ROWS="$CORPUS_ROWS ${rel}=${CD_BYTES}B/${CD_DENS}Bps/${CD_MS}ms(${kind});"
   # AC2's inequality, applied to the NUMBER: min-of-1 here (the floor row is the one #132's own
@@ -1251,6 +1261,7 @@ for rel in $CORPUS_SENTINELS; do
   [[ "$CD_MS" -le "$CORPUS_WORST_SELECTED" ]] || CORPUS_SENTINEL_SLOW="$CORPUS_SENTINEL_SLOW
 ${rel} (outside both top-${CORPUS_TOP_K} sets) measured ${CD_MS} ms against the slowest SELECTED row's ${CORPUS_WORST_SELECTED} ms"
 done
+record "#140 REACH on this corpus: the rows needing a balancing quote before the gate would decide at all:${CORPUS_PADDED:- none}"
 record "AC3/AC4 DRIVEN SET (${CORPUS_DRIVEN} rows of ${CORPUS_ENUM} enumerated, top-${CORPUS_TOP_K} by raw length unioned with top-${CORPUS_TOP_K} by raw B/struct, plus sentinels):${CORPUS_ROWS} worst selected ${CORPUS_WORST_SELECTED} ms, on $(uname -sr) at load $(tb_loadavg)"
 assert_eq "AC3 NON-VACUITY: every driven row DENIES the blanket stage and ALLOWS the narrowed one at the identical body -- a row that returned none for both would be a fixture defect (quote parity, #140) reported as a passing measurement" \
   "$CORPUS_MISVERDICT" ""
