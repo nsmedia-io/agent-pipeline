@@ -143,7 +143,8 @@ cat > "$FIXDIR/review.json" <<'FIX'
 {"secops":{"verdict":"APPROVE","reviewed_at":"2026-08-31T00:00:00Z",
  "concerns":[{"severity":"info","description":"OPTIONAL_BLANKS","must_satisfy":"x",
               "location":"","rationale_not_checked":""},
-             {"severity":"nit","description":"MISSING_KEY"}],
+             {"severity":"nit","description":"MISSING_KEY"},
+             {"severity":"","description":"BLANK_ENUM","must_satisfy":"x"}],
  "notes":"ok",
  "vulnerabilities":[{"severity":"info","description":"no security impact","remediation":"none required"}]},
  "dba":{"verdict":"APPROVE","reviewed_at":"","concerns":[],"notes":"ok"}}
@@ -164,10 +165,16 @@ assert_not_contains "an OPTIONAL rationale_not_checked left blank is NOT reporte
 # (c) A MISSING required key is a different defect with a different owner.
 assert_not_contains "a MISSING required must_satisfy is not reported as a BLANK one" \
   "$ERR" ".review.secops.concerns[1].must_satisfy"
-# (d) STRUCTURAL EXCLUSION, not an exemption list: reviewed_at carries format date-time, so it is
-# not free text. Mutate the format test out of isFreeTextSchema and this cell reddens.
+# (d) STRUCTURAL EXCLUSION, not an exemption list, and it has TWO halves because free text is
+# defined by the ABSENCE of two things. reviewed_at carries format date-time; severity carries an
+# enum. Neither is free text, both are required, and a blank in either is a SCHEMA violation the
+# validator's own type check owns -- reporting them here would be a second voice on somebody
+# else's defect. Mutate either exclusion out of isFreeTextSchema and one of these two reddens;
+# mutating only one out is why they are separate cells rather than one.
 assert_not_contains "a blank reviewed_at is NOT free text (date-time format excludes it structurally)" \
   "$ERR" ".review.dba.reviewed_at"
+assert_not_contains "a blank enum-typed severity is NOT free text either (the enum excludes it)" \
+  "$ERR" ".review.secops.concerns[2].severity"
 assert_contains "and the whole document reports ZERO blanks over a non-zero denominator" \
   "$OUT" "blank required free-text fields: 0 (of "
 NEG_N="$(printf '%s\n' "$OUT" | sed -n 's/.*fields: 0 (of \([0-9]*\) present.*/\1/p')"
