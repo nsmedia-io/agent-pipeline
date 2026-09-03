@@ -1,8 +1,8 @@
 {
   "issue_number": 132,
-  "current_phase": "4-review",
+  "current_phase": "4-review-complete",
   "started_at": "2026-09-03T00:55:30Z",
-  "updated_at": "2026-09-03T17:30:59Z",
+  "updated_at": "2026-09-03T18:31:58Z",
   "branch": "main",
   "ask_text": "--issue 132: the PreToolUse staging gate's scan is linear in command length but its constant is a shell interpreter's; a large enough command still outruns the declared 5s and a killed hook fails open.",
   "events": [
@@ -82,6 +82,12 @@
       "verdict": "GATE_PASSED",
       "at": "2026-09-03T17:30:59Z",
       "note": "CI genuinely green at HEAD 714e643ced874e3901cc20bdee875e8e16aeb79f - verified MATERIALIZED from matches exactly, both workflows success, 13min for tests. GATE_PASSED restored, earned this time. impl-report.json commits array updated 8 -> 14 to cover QA, Librarian, orchestrator and Dev commits since the original Phase 3 report. Discarded 3 stale peer-review shards from the earlier stopped panel run (diff grew 2 commits since). Re-dispatching fresh 6-role panel, all at sonnet per owner instruction."
+    },
+    {
+      "phase": "4-review",
+      "verdict": "APPROVE_WITH_NOTES",
+      "at": "2026-09-03T18:31:58Z",
+      "note": "Round 2 panel (sonnet, wf_dd2854d2-1c8): BA APPROVE, DBA APPROVE, DevOps APPROVE_WITH_NOTES, SecOps APPROVE_WITH_NOTES, Dev APPROVE, QA APPROVE_WITH_NOTES. final_verdict=APPROVE_WITH_NOTES, 0 blocking. All three notes verified non-actionable against the diff: DevOps ten-file digest mismatch claim REFUTED by orchestrator (all ten agree at reference 847cd282 on both origin/main and this HEAD, using the validated method; DevOps hit the documented trailing-newline false-alarm case the block itself warns about). DevOps + QA wall-clock flakiness both independently attributed to host CPU contention (load 23-68 observed) and separately confirmed clean against genuine CI green. SecOps confirmed the ref-pin fix (714e643) is currently safe (no pull_request_target, no elevated permissions, no secrets referenced) and is a review-integrity improvement, flagging only the general reuse-risk pattern for awareness. CI reconfirmed green at merge time."
     }
   ],
   "flags": [
@@ -202,5 +208,13 @@
     "secops",
     "dev",
     "qa"
-  ]
+  ],
+  "final_verdict": "APPROVE_WITH_NOTES",
+  "peer_review_verdict_counts": {
+    "approve": 3,
+    "approve_with_notes": 3,
+    "request_changes": 0,
+    "request_refactor": 0,
+    "veto": 0
+  }
 }
