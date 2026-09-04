@@ -631,21 +631,22 @@ dens_pad() { # <kind> <bytes> -> a body of exactly that length in the named stru
       // one unbroken run: the LENGTH AXIS population, here as the O(1)-structure extreme
       run: () => "y".repeat(n),
     };
-    // TRUNCATION MUST NOT LEAVE A QUOTE OPEN, and the first draft of this builder did. Cutting a
-    // generated body to a fixed length can end it inside a `"...`, and this scanner does not model
-    // heredocs -- so the terminator and the staging command on the far side of it were read as
-    // QUOTED TEXT and the row came back `none`. That would have been a fixture reporting an allow
-    // for a gate that is correct, which is the worst kind of red. The last two bytes are therefore
-    // spent balancing the quote counts, which keeps the length exactly n.
-    //
-    // NO APOSTROPHE APPEARS IN THIS PROGRAM'"'"'S SOURCE and the single-quoted shell word around it is
-    // why: one would close the quote and truncate the program, which is how the first draft of this
-    // line silently emitted a ZERO-LENGTH body. The row above caught it -- that is what the fixed
-    // length assertion is for -- but the quote character still has to be built rather than typed.
-    const core = mk[kind]().slice(0, n - 2);
-    const SQ = String.fromCharCode(39);
-    const odd = (s, q) => (s.split(q).length - 1) % 2 === 1;
-    process.stdout.write(core + (odd(core, "\"") ? "\"" : "z") + (odd(core, SQ) ? SQ : "z"));
+    // THE TRUNCATION USED TO BALANCE QUOTE PARITY, AND THAT WAS PAPERING OVER A GATE DEFECT, NOT
+    // FIXING A FIXTURE (#140). Cutting a generated body to a fixed length can end it inside a
+    // `"...`, and this scanner had NO heredoc-body opacity at all: an odd raw quote count left in
+    // the body leaked the scanner'"'"'s "still inside a quote" state past the heredoc'"'"'s REAL
+    // terminator line, so the terminator and the staging command on the far side of it were read
+    // as inert QUOTED TEXT and the row came back `none`. The prior version of this comment read
+    // that `none` as "a fixture reporting an allow for a gate that is correct" and spent the
+    // body'"'"'s last two bytes forcing an even quote count to make the symptom go away. That
+    // reading was WRONG: the allow was a genuine bypass, not a fixture defect -- a real shell
+    // really does execute the trailing `git add -A` in that construction -- and #140 fixes the
+    // scanner to give a heredoc body real opacity (R1) regardless of what it contains, so the
+    // body'"'"'s own quote parity no longer has any bearing on the verdict and no longer needs to
+    // be engineered around. Truncating to the full requested length, balanced or not, is now the
+    // honest fixture; #140'"'"'s own regression suite (AC3/AC6, see the "#140 AC" suites below) is
+    // what asserts the post-fix verdict is `deny` on a body this truncation leaves unbalanced.
+    process.stdout.write(mk[kind]().slice(0, n));
   ' "$1" "$2"
 }
 # THE CLASS IS THE HOOK'S OWN VALUE, NOT A COPY OF IT AND NOT ITS SOURCE TEXT (#132). This
@@ -1289,5 +1290,575 @@ assert_eq "AC4: the published ENUMERATED count is the count this block measured 
   "$(printf '%s' "$CORPUS_README_TEXT" | grep -oE 'enumerated [0-9]+' | grep -oE '[0-9]+' | head -1)" "$CORPUS_ENUM"
 assert_eq "AC4: and the published DRIVEN count is the number of rows actually driven above" \
   "$(printf '%s' "$CORPUS_README_TEXT" | grep -oE 'drove [0-9]+' | grep -oE '[0-9]+' | head -1)" "$CORPUS_DRIVEN"
+
+# =================================================================================================
+# #140: heredoc-body-opacity contract. QA-authored (Phase 3a), all 12 spec.json acceptance criteria.
+# =================================================================================================
+#
+# THE DEFECT, RESTATED FROM BEHAVIOR NOT FROM SHAPE. `_scan_go`'s redirection arm ('>'*|'<'* at
+# hooks/pre-tool-use.sh ~1153) marks only the delimiter WORD immediately after `<<`/`<<-` as an
+# inert redirect target; the heredoc BODY -- everything from there to the real terminator line --
+# is then fed through ordinary quote/comment/operator scanning exactly as if it were live command
+# text. A real shell never re-tokenizes a heredoc body; it copies it verbatim (with only
+# $-expansion, and not even that behind a quoted delimiter) to the terminator. When the body
+# carries an ODD raw count of one quote character, the scanner's "still inside a quote" state does
+# not close at the body's real end -- it leaks past the terminator line into whatever follows,
+# including a bare `git add -A`, which is then read as inert quoted text instead of its own
+# invocation. Every row below is a real, syntactically valid Bash command a real shell accepts;
+# nothing here asserts on the scanner's internal state names.
+#
+# EVERY ROW FAILS AT THE REVIEWED COMMIT (no heredoc-body opacity exists at all), ON ITS OWN LINE.
+
+suite "#140 AC1: the 12-cell heredoc-body-opacity matrix (9 bare << cells + 3 delimiter-spelling cells)"
+
+HD_TAB=$'\t'
+
+# Three bodies, each varying which single raw quote character appears an ODD number of times, and
+# a balanced control. Built with real embedded newlines (a heredoc body is multi-line by nature).
+HD_ODD_DQ="line one
+say \"hi
+line three"
+HD_ODD_SQ="line one
+it's fine
+line three"
+HD_BAL="line one
+say \"hi\" and 'bye'
+line three"
+
+HD_BLANKET='git add -A'
+HD_NARROW='git add plugins/pipeline/agents/dba.md'
+
+# hd_verdict <heredoc-intro-line, e.g. "cat <<EOF"> <body> <terminator-line> <tail-cmd>
+hd_verdict() {
+  sub_verdict "$P4" "$1
+$2
+$3
+$4"
+}
+
+# ---- 9 cells: bare << introducer, {odd-dq, odd-sq, balanced} x {blanket, narrow} + 3 no-heredoc --
+for parity in odd_dq odd_sq balanced; do
+  case "$parity" in
+    odd_dq) BODY="$HD_ODD_DQ" ;;
+    odd_sq) BODY="$HD_ODD_SQ" ;;
+    balanced) BODY="$HD_BAL" ;;
+  esac
+  assert_eq "#140 AC1 (bare <<, $parity body, blanket 'git add -A' after the real terminator): deny" \
+    "$(hd_verdict 'cat <<EOF' "$BODY" 'EOF' "$HD_BLANKET")" "deny"
+  assert_eq "#140 AC1 (bare <<, $parity body, narrow 'git add <path>' after the real terminator): none" \
+    "$(hd_verdict 'cat <<EOF' "$BODY" 'EOF' "$HD_NARROW")" "none"
+done
+# The "no heredoc at all" context. An unterminated raw quote outside a heredoc is a real shell
+# SYNTAX ERROR, so odd/even is expressed here by NESTING one quote character inside the other kind
+# rather than by leaving anything actually open -- every row below is valid, ordinary shell text,
+# and none of them invoke git. This proves the fix leaves plain (non-heredoc) quote scanning alone.
+assert_eq "#140 AC1 (no heredoc, balanced: echo \"git add -A\"): none" \
+  "$(sub_verdict "$P4" 'echo "git add -A"')" "none"
+assert_eq "#140 AC1 (no heredoc, odd single-quote raw count nested in a double-quoted string): none" \
+  "$(sub_verdict "$P4" "echo \"git add -A; it's fine\"")" "none"
+assert_eq "#140 AC1 (no heredoc, odd double-quote raw count nested in a single-quoted string): none" \
+  "$(sub_verdict "$P4" "echo 'git add -A; he said \"hi'")" "none"
+
+# ---- 3 cells: the delimiter-introducer-spelling axis, odd-dq body, blanket stage -----------------
+# SecOps's round-1 oracle (review.secops.json concerns[0]) independently reproduced all three of
+# these genuinely invoking `git add -A` in real bash while the reviewed-commit gate answered
+# 'none' for all three -- the same leak as the bare-<< case, on every legal delimiter spelling.
+assert_eq "#140 AC1 (delimiter spelling <<- with a TAB-indented terminator, odd-dq body, blanket): deny" \
+  "$(hd_verdict 'cat <<-EOF' "$HD_ODD_DQ" "${HD_TAB}EOF" "$HD_BLANKET")" "deny"
+assert_eq "#140 AC1 (delimiter spelling <<'EOF' single-quoted, odd-dq body, blanket): deny" \
+  "$(hd_verdict "cat <<'EOF'" "$HD_ODD_DQ" 'EOF' "$HD_BLANKET")" "deny"
+assert_eq "#140 AC1 (delimiter spelling <<\\EOF backslash-escaped, odd-dq body, blanket): deny" \
+  "$(hd_verdict 'cat <<\EOF' "$HD_ODD_DQ" 'EOF' "$HD_BLANKET")" "deny"
+
+# =================================================================================================
+suite "#140 AC2: genuinely-quoted staging text stays ALLOWED, both before and after the fix"
+# =================================================================================================
+# Stated as its own criterion (spec.json: "so it cannot be traded away for AC1") precisely because
+# a fix implemented as "opaque anything that looks like a quote" would satisfy AC1 by ALSO denying
+# ordinary quoted mentions, which is a different and unacceptable failure mode.
+assert_eq "#140 AC2: echo \"git add -A\" (restated as its own row per spec.json's explicit anti-trade-away text; also asserted above as AC1's no-heredoc balanced cell)" \
+  "$(sub_verdict "$P4" 'echo "git add -A"')" "none"
+assert_eq "#140 AC2: a SECOND genuinely-quoted staging string, distinct wording, inside a printf argument and not inside any heredoc" \
+  "$(sub_verdict "$P4" 'printf "run git add -A yourself\n"')" "none"
+
+# =================================================================================================
+suite "#140 AC3: the core defect / primary red-green pair"
+# =================================================================================================
+assert_eq "#140 AC3: an ODD double-quote-count heredoc body followed by git add -A after the real terminator -> deny post-fix (returns 'none' pre-fix: the leaked quote-open state swallows the terminator line and the trailing git add -A as inert quoted text)" \
+  "$(hd_verdict 'cat <<EOF' "$HD_ODD_DQ" 'EOF' "$HD_BLANKET")" "deny"
+
+# =================================================================================================
+suite "#140 AC4: a BALANCED heredoc body stays denied -- the fix discriminates rather than always-allows"
+# =================================================================================================
+assert_eq "#140 AC4: an EVEN (already-balanced) heredoc body followed by git add -A continues to return deny post-fix (it was already deny pre-fix, by the pre-fix scanner's unrelated newline-as-separator behavior -- proving the fix parses rather than blanket-denies every heredoc)" \
+  "$(hd_verdict 'cat <<EOF' "$HD_BAL" 'EOF' "$HD_BLANKET")" "deny"
+
+# =================================================================================================
+suite "#140 AC5: a narrowly-scoped git add <path> after the real terminator stays ALLOWED -- no new false positive"
+# =================================================================================================
+assert_eq "#140 AC5: odd-dq heredoc body + git add <path> after the real terminator -> none" \
+  "$(hd_verdict 'cat <<EOF' "$HD_ODD_DQ" 'EOF' "$HD_NARROW")" "none"
+assert_eq "#140 AC5: balanced heredoc body + git add <path> after the real terminator -> none" \
+  "$(hd_verdict 'cat <<EOF' "$HD_BAL" 'EOF' "$HD_NARROW")" "none"
+
+# =================================================================================================
+suite "#140 AC6: dens_pad() no longer force-balances quote parity, and the resulting body still denies"
+# =================================================================================================
+# R5/AC6: the quote-balancing patch in dens_pad() (above, DENSITY AXIS block) is reverted and its
+# comment corrected -- both done directly in that function. This row proves the REVERTED function's
+# own output, whatever raw quote parity truncation happens to leave it with, still denies once
+# heredoc opacity exists. The `quotes` kind repeats the 4-byte unit `"a" ` (2 double quotes per
+# unit); at a length that is a multiple of 4, or 3 mod 4, truncation lands on a unit boundary or
+# takes a matched quote pair and the count stays EVEN (measured: 511 -> 256, still balanced -- not
+# useful as a fixture for THIS row). At 1 or 2 mod 4 truncation stops mid-unit after exactly one of
+# the pair's two quote characters, which IS unbalanced. 509 (509 mod 4 == 1) was measured to leave
+# a raw count of 255 -- odd -- which is the exact shape the old padding existed to prevent dens_pad
+# from ever producing; the VACUITY row below re-derives this on every run rather than trusting the
+# comment's arithmetic.
+DPAD_BODY="$(dens_pad quotes 509)"
+DPAD_DQ_RAW="$(printf '%s' "$DPAD_BODY" | tr -cd '"' | wc -c | tr -d ' ')"
+record "#140 AC6: dens_pad('quotes', 509) raw double-quote count = ${DPAD_DQ_RAW}"
+assert_eq "#140 AC6 VACUITY: the chosen length genuinely leaves dens_pad()'s output with an UNBALANCED (odd) raw double-quote count -- without this, the row below would not be exercising the unbalanced case the old padding used to prevent" \
+  "$(( DPAD_DQ_RAW % 2 ))" "1"
+assert_eq "#140 AC6: dens_pad()'s own generated body (509 bytes, quote parity left as truncation leaves it, genuinely unbalanced per the row above), followed by a blanket stage after the real terminator -> deny" \
+  "$(hd_verdict "cat <<'EOF'" "$DPAD_BODY" 'EOF' "$HD_BLANKET")" "deny"
+assert_eq "#140 AC6: the reverted function still produces exactly the requested length (509 bytes) -- the DENSITY AXIS block's own VACUITY premise is unaffected by removing the balance" \
+  "${#DPAD_BODY}" "509"
+
+# =================================================================================================
+suite "#140 AC7: no regression on the existing WORD-BOUNDARY AXIS / DENSITY AXIS suites"
+# =================================================================================================
+# R7/AC7 requires no new bypass or timing regression on the suites already in this file. There is
+# no new probe here by design: AC7 is discharged by the WORD-BOUNDARY AXIS and DENSITY AXIS blocks
+# above (which this same file run already re-measures against the post-fix tree, on every run,
+# including the DENSITY AXIS heredoc probes whose dens_pad() bodies AC6 just stopped force-
+# balancing) rather than by a duplicate timing harness here. A second, independent timing rig would
+# measure the runner rather than the gate (see evidence.md's rendered-measurement rule).
+record "#140 AC7: discharged by the pre-existing AC7 LENGTH/WORD-BOUNDARY/DENSITY AXIS blocks above, re-measured against this same post-fix tree on every run of this file -- not a separate probe"
+
+# =================================================================================================
+suite "#140 AC8: the tracked reproduction file (knowledge/issue-archive/40-verify-40.sh), re-derived"
+# =================================================================================================
+AC8_FILE="$GATE_REPO_ROOT/knowledge/issue-archive/40-verify-40.sh"
+assert_eq "#140 AC8 VACUITY: the reproduction file exists and is non-empty (an absent/empty file makes the row below pass on nothing)" \
+  "$([[ -s "$AC8_FILE" ]] && echo present || echo "MISSING: $AC8_FILE")" "present"
+AC8_BYTES="$(wc -c < "$AC8_FILE" 2>/dev/null | tr -d ' ')"
+record "#140 AC8: ${AC8_FILE} is ${AC8_BYTES} bytes at this commit -- re-derived, not trusted from the issue's own 137,457-byte command-string figure (spec.json measured_state: that figure is the constructed command string, not this file's raw size)"
+AC8_BODY="$(cat "$AC8_FILE" 2>/dev/null)"
+assert_eq "#140 AC8: the tracked file staged as a heredoc body in the same Bash call, followed by git add -A after the real terminator -> deny" \
+  "$(sub_verdict "$P4" "cat <<'PIPELINE_140_EOF'
+$AC8_BODY
+PIPELINE_140_EOF
+$HD_BLANKET")" "deny"
+
+# =================================================================================================
+suite "#140 AC9: the <<- tab-strip mechanism discriminates rather than leaving <<- unhandled or blanket-denying it"
+# =================================================================================================
+assert_eq "#140 AC9: a BALANCED-quote body inside a <<- heredoc (TAB-indented terminator), followed by git add -A after the real terminator -> deny (the AC4-equivalent discrimination proof for the newly-introduced dash-strip mechanism)" \
+  "$(hd_verdict 'cat <<-EOF' "$HD_BAL" "${HD_TAB}EOF" "$HD_BLANKET")" "deny"
+
+# =================================================================================================
+suite "#140 AC10: no new false positive on the widened delimiter-spelling axis"
+# =================================================================================================
+assert_eq "#140 AC10: a <<- heredoc (TAB-indented terminator) followed by git add <path> after the real terminator -> none" \
+  "$(hd_verdict 'cat <<-EOF' "$HD_BAL" "${HD_TAB}EOF" "$HD_NARROW")" "none"
+assert_eq "#140 AC10: a single-quoted-delimiter <<'EOF' heredoc followed by git add <path> after the real terminator -> none" \
+  "$(hd_verdict "cat <<'EOF'" "$HD_BAL" 'EOF' "$HD_NARROW")" "none"
+
+# =================================================================================================
+suite "#140 AC11: named negative controls -- here-string and process substitution are NOT heredocs"
+# =================================================================================================
+# All four verdicts taken verbatim from SecOps's round-1 real-shell-plus-recording-git-shim oracle
+# (review.secops.json concerns[1]), re-verified against the fixed gate rather than re-derived here.
+assert_eq "#140 AC11(a): here-string with a genuine 'git add -A' STRING operand (fed to cat's stdin; no git process ever runs) -> none" \
+  "$(sub_verdict "$P4" "cat <<< 'git add -A'")" "none"
+assert_eq "#140 AC11(b): a here-string whose quote is deliberately left unterminated across a line, trailing git add -A -> none (real bash: the whole construction is a syntax error and nothing ever executes)" \
+  "$(sub_verdict "$P4" "cat <<< 'unterminated
+git add -A")" "none"
+assert_eq "#140 AC11(c): process substitution wrapping a real git add -A -> deny" \
+  "$(sub_verdict "$P4" 'diff <(git add -A) /dev/null')" "deny"
+assert_eq "#140 AC11(d): a narrow-stage-inside-process-substitution / blanket-stage-outside combination -> deny" \
+  "$(sub_verdict "$P4" 'diff <(git add x.txt) /dev/null; git add -A')" "deny"
+
+# =================================================================================================
+suite "#140 AC12: the unquoted-introducer coarse \$( / backtick guard (SecOps's Phase 2.5 VETO, narrowed by BA's Phase 4 round-4 ruling)"
+# =================================================================================================
+# Full body opacity (AC1-AC11) for an UNQUOTED heredoc introducer must not silently flip a
+# currently-denied live construction to 'none'. Cells (a)-(d) are verbatim from
+# secops-2.5-ruling.json's required_negative_and_positive_fixture_cells (spec.json AC12). Cells
+# (e)-(g) are BA's Phase 4 round-4 ruling (spec.json AC12's "PHASE 4 RULING" paragraph): bare
+# '${' is REMOVED from the coarse deny-outright trigger set, because bare '${...}' parameter
+# expansion cannot itself execute a command -- only a LITERAL '$(' or backtick NESTED inside the
+# braces can, and that nested substring is still independently caught by the unmodified '$('/
+# backtick scan regardless of whether it sits inside '${...}' or not. This ruling directly
+# responds to DBA's and QA's own reproduced false-positive denials on ordinary correct git
+# workflows (peer-review.dba.json concerns[0], peer-review.qa.json QA-1).
+AC12_DOLLAR_BLANKET="before
+\$(git add -A)
+after"
+AC12_DOLLAR_NARROW="before
+\$(git add plugins/pipeline/agents/dba.md)
+after"
+AC12_BACKTICK_BLANKET="before
+\`git add -A\`
+after"
+
+assert_eq "#140 AC12(a) [PRIMARY VETO-CLOSING PAIR]: unquoted <<EOF body containing \$(git add -A), no terminator-adjacent trailing command at all -> deny post-fix (already deny pre-fix via the accidental top-level '(' -separator mechanism; full opacity with no guard would silently flip this to 'none')" \
+  "$(sub_verdict "$P4" "cat <<EOF
+$AC12_DOLLAR_BLANKET
+EOF")" "deny"
+assert_eq "#140 AC12(b) [discrimination proof, the AC5/AC10-equivalent for AC12]: unquoted <<EOF body containing \$(git add <path>) (narrow) -> none post-fix, proving the guard discriminates blanket vs narrow rather than blanket-denying every '\$(' occurrence regardless of content" \
+  "$(sub_verdict "$P4" "cat <<EOF
+$AC12_DOLLAR_NARROW
+EOF")" "none"
+assert_eq "#140 AC12(c) [genuinely NEW protection, not preserved: 'none' pre-fix because backtick is not in the scanner's structural-character set today]: unquoted <<EOF body containing backtick-wrapped git add -A -> deny post-fix" \
+  "$(sub_verdict "$P4" "cat <<EOF
+$AC12_BACKTICK_BLANKET
+EOF")" "deny"
+assert_eq "#140 AC12(d)/1 [non-weakening guard]: quoted-delimiter <<'EOF' body containing \$(git add -A) -> none post-fix (full opacity for a QUOTED delimiter is correct per AC1/R1 and must not be second-guessed by AC12's narrower unquoted-only guard)" \
+  "$(sub_verdict "$P4" "cat <<'EOF'
+$AC12_DOLLAR_BLANKET
+EOF")" "none"
+assert_eq "#140 AC12(d)/2 [non-weakening guard]: quoted-delimiter <<'EOF' body containing backtick-wrapped git add -A -> none post-fix" \
+  "$(sub_verdict "$P4" "cat <<'EOF'
+$AC12_BACKTICK_BLANKET
+EOF")" "none"
+# RETIRED, NOT PATCHED FORWARD: the row that used to live here ("#140 AC12 EXTRA") asserted a bare
+# unquoted <<EOF body containing only \${SOMEVAR}, with NO trailing command and no other "git" text
+# anywhere in the call, denies. It was DOUBLY WRONG at this rework: (1) it was always structurally
+# UNREACHABLE -- pre-tool-use.sh's own pre-existing "(3) nothing without `git` in it can stage
+# anything" prefilter (`case $_COMMAND in *git*) ;; *) exit 0 ;; esac`) exits the hook before
+# `_scan` ever runs, because that fixture's whole command string carries no "git" substring at all
+# (QA panel finding QA-3, peer-review.qa.json); and (2) BA's round-4 ruling now REMOVES bare '${'
+# from AC12's trigger set entirely, so even if it were reachable its expected verdict would have
+# flipped from 'deny' to 'none'. Patching its expected verdict forward would have shipped a second
+# generation of the same unreachable-row mistake. It is deleted rather than fixed so a future
+# reader does not go looking for it; cells (e)-(g) below are what replace it, each built so the
+# whole command genuinely contains a "git" substring and is therefore actually driven through the
+# scanner rather than short-circuited by the prefilter.
+AC12_BRACE_NARROW="before
+\${VAR}
+after"
+assert_eq "#140 AC12(e) [BA round-4 ruling, discrimination-equivalent to AC5/AC10/AC12(b)]: unquoted <<EOF body containing bare \${VAR} (no \$( or backtick anywhere in the body), followed by a narrow git add <path> after the real terminator -> none post-fix -- proves '\${' is no longer an independent deny trigger" \
+  "$(hd_verdict 'cat <<EOF' "$AC12_BRACE_NARROW" 'EOF' "$HD_NARROW")" "none"
+
+# (f)'s body deliberately carries its OWN "git" text (as inert prose, never an invocation) so the
+# whole command reaches the scanner through the pre-existing *git* prefilter on its own merits --
+# unlike the retired row above, which relied on nobody noticing it never got that far. Without this
+# the "no trailing git command at all" sub-cell would be vacuous in exactly the way the retired row
+# was, only for a different reason (no "git" substring anywhere in the whole command, instead of an
+# unreachable fixture), and this rework exists specifically to stop shipping that same mistake twice.
+AC12_BRACE_GITWORD="before
+Release \${VERSION} notes; see git changelog for details
+after"
+assert_contains "#140 AC12(f) VACUITY: the whole command genuinely contains a 'git' substring (so this cell is driven through the scanner via the pre-existing *git* prefilter rather than repeating the retired row's unreachable-fixture mistake)" \
+  "cat <<EOF
+$AC12_BRACE_GITWORD
+EOF" "git"
+assert_eq "#140 AC12(f)/1 [BA round-4 ruling, the direct DBA/QA-reproduced false-positive fix]: unquoted <<EOF body containing bare \${VERSION} and inert 'git' prose text, with NO trailing command of any kind after the real terminator -> none post-fix" \
+  "$(hd_verdict 'cat <<EOF' "$AC12_BRACE_GITWORD" 'EOF' '')" "none"
+assert_eq "#140 AC12(f)/2 [BA round-4 ruling, same, with a READ-ONLY trailing git command]: unquoted <<EOF body containing bare \${VAR}, followed only by git status --porcelain (a read-only command that stages nothing) -> none post-fix" \
+  "$(hd_verdict 'cat <<EOF' "$AC12_BRACE_NARROW" 'EOF' 'git status --porcelain')" "none"
+
+AC12_BRACE_NESTED_DOLLAR="before
+\${x:-\$(git add -A)}
+after"
+assert_eq "#140 AC12(g) [BA round-4 ruling, no coverage lost]: unquoted <<EOF body containing \${x:-\$(git add -A)} (a literal \$( nested inside a \${...} construct) -> deny post-fix -- proves removing '\${' as an independent trigger loses no coverage, because the literal '\$(' substring inside the braces is still caught by the unmodified '\$(' scan" \
+  "$(sub_verdict "$P4" "cat <<EOF
+$AC12_BRACE_NESTED_DOLLAR
+EOF")" "deny"
+
+# =================================================================================================
+suite "#140 AC7 SUPPLEMENT: the many-blank-line corpus, built and measured rather than asserted in a comment"
+# =================================================================================================
+# hooks/pre-tool-use.sh's own '$_NL'*-arm comment (the arm that pulls the newline dispatch out of
+# the ';;'/'&&'/'(('/'))' bundle so `_hdpending` can be checked on every newline, including the
+# first of a blank-line pair -- design.json's own "Sketch A's own named cost" residual_risks entry)
+# says the split "trades away the paired-newline fast path, so AC7's regression budget is
+# re-measured post-fix on a many-blank-line corpus rather than carried over." QA verified (panel
+# finding QA-4, peer-review.qa.json) that no such corpus existed anywhere in this file: dens_pad()'s
+# six kinds (quotes/minified/json/code/prose/run) never emit two consecutive newlines, and no other
+# fixture in either suite does either. QA does not own pre-tool-use.sh and this rework's scope is
+# this test file only, so the source comment itself is left exactly as written; what QA CAN do, and
+# does here, is stop leaving the comment's claim unbacked by any test in the file it is a comment
+# INSIDE -- this block builds the corpus the comment names and takes the measurement live, on every
+# run, rather than trusting a number transcribed once into a comment.
+blank_body() { # <n> -> n-1 blank lines then a one-byte sentinel line, i.e. n physical heredoc-body
+  # lines with n-1 embedded newlines. The sentinel is load-bearing, not decorative: a body that is
+  # PURE newlines is entirely TRAILING newlines, and `$(...)` command substitution strips every
+  # trailing newline from what it captures -- `BLANK_LINES="$(blank_body "$n")"` silently collapsed
+  # to the empty string for every n before this fix, which the VACUITY row below caught (it read 0
+  # embedded newlines at every n, not the expected n-1) rather than the timing rows, which stayed
+  # green throughout because "none" is also the right verdict for an accidentally-empty heredoc body.
+  "$GATE_REAL_NODE" -e 'process.stdout.write("\n".repeat(Math.max(0, Number(process.argv[1]) - 1)) + "x")' "$1"
+}
+BLANK_WORST_MS=0
+BLANK_SLOW=""
+BLANK_REGRESS=""
+BLANK_ROWS=""
+for n in 1536 3072 6144 12288; do
+  BLANK_LINES="$(blank_body "$n")"
+  assert_eq "#140 AC7 SUPPLEMENT VACUITY: the ${n}-line pad really carries $((n - 1)) embedded newlines (a pad that collapsed to one line would make the timing row below measure the wrong shape)" \
+    "$(printf '%s' "$BLANK_LINES" | tr -cd '\n' | wc -c | tr -d ' ')" "$((n - 1))"
+  a="$(len_now_ms)"
+  v="$(sub_verdict "$P4" "cat > notes.md <<'EOF'
+$BLANK_LINES
+EOF
+git status --porcelain")"
+  b="$(len_now_ms)"
+  el=$(( b - a ))
+  [[ "$el" -gt "$BLANK_WORST_MS" ]] && BLANK_WORST_MS="$el"
+  [[ "$el" -lt "$BYPASS_BOUND_MS" ]] || BLANK_SLOW="$BLANK_SLOW
+${n} blank lines -> ${el} ms"
+  [[ "$el" -lt "$REGRESSION_BUDGET_MS" ]] || BLANK_REGRESS="$BLANK_REGRESS
+${n} blank lines -> ${el} ms"
+  BLANK_ROWS="$BLANK_ROWS ${n}=${el}ms;"
+  assert_eq "#140 AC7 SUPPLEMENT: a ${n}-blank-line heredoc body followed by a read-only git status --porcelain -> none (the paired-newline fast-path tradeoff must not change this verdict; a scanner that mis-tracked \`_hdpending\` across a blank-line-heavy body could flip this to deny or leave the body permanently opaque)" \
+    "$v" "none"
+done
+assert_eq "#140 AC7 SUPPLEMENT BYPASS: every many-blank-line probe above returned inside the ${LEN_TIMEOUT_S}s declared timeout (worst ${BLANK_WORST_MS} ms)" "$BLANK_SLOW" ""
+assert_eq "#140 AC7 SUPPLEMENT REGRESSION: and inside the ${REGRESSION_BUDGET_MS} ms absolute budget (worst ${BLANK_WORST_MS} ms)" "$BLANK_REGRESS" ""
+record "#140 AC7 SUPPLEMENT: many-blank-line corpus timing, measured live on THIS run rather than transcribed from a prior session:${BLANK_ROWS} worst ${BLANK_WORST_MS} ms, on $(uname -sr). (Provenance only, not a pass/fail bound: QA's own Phase 4 panel review, a different host and a different run on 2026-09-03, measured post-fix ~163/158/158/176 ms and pre-fix ~172/161/159/165 ms at n=1536/3072/6144/12288; those figures do not carry over verbatim to this host or this run, per this file's own DENSITY AXIS block's rule that a rendered measurement measures the runner.)"
+
+# =================================================================================================
+suite "#140 AC13: the terminator-recognition refill-boundary sweep (SecOps's Phase 4 panel VETO + the Phase 2.5 judge's required property, design.json residual_risks)"
+# =================================================================================================
+#
+# THE DEFECT THIS SWEEP TARGETS, restated from SecOps's peer-review.secops.json vulnerabilities[0].
+# `_hd_skip`'s terminator-recognition sets `_hdtoolong=1` (pre-tool-use.sh:999) whenever the
+# CURRENT scan window merely holds no newline -- i.e. whenever a candidate line merely STRADDLES an
+# internal refill/window boundary, not only when it genuinely exceeds a whole window as the
+# adjacent comment claims. When set, the terminator comparison for that line is suppressed and
+# heredoc opacity silently runs to the END of the command, so a trailing `git add -A` after the
+# REAL terminator is never scanned and is ALLOWED. This is a deny->allow REGRESSION against
+# origin/main on live, ordinary input, and none of AC1-AC12's fixed-length fixtures can see it,
+# because the internal window is 512 bytes (_CW, pre-tool-use.sh:701) and AC1-AC12 exercise only a
+# handful of fixed lengths that happen not to straddle it.
+#
+# THE REQUIRED PROPERTY HAS TWO HALVES, PER SECOPS'S AND THE JUDGE'S OWN RULING, AND ONLY ONE IS
+# CHEAP: (i) a line that IS the real terminator must be recognised however the window/refill
+# boundary falls, and (ii) a body-line FRAGMENT (a candidate line that only straddles a boundary, or
+# a near-miss/substring of the delimiter) must never be mistaken FOR the terminator. A fix that buys
+# (i) by relaxing (ii) -- e.g. by comparing the terminator loosely, or by treating any line that
+# merely CONTAINS the delimiter text as a match -- does not satisfy this. The sweep below is (i);
+# the two negative-control rows after it are (ii).
+#
+# THE SHAPE AND RANGE ARE SECOPS'S OWN (peer-review.secops.json concerns[0]/vulnerabilities[0]):
+# `cat <<-EOF` / 6 prose lines / N pad bytes / a TAB-indented `EOF` terminator / `git add -A`,
+# swept one byte at a time. SecOps's own sweep was N=0..600 (601 consecutive lengths); this rework
+# extends the upper bound so the swept RANGE spans at least two full internal window periods
+# (2 x 512 = 1024 bytes) rather than one, per the judge's ruling in design.json's residual_risks
+# ("swept across at least 1100 consecutive heredoc-body lengths spanning at least 2 full internal
+# scanner-window periods"). N=0..1099 is 1100 consecutive lengths spanning a 1099-byte range, which
+# exceeds 1024 -- so by construction this sweep crosses at least two window-boundary events
+# regardless of where in the 512-byte period this fixture's own fixed prose prefix happens to land
+# a given N's terminator line, rather than relying on N=0..600 having gotten lucky.
+HD13_PROSE="This document explains the deployment process for the platform.
+It covers configuration, migrations, and rollback procedures in detail.
+Refer to the runbook for step by step operator instructions and checks.
+Contact the on call engineer if verification fails during any release.
+Keep this file updated whenever the pipeline configuration changes meaningfully.
+Nothing in this note should be treated as a command to run automatically."
+# Built with plain shell slicing rather than a per-iteration node call: 1100 iterations already
+# pays 1100 real gate invocations (two node starts and a resolver run apiece, per this file's own
+# DENSITY AXIS block's cost accounting), and padding each one through node as well would double
+# that cost for no discriminating value -- the pad's CONTENT never matters to this defect, only its
+# LENGTH does.
+HD13_PADSRC="$(head -c 1100 /dev/zero | tr '\0' 'z')"
+hd13_cmd() {  # <n pad bytes> -> the full command string for that pad length
+  printf 'cat <<-EOF\n%s\n%s\n\tEOF\ngit add -A' "$HD13_PROSE" "${HD13_PADSRC:0:$1}"
+}
+
+# MUTATION-BATTERY EQUIVALENT, DOCUMENTED RATHER THAN EXECUTED INLINE (test-discipline rule 12/13:
+# a contract should be provably falsifiable before it is handed to Dev). SecOps already ran the
+# battery this rework would otherwise re-run: flipping `_hdtoolong=1` to `_hdtoolong=0` in
+# `_hd_skip`'s refill branch (pre-tool-use.sh:999) SURVIVES all 25 re-derived AC1-AC12 rows (25/25
+# still pass, peer-review.secops.json vulnerabilities[0]) while changing behaviour on live input --
+# no acceptance criterion before this rework constrained that term at all. The sweep below is what
+# makes that exact mutation OBSERVABLE: it reddens every N in the swept range where opacity now
+# fails to close at the real terminator, which AC1-AC12's handful of fixed lengths cannot reach by
+# construction. A second mutation this sweep must also catch, per property half (ii): loosening the
+# terminator comparison from exact equality to a substring/prefix match would flip the two negative
+# controls below from 'none' to 'deny' (or, on some implementations, still 'deny' but for the wrong
+# reason -- stopping the body early rather than genuinely reaching the real terminator) without
+# necessarily reddening the sweep above, which is why (i) and (ii) are both asserted rather than
+# either alone.
+HD13_FAIL=""
+for n in $(seq 0 1099); do
+  v="$(sub_verdict "$P4" "$(hd13_cmd "$n")")"
+  [[ "$v" == "deny" ]] || HD13_FAIL="$HD13_FAIL $n"
+  assert_eq "#140 AC13: refill-boundary sweep, pad=${n} bytes (cat <<-EOF / 6 prose lines / ${n} pad bytes / TAB-EOF / git add -A) -> deny" \
+    "$v" "deny"
+done
+record "#140 AC13: swept 1100 consecutive pad lengths (0..1099, spanning >1024 bytes = >2 internal 512-byte scanner-window periods). Lengths returning the wrong verdict (none instead of deny) at the reviewed commit:${HD13_FAIL:- none}"
+
+# THE REAL-SHELL-ORACLE NON-ZERO CONTROL, reusing this file's own real_argv() idiom (defined above,
+# THE ORACLE section) rather than a second implementation of the same shim. Sampled at pad=457,
+# inside the swept range, because it is the exact offset SecOps's own oracle run named as the first
+# flip on their fixture shape (peer-review.secops.json vulnerabilities[0]); this rework's own prose
+# differs in length from SecOps's, so this fixture's flip point is not guaranteed to land on the
+# same N (empirically it does not -- see HD13_FAIL above for where it actually falls), but pad=457
+# is still inside the swept range either way and the assertion below is what proves the gate's
+# 'deny' verdict at that length is not a false positive against a shell that never runs the command.
+assert_eq "#140 AC13 ORACLE NON-ZERO CONTROL: at pad=457 bytes (inside the swept range), real bash genuinely invokes 'git add -A' -- the deny above is a live defect against a real shell, not an artifact of the gate's own (possibly also wrong) reading" \
+  "$(real_argv "$(hd13_cmd 457)")" "2 [add] [-A]"
+
+# PROPERTY HALF (ii), THE PAIRED NEGATIVE CONTROL: a body line that merely RESEMBLES the delimiter
+# must not be mistaken for it. Both rows place a literal, unquoted `git add -A` as inert BODY TEXT
+# before the real (tab-indented) terminator; if `_hd_skip`'s terminator comparison ever loosened
+# from exact equality to something that matches a near-miss or a fragment, that embedded text would
+# stop being body content and would be read as its own invocation -- flipping the expected 'none'
+# to 'deny', and for a DIFFERENT reason than AC13's sweep above (an over-eager match, not a missed
+# one), which is why this is asserted as its own pair rather than inferred from the sweep.
+HD_TAB_TERM="${HD_TAB}EOF"
+assert_eq "#140 AC13 NEGATIVE CONTROL (near-miss): a body line that is one byte longer than the delimiter (EOF2, delimiter EOF) must not be mistaken for the real terminator -- opacity continues past it to the real tab-indented EOF, so the 'git add -A' written as inert body TEXT before that point stays inert and the call is allowed" \
+  "$(sub_verdict "$P4" "cat <<-EOF
+before
+EOF2
+git add -A
+$HD_TAB_TERM
+echo done")" "none"
+assert_eq "#140 AC13 NEGATIVE CONTROL (embedded fragment): a body line where the delimiter text appears only as a FRAGMENT of a longer line (xEOFx is not solely 'EOF') must not close the body early -- the embedded 'git add -A' stays inert body text and the call is allowed" \
+  "$(sub_verdict "$P4" "cat <<-EOF
+before
+xEOFx
+git add -A
+$HD_TAB_TERM
+echo done")" "none"
+
+# =================================================================================================
+suite "#140/#146 PINNING: the \$( hand-back + odd-quote gap -- a KNOWN, ACCEPTED, DISCLOSED gap, NOT a passing security property"
+# =================================================================================================
+#
+# THIS BLOCK PINS CURRENT BEHAVIOR, IT DOES NOT ASSERT SAFETY. Per design.json's round-5 BA ruling
+# (residual_risks, the "PHASE 4 BA RULING (round 5 delta)" entry on QA-R2-1/DBA concerns[0]) and
+# tracking issue #146: AC12's `$(` hand-back deliberately ends heredoc-body opacity at a literal
+# `$(` and resumes ORDINARY top-level scanning, unconsumed, so AC12(b)'s narrow-vs-blanket
+# discrimination can see the substitution's own content. When the SAME unquoted heredoc body also
+# carries an odd (unbalanced) quote -- on the same body line as the `$(` or on an earlier/later
+# line -- the resumed top-level scan opens a quote region at that odd quote and swallows the real
+# terminator line and everything after it, including a trailing blanket `git add -A`. BA ruled this
+# ACCEPTED AS A DISCLOSED, PERMANENT LIMITATION (not a #140 defect, not sent to Dev): no safe
+# narrowing exists that does not either break AC12(b)'s discrimination requirement or require real
+# tokenization of the substitution's interior (the exact bar SecOps's round-3 VETO rejected as more
+# than #140's minimum acceptable fix). A row below reading "none" is NOT a passing security
+# property -- it is the gap, recorded so a future change to the `$(` hand-back mechanism cannot
+# silently narrow OR widen it without this suite noticing. See issue #146 for the full record and
+# https://github.com/nsmedia-io/agent-pipeline/issues/145#issuecomment-5534287766 for the warning
+# that #145's currently-written backtick remedy would import this exact hole into the backtick arm.
+#
+# Each pair: a body carrying the odd quote (pins the disclosed 'none' gap) beside its
+# quote-BALANCED twin (same $(...) content, quote count evened out) which must stay 'deny' -- this
+# is AC12(a)'s own discrimination shape, so the pair discriminates a leak from a working guard
+# rather than merely firing once. Swept over the 2x2 the round-5 ruling names: {odd single-quote,
+# odd double-quote} x {bare <<EOF, <<-EOF with a TAB-indented terminator}.
+
+GAP146_SQ_ODD="before
+\$(echo hi) it's here
+after"
+GAP146_SQ_BAL="before
+\$(echo hi) it's fine, it's here
+after"
+GAP146_DQ_ODD="before
+\$(echo hi) say \"hi here
+after"
+GAP146_DQ_BAL="before
+\$(echo hi) say \"hi\" here
+after"
+
+assert_eq "#140/#146 PIN (bare <<EOF, odd single-quote body + \$(echo hi), trailing blanket 'git add -A' after the real terminator) -> none -- KNOWN ACCEPTED GAP, issue #146. NOT a passing security property: the odd quote reopened by the \$( hand-back swallows the real terminator and the trailing git add -A" \
+  "$(hd_verdict 'cat <<EOF' "$GAP146_SQ_ODD" 'EOF' "$HD_BLANKET")" "none"
+assert_eq "#140/#146 PIN CONTROL (same body, quote count evened to 2 apostrophes) -> deny -- proves the row above is the odd-parity leak and not the guard simply never firing" \
+  "$(hd_verdict 'cat <<EOF' "$GAP146_SQ_BAL" 'EOF' "$HD_BLANKET")" "deny"
+
+assert_eq "#140/#146 PIN (<<-EOF, TAB-indented terminator, odd single-quote body + \$(echo hi), trailing blanket) -> none -- KNOWN ACCEPTED GAP, issue #146, same leak under the dash-strip spelling" \
+  "$(hd_verdict 'cat <<-EOF' "$GAP146_SQ_ODD" "${HD_TAB}EOF" "$HD_BLANKET")" "none"
+assert_eq "#140/#146 PIN CONTROL (<<-EOF, same body quote-balanced) -> deny" \
+  "$(hd_verdict 'cat <<-EOF' "$GAP146_SQ_BAL" "${HD_TAB}EOF" "$HD_BLANKET")" "deny"
+
+assert_eq "#140/#146 PIN (bare <<EOF, odd double-quote body + \$(echo hi), trailing blanket) -> none -- KNOWN ACCEPTED GAP, issue #146, the odd-double-quote twin of the odd-single-quote reproduction" \
+  "$(hd_verdict 'cat <<EOF' "$GAP146_DQ_ODD" 'EOF' "$HD_BLANKET")" "none"
+assert_eq "#140/#146 PIN CONTROL (same body, quote count evened to 2 double-quotes) -> deny" \
+  "$(hd_verdict 'cat <<EOF' "$GAP146_DQ_BAL" 'EOF' "$HD_BLANKET")" "deny"
+
+assert_eq "#140/#146 PIN (<<-EOF, TAB-indented terminator, odd double-quote body + \$(echo hi), trailing blanket) -> none -- KNOWN ACCEPTED GAP, issue #146" \
+  "$(hd_verdict 'cat <<-EOF' "$GAP146_DQ_ODD" "${HD_TAB}EOF" "$HD_BLANKET")" "none"
+assert_eq "#140/#146 PIN CONTROL (<<-EOF, same body quote-balanced) -> deny" \
+  "$(hd_verdict 'cat <<-EOF' "$GAP146_DQ_BAL" "${HD_TAB}EOF" "$HD_BLANKET")" "deny"
+
+# THE BACKTICK CONTROL ROW (design.json round-5 ruling, item 4; QA-R2-1's own repro): the identical
+# odd-quote shape, but with a backtick in place of `$(`, must stay 'deny' -- backtick has no hand-
+# back at all (AC12's coarse rule denies outright whenever a backtick appears, unconditionally, see
+# AC12(c) above), so it is structurally IMMUNE to this specific leak today. This row is the one that
+# would go RED the day anyone implements issue #145's currently-written remedy ("give the scanner a
+# bounded backtick-pair recognizer... hand content back to ordinary scanning the same way `$(`
+# already does") without first solving this cross, per the warning BA posted to #145. It is the
+# only thing in this suite that would catch that specific regression before merge.
+GAP146_BACKTICK_ODD="before
+\`echo hi\` it's here
+after"
+assert_eq "#140/#146 BACKTICK CONTROL: identical odd single-quote body, backtick instead of \$(, trailing blanket 'git add -A' -> deny (NOT none) -- backtick denies outright rather than handing back, so it cannot reopen this leak. Would redden if #145's remedy is implemented as currently written without solving this cross first" \
+  "$(hd_verdict 'cat <<EOF' "$GAP146_BACKTICK_ODD" 'EOF' "$HD_BLANKET")" "deny"
+
+# REAL-SHELL ORACLE CONFIRMATION for the primary cell (bare <<EOF, odd single-quote), matching how
+# DBA and QA established this gap at the panel (peer-review.dba.json concerns[0], peer-review.qa.json
+# QA-R2-1): the gate's 'none' verdict above is confirmed against a real shell, not merely read off
+# the gate's own (possibly self-consistent but wrong) logic. Reuses this file's own real_argv()
+# PATH-shimmed recording-git oracle (defined above, THE ORACLE section) rather than a second
+# implementation of the same shim.
+assert_eq "#140/#146 PRIMARY CELL ORACLE NON-ZERO CONTROL: real /bin/sh genuinely invokes 'git add -A' for the exact command the gate answers 'none' for above -- the gap is a live defect against a real shell, not an artifact of the gate's own reading" \
+  "$(real_argv "cat <<EOF
+$GAP146_SQ_ODD
+EOF
+$HD_BLANKET")" "2 [add] [-A]"
+assert_eq "#140/#146 PRIMARY CELL ORACLE, DISCRIMINATION CHECK: the quote-BALANCED twin (asserted 'deny' above) does NOT change what a real shell does here -- it still genuinely invokes git add -A, exactly like the odd-quote row. This is expected and correct: real bash was never affected by this leak in the first place (heredoc terminator recognition in a real shell does not depend on body quote parity at all); the divergence this whole block pins is entirely in the GATE's own scanner, which is why the gate row above must flip from none to deny across the pair while the oracle reading here does not need to" \
+  "$(real_argv "cat <<EOF
+$GAP146_SQ_BAL
+EOF
+$HD_BLANKET")" "2 [add] [-A]"
+
+# =================================================================================================
+suite "#140/#145 PINNING: the backtick over-denial tradeoff -- an ACCEPTED TRADEOFF, deny-by-design"
+# =================================================================================================
+#
+# Per design.json's round-4/round-5 BA rulings (spec.json AC12's "PHASE 4 RULING" paragraph) and
+# tracking issue #145: AC12's coarse deny-outright rule for ANY backtick occurring anywhere inside
+# an unquoted heredoc body is a real, live false-positive class against ordinary correct git
+# workflows (inline code-fence prose, e.g. a body mentioning `` `git status` `` for its own literal
+# content). It is ACCEPTED AS-IS rather than narrowed, because backtick is not a member of the
+# scanner's `_STRUCT` set at all -- unlike `$(`, there is no existing mechanism to hand control back
+# and let ordinary top-level scanning discriminate blanket-vs-narrow content inside a backtick pair,
+# and building one is exactly the bar SecOps's round-3 VETO ruling rejected as more than the minimum
+# acceptable fix. This block pins BOTH HALVES of that trade-off (this file's own precedent, THE
+# DISCLOSED OVER-DENIAL block above: "The over-denial had only prose, so a later change that widened
+# or narrowed it would redden nothing. These rows are that missing half.") -- until now this
+# tradeoff had prose only (design.json, spec.json AC12, issue #145) and no test in either direction.
+#
+# Body: a single-line unquoted heredoc body containing one inert backtick-wrapped phrase,
+# reproducing design.json's own residual_risks measurement verbatim (`` Run `git status` to check.
+# ``), which also carries a literal "git" substring so the whole command reaches the scanner through
+# the pre-existing *git* prefilter regardless of what trailing command (if any) follows -- avoiding
+# the retired-row unreachable-fixture mistake AC12(f)'s own comment names.
+TRADEOFF145_BODY="Run \`git status\` to check."
+assert_contains "#140/#145 PIN VACUITY: the body itself genuinely contains a 'git' substring, so the no-trailing-command cell below is driven through the scanner via the pre-existing *git* prefilter rather than short-circuited before ever reaching it" \
+  "$TRADEOFF145_BODY" "git"
+
+assert_eq "#140/#145 PIN (a): unquoted heredoc body with an inert backtick, followed by a NARROW 'git add <path>' after the real terminator -> deny -- ACCEPTED TRADEOFF, issue #145: a real, correct narrow stage is refused solely because the body mentions a backtick for its own content" \
+  "$(hd_verdict 'cat <<EOF' "$TRADEOFF145_BODY" 'EOF' "$HD_NARROW")" "deny"
+assert_eq "#140/#145 PIN (b): same body, followed by a READ-ONLY 'git status --porcelain' (stages nothing) -> deny -- ACCEPTED TRADEOFF, issue #145" \
+  "$(hd_verdict 'cat <<EOF' "$TRADEOFF145_BODY" 'EOF' 'git status --porcelain')" "deny"
+TRADEOFF145_COMMIT_TAIL="git commit -m 'msg' plugins/pipeline/agents/dba.md"
+assert_eq "#140/#145 PIN (c): same body, followed by a scoped 'git commit -m <msg> <path>' after the real terminator -> deny -- ACCEPTED TRADEOFF, issue #145: a commit naming its own explicit pathspec is refused the same as the blanket cases" \
+  "$(hd_verdict 'cat <<EOF' "$TRADEOFF145_BODY" 'EOF' "$TRADEOFF145_COMMIT_TAIL")" "deny"
+assert_eq "#140/#145 PIN (d): same body, with NO trailing git command at all after the real terminator -> deny -- ACCEPTED TRADEOFF, issue #145: the body's own inert backtick alone is enough to deny, reachable only because the body itself carries the 'git' substring the VACUITY row above confirms" \
+  "$(hd_verdict 'cat <<EOF' "$TRADEOFF145_BODY" 'EOF' '')" "deny"
+
+# Discrimination twin -- so these four rows pin a genuine deny-by-design rather than a guard that
+# fires unconditionally on ANY heredoc body regardless of content: a quoted delimiter suppresses
+# $-expansion entirely in a real shell (AC1/R1), so the coarse backtick rule correctly does not
+# apply there. This exact cell is already asserted as AC12(d)/2 above (quoted-delimiter <<'EOF'
+# body containing a backtick-wrapped git add -A -> none); cited here rather than duplicated per
+# design.json's own note that AC12(d) already covers one of these four.
+record "#140/#145 PIN: the discrimination twin for this block (quoted-delimiter <<'EOF' + backtick -> none) is already asserted above as AC12(d)/2 and is cited rather than duplicated"
 
 finish
