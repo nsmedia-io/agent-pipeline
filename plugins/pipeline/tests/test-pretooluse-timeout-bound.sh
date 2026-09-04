@@ -607,8 +607,11 @@ assert_eq "AC3/AC4: and how many it DROVE, in the form \`drove <N>\`" \
   "$([[ "$RULE_DRIVEN" =~ ^[0-9]+$ && "$RULE_DRIVEN" -ge 1 ]] && echo reported || echo "NOT REPORTED OR ZERO: [$RULE_DRIVEN]")" "reported"
 
 LIVE_ENUM="$(tb_enumerate_count "$MAT" "${RULE_FLOOR:-2000}")"
-assert_eq "AC4: the published enumerated count equals an INDEPENDENT enumeration of the materialized tree at the published floor (${RULE_FLOOR:-?} bytes) -- a frozen list diverges here the moment the corpus grows, which is the tripwire AC4 asks for" \
-  "$RULE_ENUM" "$LIVE_ENUM"
+# ONE DIRECTION, as in test-pretooluse-gate-verdicts.sh AC4: growth past the published count is
+# the tripwire (the bound could be undersized); shrinkage is not, and used to redden this row on
+# every archive deletion. The growth control below still flips the enumerator.
+assert_eq "AC4: an INDEPENDENT enumeration of the materialized tree at the published floor (${RULE_FLOOR:-?} bytes) is at most the published count (${RULE_ENUM:-?}) -- a frozen list diverges here the moment the corpus grows, which is the tripwire AC4 asks for" \
+  "$([[ "$LIVE_ENUM" =~ ^[0-9]+$ && "$RULE_ENUM" =~ ^[0-9]+$ && "$LIVE_ENUM" -le "$RULE_ENUM" ]] && echo within-sizing || echo "GREW: live $LIVE_ENUM > published ${RULE_ENUM:-?}")" "within-sizing"
 
 # AC4's own deciding observation, and the non-zero control on the enumerator: add one tracked file
 # larger than today's largest and require the count to change and the file to rank first by length.
