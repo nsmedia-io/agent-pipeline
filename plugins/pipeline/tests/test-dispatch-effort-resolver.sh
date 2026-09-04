@@ -124,24 +124,35 @@ done
 assert_eq "the workflow surface NEVER omits, for any role at any tier (the omission is the bug)" \
   "$(printf '%s' "$WF_OMITS")" ""
 assert_eq "an UNROWED role emits its frontmatter value explicitly rather than omitting" \
-  "$(emission "$R_NONE" dba standard 4 --surface workflow)" "emit:high"
+  "$(emission "$R_NONE" librarian standard 5 --surface workflow)" "emit:medium"
 
-# ---- pins: config cannot reach secops or qa --------------------------------
+# ---- effort is TIERED on the Phase 4 panel, and no role is pinned (0.40.0) ----------------
+# The earlier pin (SecOps xhigh at every tier, QA high) was a security ruling from #101 q2. It
+# was retired when the materiality rule took over the risk it carried: the archive showed the
+# pin's cost as the largest consumer of run time. Both directions are pinned here: the tiered
+# rows resolve as stated, and config can now move these two roles like any other.
+assert_eq "SecOps runs xhigh on an ARCHITECTURAL panel" \
+  "$(emission "$R_NONE" secops architectural 4 --surface workflow)" "emit:xhigh"
+assert_eq "SecOps runs high on a STANDARD panel" \
+  "$(emission "$R_NONE" secops standard 4 --surface workflow)" "emit:high"
+assert_eq "SecOps runs medium on a TRIVIAL panel" \
+  "$(emission "$R_NONE" secops trivial 4 --surface workflow)" "emit:medium"
+assert_eq "QA runs high on an ARCHITECTURAL panel" \
+  "$(emission "$R_NONE" qa architectural 4 --surface workflow)" "emit:high"
+assert_eq "QA runs medium on a STANDARD panel" \
+  "$(emission "$R_NONE" qa standard 4 --surface workflow)" "emit:medium"
+assert_eq "DBA runs medium on a STANDARD panel (frontmatter high applies at architectural)" \
+  "$(emission "$R_NONE" dba standard 4 --surface workflow)/$(emission "$R_NONE" dba architectural 4 --surface workflow)" "emit:medium/emit:high"
+assert_eq "a tier row does not leak into another phase: SecOps at Phase 2 is its frontmatter" \
+  "$(emission "$R_NONE" secops architectural 2 --surface workflow)" "emit:xhigh"
 R_LOW_SEC="$(new_root lowsec '{"dispatchEfforts":{"secops":"low"}}')"
-R_LOW_QA="$(new_root lowqa '{"dispatchEfforts":{"qa":"low"}}')"
-for tier in $TIERS; do
-  assert_eq "config cannot lower pinned secops on the $tier tier" \
-    "$(emission "$R_LOW_SEC" secops "$tier" 4 --surface workflow)" "emit:xhigh"
-  assert_eq "config cannot lower pinned qa on the $tier tier" \
-    "$(emission "$R_LOW_QA" qa "$tier" 4 --surface workflow)" "emit:high"
-done
-assert_contains "an IGNORED config entry for a pinned role is REPORTED, never silently dropped" \
-  "$(e_stderr "$R_LOW_SEC" secops standard 4 --surface workflow)" "IGNORED"
-assert_contains "the pin is reported on the agent surface too" \
-  "$(e_stderr "$R_NONE" secops standard 4)" "pinned"
-# SecOps ruled xhigh at EVERY tier, rejecting the original "architectural only" proposal.
-assert_eq "SecOps holds xhigh at the TRIVIAL tier, which is the row the original ask lowered" \
-  "$(emission "$R_NONE" secops trivial 4 --surface workflow)" "emit:xhigh"
+R_HI_QA="$(new_root hiqa '{"dispatchEfforts":{"qa":"xhigh"}}')"
+assert_eq "config CAN lower secops now (the pin is gone)" \
+  "$(emission "$R_LOW_SEC" secops standard 4 --surface workflow)" "emit:low"
+assert_eq "and raise qa" \
+  "$(emission "$R_HI_QA" qa trivial 4 --surface workflow)" "emit:xhigh"
+assert_eq "no role reports itself pinned any more" \
+  "$(e_stderr "$R_NONE" secops standard 4 | grep -c pinned | tr -d ' ')" "0"
 
 # ---- non-pinned roles stay configurable in both directions -----------------
 R_RAISE="$(new_root raise '{"dispatchEfforts":{"librarian":"high"}}')"
@@ -176,7 +187,7 @@ assert_eq "a malformed phase is a caller bug" \
   "$(e_rc "$R_NONE" ba standard 99 --surface workflow)" "2"
 assert_eq "an unknown SURFACE is a caller bug, not a silent fallback to agent" \
   "$(e_rc "$R_NONE" ba standard 4 --surface nosuchsurface)" "2"
-assert_eq "a pinned role still exits 0 (a pin is a decision, not a failure)" \
+assert_eq "a tiered role on the agent surface still exits 0 (frontmatter governs there)" \
   "$(e_rc "$R_NONE" secops standard 4)" "0"
 
 # ---- THE LIVE CONSUMER: frontmatter parity ---------------------------------

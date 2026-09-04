@@ -54,8 +54,8 @@ assert_eq "the delta re-review block is non-empty" \
   "$([[ -s "$DELTA_BLOCK" ]] && echo yes || echo no)" "yes"
 assert_eq "the panel path carries all THREE surface probes once the two fences are joined" \
   "$(grep -c '^surface_probe [a-z-]*\.mjs diffTouches' "$PANEL_BLOCK" | tr -d ' ')" "3"
-assert_eq "and so does the delta block" \
-  "$(grep -c '^surface_probe [a-z-]*\.mjs diffTouches' "$DELTA_BLOCK" | tr -d ' ')" "3"
+assert_eq "and the delta block carries FIVE: the same three plus the security-surface and test-surface probes that seat SecOps and QA (0.40.0)" \
+  "$(grep -c '^surface_probe [a-z-]*\.mjs diffTouches' "$DELTA_BLOCK" | tr -d ' ')" "5"
 # Each surface is named EXPLICITLY. Counting to three passes on three copies of one probe,
 # which is the shape a careless de-duplication produces.
 for pred in diffTouchesDataLayer diffTouchesInfra diffTouchesFrontend; do
@@ -134,8 +134,8 @@ assert_eq "phase.md exists and has a peer-review section to check" \
   "$([[ -n "$(phase_peer_review_section "$PHASE_MD")" ]] && echo present || echo "ABSENT")" "present"
 assert_eq "the reserved no-match code is READ from pipeline.md's probe, not remembered here" \
   "$(probe_sentinel "$PIPELINE_MD")" "20"
-assert_eq "and the delta block names three predicates for the check to walk" \
-  "$(delta_predicates "$DELTA_BLOCK" | grep -c . | tr -d ' ')" "3"
+assert_eq "and the delta block names five predicates for the check to walk" \
+  "$(delta_predicates "$DELTA_BLOCK" | grep -c . | tr -d ' ')" "5"
 
 assert_eq "phase.md's manual peer-review carries the same three-outcome contract as pipeline.md" \
   "$(phase_md_drift "$PHASE_MD" "$PIPELINE_MD" "$DELTA_BLOCK")" ""
@@ -207,7 +207,7 @@ assert_eq "CONTROL: that same grep DOES find the shape when it is present" \
   "$(grep -c 'process.exit(.*?0:1)' "$TWO_OUTCOME_PROBE" | tr -d ' ')" "1"
 # ...and the blocks are non-empty, or the zero above is a statement about two empty files.
 assert_eq "and those blocks carry executable probe lines for that zero to be about" \
-  "$(cat "$PANEL_BLOCK" "$DELTA_BLOCK" | grep -c '^surface_probe ' | tr -d ' ')" "6"
+  "$(cat "$PANEL_BLOCK" "$DELTA_BLOCK" | grep -c '^surface_probe ' | tr -d ' ')" "8"
 
 # ---- fixtures ---------------------------------------------------------------
 #
@@ -296,7 +296,7 @@ assert_eq "and no stray file named after the placeholder is created" \
 # CONTROL: the SUBSTITUTED form still runs, or the refusal above is a block that never works.
 ANCHOR_REPO="$TEMP_PROJECT/repo-anchor"; make_diff_repo "$ANCHOR_REPO" "docs/notes.txt"
 assert_contains "CONTROL: with the anchor supplied, the same block runs and resolves a delta set" \
-  "$(run_delta "$ANCHOR_REPO" "$PLUGIN_ROOT")" "DELTA=qa secops"
+  "$(run_delta "$ANCHOR_REPO" "$PLUGIN_ROOT")" "DELTA="
 
 DL_REPO="$TEMP_PROJECT/repo-datalayer"; make_diff_repo "$DL_REPO" "db/queries/orders.ts"
 INFRA_REPO="$TEMP_PROJECT/repo-infra"; make_diff_repo "$INFRA_REPO" ".github/workflows/ci.yml"
@@ -434,8 +434,15 @@ assert_not_contains "nor devops" "$HALF_OUT" "devops"
 suite "the DELTA re-review round fails the same direction (the other two of the four sites)"
 
 assert_contains "a data-layer fix commit adds dba to the delta set" "$(run_delta "$DL_REPO" "$GOOD_ROOT")" "dba"
-assert_eq "CONTROL: a fix commit touching neither surface leaves the delta seed alone" \
-  "$(run_delta "$CLEAN_REPO" "$GOOD_ROOT")" "DELTA=qa secops"
+assert_eq "CONTROL: a fix commit touching no surface seats NOBODY beyond the objectors (the seed is empty now; QA and SecOps are surface-conditional on a delta round)" \
+  "$(run_delta "$CLEAN_REPO" "$GOOD_ROOT")" "DELTA="
+SEC_REPO="$TEMP_PROJECT/repo-security"; make_diff_repo "$SEC_REPO" "src/auth/session.ts"
+assert_contains "a security-surface fix commit seats secops" "$(run_delta "$SEC_REPO" "$GOOD_ROOT")" "secops"
+assert_not_contains "and not qa" "$(run_delta "$SEC_REPO" "$GOOD_ROOT")" "qa"
+TEST_REPO="$TEMP_PROJECT/repo-tests"; make_diff_repo "$TEST_REPO" "tests/login.test.ts"
+assert_contains "a test-file fix commit seats qa" "$(run_delta "$TEST_REPO" "$GOOD_ROOT")" "qa"
+assert_not_contains "and not secops" "$(run_delta "$TEST_REPO" "$GOOD_ROOT")" "secops"
+assert_contains "a data-layer fix commit seats secops beside dba" "$(run_delta "$DL_REPO" "$GOOD_ROOT")" "secops"
 BROKEN_DELTA="$(run_delta "$CLEAN_REPO" "$BROKEN_ROOT")"
 assert_contains "an unevaluable delta probe adds dba" "$BROKEN_DELTA" "dba"
 assert_contains "and devops" "$BROKEN_DELTA" "devops"
@@ -595,8 +602,8 @@ for runner in "${RUNNERS[@]}"; do
     "$(run_delta "$FE_REPO" "$GOOD_ROOT" "$runner")" "design_review"
   assert_contains "[$runner] a MULTI-path frontend fix commit adds design_review" \
     "$(run_delta "$FE_MULTI" "$GOOD_ROOT" "$runner")" "design_review"
-  assert_eq "[$runner] CONTROL: a MULTI-path fix commit touching neither surface leaves the seed alone" \
-    "$(run_delta "$CLEAN_MULTI" "$GOOD_ROOT" "$runner")" "DELTA=qa secops"
+  assert_eq "[$runner] CONTROL: a MULTI-path fix commit touching no surface seats nobody (the seed is empty; QA and SecOps are surface-conditional on a delta round)" \
+    "$(run_delta "$CLEAN_MULTI" "$GOOD_ROOT" "$runner")" "DELTA="
   assert_not_contains "[$runner] CONTROL: a MULTI-path data-layer commit does NOT add design_review" \
     "$(run_delta "$DL_MULTI" "$GOOD_ROOT" "$runner")" "design_review"
 done

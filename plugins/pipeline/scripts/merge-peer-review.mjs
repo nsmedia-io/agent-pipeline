@@ -11,6 +11,7 @@
 
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { isMain as isMainScript } from "./lib.mjs";
+import { normalizeBlock } from "./materiality.mjs";
 
 // unwrap defends against a shard that wrapped its block under its role key
 // ({"dba": {...}}) instead of writing a bare block, so a wrapped verdict is
@@ -122,6 +123,24 @@ function main(argv) {
     if (!hasRecoverableVerdict(merged[role])) {
       console.error(`NO RECOVERABLE VERDICT: ${role} (shard present but yields no verdict after unwrap)`);
       process.exit(2);
+    }
+  }
+  // MATERIALITY (0.40.0). Every shard folded on THIS invocation is normalized: a
+  // REQUEST_CHANGES with no blocking concern is recorded as APPROVE_WITH_NOTES, a VETO with
+  // no named veto_ground as REQUEST_CHANGES, an APPROVE carrying a blocking concern as
+  // REQUEST_CHANGES. The reviewer's own verdict is kept as verdict_as_returned whenever the
+  // two differ, and the change is said on stderr, so the rubric reads the ruling and the
+  // archive keeps the finding. Standing blocks from earlier rounds are NOT re-normalized:
+  // they were normalized when they were folded, and re-reading them would be a second
+  // ruling on the same evidence.
+  for (const role of Object.keys(shards)) {
+    const before = merged[role];
+    const after = normalizeBlock(before, role);
+    merged[role] = after;
+    if (after && after.verdict_as_returned !== undefined && after.verdict !== before.verdict) {
+      console.error(`normalized ${role}: ${before.verdict} -> ${after.verdict} (${(after.materiality?.notes || []).join(" ")})`);
+    } else if (after && after.materiality && after.materiality.unrated_concerns > 0) {
+      console.error(`normalized ${role}: verdict unchanged, ${after.materiality.unrated_concerns} unrated blocking-severity concern(s) treated as blocking`);
     }
   }
   writeFileSync(target, `${JSON.stringify(merged, null, 2)}\n`);

@@ -74,10 +74,12 @@ suite "merge-peer-review: a wrapped shard is recovered, not read as null"
 # The failure this defends against: an agent writes {"dba": {...}} instead of a bare block, the
 # merge stores the wrapper, and the rubric reads merged.dba.verdict as undefined -- a missing
 # review that looks like a present one.
-printf '%s' '{"dba":{"verdict":"VETO","concerns":[]}}' > "$W/peer-review.dba.json"
-merge "$W/peer-review.json" "dba=$W/peer-review.dba.json"
+# (A SecOps VETO on a named veto_ground: that is the one verdict the materiality normalizer
+# leaves standing without a rated concern, so the unwrap is what this cell measures.)
+printf '%s' '{"secops":{"verdict":"VETO","veto_ground":"auth","concerns":[]}}' > "$W/peer-review.secops.json"
+merge "$W/peer-review.json" "secops=$W/peer-review.secops.json"
 assert_eq "a wrapped shard merges cleanly" "$RC" "0"
-assert_eq "the wrapped verdict is recovered" "$(jget "$W/peer-review.json" dba.verdict)" "VETO"
+assert_eq "the wrapped verdict is recovered" "$(jget "$W/peer-review.json" secops.verdict)" "VETO"
 
 suite "merge-peer-review: halts (a missing review is never a pass)"
 
@@ -150,7 +152,9 @@ suite "merge-peer-review: the module-entrypoint guard"
 MPLAIN="$TEMP_PROJECT/mergedir"
 MLINK="$TEMP_PROJECT/merge-link"
 mkdir -p "$MPLAIN"
-cp "$MERGE" "$MPLAIN/merge-peer-review.mjs" && cp "$(dirname "$MERGE")/lib.mjs" "$MPLAIN/"
+# Through the harness helper, which follows the script's relative imports (materiality.mjs
+# since 0.40.0) rather than hand-listing lib.mjs and dying with ERR_MODULE_NOT_FOUND on the next one.
+copy_script_with_deps "$(dirname "$MERGE")" merge-peer-review.mjs "$MPLAIN"
 ln -s "$MPLAIN" "$MLINK"
 
 LINKED_ERR=$( cd "$TEMP_PROJECT" && node "$MLINK/merge-peer-review.mjs" 2>&1 )

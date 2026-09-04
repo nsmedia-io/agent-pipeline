@@ -103,9 +103,16 @@ const CODE_KEYS = {
   dispatchEfforts: {
     type: "object",
     reader: "scripts/dispatch-effort.mjs",
-    fallback: "the built-in default effort table",
+    fallback: "the built-in tiered effort table",
     degrades:
-      "per-role effort overrides are ignored and every dispatch runs the built-in assignment. secops and qa are pinned in code and ignore this key entirely. NOTE this key only reaches the Workflow dispatch surface: the Agent tool carries no effort parameter, so on today's Agent-tool dispatches agents/<role>.md frontmatter governs whatever this says.",
+      "per-role effort overrides are ignored and every dispatch runs the built-in tiered assignment (SecOps xhigh/high/medium and QA high/medium/medium by tier on the Phase 4 panel). Every role is reachable, in both directions, allowlisted. NOTE this key only reaches the Workflow dispatch surface (the Phase 4 panel): the Agent tool carries no effort parameter, so on Agent-tool dispatches agents/<role>.md frontmatter governs whatever this says.",
+  },
+  securitySurfaceGlobs: {
+    type: "string[]",
+    reader: "scripts/security-surface.mjs (diffTouchesSecuritySurface)",
+    fallback: "the built-in auth/session/crypto/secrets/webhook/policy set",
+    degrades:
+      "SecOps is re-seated on a Phase 4 DELTA round only when the fix commits touch a security surface (or the data layer, or it objected). This key can only WIDEN that set; it never narrows or disarms it. A security path the built-in set does not name lets a fix round skip the SecOps re-read.",
   },
   migrationDownMarker: {
     type: "string",

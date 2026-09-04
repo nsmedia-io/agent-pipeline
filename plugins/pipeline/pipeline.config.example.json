@@ -21,13 +21,16 @@
 
   "migrationDownMarker": "-- DOWN",
 
-  "_dispatchEfforts_comment": "NOT SET ON PURPOSE. Per-role reasoning effort (low/medium/high/xhigh/max) for the WORKFLOW dispatch surface only. The Agent tool has no effort parameter, so on today's dispatches agents/<role>.md frontmatter governs and this key changes nothing; it is here for the pending Workflow migration. `secops` and `qa` are pinned in code and ignore this key entirely, at every tier, phase and surface. Example: { \"librarian\": \"high\" }.",
+  "_dispatchEfforts_comment": "NOT SET ON PURPOSE. Per-role reasoning effort (low/medium/high/xhigh/max) for the Phase 4 panel, which dispatches through the Workflow tool. The built-in table is TIERED: SecOps xhigh/high/medium and QA high/medium/medium by tier, DBA/DevOps/Design medium on a standard or trivial panel. Every role is reachable, both directions. Example: { \"secops\": \"xhigh\" } to restore the old always-xhigh SecOps.",
+
+  "_securitySurfaceGlobs_comment": "NOT SET ON PURPOSE. Additive globs that re-seat SecOps on a Phase 4 DELTA round when a fix commit touches them. The built-in set covers auth, session, crypto, secrets, tokens, webhooks, policies, middleware and .env files; add your own security-bearing paths here. Widen-only: this key can never narrow the set.",
 
   "architecturalTriggers": {
     "_comment": "Domains/keywords that force the architectural tier (deep review). Tailor to your stack.",
     "paths": ["pipeline.config.json"],
     "_paths_comment": "A diff touching this file is architectural, always. It governs whether the mis-tier tripwire fires, who is seated on the Phase 4 panel, and which model renders a binding verdict. Write access here already implies arbitrary command execution through checkCommand, so this is not a new trust boundary; it is closed because a narrowed glob is quiet and permanent and reads as a tuning change, where an RCE is immediate and loud.",
-    "domains": ["data", "security", "compliance"],
+    "domains": ["compliance"],
+    "_domains_comment": "The built-in floor is `compliance` plus the concrete security and data triggers in agents/ba.md duty 6 (migration, access policy, contract shape, new auth flow or authorization check, crypto, webhook verification, new external data intake, new retained data type). `data` and `security` as bare domains were removed from the floor in 0.40.0 because a feature that reads user data under existing auth was reaching the deep tier; add them back here if your risk profile wants that.",
     "keywords": ["migration", "schema change", "auth", "encryption", "new external data source"]
   }
 }

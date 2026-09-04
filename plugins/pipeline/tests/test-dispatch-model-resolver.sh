@@ -92,6 +92,10 @@ for cand in $(grep -oE 'scripts/[a-zA-Z0-9_-]+\.mjs' "$PIPELINE_MD" | sort -u); 
     # "did you add a scripts/*.mjs?" is the natural question here and the answer was no. It
     # resolves no model and takes no (role, tier, phase) triple. Excluded by NAME, like the rest.
     run-candidates.mjs) continue ;;
+    # 0.40.0: the materiality normalizer (referenced from the rubric and the preamble) and the
+    # delta-round security/test surface module. Neither resolves a model nor takes a (role,
+    # tier, phase) triple. Excluded by NAME, like the rest.
+    materiality.mjs|security-surface.mjs) continue ;;
   esac
   # The data-layer surface module is referenced from the same file by R3; it is not this.
   grep -q 'migrationGlobsForTripwire' "$PLUGIN_DIR/$cand" 2>/dev/null && continue

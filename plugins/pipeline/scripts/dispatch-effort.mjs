@@ -61,7 +61,18 @@
  * on omission meaning what #98 observed rather than what the vendor documents. That answers q3
  * without needing the contradiction resolved first: emit, and the question stops mattering.
  *
- * ## PINS, NOT FLOORS (SecOps ruled on this; see #101 q2)
+ * ## PINS RETIRED IN 0.40.0 (the section below is kept as the record of why they existed)
+ *
+ * SecOps and QA are no longer pinned for effort. The Phase 4 rows are TIERED instead (SecOps
+ * xhigh/high/medium, QA high/medium/medium by risk tier; DBA, DevOps and Design medium below
+ * architectural) and `dispatchEfforts` can reach every role in both directions. The risk the pin
+ * carried -- a mis-tiered change looks benign -- now sits in the materiality rule
+ * (materiality.mjs) and the concrete security triggers in agents/ba.md duty 6, and the archive's
+ * Phase 4 time was what the pin cost. The model pins in dispatch-model.mjs are unchanged. What
+ * survives from the ruling below is the shape: rows are LOOKED UP, never clamped, and there is
+ * still no rank comparison in this file.
+ *
+ * ## PINS, NOT FLOORS (SecOps ruled on this; see #101 q2; superseded above)
  *
  * An earlier draft of this file gave secops and qa a per-tier FLOOR that config could raise but
  * never lower. SecOps reviewed it and REFUSED that shape, and the argument is kept here because
@@ -100,11 +111,16 @@ import { isMain } from "./lib.mjs";
 export const ALLOWED_EFFORTS = ["low", "medium", "high", "xhigh", "max"];
 
 /**
- * Config cannot reach these, at any tier, phase or surface. Not a ceiling and not a floor: a
- * pin, on the two roles whose depth is a security control. There is deliberately NO rank table
- * beside this and no comparison against it anywhere in the file; see the header.
+ * EMPTY since 0.40.0. SecOps and QA were pinned here (xhigh / high at every tier) on the #101
+ * q2 ruling that a mis-tiered change looks benign. The materiality rule (materiality.mjs) and
+ * the concrete security triggers in agents/ba.md duty 6 now carry that risk at the verdict and
+ * at intake, and the archive's Phase 4 time was the cost of carrying it as effort instead. The
+ * two roles now have TIERED rows below, and config can reach them like any other role. The
+ * constant stays exported, empty, so a downstream reader keyed on it sees the change rather
+ * than a missing export; and there is still deliberately NO rank table and no comparison
+ * anywhere in this file (see the header): rows are looked up, never clamped.
  */
-export const PINNED_ROLES = { secops: "xhigh", qa: "high" };
+export const PINNED_ROLES = {};
 
 export const KNOWN_ROLES = [
   "ba",
@@ -168,6 +184,21 @@ export const DEFAULT_TABLE = [
   { role: "dev", phase: "4", site: "panel-lens", effort: "medium", siteDefault: true },
   { role: "dev", phase: "2.5", site: "design-sketch", effort: "medium", siteDefault: true },
   { role: "dev", phase: "2.5", site: "bakeoff-judge", effort: "high" },
+  // TIERED Phase 4 panel rows (0.40.0). A row with a `tier` matches only that tier; a role's
+  // frontmatter still applies at any tier with no row (architectural, for these). The depth a
+  // reviewer spends on a diff now follows the tier BA set, which the materiality rule and the
+  // concrete security triggers make trustworthy enough to spend against.
+  { role: "secops", phase: "4", tier: "architectural", site: "panel-lens", effort: "xhigh", siteDefault: true },
+  { role: "secops", phase: "4", tier: "standard", site: "panel-lens", effort: "high", siteDefault: true },
+  { role: "secops", phase: "4", tier: "trivial", site: "panel-lens", effort: "medium", siteDefault: true },
+  { role: "qa", phase: "4", tier: "standard", site: "panel-lens", effort: "medium", siteDefault: true },
+  { role: "qa", phase: "4", tier: "trivial", site: "panel-lens", effort: "medium", siteDefault: true },
+  { role: "dba", phase: "4", tier: "standard", site: "panel-lens", effort: "medium", siteDefault: true },
+  { role: "dba", phase: "4", tier: "trivial", site: "panel-lens", effort: "medium", siteDefault: true },
+  { role: "devops", phase: "4", tier: "standard", site: "panel-lens", effort: "medium", siteDefault: true },
+  { role: "devops", phase: "4", tier: "trivial", site: "panel-lens", effort: "medium", siteDefault: true },
+  { role: "design_review", phase: "4", tier: "standard", site: "panel-lens", effort: "medium", siteDefault: true },
+  { role: "design_review", phase: "4", tier: "trivial", site: "panel-lens", effort: "medium", siteDefault: true },
 ];
 
 /** One normalizer, one call path. Shared shape with dispatch-model.mjs on purpose. */
@@ -237,8 +268,13 @@ export function configEfforts(cfg, reports) {
   return out;
 }
 
-function rowsFor(role, phase) {
-  return DEFAULT_TABLE.filter((r) => r.role === role && r.phase === phase);
+// A row with a `tier` matches only that tier; a row without one matches every tier. When both
+// kinds exist for a (role, phase), the tier-specific rows win outright, so a generic row can
+// never shadow a tiered one and a tiered one never leaks into another tier.
+function rowsFor(role, phase, tier) {
+  const all = DEFAULT_TABLE.filter((r) => r.role === role && r.phase === phase);
+  const tiered = all.filter((r) => r.tier !== undefined && r.tier === tier);
+  return tiered.length > 0 ? tiered : all.filter((r) => r.tier === undefined);
 }
 
 /**
@@ -306,7 +342,7 @@ export function resolve({ role: rawRole, tier, phase, site, surface, cfg }) {
   }
 
   // --- workflow surface: a per-call effort genuinely exists, so resolve one. ---
-  const rows = rowsFor(role, phase);
+  const rows = rowsFor(role, phase, tier);
   let row = null;
   if (site) {
     row = rows.find((r) => r.site === site) || null;
