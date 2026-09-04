@@ -939,42 +939,71 @@ _run_words() { # the run is in _run, already cut from _sc
 #
 # THE SAME BULK-SLICE / `_cut_sc` IDIOM THE COMMENT ARM ALREADY USES, extended to run PER LINE
 # instead of to end of command, because a heredoc body ends at a specific line and a comment does
-# not. `_seg`/`_hdnl` name whether the CURRENT WINDOW holds a real newline; when it does not (a
-# single line wider than one refill), the window in hand is cut and discarded immediately rather
-# than accumulated onto `_sc`, which is what keeps this LINEAR rather than quadratic in that line's
-# length -- the DENSITY AXIS `run` fixture (one unbroken run at a fixed length, no internal
-# whitespace or newline) is exactly the adversarial shape that would expose an accumulate-then-scan
-# version of this loop, and is why AC7 re-measures the DENSITY AXIS post-fix rather than assuming
-# the window model alone carries over.
+# not. `_seg`/`_hdnl` name whether the CURRENT WINDOW holds a real newline; when it does not (the
+# candidate line has not been fully buffered yet), the window in hand is cut and discarded from
+# `_sc` immediately rather than accumulated onto it, which is what keeps this LINEAR rather than
+# quadratic in that line's length -- the DENSITY AXIS `run` fixture (one unbroken run at a fixed
+# length, no internal whitespace or newline) is exactly the adversarial shape that would expose an
+# accumulate-then-scan version of this loop, and is why AC7 re-measures the DENSITY AXIS post-fix
+# rather than assuming the window model alone carries over.
 #
-# A LINE THAT NEVER FIT IN ONE WINDOW CANNOT BE THE TERMINATOR EITHER WAY (`_hdtoolong`), because
-# `_HDDELIM` is a single already-captured word and a real terminator line is exactly that word alone
-# -- so once a line has needed a second refill, its candidacy is settled without assembling its full
-# text, and only the AC12 substring scan (below) still has to see every byte of it.
+# THE CANDIDATE TERMINATOR LINE IS BUILT INCREMENTALLY ACROSS REFILLS, NOT DECIDED BY WHETHER A
+# REFILL WAS NEEDED AT ALL (#140 Phase 4 VETO, peer-review.secops.json vulnerabilities[0]). An
+# earlier version set a `_hdtoolong` flag the instant the CURRENTLY BUFFERED window lacked a
+# newline and suppressed the terminator comparison for the rest of that line -- but "the window in
+# hand has no newline yet" only means the line has not finished arriving, not that the line is
+# genuinely longer than `_HDDELIM` could ever be: `_sc` can be refilled with a mostly-drained
+# remainder left over from the PREVIOUS line, so an ordinary, short terminator line straddling that
+# leftover boundary tripped the same flag as a genuinely oversized line. When it fired on the real
+# terminator, opacity ran to end of command and everything after -- including a trailing
+# `git add -A` -- went unscanned and ALLOWED, live, on ordinary 1042-byte prose input.
+#
+# `_hdcand`/`_hdmismatch` replace it: `_hdcand` is the candidate line assembled so far (whitespace-
+# stripped at its own start when `_hddash` applies, exactly as before), grown by one chunk per
+# refill, and the moment it stops being a literal PREFIX of `_HDDELIM` -- checked with a quoted,
+# non-glob `case` pattern, so no character in either string is read as a wildcard -- `_hdmismatch`
+# is set and `_hdcand` is never grown again for the rest of that line. That bound is what keeps a
+# long non-matching line linear rather than quadratic: almost every ordinary body line diverges on
+# its FIRST chunk (one comparison, same as the pre-fix cost), and only a line that is itself a
+# genuine prefix of the delimiter -- bounded by the delimiter's own length, a single already-
+# captured word -- pays more than one. Both halves of the required property fall out of the same
+# rule: a line that IS the terminator matches regardless of how many chunks it arrived in, because
+# equality is checked against the fully reassembled `_hdcand`, not against any one window's worth of
+# it; a line that only CONTAINS or resembles the delimiter (a near-miss, an embedded fragment) never
+# matches, because the comparison is exact-string equality against the complete line, never a
+# substring or prefix test against the raw window.
 #
 # AC12's OWN GUARD RUNS HERE TOO, ONE COARSE CHECK PER WINDOW, gated on `_HDQ` (frozen at capture
 # time: 0 for an unquoted delimiter, 1 for a quoted or backslash-escaped one -- quoted stays fully
 # opaque, per SecOps's non-weakening clause, and never runs this check at all). `_hdtail` carries the
-# last byte of the PREVIOUS window into this one so a two-character trigger split across a refill
-# boundary is still seen; it is cleared at every real newline, because a `$` at the end of one line
-# and a `(` at the start of the next are not adjacent text and must not be read as one.
+# last byte of the PREVIOUS window into this one so `$(`, the one remaining two-character trigger,
+# is still seen when split across a refill boundary; it is cleared at every real newline, because a
+# `$` at the end of one line and a `(` at the start of the next are not adjacent text and must not
+# be read as one.
 #
-# THE TWO TRIGGERS DO NOT GET THE SAME RESPONSE, AND THAT ASYMMETRY IS AC12(b)'S OWN REQUIREMENT.
-# Backtick and `${` are not members of `_STRUCT` at all (confirmed by SecOps via direct grep), so
-# there is no existing mechanism that would ever evaluate what is inside them -- an unquoted body
-# containing either is denied OUTRIGHT here, unconditionally, which is the "genuinely new
-# protection" AC12(c) names. `$(` is different: `(` already IS a `_STRUCT` member and already ends
-# an invocation as an ordinary top-level separator, so the PRE-FIX scanner already evaluates
-# `$(git add -A)` correctly BY ACCIDENT once nothing is holding it opaque (SecOps's VETO evidence).
-# So for `$(` alone this function does the MINIMUM the fix needs -- stop being opaque and hand `_sc`
-# back to `_scan_go`'s own top-level loop exactly where the body was, unconsumed -- and lets that
-# existing mechanism discriminate blanket (AC12(a), `_verb=add` `_blanket=1` `_pathspec=0` ->
-# `_VERDICT=blanket`) from narrow (AC12(b), a pathspec is set so `_inv_finish` never sets a verdict)
-# on its own. Denying on sight of `$(` regardless of content, the same way backtick is handled,
-# would satisfy AC12(a) but fail AC12(b) outright -- this is why the two are not one `case` arm.
+# `${` IS NOT A TRIGGER HERE (#140 Phase 4 BA ruling, spec.json AC12). Bare `${...}` is parameter
+# expansion, never command execution on its own, and any `$(` or backtick nested inside `${...}` is
+# still present in the raw body text and still caught by the checks below regardless of the braces
+# around it -- so dropping `${` as an independent trigger loses no coverage against a real command-
+# substitution payload.
+#
+# BACKTICK AND `$(` DO NOT GET THE SAME RESPONSE, AND THAT ASYMMETRY IS AC12(b)'S OWN REQUIREMENT.
+# Backtick is not a member of `_STRUCT` at all (confirmed by SecOps via direct grep), so there is no
+# existing mechanism that would ever evaluate what is inside it -- an unquoted body containing one is
+# denied OUTRIGHT here, unconditionally, which is the "genuinely new protection" AC12(c) names. `$(`
+# is different: `(` already IS a `_STRUCT` member and already ends an invocation as an ordinary
+# top-level separator, so the PRE-FIX scanner already evaluates `$(git add -A)` correctly BY
+# ACCIDENT once nothing is holding it opaque (SecOps's VETO evidence). So for `$(` alone this
+# function does the MINIMUM the fix needs -- stop being opaque and hand `_sc` back to `_scan_go`'s
+# own top-level loop exactly where the body was, unconsumed -- and lets that existing mechanism
+# discriminate blanket (AC12(a), `_verb=add` `_blanket=1` `_pathspec=0` -> `_VERDICT=blanket`) from
+# narrow (AC12(b), a pathspec is set so `_inv_finish` never sets a verdict) on its own. Denying on
+# sight of `$(` regardless of content, the same way backtick is handled, would satisfy AC12(a) but
+# fail AC12(b) outright -- this is why the two are not one `case` arm.
 _hd_skip() {
   _hdtail=''
-  _hdtoolong=0
+  _hdcand=''
+  _hdmismatch=0
   while :; do
     case $_sc in
       *"$_NL"*)
@@ -989,14 +1018,31 @@ _hd_skip() {
     if [ "$_hdnl" = 0 ] && [ "$_eof" = 0 ]; then
       if [ "$_HDQ" = 0 ]; then
         case $_hdtail$_seg in
-          *'`'* | *'${'*)
+          *'`'*)
             _VERDICT=blanket
             return 0
             ;;
           *'$('*) return 0 ;;
         esac
       fi
-      _hdtoolong=1
+      if [ "$_hdmismatch" = 0 ]; then
+        _hac=$_seg
+        if [ "$_hddash" = 1 ] && [ -z "$_hdcand" ]; then
+          while :; do
+            case $_hac in
+              [$_WS]*) _hac=${_hac#?} ;;
+              *) break ;;
+            esac
+          done
+        fi
+        if [ -n "$_hac" ]; then
+          _hdcand=$_hdcand$_hac
+          case $_HDDELIM in
+            "$_hdcand"*) ;;
+            *) _hdmismatch=1 ;;
+          esac
+        fi
+      fi
       # READ THE LAST CHARACTER WITHOUT NAMING A LONG LITERAL. `${_seg#"${_seg%?}"}` -- the file's
       # own first-character idiom mirrored backwards -- is exactly the `${s#"$long"}` shape its own
       # header measures at 2.2 s PER CALL over a whole-string prefix (#106); `_seg` is unbounded
@@ -1030,37 +1076,40 @@ _hd_skip() {
     fi
     if [ "$_HDQ" = 0 ]; then
       case $_hdtail$_seg in
-        *'`'* | *'${'*)
+        *'`'*)
           _VERDICT=blanket
           return 0
           ;;
         *'$('*) return 0 ;;
       esac
     fi
-    if [ "$_hdtoolong" = 0 ]; then
-      if [ "$_hddash" = 1 ]; then
-        # STRIPS A LEADING _WS RUN (SPACE-OR-TAB), NOT A BARE TAB, EVEN THOUGH POSIX `<<-` ONLY
-        # STRIPS TABS. `_sc` never sees the raw command text: LEVEL 1's own queue split
-        # (`_scan_go`, `IFS=$_WS`) already collapsed every leading tab run into ONE reconstructed
-        # `_SP` character before this function ever runs, so the tab/space distinction this
-        # candidate is compared on is gone by construction, not by a choice made here. Widening the
-        # strip to cover a reconstructed space is the SAFE side of that loss: it can only make this
-        # function decide the body ended SOONER than a real `<<-` would, handing the (real, still-
-        # part-of-the-body-in-a-real-shell) text that follows to ORDINARY scanning instead of
-        # opacity -- which can only turn inert data into something this scanner denies, never the
-        # reverse. No AC constructs a space-indented terminator that must NOT match under `<<-`.
-        _cand=$_seg
+    if [ "$_hdmismatch" = 0 ]; then
+      # STRIPS A LEADING _WS RUN (SPACE-OR-TAB), NOT A BARE TAB, EVEN THOUGH POSIX `<<-` ONLY
+      # STRIPS TABS. `_sc` never sees the raw command text: LEVEL 1's own queue split
+      # (`_scan_go`, `IFS=$_WS`) already collapsed every leading tab run into ONE reconstructed
+      # `_SP` character before this function ever runs, so the tab/space distinction this
+      # candidate is compared on is gone by construction, not by a choice made here. Widening the
+      # strip to cover a reconstructed space is the SAFE side of that loss: it can only make this
+      # function decide the body ended SOONER than a real `<<-` would, handing the (real, still-
+      # part-of-the-body-in-a-real-shell) text that follows to ORDINARY scanning instead of
+      # opacity -- which can only turn inert data into something this scanner denies, never the
+      # reverse. No AC constructs a space-indented terminator that must NOT match under `<<-`.
+      _hac=$_seg
+      if [ "$_hddash" = 1 ] && [ -z "$_hdcand" ]; then
         while :; do
-          case $_cand in
-            [$_WS]*) _cand=${_cand#?} ;;
+          case $_hac in
+            [$_WS]*) _hac=${_hac#?} ;;
             *) break ;;
           esac
         done
-      else
-        _cand=$_seg
       fi
-    else
-      _cand=''
+      if [ -n "$_hac" ]; then
+        _hdcand=$_hdcand$_hac
+        case $_HDDELIM in
+          "$_hdcand"*) ;;
+          *) _hdmismatch=1 ;;
+        esac
+      fi
     fi
     if [ -n "$_seg" ]; then
       if [ ${#_seg} -lt 64 ]; then
@@ -1070,11 +1119,12 @@ _hd_skip() {
       fi
     fi
     [ "$_hdnl" = 1 ] && _sc=${_sc#?}
-    if [ "$_hdtoolong" = 0 ] && [ "$_cand" = "$_HDDELIM" ]; then
+    if [ "$_hdmismatch" = 0 ] && [ "$_hdcand" = "$_HDDELIM" ]; then
       return 0
     fi
     _hdtail=''
-    _hdtoolong=0
+    _hdcand=''
+    _hdmismatch=0
     [ "$_hdnl" = 1 ] || return 0
   done
 }
