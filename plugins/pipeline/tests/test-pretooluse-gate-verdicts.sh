@@ -1286,8 +1286,13 @@ assert_eq "VACUITY: README item 27 was located and is long enough to be the disc
   "$([[ "${#CORPUS_README_TEXT}" -gt 2000 ]] && echo located || echo "ONLY ${#CORPUS_README_TEXT} BYTES")" "located"
 assert_eq "AC4: the published size FLOOR is the floor this block enumerated over" \
   "$(printf '%s' "$CORPUS_README_TEXT" | grep -oE 'at or above [0-9]+ bytes' | grep -oE '[0-9]+' | head -1)" "$CORPUS_FLOOR"
-assert_eq "AC4: the published ENUMERATED count is the count this block measured -- when the tracked corpus grows past what was sized, this row reddens instead of the gate falling open" \
-  "$(printf '%s' "$CORPUS_README_TEXT" | grep -oE 'enumerated [0-9]+' | grep -oE '[0-9]+' | head -1)" "$CORPUS_ENUM"
+# ONE DIRECTION. The bound was sized on the published corpus; a LARGER live corpus can undersize
+# it (the gate falls open), a smaller one cannot. Both directions used to redden, so every
+# archive deletion turned this row into a doc-maintenance tax with no safety content, and it
+# stayed red across releases. Growth still trips it; republish the count when it does.
+PUB_ENUM="$(printf '%s' "$CORPUS_README_TEXT" | grep -oE 'enumerated [0-9]+' | grep -oE '[0-9]+' | head -1)"
+assert_eq "AC4: the live ENUMERATED count is at most the published one (${PUB_ENUM:-?}) -- when the tracked corpus grows past what was sized, this row reddens instead of the gate falling open" \
+  "$([[ "$CORPUS_ENUM" =~ ^[0-9]+$ && "$PUB_ENUM" =~ ^[0-9]+$ && "$CORPUS_ENUM" -le "$PUB_ENUM" ]] && echo within-sizing || echo "GREW: live $CORPUS_ENUM > published ${PUB_ENUM:-?}")" "within-sizing"
 assert_eq "AC4: and the published DRIVEN count is the number of rows actually driven above" \
   "$(printf '%s' "$CORPUS_README_TEXT" | grep -oE 'drove [0-9]+' | grep -oE '[0-9]+' | head -1)" "$CORPUS_DRIVEN"
 

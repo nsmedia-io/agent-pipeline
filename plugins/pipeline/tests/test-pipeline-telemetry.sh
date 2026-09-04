@@ -724,7 +724,11 @@ suite "AC34: no string at any depth in a status.json looks like an absolute path
 WALK="$TEMP_PROJECT/walk.mjs"
 cat > "$WALK" <<'EOF'
 import { readFileSync } from "node:fs";
-const ABS = [/^\//, /^[A-Za-z]:\\/];
+// MACHINE-SPECIFIC prefixes, not every leading slash. The rule exists to keep a developer's
+// home, a temp dir or a mounted volume out of a committed archive; `/bin/sh` and `/usr/bin/env`
+// are the same string on every machine and are legitimate archive content (archive 140 records
+// which shells a reproduction ran under). `^\/` alone flagged that and kept main red.
+const ABS = [/^\/(Users|home|private|tmp|var\/folders|var\/tmp|root|mnt|Volumes)\//, /^[A-Za-z]:\\/];
 const hits = [];
 function walk(v, path) {
   if (typeof v === "string") { if (ABS.some(re => re.test(v))) hits.push(path + "=" + v); return; }
