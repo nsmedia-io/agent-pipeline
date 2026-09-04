@@ -83,6 +83,11 @@ export const DEFAULT_TABLE = [
   { role: "dev", phase: "4", site: "panel-lens", model: "sonnet", siteDefault: true },
   { role: "dev", phase: "2.5", site: "design-sketch", model: "sonnet", siteDefault: true },
   { role: "dev", phase: "2.5", site: "bakeoff-judge", model: "opus" },
+  // TIERED rows (0.40.0): a `tier` key matches only that tier; the frontmatter opus applies at
+  // architectural, where DBA has already reviewed the spec and the diff is the one that can
+  // carry a migration. On a standard or trivial panel the data-layer re-read is a sonnet job.
+  { role: "dba", phase: "4", tier: "standard", site: "panel-lens", model: "sonnet", siteDefault: true },
+  { role: "dba", phase: "4", tier: "trivial", site: "panel-lens", model: "sonnet", siteDefault: true },
 ];
 
 /** One normalizer, one call path. 'SecOps', 'sec-ops' and 'sec_ops' are the same role. */
@@ -145,8 +150,12 @@ export function configModels(cfg, reports) {
   return out;
 }
 
-function rowsFor(role, phase) {
-  return DEFAULT_TABLE.filter((r) => r.role === role && r.phase === phase);
+// A row with a `tier` matches only that tier; a row without one matches every tier. Tiered rows
+// win outright when both exist, so neither kind can shadow the other by accident.
+function rowsFor(role, phase, tier) {
+  const all = DEFAULT_TABLE.filter((r) => r.role === role && r.phase === phase);
+  const tiered = all.filter((r) => r.tier !== undefined && r.tier === tier);
+  return tiered.length > 0 ? tiered : all.filter((r) => r.tier === undefined);
 }
 
 /**
@@ -185,7 +194,7 @@ export function resolve({ role: rawRole, tier, phase, site, cfg }) {
   const config = cfg || readConfig();
   const overrides = configModels(config, reports);
 
-  const rows = rowsFor(role, phase);
+  const rows = rowsFor(role, phase, tier);
   let row = null;
   if (site) {
     row = rows.find((r) => r.site === site) || null;

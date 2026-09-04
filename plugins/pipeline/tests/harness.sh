@@ -380,4 +380,17 @@ copy_script_with_deps() {
   local src_dir="$1" script="$2" dest="$3"
   cp "$src_dir/$script" "$dest/" || return 1
   cp "$src_dir/lib.mjs" "$dest/" || return 1
+  # And every sibling the script imports by relative path, transitively, so a scratch copy
+  # never dies with ERR_MODULE_NOT_FOUND on an import lib.mjs alone did not cover (0.40.0:
+  # merge-peer-review.mjs imports materiality.mjs). Read from the copied file, not guessed.
+  local queue="$script" seen=" lib.mjs " dep
+  while [[ -n "$queue" ]]; do
+    local cur="${queue%% *}"; queue="${queue#"$cur"}"; queue="${queue# }"
+    for dep in $(grep -oE "from \"\./[a-zA-Z0-9_-]+\.mjs\"" "$dest/$cur" 2>/dev/null | sed 's/from "\.\///;s/"$//'); do
+      case "$seen" in *" $dep "*) continue ;; esac
+      seen="$seen$dep "
+      [[ -f "$src_dir/$dep" ]] && cp "$src_dir/$dep" "$dest/" && queue="$queue $dep"
+    done
+  done
+  return 0
 }

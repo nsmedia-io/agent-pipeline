@@ -397,6 +397,10 @@ for cand in $(grep -oE 'scripts/[a-zA-Z0-9_-]+\.mjs' "$PIPELINE_MD" | sort -u); 
     # REFERENCE rather than a script tripped the halt here. It resolves no model. See the twin in
     # test-dispatch-model-resolver.sh.
     run-candidates.mjs) continue ;;
+    # 0.40.0: the materiality normalizer and the delta-round security/test surface module.
+    # Neither resolves a model nor takes a (role, tier, phase) triple. Excluded by NAME, as in
+    # the twin in test-dispatch-model-resolver.sh.
+    materiality.mjs|security-surface.mjs) continue ;;
   esac
   CANDIDATES_REL+=("$cand")
 done
