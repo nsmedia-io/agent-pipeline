@@ -1,6 +1,6 @@
 {
   "issue_number": 140,
-  "current_phase": "3-impl",
+  "current_phase": "4-review",
   "started_at": "2026-09-03T18:54:53Z",
   "updated_at": "2026-09-03T22:15:00Z",
   "branch": "main",
@@ -86,6 +86,11 @@
   ],
   "phase3_qa_test_commit": "b6f57a084a128d1e5cff0179f5a74eebd8ef1e13",
   "flags": [
+    {
+      "phase": "3-impl",
+      "at": "2026-09-03T23:15:00Z",
+      "summary": "Dev fix round complete (d36f625, PR #144 force-pushed with lease after the earlier rebase). Root cause of SecOps's VETO: _hd_skip's _hdtoolong flag conflated 'line not yet fully buffered' with 'line genuinely too long', so a terminator line straddling the scanner's internal refill boundary had its comparison suppressed, letting opacity run to end-of-command. Fixed by replacing it with incremental _hdcand/_hdmismatch prefix matching (grows one refill chunk at a time, locks on first mismatch). Gate-bites proof done properly: planted the exact unconditional-mismatch mutation, confirmed the AC13 sweep reddened, reverted via git checkout (not hand-edit), confirmed green again. AC12 narrowed per BA's ruling (bare ${ dropped from the trigger, $(  and backtick unchanged). Full suite: test-pretooluse-gate-verdicts.sh 1802/1 (1 = known AC4 drift); all other suites clean except test-pretooluse-timeout-bound.sh at 122/2, where Dev correctly diagnosed (but did not touch, per QA-ownership discipline) a stale hardcoded 4/4 timing-guard count that QA's own necessary AC7 SUPPLEMENT block pushed to 5/5. Orchestrator fixed that one-line literal directly (6f13ea2, mechanical, verified true count via awk before editing), re-ran the suite: 123/1, confirmed the sole remaining failure is the same known AC4 drift. Pre-Phase-4 gate re-run clean. Dispatching a DELTA Phase 4 round (DBA + SecOps + QA only -- the three non-APPROVE roles; BA/DevOps/Dev's clean APPROVEs are unaffected by a security-scanner bugfix and its test coverage, nothing in their domains changed)."
+    },
     {
       "phase": "3-impl",
       "at": "2026-09-03T22:45:00Z",
