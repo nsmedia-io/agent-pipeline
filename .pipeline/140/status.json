@@ -1,10 +1,12 @@
 {
   "issue_number": 140,
-  "current_phase": "1-ba",
+  "current_phase": "4-review-complete",
   "started_at": "2026-09-03T18:54:53Z",
   "updated_at": "2026-09-03T22:15:00Z",
   "branch": "main",
   "pr_url": "https://github.com/nsmedia-io/agent-pipeline/pull/144",
+  "merge_commit": "d041bb07f68fd378addfbf8b6d6530fb3bef6b58",
+  "merged_at": "2026-09-04T02:21:41Z",
   "final_verdict": "APPROVE_WITH_NOTES",
   "peer_review_verdict_counts": {"APPROVE": 3, "APPROVE_WITH_NOTES": 3, "REQUEST_CHANGES": 0, "VETO": 0},
   "panel_roles": [
