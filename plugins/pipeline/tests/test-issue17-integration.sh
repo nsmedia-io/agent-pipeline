@@ -96,74 +96,51 @@ assert_contains "run.sh prints the suite name it is about to run" \
   "$(grep '== %s ==' "$TESTS_DIR/run.sh")" "printf"
 
 # =============================================================================
-# AC41 -- CI ACTUALLY RUNS THE SUITE.
+# AC41 -- THE LINUX RUNNER ACTUALLY RUNS THE SUITE.
 # =============================================================================
-suite "AC41: a workflow runs run.sh on pull_request and on push to main"
+# 0.40.2: .github/workflows/tests.yml is gone (its Actions minutes were the owner's subscription,
+# ~40 min per push with the nested fresh-checkout run). The property it carried is kept here on
+# its replacement, tests/run-linux.sh: the suite is evaluated on a Linux host, in strict-capability
+# mode, with zsh installed, through the SAME `bash plugins/pipeline/tests/run.sh` command, with no
+# dependency install. Run by hand instead of on every push; the assertions below are what a
+# rename, a dropped flag, or a floating image tag cannot slip past.
+suite "AC41: tests/run-linux.sh runs run.sh on a pinned Linux image in strict-capability mode"
 
-WF_DIR="$REPO_ROOT/.github/workflows"
-WF_MATCHES="$(grep -rl 'plugins/pipeline/tests/run.sh' "$WF_DIR" 2>/dev/null | grep -c . | tr -d ' ')"
-WF_WITH_SUITE="$(grep -rl 'plugins/pipeline/tests/run.sh' "$WF_DIR" 2>/dev/null | head -1)"
-assert_eq "at least one workflow invokes tests/run.sh (a rename cannot silently drop it)" \
-  "$([[ -n "$WF_WITH_SUITE" ]] && echo yes || echo "no: nothing in .github/workflows runs the suite")" "yes"
-# `head -1` is only honest while there is nothing to choose between. Two workflows running the
-# suite would leave every assertion below describing whichever sorted first, and a second one
-# added with a broken trigger would be invisible here forever.
-assert_eq "and exactly one does, so the head -1 below is not silently picking a winner" \
-  "$WF_MATCHES" "1"
-WF_TWO="$TEMP_PROJECT/two-workflows"
-mkdir -p "$WF_TWO"
-printf 'run: bash plugins/pipeline/tests/run.sh\n' > "$WF_TWO/a.yml"
-printf 'run: bash plugins/pipeline/tests/run.sh\n' > "$WF_TWO/b.yml"
-assert_eq "CONTROL: the same count reports 2 when two files match, so the 1 above is a measurement" \
-  "$(grep -rl 'plugins/pipeline/tests/run.sh' "$WF_TWO" 2>/dev/null | grep -c . | tr -d ' ')" "2"
-assert_contains "the run step is the exact command" "$(cat "$WF_WITH_SUITE")" "bash plugins/pipeline/tests/run.sh"
-assert_contains "it triggers on pull_request" "$(cat "$WF_WITH_SUITE")" "pull_request"
-assert_contains "and on push to main" "$(cat "$WF_WITH_SUITE")" "branches: [main]"
-# THE CLAIM IS ABOUT STEPS, AND SO IS THE READING. Both of these matched the WHOLE FILE, so they
-# could not tell an instruction from an explanation of why there is no such instruction: the
-# workflow now carries a paragraph about the repo's dependency-free constraint, and the phrase
-# `npm install` inside that paragraph turned the assertion red while the workflow ran no npm at
-# all. A check that a comment can flip is a check about prose (#47).
-WF_RUN_LINES="$(grep -E '^[[:space:]]*run:' "$WF_WITH_SUITE")"
-assert_eq "CONTROL: the run: steps were actually extracted (an empty read refuses nothing)" \
-  "$([[ -n "$WF_RUN_LINES" ]] && echo ok || echo "no run: step found")" "ok"
-assert_not_contains "no step runs npm install (the repo's dependency-free CI constraint)" \
-  "$WF_RUN_LINES" "npm install"
-assert_not_contains "and no step runs npm ci" "$WF_RUN_LINES" "npm ci"
-# NON-ZERO CONTROL, or the two above are equally satisfied by a reader pointed at nothing.
-WF_NPM_PROBE="$TEMP_PROJECT/npm-step-probe.yml"
-printf 'jobs:\n  a:\n    steps:\n      - run: npm install\n' > "$WF_NPM_PROBE"
-assert_contains "CONTROL: the same extraction DOES find an npm step when one is present" \
-  "$(grep -E '^[[:space:]]*(- )?run:' "$WF_NPM_PROBE")" "npm install"
-
-# THE ONE INSTALL STEP THE WORKFLOW DOES CARRY, pinned here so it cannot be dropped in silence.
-# The `[zsh]` columns in test-mis-tier-tripwire.sh and test-panel-composition-fail-direction.sh
-# are the regression test for the #17 VETO, and ubuntu-latest has no zsh: without this step those
-# 32 assertions did not exist where the gate is enforced, on a green build (#47). Removing the
-# step reddens HERE rather than shrinking a suite nobody is counting.
-assert_contains "the workflow installs zsh, so the [zsh] columns run where the gate is enforced" \
-  "$WF_RUN_LINES" "install -y zsh"
+LINUX_RUNNER="$TESTS_DIR/run-linux.sh"
+assert_eq "the Linux runner exists (a rename cannot silently drop it)" \
+  "$([[ -f "$LINUX_RUNNER" ]] && echo yes || echo "no: plugins/pipeline/tests/run-linux.sh is missing")" "yes"
+assert_eq "and it parses as bash" "$(bash -n "$LINUX_RUNNER" 2>&1 && echo parses || echo "SYNTAX ERROR")" "parses"
+assert_eq "and no OTHER file under tests/ also claims to be a runner, so the reads below are about one file" \
+  "$(ls "$TESTS_DIR"/run-*.sh | grep -c . | tr -d ' ')" "1"
+# INSTRUCTIONS, NOT PROSE: every property below is read from non-comment lines, because the file
+# explains at length why there is no npm install, and a whole-file grep would flip on the
+# explanation (the exact defect #47 found in the workflow's own reader).
+RUNNER_CODE="$(grep -vE '^[[:space:]]*#' "$LINUX_RUNNER")"
+assert_eq "CONTROL: the non-comment lines were actually extracted (an empty read refuses nothing)" \
+  "$([[ -n "$RUNNER_CODE" ]] && echo ok || echo "nothing extracted")" "ok"
+assert_contains "the container runs the exact suite command" "$RUNNER_CODE" "bash plugins/pipeline/tests/run.sh"
+assert_contains "it installs zsh, so the [zsh] columns run on the Linux answer (the #17 veto's regression test)" \
+  "$RUNNER_CODE" "install -y -qq zsh"
 assert_contains "and it runs the suite in strict-capability mode, so a future absent tool is a FAILURE" \
-  "$(cat "$WF_WITH_SUITE")" "PIPELINE_TESTS_REQUIRE_CAPABILITIES"
-
-# The file must PARSE as YAML, not merely exist. No YAML parser ships with node, so the
-# structural properties are asserted directly: a top-level `on:` with both triggers, a `jobs:`
-# mapping, and a `run:` step under it, each at its expected indentation.
-assert_eq "the workflow has a top-level on: trigger block" \
-  "$(grep -c '^on:$' "$WF_WITH_SUITE" | tr -d ' ')" "1"
-assert_eq "and a top-level jobs: block" "$(grep -c '^jobs:$' "$WF_WITH_SUITE" | tr -d ' ')" "1"
-assert_eq "and the command sits under a run: key inside a step" \
-  "$(grep -c '^        run: bash plugins/pipeline/tests/run.sh$' "$WF_WITH_SUITE" | tr -d ' ')" "1"
-# BSD grep has no -P, and a `grep -cP` that ERRORS prints nothing, which would have compared
-# an empty string to "0" forever. The tab is matched as a literal character instead.
-TAB="$(printf '\t')"
-assert_eq "no tab characters (YAML forbids them, and a tab makes the file unparseable)" \
-  "$(grep -c "$TAB" "$WF_WITH_SUITE" | tr -d ' ')" "0"
-TABPROBE="$TEMP_PROJECT/tab-probe.yml"
-printf 'a:\n\tb: c\n' > "$TABPROBE"
-assert_eq "CONTROL: the same check DOES find a tab when one is present" \
-  "$(grep -c "$TAB" "$TABPROBE" | tr -d ' ')" "1"
-
+  "$RUNNER_CODE" "PIPELINE_TESTS_REQUIRE_CAPABILITIES=1"
+assert_not_contains "no instruction runs npm install (the repo's dependency-free constraint)" "$RUNNER_CODE" "npm install"
+assert_not_contains "and none runs npm ci" "$RUNNER_CODE" "npm ci"
+NPM_PROBE="$TEMP_PROJECT/npm-step-probe.sh"
+printf '#!/usr/bin/env bash\n# no npm install here, in prose\nnpm install\n' > "$NPM_PROBE"
+assert_contains "CONTROL: the same non-comment extraction DOES find an npm instruction when one is present" \
+  "$(grep -vE '^[[:space:]]*#' "$NPM_PROBE")" "npm install"
+# THE IMAGE IS PINNED. A floating tag is a gate that breaks on someone else's package.
+RUNNER_IMAGE="$(printf '%s' "$RUNNER_CODE" | grep -oE 'node:[A-Za-z0-9._-]+' | head -1)"
+assert_eq "the default image carries a pinned tag, not :latest" \
+  "$([[ -n "$RUNNER_IMAGE" && "$RUNNER_IMAGE" != "node:latest" ]] && echo pinned || echo "image=[${RUNNER_IMAGE:-none}]")" "pinned"
+assert_contains "and the tag names a Linux distro release, so the evaluating host is a known one" "$RUNNER_IMAGE" "bookworm"
+# A WORKTREE IS A CHECKOUT TOO. This repo is developed in git worktrees, whose .git is a FILE
+# pointing into the main repo; a runner that mounted only the checkout measured nothing ("not a
+# git repository") on its first run. The common dir must be mounted at its own absolute path.
+assert_contains "the runner resolves the git common dir, so a worktree checkout can be tested" \
+  "$RUNNER_CODE" "git-common-dir"
+assert_contains "and mounts the checkout at its OWN absolute path, so a worktree's gitdir pointer resolves" \
+  "$RUNNER_CODE" '"$REPO_ROOT:$REPO_ROOT"'
 suite "AC41(b) GATE-BITES PROOF: run.sh exits NON-ZERO on a failing assertion, which is what fails the job"
 
 # The job fails when its `run:` command exits non-zero; that is the runner's contract, and the
