@@ -8,7 +8,8 @@ development pipeline. This repo IS the plugin source; it also runs the pipeline 
 ```
 bash plugins/pipeline/tests/run.sh        # the whole suite; also the Stop-hook checkCommand
 bash plugins/pipeline/tests/test-<name>.sh # one suite
-node scripts/sync-manifests.mjs --check    # marketplace.json matches plugin.json (CI runs this)
+bash plugins/pipeline/tests/run-linux.sh [test-<name>.sh ...]  # the Linux answer, in a container, on demand
+node scripts/sync-manifests.mjs --check    # marketplace.json matches plugin.json (the one remaining workflow)
 ```
 
 Healthy output ends with every suite listed and `failed=0`. Do not run the suite while a

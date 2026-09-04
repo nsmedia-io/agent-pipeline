@@ -163,6 +163,13 @@ The four hooks have a dependency-free bash suite (no framework, no `node_modules
 bash plugins/pipeline/tests/run.sh
 ```
 
+There is no hosted CI for the suite (0.40.2 retired the Actions workflow: forty minutes per push, billed to a subscription). The Linux answer is taken on demand, in a pinned container, with the strict-capability flag set so an absent optional tool such as zsh counts as a failure rather than a silently narrower suite:
+
+```
+bash plugins/pipeline/tests/run-linux.sh                 # the whole suite
+bash plugins/pipeline/tests/run-linux.sh test-x.sh ...   # named suites
+```
+
 It builds throwaway git repos and drives each hook end to end: that the Stop hook blocks a turn (exit 2) on a failing check and stays out of the way otherwise, that the SessionStart report degrades quietly outside a repo or with a broken config, that the SubagentStop hook passes a `decision: block` through while fail-opening on every tooling gap, and that the PreToolUse gate denies a Phase 4 subagent's blanket staging, allows explicit-path staging and the orchestrator's own checkpoint, and fails open on all eight of its tooling gaps.
 
 Each config-parsing case was recorded FAILING against the pre-fix hooks before it was recorded passing, per the gate-bites rule below. A control nobody has watched fail is indistinguishable from a no-op, and that is not hypothetical here: both hooks previously read `pipeline.config.json` with a regex that silently returned the default on a reformatted config, so the Stop hook's check gate could stop firing with nothing to indicate it had.

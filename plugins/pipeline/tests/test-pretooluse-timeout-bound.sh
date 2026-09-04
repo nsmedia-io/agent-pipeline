@@ -302,7 +302,14 @@ record "AC3 DENSE END selected at run time: $DENSEST_REL -- $DENSEST_DENS (bytes
 # MAX_ARG_STRLEN: a 3,111,437-byte command came back as an EMPTY payload and the gate answered
 # `none` in 352 ms -- a fixture reporting an ALLOW for a gate that was working.
 DENSE_CMD_FILE="$TEMP_PROJECT/dense.cmd"
-DENSE_MAX_BYTES=6000000
+# 16 MB since 0.40.2, from 6 MB. The ceiling bounds the work this harness PERFORMS, not the
+# property; it has to sit above the length the pair needs on the FASTEST host this suite runs on.
+# 0.40.0 changed the densest unit to tests/test-materiality.sh (9640 bytes/copy), and on
+# ubuntu-latest the gate then decided 5996118 bytes in 26.6 s -- under the 30 s kill -- so the
+# climb hit the ceiling before it could build arm two (CI run 33905241529). Darwin reaches the
+# target at ~2 MB and is unaffected. The recorded-curve fixture below keeps its own 906-copy
+# ceiling from the 6 MB era, on purpose: it is a fixed oracle, not a mirror of this constant.
+DENSE_MAX_BYTES=16000000
 DENSE_PAD=""
 dense_write() {  # <copies> [pad] -> writes the command to DENSE_CMD_FILE and prints its byte count
   "$GATE_REAL_NODE" -e '
@@ -534,7 +541,8 @@ syn_climb() {  # <high-exponent-x10000> <max-copies> <bound-ms>
   tb_climb syn_probe 4 "$m1" 16 "$m2" "$SYN_FLOOR" 45000 42600 3200 "$2" 6
 }
 
-# The ceiling in copies at the recorded 6617 bytes per copy: 6000000 / 6617 = 906.
+# The ceiling in copies at the recorded 6617 bytes per copy, at the 6 MB ceiling this curve was
+# recorded under: 6000000 / 6617 = 906. Fixed here even though DENSE_MAX_BYTES has since moved.
 SYN_MAXC=906
 # WHAT THE METHOD THIS REPLACES WOULD HAVE ASKED FOR, from the SAME two points: solve the straight
 # line ms = 137 + 18.375c for 45000 and you get 2442 copies = 16.2 MB, over the ceiling and 15.6x
@@ -658,12 +666,15 @@ assert_eq "AC7: the four timing probes report a BYPASS (the gate emits nothing a
      if [[ "$_byp" -ge 4 && "$_reg" -ge 4 ]]; then echo both; else echo "BYPASS=$_byp REGRESSION=$_reg"; fi)" \
   "both"
 
-# AC6: the bound is EVALUATED on ubuntu-latest (.github/workflows/tests.yml:17,60 runs
-# `bash plugins/pipeline/tests/run.sh` there on every PR) and was DERIVED on darwin. A figure
-# re-taken on the evaluating host must sit beside the bound, in the same form measured_state records
-# the darwin figures. A bound padded to cover an unmeasured host fails AC6 explicitly.
-CI_RUNS_SUITE="$(grep -c 'ubuntu-latest' "$MAT/.github/workflows/tests.yml" 2>/dev/null | tr -d ' \n')"
-assert_eq "PREMISE for AC6: .github/workflows/tests.yml still runs this suite on ubuntu-latest (if this is 0 the criterion's evaluating host changed and the row below needs a new subject)" \
+# AC6: the bound is EVALUATED on a Linux host (0.40.2: tests/run-linux.sh runs
+# `bash plugins/pipeline/tests/run.sh` in a pinned Debian container, on demand, replacing the
+# ubuntu-latest workflow that ran it on every PR) and was DERIVED on darwin. A figure re-taken on
+# the evaluating host must sit beside the bound, in the same form measured_state records the
+# darwin figures. A bound padded to cover an unmeasured host fails AC6 explicitly. The recorded
+# ubuntu-latest figures below stay what they are: measurements taken on that runner, still the
+# closest Linux figures this repo holds until run-linux.sh's are recorded beside them.
+CI_RUNS_SUITE="$(grep -cE 'bookworm|ubuntu' "$MAT/plugins/pipeline/tests/run-linux.sh" 2>/dev/null | tr -d ' \n')"
+assert_eq "PREMISE for AC6: tests/run-linux.sh still runs this suite on a Linux image (if this is 0 the criterion's evaluating host changed and the row below needs a new subject)" \
   "$([[ "$CI_RUNS_SUITE" -ge 1 ]] && echo runs || echo "NOT FOUND")" "runs"
 UBUNTU_FIGS="$(grep -n 'ubuntu-latest' "$VERDICTS_SRC" 2>/dev/null | head -1 | cut -d: -f1)"
 UBUNTU_BLOCK="$(sed -n "$(( ${UBUNTU_FIGS:-1} - 6 )),$(( ${UBUNTU_FIGS:-1} + 8 ))p" "$VERDICTS_SRC" 2>/dev/null)"

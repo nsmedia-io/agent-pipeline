@@ -124,7 +124,7 @@ record() {
 #
 # THE RULE. A suite may run with a capability absent on a developer's machine. CI may not. So
 # the answer is always RECORDED (the transcript names the tool and its state either way), and
-# under PIPELINE_TESTS_REQUIRE_CAPABILITIES=1 -- which .github/workflows/tests.yml sets -- an
+# under PIPELINE_TESTS_REQUIRE_CAPABILITIES=1 -- which tests/run-linux.sh sets -- an
 # absent capability becomes a counted FAILURE naming the tool, instead of a column that quietly
 # does not exist.
 #

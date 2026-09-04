@@ -420,8 +420,9 @@ assert_eq "VACUITY: hooks.json declares a positive PreToolUse timeout to bound a
 #     Command: bash plugins/pipeline/tests/run.sh (this suite reads its own `record` lines back).
 #
 #   MEASURED ON ubuntu-latest, WHICH IS THE HOST THE GUARD IS EVALUATED ON.
-#   .github/workflows/tests.yml:17,60 runs `bash plugins/pipeline/tests/run.sh` on ubuntu-latest
-#   for every pull_request and every push to main, so these four blocks execute there on every
+#   tests/run-linux.sh (0.40.2; before it, .github/workflows/tests.yml on ubuntu-latest for
+#   every pull_request and push) runs `bash plugins/pipeline/tests/run.sh` on a Linux host, so
+#   these four blocks execute there whenever a Linux answer is taken, and executed there on every
 #   change and the figures below were read off that run rather than estimated from the darwin ones:
 #     LENGTH 119 ms, WORD-BOUNDARY 175 ms, DENSITY 154 ms,
 #     DENSITY-GROWTH 156 ms.
@@ -756,8 +757,13 @@ assert_eq "AC7 DENSITY VACUITY: the population really spans density -- ${DENS_MI
 # curve recorded above, not this row; this row is here so a regression cannot land silently.
 assert_eq "AC7 DENSITY: the densest cell stays inside 12x of the cheapest at one fixed length ($(( DENS_SPREAD_X10 / 10 )).$(( DENS_SPREAD_X10 % 10 ))x over a ${DENS_MIN_D}-to-${DENS_MAX_D} structural-character span). A REGRESSION GUARD against cost returning to the product of density and length, not a proof that it has not: see the comment above it and the recorded curve" \
   "$([[ "$DENS_SPREAD_X10" -le 120 ]] && echo bounded || echo "FOLLOWS DENSITY: $(( DENS_SPREAD_X10 / 10 )).$(( DENS_SPREAD_X10 % 10 ))x over ${DENS_MIN_D}..${DENS_MAX_D} structural characters")" "bounded"
-assert_eq "AC7 DENSITY DISCRIMINATION: and the cells still differ measurably from each other ($(( DENS_SPREAD_X10 / 10 )).$(( DENS_SPREAD_X10 % 10 ))x > 1.2x), so the row above is bounding the GATE and not a harness floor that swamped every cell" \
-  "$([[ "$DENS_SPREAD_X10" -gt 12 ]] && echo discriminates || echo "FLOOR-DOMINATED: $(( DENS_SPREAD_X10 / 10 )).$(( DENS_SPREAD_X10 % 10 ))x -- every cell is the harness and the bound above proves nothing")" \
+# #147: after #140 this spread measures exactly 1.2x on ubuntu-latest (1.4x before), and a strict
+# `> 1.2x` reddened CI on every run since. This row is a VACUITY control for the 12x bound above,
+# not a bound itself: what it must refuse is a spread of 1.0x, where every cell is the harness
+# floor and the 12x row proves nothing. So the floor is "differ at all", not a figure tuned to one
+# runner (evidence-controls.md rule 21: a threshold on a rendered measurement measures the runner).
+assert_eq "AC7 DENSITY DISCRIMINATION: and the cells still differ measurably from each other ($(( DENS_SPREAD_X10 / 10 )).$(( DENS_SPREAD_X10 % 10 ))x > 1.0x), so the row above is bounding the GATE and not a harness floor that swamped every cell" \
+  "$([[ "$DENS_SPREAD_X10" -gt 10 ]] && echo discriminates || echo "FLOOR-DOMINATED: $(( DENS_SPREAD_X10 / 10 )).$(( DENS_SPREAD_X10 % 10 ))x -- every cell is the harness and the bound above proves nothing")" \
   "discriminates"
 
 # ===============================================================================================
