@@ -766,8 +766,8 @@ assert_eq "AC5 PLANT-RED DISCRIMINATION: and the BYPASS row over the SAME probes
 
 RB_REG_GUARDS="$(grep -c -- '-lt "$REGRESSION_BUDGET_MS"' "$RB_SRC" 2>/dev/null | tr -d ' \n')"
 RB_BYP_GUARDS="$(grep -c -- '-lt "$BYPASS_BOUND_MS"' "$RB_SRC" 2>/dev/null | tr -d ' \n')"
-assert_eq "AC5/AC7: the live observation above is on ONE of the four timing blocks, and the other three are pinned STRUCTURALLY in the same breath -- four guards read the absolute budget and four read the declared bypass bound (found $RB_REG_GUARDS and $RB_BYP_GUARDS). A block rewired to read the declaration moves this count instead of passing quietly" \
-  "$RB_REG_GUARDS/$RB_BYP_GUARDS" "4/4"
+assert_eq "AC5/AC7: the live observation above is on ONE of the five timing blocks (a fifth, #140 AC7 SUPPLEMENT, joined this round to measure the many-blank-line corpus the heredoc-opacity fix's own comment claims to have re-measured), and the other four are pinned STRUCTURALLY in the same breath -- five guards read the absolute budget and five read the declared bypass bound (found $RB_REG_GUARDS and $RB_BYP_GUARDS). A block rewired to read the declaration moves this count instead of passing quietly" \
+  "$RB_REG_GUARDS/$RB_BYP_GUARDS" "5/5"
 
 # ===============================================================================================
 suite "AC8: the declaration suite's range assertion names the measurement that fixes it"
