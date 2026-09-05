@@ -146,10 +146,14 @@ function resolveLedgerRef(root, dir, rel) {
 }
 
 /** Run a CLI. Returns { ran, status, out } and never throws. */
-function runCli(cmd, args) {
+// `cwd` is the PROJECT ROOT, never the caller's working directory: `gh issue view 412` resolves
+// the repository from the git remote of the directory it runs in, and the gate that calls verify
+// runs from the orchestrator's checkout, which can be a different repository altogether (measured:
+// a real issue reported as "does not exist" because gh was asked from the plugin's own worktree).
+function runCli(cmd, args, cwd) {
   let r;
   try {
-    r = spawnSync(cmd, args, { encoding: "utf8" });
+    r = spawnSync(cmd, args, { encoding: "utf8", ...(cwd ? { cwd } : {}) });
   } catch (e) {
     return { ran: false, status: null, out: String(e && e.message) };
   }
@@ -249,8 +253,11 @@ export function verifyDeferralRef(ref, opts = {}) {
     };
   }
 
-  const number = issueNumberOf(value);
-  const r = runCli(cli, ["issue", "view", number || value]);
+  // A URL names its repository and goes to the CLI untouched; only a bare `#n` leans on the
+  // project root's remote. Reducing a URL to its number would ask whatever repo the cwd's
+  // remote points at, which is the false negative the cwd rule above also closes.
+  const target = URL_REF.test(value) ? value : issueNumberOf(value) || value;
+  const r = runCli(cli, ["issue", "view", target], root);
   if (r.ran && r.status === 0) {
     return { ok: true, code: 0, message: `${value} exists`, warning: null };
   }
@@ -336,7 +343,9 @@ export function recordDeferral({ tracker, root, dir, issue, title, body, evidenc
     tracker === "github"
       ? ["issue", "create", "--title", String(title), "--body", text]
       : ["issue", "create", "--title", String(title), "--description", text, "--yes"];
-  const r = runCli(cli, args);
+  // Created in the PROJECT ROOT's repository, never the caller's cwd: an orchestrator running
+  // from its own checkout would otherwise file the deferral against the wrong remote.
+  const r = runCli(cli, args, root);
   if (!r.ran || r.status !== 0) {
     throw new Error(`${cli} issue create failed (status ${r.status}): ${(r.out || "").trim().slice(0, 400)}`);
   }

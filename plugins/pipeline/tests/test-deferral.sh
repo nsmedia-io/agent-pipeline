@@ -292,6 +292,34 @@ assert_contains "...and naming the tool it wanted" "$OUT" "gh"
 run_isolated verify "not a ref at all"
 assert_eq "CONTROL: an absent CLI still refuses a MALFORMED ref" "$RC" "2"
 
+# (1b) THE CLI RUNS IN THE PROJECT ROOT AND A URL GOES THROUGH UNTOUCHED. Measured against a real
+# gh before this cell existed: verify asked `gh issue view 2343` from the plugin's own worktree,
+# gh resolved the repository from THAT cwd's remote, and a real issue came back "does not exist".
+# The stub here writes its cwd and argv, and the caller sits in a directory that is NOT the
+# project, so a regression to "spawn where you stand" or "reduce the URL to its number" reddens.
+CAPTURE="$TEMP_PROJECT/gh-capture.txt"
+{
+  printf '#!/bin/sh\n'
+  printf 'if [ "$1" = "--version" ]; then echo "gh 0.0.0-stub"; exit 0; fi\n'
+  printf 'printf "%%s|%%s\\n" "$(pwd -P)" "$*" >> "%s"\n' "$CAPTURE"
+  printf 'echo "Issue #412: something"\n'
+  printf 'exit 0\n'
+} > "$SCRATCH_BIN/gh"
+chmod +x "$SCRATCH_BIN/gh"
+rm -f "$CAPTURE"
+( cd "$SCRATCH_BIN" && CLAUDE_PROJECT_DIR="$PROJ" PATH="$SCRATCH_BIN" "$NODE_BIN" "$DEFERRAL" verify "https://github.com/acme/app/issues/412" ) >/dev/null 2>&1
+RC=$?
+assert_eq "URL ref, asked from a foreign cwd: accepted" "$RC" "0"
+PROJ_REAL="$(cd "$PROJ" && pwd -P)"
+assert_eq "...and gh ran IN THE PROJECT ROOT, not where the caller stood" \
+  "$(cut -d'|' -f1 "$CAPTURE" | tail -1)" "$PROJ_REAL"
+assert_eq "...and it was handed the URL itself, which names its repository" \
+  "$(cut -d'|' -f2- "$CAPTURE" | tail -1)" "issue view https://github.com/acme/app/issues/412"
+rm -f "$CAPTURE"
+( cd "$SCRATCH_BIN" && CLAUDE_PROJECT_DIR="$PROJ" PATH="$SCRATCH_BIN" "$NODE_BIN" "$DEFERRAL" verify "#412" ) >/dev/null 2>&1
+assert_eq "a bare #n ref is reduced to its number for the project root's remote" \
+  "$(cut -d'|' -f2- "$CAPTURE" | tail -1)" "issue view 412"
+
 # (2) CLI PRESENT and the issue RESOLVES -> accept, silently. The stub stands in for the tracker
 # and proves only which branch ran.
 plant_cli gh 0 "Issue #412: something"
