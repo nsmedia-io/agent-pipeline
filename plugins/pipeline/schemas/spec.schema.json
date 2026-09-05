@@ -63,6 +63,10 @@
       "minItems": 1,
       "description": "Testable criteria QA maps to tests"
     },
+    "size_justification": {
+      "type": "string",
+      "description": "Why this is ONE issue rather than several, written when the spec crosses the size tripwire (more than 10 requirements or more than 12 acceptance criteria). Those are not limits; they are the point at which 'is this one issue?' stops being rhetorical, and the tripwire was prose nothing read: on one run BA recommended a three-way split the first time it was asked directly, and was right, but nothing had asked. scripts/validate-pipeline-artifact.mjs WARNS when the counts cross and this field is absent or blank; it never blocks, because an over-sized spec is a judgement call and a refusal here would be one an owner cannot answer at the moment it fires."
+    },
     "impacted_domains": {
       "type": "array",
       "items": {
@@ -334,7 +338,7 @@
               },
               "fixture_matrix": {
                 "type": "string",
-                "description": "For a criterion governing a COMPOUND predicate, the cross product of cells its fixtures must cover. A battery can only mutate the code its fixtures reach; every fixture sitting in one cell of a conjunction is how a veto-grade defect survives a green battery."
+                "description": "For a criterion governing a COMPOUND predicate, the cross product of cells its fixtures must cover. A battery can only mutate the code its fixtures reach; every fixture sitting in one cell of a conjunction is how a veto-grade defect survives a green battery. WHERE THE PROPERTY IS A QUANTIFIER OVER A SET -- 'the same as <predicate X> over the same rows', 'for every', 'any' -- the matrix must also carry the POPULATION dimension: the row count and which rows, with at least one multi-row fixture that distinguishes the naive single-row reading from the real predicate. A matrix over value cells alone lets a gate that reads one row of four terms pass every test. Origin: a Settings gate read one primary contact with three terms while the delivery query read all rows with four; every fixture had one contact, so 2083 tests were green and the defect reached the panel."
               }
             }
           }
