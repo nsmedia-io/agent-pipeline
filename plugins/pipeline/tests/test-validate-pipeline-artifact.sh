@@ -341,4 +341,90 @@ assert_contains "every shipped agent is registered or declared artifact-less" "$
 assert_contains "and nothing is classified that the plugin does not ship" "$MANIFEST" '"extra":[]'
 assert_contains "bare and plugin-namespaced dispatch agree for every shipped agent" "$MANIFEST" '"drift":[]'
 
+# ---------------------------------------------------------------------------
+suite "validate-pipeline-artifact: the spec SIZE TRIPWIRE warns and never blocks (0.41.0)"
+# ---------------------------------------------------------------------------
+# commands/pipeline.md has said for its whole life that a spec crossing 10 requirements or 12
+# acceptance criteria must justify its size or propose a split, and nothing read it. On the run
+# that produced the rule, BA recommended a three-way split the first time it was asked directly
+# and was right; nothing had asked.
+#
+# THE FAIL DIRECTION IS THE WHOLE DESIGN, so every cell below asserts stdout as well as stderr.
+# The counts are a smell, not a defect: a genuinely large issue is a real thing, and "split
+# this" is a decision only BA and the owner can take, at a moment a SubagentStop refusal cannot
+# reach them. A warning that could ever turn into a block would be refusing correct work on a
+# heuristic, which is how a control gets switched off.
+
+PAYLOAD_BA="{\"agent_type\":\"ba\",\"cwd\":\"$TEMP_PROJECT\",\"active_issue\":\"$ISSUE\"}"
+
+# write_spec_sized <n-requirements> <n-criteria> [size_justification]
+write_spec_sized() {
+  node -e '
+    const fs = require("fs");
+    const [, file, reqs, acs, just] = process.argv;
+    const spec = {
+      issue_number: 4242, title: "t", problem: "p",
+      requirements: Array.from({ length: Number(reqs) }, (_, i) => `R${i + 1} do the thing`),
+      acceptance_criteria: Array.from({ length: Number(acs) }, (_, i) => `AC${i + 1}. it is done`),
+      impacted_domains: ["api"], trivial: false, ba_approved_at: "2026-01-01T00:00:00Z",
+    };
+    if (just !== "") spec.size_justification = just;
+    fs.writeFileSync(file, JSON.stringify(spec));
+  ' "$TEMP_ISSUE_DIR/spec.json" "$1" "$2" "${3:-}"
+}
+
+# A spec at the tripwire is not over it: 10 and 12 conform, and a warning at the boundary would
+# fire on every spec that sits exactly where the rule says it may.
+write_spec_sized 10 12 ""
+hook "$PAYLOAD_BA"
+assert_not_contains "BOUNDARY: exactly 10 requirements and 12 criteria is silent" "$ERR" "size tripwire"
+assert_eq "BOUNDARY: exit 0" "$RC" "0"
+assert_eq "BOUNDARY: and nothing on stdout" "$OUT" ""
+
+write_spec_sized 11 12 ""
+hook "$PAYLOAD_BA"
+assert_eq "one requirement over the tripwire still exits 0" "$RC" "0"
+assert_eq "AND WRITES NOTHING TO STDOUT: a warning must never become a decision:block" "$OUT" ""
+assert_contains "the warning is on stderr" "$ERR" "agent-pipeline WARNING"
+assert_contains "and names the tripwire" "$ERR" "size tripwire"
+assert_contains "and names the requirement count" "$ERR" "11 requirements"
+# BOTH counts, whichever crossed: "11 requirements" alone leaves the reader wondering whether
+# the criteria are fine or simply unmentioned.
+assert_contains "and the criteria count too, although that one did not cross" "$ERR" "12 acceptance criteria"
+assert_contains "and names the field that answers it" "$ERR" "size_justification"
+assert_contains "and says out loud that it blocks nothing" "$ERR" "blocks nothing"
+
+write_spec_sized 10 13 ""
+hook "$PAYLOAD_BA"
+assert_eq "the criteria count crosses on its own" "$RC" "0"
+assert_contains "and warns" "$ERR" "size tripwire"
+assert_contains "naming both counts again" "$ERR" "13 acceptance criteria"
+assert_eq "still nothing on stdout" "$OUT" ""
+
+# THE FIELD ANSWERS IT. Without this cell the warning would be unconditional above the counts
+# and `size_justification` would be a field nothing reads.
+write_spec_sized 11 13 "One issue: the eleven requirements are one migration's blast radius and split three ways they cannot be reviewed."
+hook "$PAYLOAD_BA"
+assert_eq "a size_justification silences the warning" "$RC" "0"
+assert_not_contains "the tripwire says nothing once the question is answered" "$ERR" "size tripwire"
+
+# A BLANK field is not an answer. `""` satisfies a required-string check while claiming a
+# justification exists, which is the cheapest-valid-value defect this repo has already shipped
+# once on a required free-text field.
+write_spec_sized 11 13 "   "
+hook "$PAYLOAD_BA"
+assert_contains "a whitespace-only size_justification does NOT silence it" "$ERR" "size tripwire"
+assert_eq "and it still blocks nothing" "$OUT" ""
+
+# CONTROL ON THE INSTRUMENT: the same oversized spec, otherwise valid, must produce no schema
+# failure. Without this the warning cells could be riding on an artifact that was refused for
+# some other reason entirely.
+write_spec_sized 11 13 ""
+hook "$PAYLOAD_BA"
+assert_not_contains "CONTROL: the oversized spec is otherwise schema-valid" "$OUT" "decision"
+assert_contains "CONTROL: and the run reports it CHECKED the artifact" "$ERR" "verdict=checked"
+
+rm -f "$TEMP_ISSUE_DIR/spec.json"
+
+
 finish

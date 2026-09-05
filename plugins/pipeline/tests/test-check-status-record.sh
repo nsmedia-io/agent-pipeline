@@ -392,4 +392,116 @@ DOC_RUN_CLEAN="$( cd "$MULTI_ROOT" && eval "$DOC_CMD_RESOLVED" 2>&1; printf '|%s
 assert_eq "GATE BITES, the other half: the same documented command exits 0 on the fixed record" \
   "$DOC_RUN_CLEAN" "|0"
 
+# ---------------------------------------------------------------------------
+suite "the default scan is scoped to LIVE records (0.41.0)"
+# ---------------------------------------------------------------------------
+# WHY THE SCOPE CHANGED. `.pipeline/` accumulates one record per run forever, and records
+# written before #34 capped the verdict field carry pre-cap values nobody may edit: they are the
+# archive. The bare invocation walked all of them, so a checkpoint commit printed the same
+# violations about the same finished runs on every run of every issue, none of them actionable
+# by the writer. A refusal that fires identically whatever you just wrote is one people learn to
+# scroll past, and a control nobody reads is indistinguishable from one that was never wired up.
+#
+# LIVE is a DISJUNCTION and each half is pinned separately below: recent, OR not at a terminal
+# phase. The second half is what keeps an abandoned run in scope -- a pipeline halted three
+# months ago at 3-impl-gate-failed is exactly the record a --resume will read next.
+
+# aged_record <file> <phase> <iso-updated_at> <events-verdict>
+aged_record() {
+  mkdir -p "$(dirname "$1")"
+  node -e '
+    const fs = require("fs");
+    const [, file, phase, updated, verdict] = process.argv;
+    const ev = { phase, at: updated };
+    if (verdict !== "") ev.verdict = verdict;
+    fs.writeFileSync(file, JSON.stringify({
+      current_phase: phase, started_at: "2020-01-01T00:00:00Z", updated_at: updated,
+      branch: "b", events: [ev], flags: [],
+    }));' "$1" "$2" "$3" "$4"
+}
+
+RECENT_ISO="$(node -e 'process.stdout.write(new Date(Date.now() - 3600e3).toISOString())')"
+OLD_ISO="$(node -e 'process.stdout.write(new Date(Date.now() - 400*24*3600e3).toISOString())')"
+
+new_tmpdir || exit 90
+SCOPE_ROOT="$NEW_TMPDIR"
+# 1: OLD and ARCHIVED, carrying an over-cap verdict. The historical record nobody may fix.
+aged_record "$SCOPE_ROOT/.pipeline/1/status.json" "5-archived" "$OLD_ISO" "$OVER_CAP"
+# 2: OLD but NOT terminal. Abandoned mid-run, and still the record a resume would read.
+aged_record "$SCOPE_ROOT/.pipeline/2/status.json" "3-impl" "$OLD_ISO" "$AT_CAP"
+# 3: RECENT and archived. Terminal, but inside the window, so still in scope.
+aged_record "$SCOPE_ROOT/.pipeline/3/status.json" "5-archived" "$RECENT_ISO" "$AT_CAP"
+
+SCOPED="$(cd "$SCOPE_ROOT" && node "$CHECKER" --root "$SCOPE_ROOT" --report 2>&1)"
+assert_contains "the default scan reads two of the three records" "$SCOPED" "files=2"
+assert_eq "and it exits 0: the old archived violation is out of scope" \
+  "$(run_checker "$SCOPE_ROOT" | cut -d'|' -f1)" "0"
+# Each half of the disjunction, named, so a rule that kept only one would redden here rather
+# than pass on the aggregate count.
+assert_not_contains "the OLD ARCHIVED record is the one dropped" "$SCOPED" ".pipeline/1/status.json"
+ALL_OUT="$(run_checker "$SCOPE_ROOT" --all)"
+assert_eq "--all restores the historical walk and finds it" "${ALL_OUT%%|*}" "1"
+assert_contains "...naming the record the default scan skipped" "$ALL_OUT" ".pipeline/1/status.json"
+
+# NON-ZERO CONTROL ON THE SCOPING ITSELF. The two cells above are consistent with a scan that
+# reads nothing at all, so each surviving record is made to speak: put an over-cap verdict in
+# the OLD NON-TERMINAL record and in the RECENT ARCHIVED one, one at a time, and require the
+# default scan to refuse each.
+aged_record "$SCOPE_ROOT/.pipeline/2/status.json" "3-impl" "$OLD_ISO" "$OVER_CAP"
+OLD_LIVE="$(run_checker "$SCOPE_ROOT")"
+assert_eq "an OLD but non-terminal record is IN scope: the default scan refuses it" "${OLD_LIVE%%|*}" "1"
+assert_contains "...naming it" "$OLD_LIVE" ".pipeline/2/status.json"
+aged_record "$SCOPE_ROOT/.pipeline/2/status.json" "3-impl" "$OLD_ISO" "$AT_CAP"
+
+aged_record "$SCOPE_ROOT/.pipeline/3/status.json" "5-archived" "$RECENT_ISO" "$OVER_CAP"
+RECENT_ARCH="$(run_checker "$SCOPE_ROOT")"
+assert_eq "a RECENT archived record is IN scope too" "${RECENT_ARCH%%|*}" "1"
+assert_contains "...naming it" "$RECENT_ARCH" ".pipeline/3/status.json"
+aged_record "$SCOPE_ROOT/.pipeline/3/status.json" "5-archived" "$RECENT_ISO" "$AT_CAP"
+
+# --issue reaches ONE record whatever its age or phase, which is the flag a writer uses when the
+# thing they just edited is the archived one.
+ISSUE_OUT="$(run_checker "$SCOPE_ROOT" --issue 1)"
+assert_eq "--issue reads the out-of-scope record and refuses it" "${ISSUE_OUT%%|*}" "1"
+assert_contains "...and reads ONLY that one" "$ISSUE_OUT" ".pipeline/1/status.json"
+assert_not_contains "...without walking its siblings" "$ISSUE_OUT" ".pipeline/2/status.json"
+assert_eq "--issue on a clean record exits 0" "$(run_checker "$SCOPE_ROOT" --issue 3 | cut -d'|' -f1)" "0"
+assert_eq "--issue on a run that does not exist exits 2, never 0" \
+  "$(run_checker "$SCOPE_ROOT" --issue 4242 | cut -d'|' -f1)" "2"
+assert_eq "--issue with no value is a usage error" \
+  "$(run_checker "$SCOPE_ROOT" --issue | cut -d'|' -f1)" "2"
+
+# A record the scan CANNOT date stays in scope. An undatable record is one the checker must
+# still be given the chance to refuse; filtering it here would turn a torn write into a silent
+# pass, which is the one thing "nothing checked is never a pass" forbids.
+new_tmpdir || exit 90
+UNDATABLE_ROOT="$NEW_TMPDIR"
+mkdir -p "$UNDATABLE_ROOT/.pipeline/7"
+printf '{"current_phase":"5-archived","events":[{"phase":"5-archived","at":"x","verdict":' \
+  > "$UNDATABLE_ROOT/.pipeline/7/status.json"
+TORN_SCOPE="$(run_checker "$UNDATABLE_ROOT")"
+assert_eq "a torn record at a terminal phase is still read, and exits 2" "${TORN_SCOPE%%|*}" "2"
+assert_contains "...naming the file it could not read" "$TORN_SCOPE" ".pipeline/7/status.json"
+
+# A tree whose every record is archived-and-old reports NOTHING CHECKED rather than a pass, and
+# the message names the scope so the reader knows --all is the next move. This is the state the
+# scoping newly creates, so it gets its own cell rather than riding on the pre-existing
+# empty-directory one.
+new_tmpdir || exit 90
+ALL_ARCHIVED="$NEW_TMPDIR"
+aged_record "$ALL_ARCHIVED/.pipeline/9/status.json" "5-archived" "$OLD_ISO" "$AT_CAP"
+ARCHIVED_ONLY="$(run_checker "$ALL_ARCHIVED")"
+assert_eq "a tree with only old archived records exits 2, not 0" "${ARCHIVED_ONLY%%|*}" "2"
+assert_contains "...saying nothing was checked" "$ARCHIVED_ONLY" "not a pass"
+assert_contains "...naming the scope, so the reader knows why" "$ARCHIVED_ONLY" "LIVE"
+assert_contains "...and naming the flag that widens it" "$ARCHIVED_ONLY" "--all"
+assert_eq "CONTROL: --all on the same tree finds the record and passes it" \
+  "$(run_checker "$ALL_ARCHIVED" --all)" "0|"
+
+# The selection flags do not combine with explicitly named files: a flag silently ignored beside
+# an argument is how a writer comes to believe they checked something they did not.
+assert_eq "--all beside a named file is a usage error" \
+  "$(run_checker "$SCOPE_ROOT" --all .pipeline/1/status.json | cut -d'|' -f1)" "2"
+
+
 finish
