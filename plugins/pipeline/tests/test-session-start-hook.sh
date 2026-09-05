@@ -107,4 +107,50 @@ assert_contains "still prints the report" "$OUT" "=== AGENT PIPELINE WARMUP ==="
 assert_contains "falls back to the default branch" "$OUT" "origin/main"
 rm -rf "$REPO"
 
+suite "SessionStart hook: an unconfigured checkout says so LOUDLY (0.41.0)"
+
+# THE DEFECT. A session ran an entire pipeline end to end inside a worktree created before its
+# project adopted this plugin. That tree carried the project's own retired in-repo copy, so every
+# phase dispatched, every gate ran, every gate PASSED, and Phase 5 silently no-opped into a store
+# nothing read. Nothing in the run looked wrong, because the stale copy answered consistently
+# about itself. An absent pipeline.config.json is the cheapest early signal separating that tree
+# from a configured one.
+#
+# THE HOOK REPORTS, IT NEVER REFUSES. The refusal lives in commands/pipeline.md Phase 0 step 0,
+# where a run can be halted before it dispatches anything; a hook that wedged a session over a
+# missing config would be the wrong instrument entirely. So both halves are pinned: the line is
+# there, and the exit code has not moved.
+
+REPO=$(make_repo)
+run_hook ''
+assert_eq "an absent config does not change the exit code" "$RC" "0"
+assert_contains "the warmup says the checkout is not configured" "$OUT" "NOT CONFIGURED"
+assert_contains "and names the file it looked for" "$OUT" "pipeline.config.json"
+assert_contains "and says what such a checkout might be" "$OUT" "predates the plugin's adoption"
+assert_contains "and names the consequence, not just the absence" "$OUT" "stale or missing tooling"
+assert_contains "and tells the reader the pipeline will halt on it" "$OUT" "HALTS at Phase 0"
+assert_contains "and gives the copy command" "$OUT" "pipeline.config.example.json"
+assert_contains "without losing the rest of the warmup" "$OUT" "=== END WARMUP ==="
+rm -rf "$REPO"
+
+# CONTROL. A configured checkout must be silent about this, or the line is one every session
+# prints and every reader learns to scroll past, which is the failure mode that makes a startup
+# warning worthless.
+REPO=$(make_repo)
+run_hook '{"checkCommand":"npm test"}'
+assert_eq "CONTROL: a configured checkout exits 0 too" "$RC" "0"
+assert_not_contains "CONTROL: and says nothing about not being configured" "$OUT" "NOT CONFIGURED"
+assert_contains "CONTROL: while still printing the warmup" "$OUT" "=== END WARMUP ==="
+rm -rf "$REPO"
+
+# An UNPARSEABLE config is a different condition and is not this line's business: the file is
+# there, so this checkout is not the pre-adoption tree the line is about. config-doctor.mjs owns
+# that diagnosis, further down and in its own words.
+REPO=$(make_repo)
+run_hook '{ not valid json'
+assert_not_contains "an unparseable config is NOT reported as unconfigured" "$OUT" "NOT CONFIGURED"
+assert_eq "and still exits 0" "$RC" "0"
+rm -rf "$REPO"
+
+
 finish
