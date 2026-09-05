@@ -105,7 +105,7 @@ key_field() { # <key> <field>
       console.log(k[process.env.FIELD] ? "present" : "MISSING");
     })'
 }
-for k in extraMigrationGlobs dataLayerGlobs infraGlobs dispatchModels; do
+for k in extraMigrationGlobs dataLayerGlobs infraGlobs dispatchModels deferralTracker deferralDir; do
   assert_eq "$k has a reader"   "$(key_field "$k" reader)"   "present"
   assert_eq "$k has a fallback" "$(key_field "$k" fallback)" "present"
   assert_eq "$k has a degrades consequence" "$(key_field "$k" degrades)" "present"
@@ -118,6 +118,25 @@ assert_contains "migrationGlobs' consequence names the GATE consumer" "$DEGRADES
 assert_contains "and the TRIPWIRE consumer" "$DEGRADES" "tripwire"
 assert_contains "and says the tripwire UNIONS rather than narrows" "$DEGRADES" "UNIONS"
 assert_contains "and names extraMigrationGlobs as the additive alternative" "$DEGRADES" "extraMigrationGlobs"
+
+# The two deferral keys (0.41.0). `deferralTracker` decides where a deferred item is WRITTEN, and
+# the pre-Phase-4 gate refuses a tracker_ref that does not resolve in the mode it names, so a
+# project that never sets it records deferrals into a `gh` it may not have. Its `degrades` has to
+# say that, and has to name the escape hatch, or an adopting project reads the key as cosmetic.
+TRACKER_DEGRADES="$(DOC="$DOCTOR" node -e 'import(process.env.DOC).then(m=>console.log(m.ALL_KEYS.deferralTracker.degrades))')"
+assert_contains "deferralTracker's consequence names the default it silently takes" "$TRACKER_DEGRADES" "gh issue create"
+assert_contains "and names every legal value, so a typo is diagnosable from this line alone" \
+  "$TRACKER_DEGRADES" '"directory"'
+assert_contains "and names the gate that refuses a ref written the wrong way" "$TRACKER_DEGRADES" "gate"
+DIR_DEGRADES="$(DOC="$DOCTOR" node -e 'import(process.env.DOC).then(m=>console.log(m.ALL_KEYS.deferralDir.degrades))')"
+assert_contains "deferralDir's consequence says it is read in ONE mode only" "$DIR_DEGRADES" "directory"
+assert_contains "and that an escaping value is refused rather than honoured" "$DIR_DEGRADES" "refused"
+
+# The example must SET both, not merely mention them: an adopting project copies that file, and a
+# key it does not carry is a key nobody discovers.
+assert_eq "the shipped example sets deferralTracker" \
+  "$(grep -c '"deferralTracker":' "$EXAMPLE" | tr -d ' ')" "1"
+assert_eq "and deferralDir" "$(grep -c '"deferralDir":' "$EXAMPLE" | tr -d ' ')" "1"
 
 suite "AC12: every config key the docs name in backticks resolves to a registered key"
 
