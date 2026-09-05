@@ -212,7 +212,7 @@ Write at the end of Phase 3:
       "what": "the retry backoff is still linear on the notify path",
       "reason": "out of scope: changing it needs the queue owner's call on the redelivery budget",
       "tracker_ref": "https://github.com/acme/app/issues/912",
-      "evidence": "packages/notify/src/send.ts:88"
+      "evidence": "packages/notify/src/send.ts, at the retry call"
     }
   ],
   "scope_drift": {

@@ -557,14 +557,14 @@ assert_eq "AC36(a): a FUNCTION-SCOPE reverse edge is still a cycle and is still 
 # The module count is a present-tense fact, so a stale expectation fails loudly rather than
 # passing confidently: 16 at the reviewed commit, 17 once R6's leaf module landed, 18 with
 # #117's check-status-record.mjs, 19 with #132's check-knowledge-timeout-literals.mjs, 21 with
-# 0.40.0's materiality.mjs and security-surface.mjs. It went red on schedule when the eighteenth
+# 0.40.0's materiality.mjs and security-surface.mjs, 22 with 0.41.0's deferral.mjs. It went red on schedule when the eighteenth
 # module landed, again at the nineteenth, and again at the twenty-first, which is the behaviour
 # this pin is for -- bump the number, do not soften it to a floor. The assertion NAME is left as
 # it stands apart from the count: #132's AC15 compares this suite's row names against
 # origin/main with digits normalised, so a reworded row reads there as a DELETED one.
 MODULE_N="$(printf '%s' "$GRAPH_OUT" | sed -n 's/modules=\([0-9]*\).*/\1/p' | head -1)"
-assert_eq "AC36: scripts/ holds 21 modules -- R6's LEAF module plus #117's check-status-record.mjs, not the reviewed commit's 16" \
-  "$MODULE_N" "21"
+assert_eq "AC36: scripts/ holds 22 modules -- R6's LEAF module plus #117's check-status-record.mjs, not the reviewed commit's 16" \
+  "$MODULE_N" "22"
 
 # ===============================================================================================
 suite "AC36(b): three entry directions, PAIRED SAME-RUN CAPTURE against the reviewed commit"
