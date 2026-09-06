@@ -47,9 +47,13 @@
  *
  * Usage:
  *   node check-status-record.mjs [<status.json> ...]
- *     [--root <dir>] [--schema <path>] [--cap <n>] [--report]
+ *     [--root <dir>] [--schema <path>] [--cap <n>] [--all] [--issue <n>] [--report]
  *
- *   <no paths>      discover .pipeline/<*>/status.json under --root (default: cwd)
+ *   <no paths>      discover the LIVE .pipeline/<*>/status.json records under --root (default:
+ *                   cwd): updated in the last 30 days, OR parked at a non-terminal phase. See
+ *                   discover() for why the default is scoped and what stays in scope.
+ *   --all           every record under .pipeline/, history included. The pre-scoping default.
+ *   --issue <n>     just .pipeline/<n>/status.json, whatever its age or phase.
  *   --cap <n>       check against a TIGHTER cap than the schema's. Refused when it would
  *                   loosen one, so this flag can only ever make the check refuse more. It
  *                   exists for the non-zero controls in the contract suite, which lower the
@@ -62,7 +66,7 @@
  * that found nothing has no zero to report.
  */
 
-import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { isMain } from "./lib.mjs";
@@ -220,8 +224,55 @@ export function checkRecords(records, caps) {
   return out;
 }
 
-/** Repo-relative `.pipeline/<*>/status.json` paths under root, sorted. */
-export function discover(root) {
+// THE DEFAULT SCAN IS SCOPED TO LIVE RECORDS, and that is an observability fix rather than a
+// weakening (0.41.0).
+//
+// The bare invocation used to return EVERY `.pipeline/<n>/status.json` in the tree, history
+// included. `.pipeline/` accumulates one record per run forever, and records written before
+// #34 capped the verdict field carry pre-cap values that nobody may edit -- they are the
+// archive. So every checkpoint commit, on every run, printed the same six violations about six
+// finished runs, none of which the writer could act on. A refusal that fires identically
+// whatever you just wrote is one people learn to scroll past, and a control nobody reads is
+// indistinguishable from one that was never wired up.
+//
+// LIVE means one of two things, either sufficient: updated in the last 30 days, or parked at a
+// phase that is not terminal. The second disjunct is what keeps an abandoned run in scope: a
+// pipeline halted three months ago at `3-impl-gate-failed` is exactly the record a resume will
+// read, so its age is no reason to stop checking it.
+//
+// TERMINALITY IS READ FROM THE RECORD, not from a phase table copied in here: any `5-` prefix
+// counts, which is the same rule hooks/session-start.sh uses for "this run is finished", so a
+// new phase-5 label cannot silently fall out of the terminal set.
+//
+// FAIL DIRECTION. An unreadable, undatable or mis-shaped record is IN scope, never filtered
+// out: a record this function cannot date is one checkRecords must still be given the chance to
+// refuse, and dropping it here would turn a torn write into a silent pass. `--all` restores the
+// full historical walk and `--issue <n>` narrows to one record; an explicitly named file
+// argument never comes through here at all.
+const LIVE_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+
+/** Is this parsed record live (recent, or not at a terminal phase)? Unparseable is live. */
+export function isLiveRecord(text, now = Date.now(), windowMs = LIVE_WINDOW_MS) {
+  let s;
+  try {
+    s = JSON.parse(text);
+  } catch {
+    return true; // undatable: keep it in scope so checkRecords can report it
+  }
+  if (!s || typeof s !== "object" || Array.isArray(s)) return true;
+  const phase = String(s.current_phase ?? "");
+  if (!/^5-/.test(phase)) return true; // not terminal: live whatever its age
+  const updated = Date.parse(String(s.updated_at ?? ""));
+  if (!Number.isFinite(updated)) return true; // undatable: in scope
+  return now - updated <= windowMs;
+}
+
+/**
+ * Repo-relative `.pipeline/<*>/status.json` paths under root, sorted.
+ *
+ * @param {object} opts {all: boolean} to keep every historical record, {issue: string} for one.
+ */
+export function discover(root, opts = {}) {
   const base = path.join(root, ".pipeline");
   let entries;
   try {
@@ -229,15 +280,29 @@ export function discover(root) {
   } catch {
     return [];
   }
+  const now = typeof opts.now === "number" ? opts.now : Date.now();
   const found = [];
   for (const e of entries) {
     if (!e.isDirectory()) continue;
+    if (opts.issue !== undefined && e.name !== String(opts.issue)) continue;
     const rel = path.join(".pipeline", e.name, "status.json");
+    const abs = path.join(root, rel);
     try {
-      if (statSync(path.join(root, rel)).isFile()) found.push(rel);
+      if (!statSync(abs).isFile()) continue;
     } catch {
-      /* not a record dir */
+      continue; // not a record dir
     }
+    if (!opts.all && opts.issue === undefined) {
+      let text;
+      try {
+        text = readFileSync(abs, "utf8");
+      } catch {
+        found.push(rel); // unreadable: in scope, so the read error is reported not swallowed
+        continue;
+      }
+      if (!isLiveRecord(text, now)) continue;
+    }
+    found.push(rel);
   }
   return found.sort();
 }
@@ -249,7 +314,7 @@ function flatten(v) {
 function usage(msg) {
   process.stderr.write(`check-status-record: ${msg}\n`);
   process.stderr.write(
-    "usage: node check-status-record.mjs [<status.json> ...] [--root <dir>] [--schema <path>] [--cap <n>] [--report]\n",
+    "usage: node check-status-record.mjs [<status.json> ...] [--root <dir>] [--schema <path>] [--cap <n>] [--all] [--issue <n>] [--report]\n",
   );
   return 2;
 }
@@ -260,6 +325,13 @@ export function main(argv) {
   let schemaPath = DEFAULT_SCHEMA;
   let capOverride = null;
   let report = false;
+  let all = false;
+  let issue;
+  // Seen-ness is tracked separately from the value: `--issue` as the last word on the line
+  // takes `undefined`, which is indistinguishable from "the flag was never given" unless the
+  // flag records that it fired. A selection flag that silently no-ops back to the full scan is
+  // how a writer comes to believe they checked one record when they walked all of them.
+  let issueSeen = false;
 
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -268,6 +340,8 @@ export function main(argv) {
     const inline = a.startsWith("--") && eq > 0 ? a.slice(eq + 1) : null;
     const take = () => (inline !== null ? inline : argv[++i]);
     if (flag === "--report") report = true;
+    else if (flag === "--all") all = true;
+    else if (flag === "--issue") { issueSeen = true; issue = take(); }
     else if (flag === "--root") root = take();
     else if (flag === "--schema") schemaPath = take();
     else if (flag === "--cap") capOverride = take();
@@ -278,6 +352,12 @@ export function main(argv) {
     else files.push(a);
   }
   if (!root || !schemaPath) return usage("a flag was given with no value");
+  if (issueSeen && (issue === undefined || issue === "" || issue.startsWith("--"))) {
+    return usage("--issue needs a run id");
+  }
+  if (files.length > 0 && (all || issueSeen)) {
+    return usage("--all and --issue select what to DISCOVER; they do not combine with named files");
+  }
 
   let caps;
   try {
@@ -302,7 +382,7 @@ export function main(argv) {
   }
 
   const discovered = files.length === 0;
-  const list = discovered ? discover(root) : files;
+  const list = discovered ? discover(root, { all, issue }) : files;
 
   const records = [];
   for (const f of list) {
@@ -329,9 +409,18 @@ export function main(argv) {
   }
 
   if (result.files === 0) {
+    // The scope is NAMED in the refusal. Under the live-record default an empty walk can mean
+    // "this project has no runs" or "every run here is archived", and those want different
+    // next moves: only the second is answered by --all.
+    const scope =
+      issue !== undefined
+        ? `.pipeline/${issue}/status.json`
+        : all
+          ? "no .pipeline/<n>/status.json"
+          : "no LIVE .pipeline/<n>/status.json (updated in the last 30 days, or parked at a non-terminal phase; --all walks the archive too)";
     process.stderr.write(
       discovered
-        ? `check-status-record: no .pipeline/<n>/status.json found under ${root}. Nothing was checked, so this is not a pass.\n`
+        ? `check-status-record: ${issue !== undefined ? `no ${scope}` : scope} found under ${root}. Nothing was checked, so this is not a pass.\n`
         : "check-status-record: no files given.\n",
     );
     return 2;

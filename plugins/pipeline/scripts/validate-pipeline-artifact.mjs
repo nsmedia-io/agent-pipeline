@@ -1054,6 +1054,47 @@ export function groundFalsifiability(data, failures = []) {
   return failures;
 }
 
+/**
+ * THE SPEC SIZE TRIPWIRE, MADE VISIBLE. A WARNING, never a block, and the direction is the
+ * whole design.
+ *
+ * commands/pipeline.md has said for its whole life that a spec crossing 10 requirements or 12
+ * acceptance criteria must either justify its size or propose a split. Nothing read it. On the
+ * run that produced the rule, BA recommended a three-way split the first time it was asked
+ * directly and was right; nothing had asked.
+ *
+ * WHY IT CANNOT BLOCK. The counts are a smell, not a defect: a genuinely large issue is a real
+ * thing, and the remedy ("split this") is a decision only the owner and BA can take, at a
+ * moment a SubagentStop refusal cannot reach them. A gate that halted here would be refusing
+ * correct work on a heuristic, which is the shape evidence.md warns gets switched off. So it
+ * SAYS the numbers, names the field that answers it, and gets out of the way.
+ *
+ * BOTH COUNTS ARE NAMED whichever one crossed, because "11 requirements" alone leaves the
+ * reader wondering whether the criteria are fine or simply unmentioned.
+ *
+ * @returns {string[]} warnings, appended to the array passed in.
+ */
+export const SPEC_SIZE_REQUIREMENTS = 10;
+export const SPEC_SIZE_CRITERIA = 12;
+
+export function groundSpecSize(data, warnings = []) {
+  if (!data || typeof data !== "object") return warnings;
+  const reqs = Array.isArray(data.requirements) ? data.requirements.length : 0;
+  const acs = Array.isArray(data.acceptance_criteria) ? data.acceptance_criteria.length : 0;
+  if (reqs <= SPEC_SIZE_REQUIREMENTS && acs <= SPEC_SIZE_CRITERIA) return warnings;
+  const justified =
+    typeof data.size_justification === "string" && data.size_justification.trim() !== "";
+  if (justified) return warnings;
+  warnings.push(
+    `spec.json crosses the size tripwire (${reqs} requirements, ${acs} acceptance criteria; ` +
+      `the tripwire is ${SPEC_SIZE_REQUIREMENTS} and ${SPEC_SIZE_CRITERIA}) and carries no ` +
+      `size_justification. These are not limits: they are the point at which "is this one ` +
+      `issue?" stops being rhetorical. Write size_justification saying why this is one issue, ` +
+      `or propose a split. This is a WARNING and blocks nothing.`,
+  );
+  return warnings;
+}
+
 export function groundImplReport(data, ev, failures = []) {
   if (!data || typeof data !== "object") return failures;
   groundFilesChanged(data, ev, failures);
@@ -1150,11 +1191,16 @@ export function checkArtifacts(agentType, input, now = Date.now(), rootsOverride
   const agent = bareRole(agentType);
   const rules = AGENT_RULES[agent];
   const failures = [];
+  // A SECOND CHANNEL, deliberately separate from `failures`. Everything in `failures` becomes a
+  // decision:block; a warning must never reach that path, so it can never share the array. It
+  // is reported on stderr beside the announce line, where the operator already reads.
+  const warnings = [];
   const roots = pipelineDirs(input, rootsOverride);
 
   if (!rules) {
     return {
       failures,
+      warnings,
       verdict: "no-rules",
       agent,
       issue: null,
@@ -1165,7 +1211,7 @@ export function checkArtifacts(agentType, input, now = Date.now(), rootsOverride
     };
   }
   if (roots.length === 0) {
-    return { failures, verdict: "no-pipeline-root", agent, issue: null, roots: 0, detail: "no .pipeline directory in any candidate root" };
+    return { failures, warnings, verdict: "no-pipeline-root", agent, issue: null, roots: 0, detail: "no .pipeline directory in any candidate root" };
   }
 
   let verdict = "no-active-issue";
@@ -1306,6 +1352,7 @@ export function checkArtifacts(agentType, input, now = Date.now(), rootsOverride
           try {
             groundOpenQuestions(data, failures);
             groundFalsifiability(data, failures);
+            groundSpecSize(data, warnings);
           } catch {
             // same contract as groundImplReport: never wedge a stop
           }
@@ -1320,7 +1367,7 @@ export function checkArtifacts(agentType, input, now = Date.now(), rootsOverride
     // cross-worktree false blocks.
     if (sawRecent) break;
   }
-  return { failures, verdict, detail, agent, issue, roots: roots.length };
+  return { failures, warnings, verdict, detail, agent, issue, roots: roots.length };
 }
 
 /**
@@ -2155,6 +2202,9 @@ async function main() {
   const result = checkArtifacts(input.agent_type, input);
   const line = announceLine(result);
   if (line) process.stderr.write(`${line}\n`);
+  // Warnings go to stderr and stop there. stdout stays the decision channel, so nothing here
+  // can turn into a block: this is the one path in this file that reports without refusing.
+  for (const w of result.warnings || []) process.stderr.write(`agent-pipeline WARNING: ${w}\n`);
 
   const { failures } = result;
   if (failures.length === 0) return; // allow stop

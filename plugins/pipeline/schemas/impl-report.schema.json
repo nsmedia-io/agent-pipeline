@@ -154,6 +154,36 @@
         }
       }
     },
+    "deferred": {
+      "type": "array",
+      "description": "Every item Dev observed and did NOT fix, with the ref that proves it was written down somewhere durable. Recorded through scripts/deferral.mjs BEFORE this report is written; the ref is whatever that script printed, which is an issue URL under deferralTracker github/gitlab and a repo-relative path under deferralDir in directory mode. The pre-Phase-4 gate refuses a report whose deferred entry carries no ref its configured tracker can resolve, because 'routed to #N' claimed in an artifact and never written has happened across three consecutive rounds on one PR.",
+      "items": {
+        "type": "object",
+        "required": [
+          "what",
+          "reason",
+          "tracker_ref"
+        ],
+        "properties": {
+          "what": {
+            "type": "string",
+            "description": "The item itself, specific enough that the next reader can act on it without this run's context."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why it was deferred. Usually the most valuable half: the reason is what stops the next person reaching the opposite conclusion."
+          },
+          "tracker_ref": {
+            "type": "string",
+            "description": "The ref scripts/deferral.mjs printed. An issue URL or #<n> for github/gitlab; a path under deferralDir for directory mode."
+          },
+          "evidence": {
+            "type": "string",
+            "description": "Where it lives: file:line, a failing case, a consumer the change does not reach."
+          }
+        }
+      }
+    },
     "scope_drift": {
       "type": "object",
       "properties": {

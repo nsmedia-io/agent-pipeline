@@ -1,5 +1,8 @@
+...with no schema complaint about the fixture
 BOUNDARY: a MySQL conditional-execution opener counts as an up section
 CONTROL: a real paraphrase of the same long criterion still covers it
+CONTROL: a report recording no deferrals passes
+CONTROL: an empty deferred[] passes
 CONTROL: the identical report with a flat commits array passes
 CONTROL: the same criterion passes once one check names AC23
 CONTROL: the same statements unwrapped ARE an up section
@@ -9,8 +12,13 @@ a block that opens before the marker and closes after it halts
 a block-comment PREAMBLE above live statements is still an up section
 a block-commented up region is NOT an up section
 a commits object is REFUSED rather than crashing the gate
+a criterion covered ONLY in acceptance_criteria_met passes
+a criterion in NEITHER array still halts
+a criterion recorded as NOT met is still covered (the gate asks addressed, not passed)
 a custom glob matches ONLY what it names
 a custom glob matches what it names
+a deferral with an empty tracker_ref HALTS
+a deferred entry missing a required key is refused
 a file using only the configured custom marker passes
 a labelled criterion no check names is uncovered, despite heavy token overlap
 a labelled criterion still matches on wording when NO check carries a label
@@ -23,6 +31,7 @@ a non-string marker falls back to the default
 a passing gate says so
 a per-commit exemption does not leak to a later commit
 a per-commit files_removed exempts that commit
+a ref naming a file that does not exist HALTS
 a schema violation halts
 a short criterion still matches on three tokens, exactly as before
 a token-overlap match covers the criterion
@@ -41,30 +50,46 @@ an unterminated block comment before the marker is NOT an up section
 an up section plus a -- DOWN marker passes
 and does not claim the down section is missing
 and is reported by name
+and it is attributable to the coverage rule, not the schema
+and it is attributable to the deferral rule, not the schema
+and it is named as a schema violation
 and it is named as a shape error, not a TypeError
 and it reports the up-section failure
 and it reports the up-section failure
 and it reports the up-section failure
 and its own remedy, which is not the commented-out one
+and names the REMEDY, not just the refusal
 and names the correct work it refuses
+and names the destination this project configured
 and names the label that went unanswered
 and names the remedy for the block form specifically
 and names the remedy in the convention the report already uses
+and quotes the item, so the reader knows which deferral
 and reports that file
+and says no ref was recorded
+and says the file is not there
 and says token overlap was deliberately not consulted
 and the clean down region is not reported
+and the gate says it passed
+and the gate says so
+and the halt names THAT array, so the writer knows which one
+and the halt names the uncovered criterion
 and the halt quotes the criterion
+and the message names both places a criterion may be covered
 and the message quotes the DEFAULT marker
 and the up region is reported
 as UNTERMINATED, because the closing delimiter is outside the region
 migrationGlobs: [] disarms the INFERENCE path
 migrationGlobs: [] does NOT disarm an explicitly-named migration
+naming the missing field
 naming the unanswered label
 naming the unterminated block and where it opened
 neither marker present still halts
 no TypeError reaches the operator
 nor an incidental schema error
 one labelled check out of three does NOT arm the strict rule
+scope_drift.observations_reported_not_fixed is read the same way
+the SAME report with a real ledger file passes
 the builtin -- DOWN still passes while a custom marker is configured
 the coverage halt is not an incidental schema error
 the default globs still find the migration
@@ -74,6 +99,7 @@ the explicit-path halt is not an incidental schema error
 the gate announces it blocked
 the halt is attributed to the schema
 the halt is the migration rule, not an incidental schema error
+the halt names the entry by index
 the halt names the minItems rule
 the halt names the missing artifact
 the halt names the missing field

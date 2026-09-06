@@ -136,6 +136,258 @@ assert_contains "the halt says which rule fired" "$ERR" "acceptance criterion no
 assert_contains "the halt quotes the uncovered criterion" "$ERR" "Concurrent claims cannot double-assign a courier"
 assert_contains "the gate announces it blocked" "$ERR" "FAIL: pre-Phase-4 gate blocked the panel."
 
+# =============================================================================
+# THE GATE AND THE CONTRACT MUST AGREE ABOUT WHERE A CRITERION MAY LIVE (0.41.0).
+# =============================================================================
+suite "pre-Phase-4 gate: acceptance_criteria_met covers a criterion too"
+
+# THE DEFECT. This gate read `requirement_checks` alone, while agents/dev.md and the schema both
+# describe that array as "one entry per spec.requirements" and ship `acceptance_criteria_met` as
+# the array whose entries ARE criteria. A Dev followed the contract, put the AC labels where the
+# contract says criteria go, and the gate refused the panel over a report that had said
+# everything it was asked to say. It happened on two runs; the first passed only because that
+# Dev happened to echo the labels into requirement_checks as well.
+#
+# WHAT CHANGED IS WHERE THE GATE LOOKS, NEVER HOW LENIENTLY. Same label authority, same token
+# floor, over the union of the two arrays. The uncovered cell below is what pins that.
+
+new_project cov-acmet-only
+write_spec_criteria '["AC7: the courier roster rotates on the hour"]'
+# The criterion is named ONLY in acceptance_criteria_met. requirement_checks carries an entry
+# with no label and no shared vocabulary at all, so nothing but the new array can cover this.
+cat > "$PROJ_ISSUE_DIR/impl-report.json" <<EOF
+{
+  "issue_number": $ISSUE,
+  "branch": "feat/script-coverage",
+  "commits": [],
+  "checks_passed": {"typecheck": true, "test": true, "lint": true},
+  "completed_at": "2026-01-01T00:00:00Z",
+  "requirement_checks": [
+    {"requirement_index": 0, "requirement_text": "wire the scheduler module", "status": "PASS", "notes": "done"}
+  ],
+  "acceptance_criteria_met": [
+    {"criterion": "AC7: the courier roster rotates on the hour", "met": true, "evidence": "test: rotation case"}
+  ]
+}
+EOF
+gate --issue "$ISSUE"
+assert_eq "a criterion covered ONLY in acceptance_criteria_met passes" "$RC" "0"
+assert_contains "and the gate says it passed" "$OUT" "OK: pre-Phase-4 gate passed."
+
+# NON-ZERO CONTROL, and it is the whole reason this widening is not a loosening: a criterion
+# named in NEITHER array still halts. Same fixture, same two arrays, one criterion added.
+new_project cov-acmet-missing
+write_spec_criteria '["AC7: the courier roster rotates on the hour","AC8: concurrent claims cannot double-assign a courier"]'
+cat > "$PROJ_ISSUE_DIR/impl-report.json" <<EOF
+{
+  "issue_number": $ISSUE,
+  "branch": "feat/script-coverage",
+  "commits": [],
+  "checks_passed": {"typecheck": true, "test": true, "lint": true},
+  "completed_at": "2026-01-01T00:00:00Z",
+  "requirement_checks": [
+    {"requirement_index": 0, "requirement_text": "AC7 wire the scheduler module", "status": "PASS", "notes": "done"}
+  ],
+  "acceptance_criteria_met": [
+    {"criterion": "AC7: the courier roster rotates on the hour", "met": true, "evidence": "test: rotation case"}
+  ]
+}
+EOF
+gate --issue "$ISSUE"
+assert_eq "a criterion in NEITHER array still halts" "$RC" "1"
+assert_contains "and the halt names the uncovered criterion" "$ERR" "AC8: concurrent claims"
+assert_contains "and the message names both places a criterion may be covered" \
+  "$ERR" "acceptance_criteria_met"
+assert_contains "and it is attributable to the coverage rule, not the schema" \
+  "$ERR" "acceptance criterion not covered"
+assert_eq "...with no schema complaint about the fixture" \
+  "$(printf '%s' "$ERR" | grep -c 'impl-report schema:' | tr -d ' ')" "0"
+
+# A criterion recorded as NOT met is still ADDRESSED. Whether the pipeline should ship it is the
+# panel's question; treating "met: false" as absent would refuse the honest report while passing
+# the one that omits the row entirely.
+new_project cov-acmet-false
+write_spec_criteria '["AC7: the courier roster rotates on the hour"]'
+cat > "$PROJ_ISSUE_DIR/impl-report.json" <<EOF
+{
+  "issue_number": $ISSUE,
+  "branch": "feat/script-coverage",
+  "commits": [],
+  "checks_passed": {"typecheck": true, "test": true, "lint": true},
+  "completed_at": "2026-01-01T00:00:00Z",
+  "requirement_checks": [
+    {"requirement_index": 0, "requirement_text": "wire the scheduler module", "status": "PASS", "notes": "done"}
+  ],
+  "acceptance_criteria_met": [
+    {"criterion": "AC7: the courier roster rotates on the hour", "met": false, "evidence": "blocked on the queue owner"}
+  ]
+}
+EOF
+gate --issue "$ISSUE"
+assert_eq "a criterion recorded as NOT met is still covered (the gate asks addressed, not passed)" "$RC" "0"
+
+# =============================================================================
+# THE DEFERRAL LEDGER (0.41.0): a deferral with no resolvable ref HALTS the panel.
+# =============================================================================
+suite "pre-Phase-4 gate: every deferral carries a ref the configured tracker can resolve"
+
+# The ledger is exercised in DIRECTORY mode throughout: it is the one tracker whose refs this
+# suite can construct, and the routing itself is covered in test-deferral.sh. The fixtures below
+# are otherwise the standard schema-valid envelope, so an exit 1 here is the deferral rule.
+DEFERRAL_CFG='{"deferralTracker":"directory","deferralDir":"ledger"}'
+
+new_project defer-no-ref
+write_config "$DEFERRAL_CFG"
+write_spec "AC1 handled"
+cat > "$PROJ_ISSUE_DIR/impl-report.json" <<EOF
+{
+  "issue_number": $ISSUE,
+  "branch": "feat/script-coverage",
+  "commits": [],
+  "checks_passed": {"typecheck": true, "test": true, "lint": true},
+  "completed_at": "2026-01-01T00:00:00Z",
+  "requirement_checks": [
+    {"requirement_index": 0, "requirement_text": "AC1 handled", "status": "PASS", "notes": "n"}
+  ],
+  "deferred": [
+    {"what": "the notify retry backoff is still linear", "reason": "needs the queue owner", "tracker_ref": ""}
+  ]
+}
+EOF
+gate --issue "$ISSUE"
+assert_eq "a deferral with an empty tracker_ref HALTS" "$RC" "1"
+assert_contains "the halt names the entry by index" "$ERR" "deferred[0]"
+assert_contains "and quotes the item, so the reader knows which deferral" \
+  "$ERR" "the notify retry backoff is still linear"
+assert_contains "and says no ref was recorded" "$ERR" "no tracker_ref recorded"
+assert_contains "and names the REMEDY, not just the refusal" "$ERR" "scripts/deferral.mjs record"
+assert_contains "and names the destination this project configured" "$ERR" "ledger/"
+assert_eq "and it is attributable to the deferral rule, not the schema" \
+  "$(printf '%s' "$ERR" | grep -c 'impl-report schema:' | tr -d ' ')" "0"
+
+# THE PASSING DIRECTION, on a ref that is a file this test actually created. Without it the
+# refusal above could have been bought by refusing every deferral there is.
+mkdir -p "$PROJ/ledger"
+printf 'x\n' > "$PROJ/ledger/847-backoff.md"
+node -e '
+  const fs = require("fs");
+  const f = process.argv[1];
+  const j = JSON.parse(fs.readFileSync(f, "utf8"));
+  j.deferred[0].tracker_ref = "ledger/847-backoff.md";
+  fs.writeFileSync(f, JSON.stringify(j));
+' "$PROJ_ISSUE_DIR/impl-report.json"
+gate --issue "$ISSUE"
+assert_eq "the SAME report with a real ledger file passes" "$RC" "0"
+assert_contains "and the gate says so" "$OUT" "OK: pre-Phase-4 gate passed."
+
+# A ref that names a file nobody wrote is the exact shape the rule exists for: "routed to #N"
+# claimed in an artifact and written nowhere. It must not pass on plausibility.
+new_project defer-phantom-ref
+write_config "$DEFERRAL_CFG"
+write_spec "AC1 handled"
+cat > "$PROJ_ISSUE_DIR/impl-report.json" <<EOF
+{
+  "issue_number": $ISSUE,
+  "branch": "feat/script-coverage",
+  "commits": [],
+  "checks_passed": {"typecheck": true, "test": true, "lint": true},
+  "completed_at": "2026-01-01T00:00:00Z",
+  "requirement_checks": [
+    {"requirement_index": 0, "requirement_text": "AC1 handled", "status": "PASS", "notes": "n"}
+  ],
+  "deferred": [
+    {"what": "an item nobody wrote down", "reason": "r", "tracker_ref": "ledger/never-written.md"}
+  ]
+}
+EOF
+gate --issue "$ISSUE"
+assert_eq "a ref naming a file that does not exist HALTS" "$RC" "1"
+assert_contains "and says the file is not there" "$ERR" "names no file"
+
+# THE SHAPE A DEV ACTUALLY WROTE IN THE WILD, before `deferred[]` existed. A gate reading only
+# the declared name would have enforced NOTHING on the very run that motivated the rule, while
+# reporting a clean pass -- this gate's own defect class wearing the new rule's clothes.
+new_project defer-observations-shape
+write_config "$DEFERRAL_CFG"
+write_spec "AC1 handled"
+cat > "$PROJ_ISSUE_DIR/impl-report.json" <<EOF
+{
+  "issue_number": $ISSUE,
+  "branch": "feat/script-coverage",
+  "commits": [],
+  "checks_passed": {"typecheck": true, "test": true, "lint": true},
+  "completed_at": "2026-01-01T00:00:00Z",
+  "requirement_checks": [
+    {"requirement_index": 0, "requirement_text": "AC1 handled", "status": "PASS", "notes": "n"}
+  ],
+  "scope_drift": {
+    "detected": true,
+    "observations_reported_not_fixed": [
+      {"what": "the settings gate reads one contact row", "reason": "out of scope for this issue"}
+    ]
+  }
+}
+EOF
+gate --issue "$ISSUE"
+assert_eq "scope_drift.observations_reported_not_fixed is read the same way" "$RC" "1"
+assert_contains "and the halt names THAT array, so the writer knows which one" \
+  "$ERR" "scope_drift.observations_reported_not_fixed[0]"
+
+# CONTROL: a report with no deferrals at all is untouched by this rule. Without it every case
+# above would be consistent with a gate that halts on every report.
+new_project defer-none
+write_config "$DEFERRAL_CFG"
+write_spec "AC1 handled"
+write_report "AC1 handled"
+gate --issue "$ISSUE"
+assert_eq "CONTROL: a report recording no deferrals passes" "$RC" "0"
+
+# CONTROL: an EMPTY deferred array is not a deferral either. `deferred: []` is what an honest
+# report with nothing to defer looks like, and refusing it would tax every clean run.
+new_project defer-empty
+write_config "$DEFERRAL_CFG"
+write_spec "AC1 handled"
+cat > "$PROJ_ISSUE_DIR/impl-report.json" <<EOF
+{
+  "issue_number": $ISSUE,
+  "branch": "feat/script-coverage",
+  "commits": [],
+  "checks_passed": {"typecheck": true, "test": true, "lint": true},
+  "completed_at": "2026-01-01T00:00:00Z",
+  "requirement_checks": [
+    {"requirement_index": 0, "requirement_text": "AC1 handled", "status": "PASS", "notes": "n"}
+  ],
+  "deferred": []
+}
+EOF
+gate --issue "$ISSUE"
+assert_eq "CONTROL: an empty deferred[] passes" "$RC" "0"
+
+# The schema half: an entry missing a REQUIRED key is a schema violation, reported as one, so a
+# report that omits `reason` is told which rule it broke rather than only that something is off.
+new_project defer-schema
+write_config "$DEFERRAL_CFG"
+write_spec "AC1 handled"
+cat > "$PROJ_ISSUE_DIR/impl-report.json" <<EOF
+{
+  "issue_number": $ISSUE,
+  "branch": "feat/script-coverage",
+  "commits": [],
+  "checks_passed": {"typecheck": true, "test": true, "lint": true},
+  "completed_at": "2026-01-01T00:00:00Z",
+  "requirement_checks": [
+    {"requirement_index": 0, "requirement_text": "AC1 handled", "status": "PASS", "notes": "n"}
+  ],
+  "deferred": [
+    {"what": "an item with no reason", "tracker_ref": "ledger/x.md"}
+  ]
+}
+EOF
+gate --issue "$ISSUE"
+assert_eq "a deferred entry missing a required key is refused" "$RC" "1"
+assert_contains "and it is named as a schema violation" "$ERR" "impl-report schema:"
+assert_contains "naming the missing field" "$ERR" 'missing required field "reason"'
+
 suite "pre-Phase-4 gate: artifact I/O fails CLOSED"
 
 new_project io-missing-report

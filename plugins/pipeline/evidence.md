@@ -286,7 +286,11 @@ checked the issue rather than the claim.
 
 **How to satisfy it.** Every deferred item is recorded in the tracker with its evidence, its
 reasoning, and the file:line it lives at, BEFORE the change that deferred it merges. A deferral
-recorded only in a test comment or a pull request body is buried on merge. If the reason it was
+recorded only in a test comment or a pull request body is buried on merge. **A project with no
+tracker CLI is not exempt, it is configured:** set `deferralTracker` to `directory` and
+`scripts/deferral.mjs record` writes the same item as a committed markdown file under
+`deferralDir`, which is a worse tracker than a tracker and a far better one than a sentence in a
+review artifact nobody opens again. If the reason it was
 deferred is interesting, that reasoning is the most valuable part; record it, because the next person
 will otherwise re-derive it and reach the other conclusion.
 

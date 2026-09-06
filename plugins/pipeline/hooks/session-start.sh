@@ -32,6 +32,32 @@ KNOWLEDGE_SUBDIR="$(read_config knowledgeDir knowledge)"
 echo "=== AGENT PIPELINE WARMUP ==="
 echo ""
 
+# --- Is this checkout configured for the plugin at all? ---
+#
+# A LOUD LINE, NEVER A REFUSAL. A hook that wedged a session over a missing config would be the
+# wrong instrument entirely; the refusal lives in commands/pipeline.md Phase 0 step 0, where a
+# run can be halted before it dispatches anything.
+#
+# WHY IT IS FIRST, AND WHY IT IS LOUD. A session ran an entire pipeline end to end inside a
+# worktree created before its project adopted this plugin. That tree carried the project's own
+# retired in-repo copy, so every phase dispatched, every gate ran, every gate PASSED, and Phase 5
+# silently no-opped into a store nothing read. Nothing in the run looked wrong, because the stale
+# copy answered consistently about itself. The absent config file is the cheapest early signal
+# that separates that tree from a configured one.
+#
+# config-doctor.mjs also reports this, further down and in the sober register it uses for every
+# other key. That register is right for "you misspelled a glob" and wrong for "this may be the
+# wrong checkout", and the doctor's line needs node on PATH while this one does not.
+if [[ ! -f "$PROJECT_DIR/pipeline.config.json" ]]; then
+  echo "NOT CONFIGURED: there is no pipeline.config.json at $PROJECT_DIR."
+  echo "  This checkout either predates the plugin's adoption or was never configured. A pipeline"
+  echo "  run started from it would use stale or missing tooling, and a stale in-repo copy passes"
+  echo "  every gate it owns. /pipeline HALTS at Phase 0 until this is settled."
+  echo "  Settle it: cp \"\$CLAUDE_PLUGIN_ROOT/pipeline.config.example.json\" pipeline.config.json"
+  echo "  and edit it, or move to the checkout that already has one."
+  echo ""
+fi
+
 # --- Git state ---
 BRANCH=$(git branch --show-current 2>/dev/null || echo "?")
 HEAD=$(git log -1 --oneline 2>/dev/null || echo "?")

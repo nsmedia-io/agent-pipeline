@@ -901,19 +901,20 @@ assert_contains "CONTROL: and the telemetry-fix revert names its own" \
 suite "AC6: the shipped gate suite still passes, and its assertions are untouched"
 
 GATE_OUT="$(bash "$TESTS_DIR/test-gate-pre-phase4.sh" 2>&1)"
-assert_contains "test-gate-pre-phase4.sh passes in full" "$GATE_OUT" "passed=99 failed=0"
+assert_contains "test-gate-pre-phase4.sh passes in full" "$GATE_OUT" "passed=125 failed=0"
 # The count is pinned as well as the verdict: a suite that passes with FEWER assertions than
 # it shipped with has had a case deleted, which is exactly how a fail-closed gate loses its
 # deletion-exemption coverage quietly.
 #
-# 56 -> 95 for #31 and #48, then 95 -> 99 for the multi-repo commits-shape cases, and the two
+# 56 -> 95 for #31 and #48, 95 -> 99 for the multi-repo commits-shape cases, then 99 -> 125 for
+# 0.41.0's deferral-ledger and acceptance_criteria_met coverage cases, and the two
 # literals below are NOT the same number wearing two
 # hats. This one tracks the LIVE suite and moves whenever it legitimately grows; the CONTROL
 # further down counts assertion lines in the historical commit that authored the suite, and 56
 # is a fact about that commit forever. Raising both together is the mistake this note exists to
 # prevent -- it would retire the only non-zero control the pattern above has.
-assert_eq "and it still carries all 99 assertions (a green with fewer is a deleted case)" \
-  "$(printf '%s' "$GATE_OUT" | grep -c '^  ok' | tr -d ' ')" "99"
+assert_eq "and it still carries all 125 assertions (a green with fewer is a deleted case)" \
+  "$(printf '%s' "$GATE_OUT" | grep -c '^  ok' | tr -d ' ')" "125"
 # Measured across the SERIES WINDOW, for the same reason the round lookups are: `origin/main...HEAD`
 # is an empty diff on main, so after the merge this line was green because it compared a commit
 # with itself. A vacuous pass is the worse half of the same defect -- the round assertions at

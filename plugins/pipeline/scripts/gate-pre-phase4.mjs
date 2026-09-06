@@ -9,8 +9,12 @@
  *
  * What it checks:
  *   (a) impl-report.json validates against ../schemas/impl-report.schema.json.
- *   (b) every acceptance_criteria entry in spec.json is covered by at least one
- *       requirement_checks entry in impl-report.json. Matching is by AC LABEL first, and where
+ *   (b) every acceptance_criteria entry in spec.json is covered by at least one entry in
+ *       impl-report.json's requirement_checks OR its acceptance_criteria_met. BOTH ARRAYS
+ *       COUNT, over one merged population: requirement_checks is contracted as one entry per
+ *       spec.requirements, so a Dev following the contract puts criteria in
+ *       acceptance_criteria_met, and a gate reading one array refused the panel over a report
+ *       that had said everything it was asked to say. Matching is by AC LABEL first, and where
  *       a majority of the checks carry labels that match is AUTHORITATIVE: a labelled criterion
  *       no check names is uncovered, full stop, with no fall-through to token overlap. Only a
  *       label-free report is scored on token overlap, and that score now carries a
@@ -116,6 +120,21 @@
  *       ever targets MySQL/MariaDB. Gate-green means "a down section is present and reads as
  *       documentation", never "rollback is known to work"; a human still reviews it.
  *
+ *   (e) every DEFERRAL the report records carries a tracker_ref the configured deferral tracker
+ *       can resolve. Two shapes are read: the declared `deferred[]` array, and
+ *       `scope_drift.observations_reported_not_fixed[]`, which a Dev wrote in the wild before
+ *       the array existed and which means exactly the same thing. The ref is judged by
+ *       verifyDeferralRef in deferral.mjs, IMPORTED rather than shelled out to, so the gate and
+ *       the `deferral.mjs verify` command a writer runs by hand can never answer differently.
+ *       # CUSTOMIZE: `deferralTracker` (github | gitlab | directory) and `deferralDir` in
+ *       pipeline.config.json decide what a resolvable ref looks like. A project with no tracker
+ *       CLI sets "directory" and the ref is a committed file under deferralDir. Absence of a
+ *       CLI never halts: verifyDeferralRef accepts a well-formed issue ref with a warning when
+ *       it cannot ask, because a gate that halts a panel over tooling on the machine it happens
+ *       to run on is a gate that gets deleted. What it refuses is the shape the rule exists
+ *       for: an item marked deferred with no ref at all, which is "routed to #N" claimed in an
+ *       artifact and written nowhere.
+ *
  * What it does NOT check (by design, so reviewers do not assume coverage exists):
  *   - Syntactic validity of migrations: that is your migration linter's job (CI).
  *   - Whether the documented rollback would actually restore the data.
@@ -145,6 +164,13 @@ import {
   isMigrationPath,
   migrationGlobsForGate,
 } from "./data-layer-surface.mjs";
+import {
+  DEFAULT_DEFERRAL_DIR,
+  DEFAULT_TRACKER,
+  deferralDirFromConfig,
+  trackerFromConfig,
+  verifyDeferralRef,
+} from "./deferral.mjs";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 // Schemas ship WITH the plugin (../schemas), independent of the user's project.
@@ -517,6 +543,32 @@ function labelVerdict(critLabels, checks) {
 // validate-pipeline-artifact.mjs, which keeps the flat threshold. That is deliberate and not
 // drift: that validator is fail-OPEN and advisory at SubagentStop, this gate is fail-CLOSED and
 // halts the panel. Tightening the advisory one buys nothing and can wedge a session.
+// THE POPULATION THE COVERAGE RULE READS: requirement_checks PLUS acceptance_criteria_met,
+// normalized onto the one shape the matcher understands.
+//
+// Why the union rather than a second pass over each array: the label rule's precondition is a
+// MAJORITY of entries carrying a label, and two separate passes would compute two different
+// majorities over two halves of one report, so a criterion could be strictly-refused under one
+// and token-scored under the other. One population, one denominator, one verdict.
+//
+// An acceptance_criteria_met entry contributes its `criterion` where a check contributes
+// `requirement_text`, and its `evidence` where a check contributes `notes`. `met: false` is NOT
+// filtered out here: this rule asks whether a criterion was ADDRESSED, and a criterion recorded
+// as not met is addressed and reported. Whether the pipeline should ship it is the panel's
+// question, not this gate's, and silently treating "false" as "absent" would refuse the honest
+// report while passing the one that omits the row.
+export function coverageCandidates(report) {
+  const out = [];
+  for (const c of (report && report.requirement_checks) || []) {
+    if (c && typeof c === "object") out.push(c);
+  }
+  for (const a of (report && report.acceptance_criteria_met) || []) {
+    if (!a || typeof a !== "object") continue;
+    out.push({ requirement_text: a.criterion || "", notes: a.evidence || "" });
+  }
+  return out;
+}
+
 export function criterionCovered(criterion, checks) {
   const list = checks || [];
   const verdict = labelVerdict(acLabels(criterion), list);
@@ -540,17 +592,21 @@ export function criterionCovered(criterion, checks) {
 // the wrong remedy costs a round trip through the most expensive transition in the pipeline,
 // and an unactionable halt is how an adopting project ends up deleting the gate.
 function uncoveredCriterionFailure(criterion, checks) {
-  const head = `acceptance criterion not covered by any requirement_check: "${criterion.slice(0, 120)}"`;
+  const head =
+    `acceptance criterion not covered by any requirement_check or acceptance_criteria_met ` +
+    `entry: "${criterion.slice(0, 120)}"`;
   const labels = acLabels(criterion);
   if (labelVerdict(labels, checks || []) !== "uncovered") return head;
   const named = [...labels].map((l) => l.toUpperCase()).join(", ");
   return (
     `${head}\n` +
-    `    the criterion names ${named} and the requirement_checks carry AC labels, so the label ` +
-    `IS the match and no check names ${named}. Token overlap is deliberately not consulted ` +
-    `here: it is what covered two criteria out of the wording of the other 52 on a real spec.\n` +
-    `    remedy: name ${named} in the covering check's requirement_text or notes, or add the ` +
-    `check if it is genuinely missing.`
+    `    the criterion names ${named} and the report's entries carry AC labels, so the label ` +
+    `IS the match and no check names ${named}, nor does any acceptance_criteria_met entry. ` +
+    `Token overlap is deliberately not consulted here: it is what covered two criteria out of ` +
+    `the wording of the other 52 on a real spec.\n` +
+    `    remedy: name ${named} in the covering check's requirement_text or notes, or in an ` +
+    `acceptance_criteria_met entry's criterion -- either place counts -- or add the entry if ` +
+    `it is genuinely missing.`
   );
 }
 
@@ -589,22 +645,85 @@ export function migrationFilesFromReport(report, rootDir, globs = DEFAULT_MIGRAT
   return [...out].map((rel) => ({ rel, abs: path.resolve(rootDir, rel) }));
 }
 
-// Pure check core. Returns { failures: string[] }. `migrationSources` and the parsed
-// artifacts are injected so tests drive the logic without touching the real filesystem.
-export function runGate({ report, spec, schema, migrationSources, downMarker = DEFAULT_DOWN_MARKER }) {
+// THE DEFERRAL LEDGER CHECK. Every entry the report marks deferred must carry a ref that
+// resolves in this project's configured tracker.
+//
+// TWO SHAPES ARE READ, and the second is not a courtesy. `deferred[]` is the declared array;
+// `scope_drift.observations_reported_not_fixed[]` is what a Dev actually wrote on a real run
+// before the array existed, and it means the identical thing. A gate that read only the
+// declared name would have enforced NOTHING on the run that motivated it while reporting a
+// clean pass, which is this gate's own defect class wearing the new rule's clothes.
+//
+// The refusal names the remedy, because an unactionable halt at the most expensive transition
+// in the pipeline is how an adopting project ends up deleting the gate.
+function deferralFailures(report, deferral) {
+  const failures = [];
+  const opts = {
+    tracker: deferral.tracker || DEFAULT_TRACKER,
+    dir: deferral.dir || DEFAULT_DEFERRAL_DIR,
+    root: deferral.root,
+  };
+  const sources = [
+    { label: "deferred", rows: report && report.deferred },
+    {
+      label: "scope_drift.observations_reported_not_fixed",
+      rows: report && report.scope_drift && report.scope_drift.observations_reported_not_fixed,
+    },
+  ];
+  for (const { label, rows } of sources) {
+    if (!Array.isArray(rows)) continue;
+    rows.forEach((row, i) => {
+      const what =
+        (row && typeof row === "object" && (row.what || row.observation || row.description)) || "";
+      const ref = row && typeof row === "object" ? row.tracker_ref : undefined;
+      const v = verifyDeferralRef(ref, opts);
+      if (v.ok) return;
+      failures.push(
+        `${label}[${i}] is not in the deferral ledger: ${v.message}\n` +
+          `    item: ${JSON.stringify(String(what).slice(0, 120))}\n` +
+          `    deferring is an ACTION, not a sentence in an artifact: record it with ` +
+          `scripts/deferral.mjs record --issue <n> --title "<t>" --body-file <path>, then write ` +
+          `the ref it prints here as tracker_ref. The destination is ${opts.tracker === "directory" ? `the deferral directory (${opts.dir}/)` : `your ${opts.tracker} tracker`}, ` +
+          `per deferralTracker in pipeline.config.json.`,
+      );
+    });
+  }
+  return failures;
+}
+
+// Pure check core. Returns { failures: string[] }. `migrationSources`, the deferral routing and
+// the parsed artifacts are injected so tests drive the logic without touching the real
+// filesystem.
+export function runGate({
+  report,
+  spec,
+  schema,
+  migrationSources,
+  downMarker = DEFAULT_DOWN_MARKER,
+  deferral = {},
+}) {
   const failures = [];
 
   // (a) schema validation of impl-report.json
   const schemaErrs = validate(report, schema, schema, "");
   for (const e of schemaErrs) failures.push(`impl-report schema: ${e}`);
 
-  // (b) every acceptance criterion covered by a requirement_check
+  // (b) every acceptance criterion covered by a requirement_check OR an acceptance_criteria_met
+  // entry. BOTH PLACES COUNT, and that is the fix for a gate and a contract that disagreed: the
+  // gate read requirement_checks only, while agents/dev.md and the schema both describe
+  // requirement_checks as "one per spec.requirements" and ship acceptance_criteria_met as the
+  // array whose entries ARE criteria. A Dev followed the contract, put the AC labels where the
+  // contract said criteria go, and the gate refused the panel. Two runs hit it; one passed only
+  // because the Dev happened to echo the labels into requirement_checks as well.
+  // The MATCHING RULE is unchanged, deliberately: the same label authority, the same token
+  // floor, over the union of the two arrays. This widens WHERE the gate looks, never HOW
+  // leniently it looks.
   const criteria = (spec && spec.acceptance_criteria) || [];
-  const checks = (report && report.requirement_checks) || [];
+  const coverageEntries = coverageCandidates(report);
   for (const crit of criteria) {
     if (typeof crit !== "string") continue;
-    if (!criterionCovered(crit, checks)) {
-      failures.push(uncoveredCriterionFailure(crit, checks));
+    if (!criterionCovered(crit, coverageEntries)) {
+      failures.push(uncoveredCriterionFailure(crit, coverageEntries));
     }
   }
 
@@ -635,6 +754,9 @@ export function runGate({ report, spec, schema, migrationSources, downMarker = D
       failures.push(classificationFailure(mig.rel, classified));
     }
   }
+
+  // (e) every deferral carries a resolvable tracker_ref
+  for (const f of deferralFailures(report, deferral)) failures.push(f);
 
   return { failures };
 }
@@ -745,7 +867,27 @@ async function main() {
 
   const migrationSources = collectMigrationSources(args, report, globs);
 
-  const { failures } = runGate({ report, spec: specData, schema, migrationSources, downMarker });
+  // The ledger is resolved against the IMPLEMENTATION WORKTREE, not the orchestrator's
+  // checkout, for the same reason migration files are: in directory mode Dev writes the ledger
+  // entry beside the code, on a branch this checkout may not have. Reading it here would report
+  // "names no file" for an entry that exists, halting the panel over a path arithmetic error.
+  // resolveMigrationRoot is the existing derivation (--migrations-root, else the worktree the
+  // --impl-report path sits in, else PROJECT_ROOT); the config itself is the orchestrator's,
+  // since that is the config every other rule in this gate was resolved against.
+  const deferral = {
+    tracker: trackerFromConfig(cfg),
+    dir: deferralDirFromConfig(cfg),
+    root: resolveMigrationRoot(args),
+  };
+
+  const { failures } = runGate({
+    report,
+    spec: specData,
+    schema,
+    migrationSources,
+    downMarker,
+    deferral,
+  });
 
   if (failures.length === 0) {
     process.stdout.write("OK: pre-Phase-4 gate passed.\n");

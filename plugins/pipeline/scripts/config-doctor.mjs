@@ -119,6 +119,20 @@ const CODE_KEYS = {
     reader: "scripts/gate-pre-phase4.mjs",
     fallback: 'the built-in "-- DOWN" line-comment marker',
   },
+  deferralTracker: {
+    type: "string",
+    reader: "scripts/deferral.mjs, read by scripts/gate-pre-phase4.mjs through it",
+    fallback: '"github"',
+    degrades:
+      'the deferral ledger routes to `gh issue create` whatever your project uses. Legal values are "github", "gitlab" and "directory"; anything else is IGNORED and github applies, so a project on neither tracker records deferrals into a command it does not have and the pre-Phase-4 gate refuses every tracker_ref it writes. Set "directory" to keep the ledger in the repository instead.',
+  },
+  deferralDir: {
+    type: "string",
+    reader: "scripts/deferral.mjs (directory mode only)",
+    fallback: '"knowledge/deferred"',
+    degrades:
+      'nothing at all unless deferralTracker is "directory"; in that mode it is where the committed ledger files are written and the only place the pre-Phase-4 gate will accept a tracker_ref from. An absolute path or one containing a ".." segment is refused and the default applies, because this key names a directory the pipeline writes committed files into.',
+  },
 };
 
 /** Keys consumed by AGENT JUDGMENT rather than by code. Valid, but no script enforces them. */

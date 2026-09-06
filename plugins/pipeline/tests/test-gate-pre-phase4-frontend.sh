@@ -36,8 +36,14 @@ write_evidence() {
 
 # shot_evidence <screenshot-path> -> evidence that is complete EXCEPT for the path under test,
 # so any failure is attributable to containment and not to missing evidence.
+#
+# It carries a VALID default_state_screenshot for the same reason it carries a verdict and two
+# passes: since 0.41.0 a non-empty screenshots[] with no default recorded is itself a halt, and
+# a containment cell that tripped over THAT would be attributing one rule's refusal to another.
+# The default-state rule gets its own suite below, where it is the only thing varying.
+DEFAULT_SHOT=".pipeline/$ISSUE/default.png"
 shot_evidence() {
-  write_evidence "{\"verdict\":\"APPROVE\",\"lint_pass\":true,\"a11y_pass\":true,\"screenshots\":[\"$1\"]}"
+  write_evidence "{\"verdict\":\"APPROVE\",\"lint_pass\":true,\"a11y_pass\":true,\"screenshots\":[\"$1\"],\"default_state_screenshot\":\"$DEFAULT_SHOT\"}"
 }
 
 FRONTEND_PATH="app/components/Button.tsx"
@@ -230,7 +236,7 @@ assert_eq "a .. segment that resolves back inside is still refused" "$RC" "1"
 
 # Backslash normalization happens BEFORE the containment check, so a Windows-style traversal
 # cannot slip past a check that only understands forward slashes.
-EV=$(write_evidence '{"verdict":"APPROVE","lint_pass":true,"a11y_pass":true,"screenshots":[".pipeline\\..\\..\\x.png"]}')
+EV=$(write_evidence "{\"verdict\":\"APPROVE\",\"lint_pass\":true,\"a11y_pass\":true,\"screenshots\":[\".pipeline\\\\..\\\\..\\\\x.png\"],\"default_state_screenshot\":\"$DEFAULT_SHOT\"}")
 gate --issue "$ISSUE" --changed "$FRONTEND_PATH" --evidence "$EV"
 assert_eq "a backslash traversal is refused" "$RC" "1"
 
@@ -247,9 +253,101 @@ assert_eq "a dir name beginning with .. (not a segment) still passes" "$RC" "0"
 
 # A non-string entry is refused rather than coerced: a number or object here means the shard
 # was written wrong, and coercion would let a non-path through the containment check.
-EV=$(write_evidence '{"verdict":"APPROVE","lint_pass":true,"a11y_pass":true,"screenshots":[42]}')
+EV=$(write_evidence "{\"verdict\":\"APPROVE\",\"lint_pass\":true,\"a11y_pass\":true,\"screenshots\":[42],\"default_state_screenshot\":\"$DEFAULT_SHOT\"}")
 gate --issue "$ISSUE" --changed "$FRONTEND_PATH" --evidence "$EV"
 assert_eq "a non-string screenshot entry is refused" "$RC" "1"
 assert_contains "the non-string refusal says so" "$ERR" "not a string path"
+
+suite "frontend gate: the DEFAULT STATE must be one of the states you looked at"
+
+# THE DEFECT THIS CLOSES, and it is a real escape rather than a tidiness rule. A run rendered the
+# feature with its toggle switched ON, recorded the screenshots, passed this gate and shipped.
+# The SHIPPED default was OFF, so the only state every new user would ever see was the one state
+# nobody had looked at. The evidence was not thin; it was aimed at the wrong screen, because the
+# author had been working in the toggled-on state for an hour.
+#
+# THE TRIGGER IS A NON-EMPTY screenshots[], NOT A FRONTEND DIFF. This asks "you photographed some
+# states, is the default among them?", which is a question with an answer only where there are
+# photographs. Every cell below pins one side of that.
+
+EV=$(write_evidence "{\"verdict\":\"APPROVE\",\"lint_pass\":true,\"a11y_pass\":true,\"screenshots\":[\".pipeline/$ISSUE/toggled-on.png\"]}")
+gate --issue "$ISSUE" --changed "$FRONTEND_PATH" --evidence "$EV"
+assert_eq "screenshots with NO default_state_screenshot halts" "$RC" "1"
+assert_contains "the halt names the missing field" "$ERR" "default_state_screenshot"
+assert_contains "and says what went unlooked-at, not merely that a field is absent" \
+  "$ERR" "the state every new user sees was never looked at"
+assert_contains "and names the defect it closes, so the rule is not mistaken for bookkeeping" \
+  "$ERR" "toggled ON while the shipped default was OFF"
+
+EV=$(write_evidence "{\"verdict\":\"APPROVE\",\"lint_pass\":true,\"a11y_pass\":true,\"screenshots\":[\".pipeline/$ISSUE/toggled-on.png\"],\"default_state_screenshot\":\".pipeline/$ISSUE/default.png\"}")
+gate --issue "$ISSUE" --changed "$FRONTEND_PATH" --evidence "$EV"
+assert_eq "the SAME evidence with a default recorded passes" "$RC" "0"
+assert_contains "and the gate says so" "$OUT" "OK: frontend visual-verification gate passed."
+
+# CONTROL, and it is the boundary of the rule rather than a nicety: evidence with NO screenshots
+# at all is unchanged. A project that records a verdict, a lint pass and an a11y pass and takes
+# no captures owes nothing new, so this adds no obligation where there was none.
+EV=$(write_evidence '{"verdict":"APPROVE","lint_pass":true,"a11y_pass":true}')
+gate --issue "$ISSUE" --changed "$FRONTEND_PATH" --evidence "$EV"
+assert_eq "CONTROL: evidence with no screenshots at all still passes" "$RC" "0"
+assert_not_contains "and says nothing about a default state" "$ERR" "default_state_screenshot"
+
+EV=$(write_evidence '{"verdict":"APPROVE","lint_pass":true,"a11y_pass":true,"screenshots":[]}')
+gate --issue "$ISSUE" --changed "$FRONTEND_PATH" --evidence "$EV"
+assert_eq "CONTROL: an EMPTY screenshots array is not a capture either" "$RC" "0"
+
+# A BLANK default is not a default. Without this cell the rule is one empty string away from
+# being satisfied by nothing at all, which is the cheapest valid value defect that has already
+# shipped once in this repo on a required free-text field.
+EV=$(write_evidence "{\"verdict\":\"APPROVE\",\"lint_pass\":true,\"a11y_pass\":true,\"screenshots\":[\".pipeline/$ISSUE/on.png\"],\"default_state_screenshot\":\"   \"}")
+gate --issue "$ISSUE" --changed "$FRONTEND_PATH" --evidence "$EV"
+assert_eq "a whitespace-only default_state_screenshot does not satisfy the rule" "$RC" "1"
+assert_contains "and the halt is the default-state one" "$ERR" "default_state_screenshot"
+
+# CONTAINMENT applies to this field by the SAME rule, checked in the same loop. A field exempted
+# from containment would be a fresh committable-PII path in a control built to close one.
+EV=$(write_evidence "{\"verdict\":\"APPROVE\",\"lint_pass\":true,\"a11y_pass\":true,\"screenshots\":[\".pipeline/$ISSUE/on.png\"],\"default_state_screenshot\":\"assets/default.png\"}")
+gate --issue "$ISSUE" --changed "$FRONTEND_PATH" --evidence "$EV"
+assert_eq "a default_state_screenshot outside .pipeline/ is refused" "$RC" "1"
+assert_contains "and the refusal names the offending path" "$ERR" "assets/default.png"
+
+EV=$(write_evidence "{\"verdict\":\"APPROVE\",\"lint_pass\":true,\"a11y_pass\":true,\"screenshots\":[\".pipeline/$ISSUE/on.png\"],\"default_state_screenshot\":\".pipeline/$ISSUE/../../etc/passwd.png\"}")
+gate --issue "$ISSUE" --changed "$FRONTEND_PATH" --evidence "$EV"
+assert_eq "a .. segment in default_state_screenshot is refused too" "$RC" "1"
+
+EV=$(write_evidence "{\"verdict\":\"APPROVE\",\"lint_pass\":true,\"a11y_pass\":true,\"screenshots\":[\".pipeline/$ISSUE/on.png\"],\"default_state_screenshot\":42}")
+gate --issue "$ISSUE" --changed "$FRONTEND_PATH" --evidence "$EV"
+assert_eq "a non-string default_state_screenshot is refused rather than coerced" "$RC" "1"
+assert_contains "and says so" "$ERR" "not a string path"
+
+# The impl-report design_gate fallback carries the field too: Dev's visual-build loop is where
+# most captures are recorded, and a rule that bound only on the Design shard would miss them.
+mkdir -p "$TEMP_PROJECT/.pipeline/4260"
+cat > "$TEMP_PROJECT/.pipeline/4260/impl-report.json" <<EOF
+{"commits":[{"sha":"a","message":"m","files_changed":["app/components/Button.tsx"]}],
+ "design_gate":{"verdict":"APPROVE","token_lint":"pass","axe":{"status":"pass"},
+                "screenshots":[".pipeline/4260/on.png"]}}
+EOF
+gate --issue 4260
+assert_eq "a design_gate with screenshots and no default halts" "$RC" "1"
+assert_contains "and names the field" "$ERR" "default_state_screenshot"
+
+mkdir -p "$TEMP_PROJECT/.pipeline/4261"
+cat > "$TEMP_PROJECT/.pipeline/4261/impl-report.json" <<EOF
+{"commits":[{"sha":"a","message":"m","files_changed":["app/components/Button.tsx"]}],
+ "design_gate":{"verdict":"APPROVE","token_lint":"pass","axe":{"status":"pass"},
+                "screenshots":[".pipeline/4261/on.png"],
+                "default_state_screenshot":".pipeline/4261/default.png"}}
+EOF
+gate --issue 4261
+assert_eq "CONTROL: the same design_gate with a default passes" "$RC" "0"
+
+# And the whole rule stays behind the trigger: a diff that touches no frontend surface is not
+# asked about default states however its evidence is shaped.
+EV=$(write_evidence "{\"verdict\":\"APPROVE\",\"lint_pass\":true,\"a11y_pass\":true,\"screenshots\":[\".pipeline/$ISSUE/on.png\"]}")
+gate --issue "$ISSUE" --changed "$BACKEND_PATH" --evidence "$EV"
+assert_eq "CONTROL: a backend-only diff still skips, default state or not" "$RC" "0"
+assert_contains "and it is the ordinary skip" "$OUT" "SKIP: no frontend surface in the diff"
+
 
 finish

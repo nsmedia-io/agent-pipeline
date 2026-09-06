@@ -96,6 +96,10 @@ for cand in $(grep -oE 'scripts/[a-zA-Z0-9_-]+\.mjs' "$PIPELINE_MD" | sort -u); 
     # delta-round security/test surface module. Neither resolves a model nor takes a (role,
     # tier, phase) triple. Excluded by NAME, like the rest.
     materiality.mjs|security-surface.mjs) continue ;;
+    # 0.41.0: the deferral ledger, referenced from the APPROVE_WITH_NOTES rubric, the merge
+    # guard and both Dev dispatch prompts. It routes where a deferred item is WRITTEN and takes
+    # a command plus a ref, never a (role, tier, phase) triple. Excluded by NAME, like the rest.
+    deferral.mjs) continue ;;
   esac
   # The data-layer surface module is referenced from the same file by R3; it is not this.
   grep -q 'migrationGlobsForTripwire' "$PLUGIN_DIR/$cand" 2>/dev/null && continue

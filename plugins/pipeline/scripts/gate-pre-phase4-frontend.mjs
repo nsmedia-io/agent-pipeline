@@ -19,6 +19,9 @@
  *     to verify, nothing to gate. Absence of a trigger is never read as missing evidence.
  *   - A frontend file DID change -> require recorded evidence (a design_review verdict
  *     present + a lint pass + an accessibility (a11y) pass). Missing evidence HALTS (exit 1).
+ *   - Screenshots WERE captured but none of them is the default state -> HALTS (exit 1). The
+ *     trigger is a non-empty screenshots[], so this asks a question only of evidence that has
+ *     photographs in it, and adds no obligation where none were recorded.
  *   - The changed-path list could NOT be determined (no --changed paths AND the impl-report is
  *     absent, unreadable, unparseable, or records no file list at all) -> HARD ERROR (exit 1),
  *     never a skip. "I could not determine what changed" is a DIFFERENT state from "nothing
@@ -36,7 +39,8 @@
  *   - JSON.parse only. No eval, no shell interpolation of any artifact field or path.
  *   - Frontend detection is the glob allowlist in frontend-surface.mjs, never a regex built
  *     from artifact content.
- *   - Any recorded screenshot evidence path MUST live under .pipeline/<issue>/ (gitignored)
+ *   - Any recorded screenshot evidence path (screenshots[] and default_state_screenshot alike)
+ *     MUST live under .pipeline/<issue>/ (gitignored)
  *     and contain no ".." segment. A path outside that tree is refused, as is a ".." segment
  *     even when it would resolve back inside: committing a screenshot that may carry PII or a
  *     secret is a committable-leak vector. The check is string-only and never touches the
@@ -88,7 +92,12 @@ export function runFrontendGate({ touchesFrontend, evidence }) {
 
   // Hygiene: any recorded screenshot path must live under .pipeline/<issue>/. A path
   // outside that gitignored tree is a committable-PII vector and is refused here.
-  for (const shot of ev.screenshots || []) {
+  //
+  // `default_state_screenshot` is judged by the SAME rule and is checked here rather than in
+  // its own loop, so a containment hole cannot open on one field while closed on the other.
+  const shots = [...(ev.screenshots || [])];
+  if (ev.default_state_screenshot !== undefined) shots.push(ev.default_state_screenshot);
+  for (const shot of shots) {
     if (typeof shot !== "string") {
       failures.push("screenshot evidence entry is not a string path");
       continue;
@@ -107,6 +116,31 @@ export function runFrontendGate({ touchesFrontend, evidence }) {
         `screenshot evidence path escapes .pipeline/ via a ".." segment: "${norm.slice(0, 120)}"`,
       );
     }
+  }
+
+  // THE DEFAULT STATE MUST BE ONE OF THE STATES YOU LOOKED AT.
+  //
+  // A run captured the feature with its toggle switched ON, recorded the screenshots, passed
+  // this gate and shipped. The shipped DEFAULT was OFF, so the only state every new user would
+  // ever see was the one state nobody had rendered. The evidence was not thin, it was aimed at
+  // the wrong screen: a capture of the state the author had been working in for an hour.
+  //
+  // The trigger is a NON-EMPTY screenshots[], not a frontend diff: this asks "you photographed
+  // some states, is the default among them?", which is a question with an answer only where
+  // there are photographs. A diff whose evidence is verdict + lint + a11y with no captures at
+  // all is unchanged by this rule, so it adds no obligation to a project that records none.
+  const captured = (ev.screenshots || []).some((s) => typeof s === "string" && s.trim() !== "");
+  const hasDefault =
+    typeof ev.default_state_screenshot === "string" && ev.default_state_screenshot.trim() !== "";
+  if (captured && !hasDefault) {
+    failures.push(
+      "screenshots were captured but no default_state_screenshot was recorded: the state every " +
+        "new user sees was never looked at. A run captured the feature toggled ON while the " +
+        "shipped default was OFF, and the default state reached production unrendered. " +
+        'Record the default-state render as `default_state_screenshot` (same .pipeline/<issue>/ ' +
+        "containment rule as screenshots[]), or say in the design_review why this surface has " +
+        "no default state distinct from what you captured.",
+    );
   }
 
   return { skipped: false, failures };
@@ -142,6 +176,11 @@ export function normalizeEvidence(raw) {
     ev.a11y_pass = true;
   }
   if (Array.isArray(raw.screenshots)) ev.screenshots = raw.screenshots;
+  // Carried through UNCOERCED, including a non-string, so runFrontendGate's containment loop
+  // reports the wrong type rather than this normalizer silently dropping it into "absent".
+  if (raw.default_state_screenshot !== undefined) {
+    ev.default_state_screenshot = raw.default_state_screenshot;
+  }
   return ev;
 }
 
