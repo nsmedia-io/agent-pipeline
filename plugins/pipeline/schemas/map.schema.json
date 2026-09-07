@@ -26,7 +26,7 @@
           "readers": {
             "type": "object",
             "properties": {
-              "typescript": {"type": "array", "items": {"type": "string"}, "description": "Source-code call sites and importers (file:line). Rename to your language if not TypeScript; the field name is kept for schema stability."},
+              "typescript": {"type": "array", "items": {"type": "string"}, "description": "Source-code call sites and importers (file:line), AND every reader of any FIELD the change writes into a shared data object (a field's readers are not the producer's callers; a value written into one array reaches every consumer of that array). Rename to your language if not TypeScript; the field name is kept for schema stability."},
               "sql_resident": {"type": "array", "items": {"type": "string"}, "description": "Data-layer-resident readers: DB function/view bodies in schema-migration files that reference it; invisible to a call-site grep. Empty if the project has no such layer."},
               "re_derivations": {"type": "array", "items": {"type": "string"}, "description": "Code paths that independently recompute the same value (diverge silently while both compile)."}
             }
