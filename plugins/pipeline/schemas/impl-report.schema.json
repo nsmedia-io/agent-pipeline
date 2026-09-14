@@ -281,6 +281,40 @@
     "experiment_id": {
       "type": "string",
       "description": "Present only on an experiment run: the exp-<slug> placeholder id used in place of a tracker issue."
+    },
+    "test_side_repairs": {
+      "type": "array",
+      "description": "Disclosed repairs Dev made to QA-authored tests at the architectural tier (#158): only for a test unsatisfiable by any implementation, never a weakening. QA rules on each entry in Phase 4; its ruling is binding.",
+      "items": {
+        "type": "object",
+        "required": [
+          "file",
+          "test",
+          "defect",
+          "repair",
+          "weakened"
+        ],
+        "properties": {
+          "file": {
+            "type": "string"
+          },
+          "test": {
+            "type": "string"
+          },
+          "defect": {
+            "type": "string"
+          },
+          "repair": {
+            "type": "string"
+          },
+          "weakened": {
+            "type": "boolean",
+            "enum": [
+              false
+            ]
+          }
+        }
+      }
     }
   }
 }

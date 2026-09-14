@@ -1,0 +1,45 @@
+{
+  "_comment": "The ONE source of the Phase 4 lens line per panel role (#157). render-panel.mjs appends the role's lens to the shared preamble it slices out of commands/pipeline.md; the Workflow block in that file shows the SHAPE and must not carry a second copy of these strings. agentType is the namespaced subagent name the Workflow tool dispatches; the role key is the panel_roles token and the shard suffix (peer-review.<role>.json). # CUSTOMIZE: a project may add a role here only if it also ships the agent.",
+  "roles": {
+    "ba": {
+      "agentType": "pipeline:ba",
+      "label": "ba-panel",
+      "lens": "Your role: ba. Shard: peer-review.ba.json. Read <ARTIFACT_DIR>/spec.json and <ARTIFACT_DIR>/impl-report.json. Verify: does implementation match spec intent? Any unflagged scope drift? Are every open_questions resolution and every scope_drift_log ruling honored as recorded? Return verdict APPROVE | APPROVE_WITH_NOTES | REQUEST_CHANGES."
+    },
+    "dba": {
+      "agentType": "pipeline:dba",
+      "label": "dba-panel",
+      "lens": "Your role: dba. Shard: peer-review.dba.json. Re-verify the schema/migration/access-control diff against the DBA checklist: every data-layer query shape unchanged unless the spec changed it, migrations reversible with a commented-out down region, access policies intact, live-verification suites run rather than skipped. Return verdict APPROVE | APPROVE_WITH_NOTES | REQUEST_CHANGES."
+    },
+    "devops": {
+      "agentType": "pipeline:devops",
+      "label": "devops-panel",
+      "lens": "Your role: devops. Shard: peer-review.devops.json. Re-verify infrastructure config, workflows, deploy order, bindings and secrets against the DevOps checklist, and read the remote CI state on the PR (a ceiling timeout is not a code failure). Return verdict APPROVE | APPROVE_WITH_NOTES | REQUEST_CHANGES."
+    },
+    "secops": {
+      "agentType": "pipeline:secops",
+      "label": "secops-panel",
+      "lens": "Your role: secops. Shard: peer-review.secops.json. Re-verify auth, authorization ordering, encryption, input validation, logging and PII exposure on the finished diff; you hold the veto. Return verdict APPROVE | APPROVE_WITH_NOTES | REQUEST_CHANGES | VETO (VETO only on a named veto_ground)."
+    },
+    "dev": {
+      "agentType": "pipeline:dev",
+      "label": "dev-panel",
+      "lens": "Your role: dev. Shard: peer-review.dev.json. Review code quality, DRY, SOLID and readability of the diff; verify any claimed pure move by body comparison against the base ref, not by trusting the report. Return verdict APPROVE | APPROVE_WITH_NOTES | REQUEST_CHANGES."
+    },
+    "qa": {
+      "agentType": "pipeline:qa",
+      "label": "qa-panel",
+      "lens": "Your role: qa. Shard: peer-review.qa.json. You are the binding independent test verdict. This is an ADVERSARIAL gap-check, not an auto-pass on green: green proves only that the tests that exist pass. Audit coverage against the diff and the Phase-3 behavioral test contract (you authored it at the architectural tier; Dev authored it at standard/trivial, which makes your fresh-eyes audit the FIRST independent look at those tests, so scrutinize them hardest): every changed path tested, webhooks cover idempotency/replay, integration tests hit a real backing service (not mocks), failure modes covered, behavior outside the existing tests not left untested (overfitting), no test weakened to force a pass, and every disclosed test_side_repairs entry ruled on (your ruling on each is binding). Re-run at least three of the recorded mutations in an isolated tree plus one of your own. Name specific missing tests. Return verdict APPROVE | APPROVE_WITH_NOTES | REQUEST_CHANGES | REQUEST_REFACTOR."
+    },
+    "design_review": {
+      "agentType": "pipeline:design",
+      "label": "design-panel",
+      "lens": "Your role: design (shard key design_review). Shard: peer-review.design_review.json. You are dispatched ONLY because the diff touches a frontend surface. Run the three lenses per your agent definition: token conformance (binding, your token-lint rule), accessibility (axe deterministic plus the mandatory human-residual caveat), and critique/copy (advisory only). A REQUEST_CHANGES is valid ONLY when a concerns[] blocker/major cites a token_lint or axe failure; taste-only findings are advisory. You hold NO veto. Return verdict APPROVE | APPROVE_WITH_NOTES | REQUEST_CHANGES."
+    },
+    "art_director": {
+      "agentType": "pipeline:art-director",
+      "label": "art-director-panel",
+      "lens": "Your role: art-director (shard key art_director). Shard: peer-review.art_director.json. You are dispatched ONLY because <ARTIFACT_DIR>/visual-contract.json exists and you authored it. Render the result yourself, rule clause by clause against the BINDING clauses, and cite rendered evidence you captured. Your REQUEST_CHANGES binds solely on a cited clause plus your own rendered evidence; pure preference stays advisory and you must say which you are doing. You may return ESCALATE when the contract itself was wrong. Return verdict APPROVE | APPROVE_WITH_NOTES | REQUEST_CHANGES | ESCALATE."
+    }
+  }
+}

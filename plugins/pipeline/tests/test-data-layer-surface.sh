@@ -306,6 +306,24 @@ M_INFEMPTY="$TEMP_PROJECT/m-infempty.tsv"; build_matrix "$R_INFRA_EMPTY" "$M_INF
 # =============================================================================
 # AC3 -- the DIVERGENCE CLASS, not one instance.
 # =============================================================================
+suite "#156: a TEST FILE under a migrations directory is never a migration (narrow predicate)"
+
+# Origin: a one-line import repoint in packages/db/src/migrations/233_x.test.ts (a TypeScript test
+# ABOUT a migration, zero SQL) fired both the mis-tier tripwire and the gate's down-section rule.
+DEFAULTS='["**/migrations/**","**/db/migrate/**","**/db/schema.ts","**/policies/**.sql"]'
+narrow() { DL_MODULE="$DL_MODULE" node "$DRIVER" narrow-with "$DEFAULTS" "$1"; }
+assert_eq "a .test.ts under packages/db/src/migrations/ is NOT a migration" "$(narrow packages/db/src/migrations/233_widen_v.test.ts)" "false"
+assert_eq "a .spec.sql is NOT a migration" "$(narrow migrations/001.spec.sql)" "false"
+assert_eq "a file under migrations/__tests__/ is NOT a migration" "$(narrow supabase/migrations/__tests__/x.test.ts)" "false"
+assert_eq "a helper under migrations/__tests__/lib/ is NOT a migration" "$(narrow supabase/migrations/__tests__/lib/live-db-helpers.ts)" "false"
+assert_eq "a file under migrations/tests/ is NOT a migration" "$(narrow db/migrate/tests/fixture.rb)" "false"
+# NON-ZERO CONTROLS: the exclusion is keyed to TEST shapes, not to extensions or to the word.
+assert_eq "control: a .sql migration still matches" "$(narrow supabase/migrations/258_x.sql)" "true"
+assert_eq "control: a Rails .rb migration still matches" "$(narrow db/migrate/001_x.rb)" "true"
+assert_eq "control: the Drizzle schema.ts row still matches (extensions are not allowlisted)" "$(narrow db/schema.ts)" "true"
+assert_eq "control: a migration whose NAME contains test but is not a test file still matches" "$(narrow migrations/010_add_test_accounts.sql)" "true"
+assert_eq "control: a migration named contest.sql still matches (segment match, not substring)" "$(narrow migrations/011_contest.sql)" "true"
+
 suite "AC3(a): the TRIPWIRE match set is a SUPERSET of the GATE's, under every config fixture"
 
 # The mechanism, stated so the invariant is not a coincidence of this corpus: the tripwire set

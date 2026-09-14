@@ -427,4 +427,43 @@ assert_contains "CONTROL: and the run reports it CHECKED the artifact" "$ERR" "v
 rm -f "$TEMP_ISSUE_DIR/spec.json"
 
 
+suite "validate-pipeline-artifact: the QA 3a satisfiability record is REQUIRED at the architectural tier (#158)"
+
+# QA writes tasks.json first at Phase 3a; impl-report.json does not exist yet. spec.json says
+# architectural. With no satisfiability_proof the QA stop is BLOCKED; with a complete one it is
+# not; below the architectural tier, or once impl-report.json exists (the Phase 4 QA stop), the
+# check is off. tasks.json is not in QA's AGENT_RULES, so this is the one place it is read.
+PAYLOAD_QA="{\"agent_type\":\"qa\",\"cwd\":\"$TEMP_PROJECT\",\"active_issue\":\"$ISSUE\"}"
+SAVED_REPORT="$TEMP_PROJECT/saved-impl-report.json"
+[ -f "$TEMP_ISSUE_DIR/impl-report.json" ] && mv "$TEMP_ISSUE_DIR/impl-report.json" "$SAVED_REPORT"
+printf '%s' '{"issue_number":4242,"title":"t","problem":"p","requirements":["r"],"acceptance_criteria":["AC1. x"],"impacted_domains":["api"],"trivial":false,"risk_tier":"architectural"}' > "$TEMP_ISSUE_DIR/spec.json"
+printf '%s' '{"issue_number":4242,"tasks":[{"id":"t1","title":"author tests","status":"done"}]}' > "$TEMP_ISSUE_DIR/tasks.json"
+hook "$PAYLOAD_QA"
+assert_eq "qa stop with no satisfiability_proof at architectural exits 0 (hook contract)" "$RC" "0"
+assert_contains "qa stop with no satisfiability_proof is BLOCKED" "$OUT" '"decision":"block"'
+assert_contains "the reason names the missing block" "$OUT" "satisfiability_proof is absent"
+
+printf '%s' '{"issue_number":4242,"tasks":[{"id":"t1","title":"author tests","status":"done"}],"satisfiability_proof":{"reference_impl_run":true,"criteria_proven":["AC1"],"criteria_unproven":[],"configs_run":["vitest.config.ts"]}}' > "$TEMP_ISSUE_DIR/tasks.json"
+hook "$PAYLOAD_QA"
+assert_eq "qa stop with a complete record exits 0" "$RC" "0"
+assert_not_contains "qa stop with a complete record is NOT blocked" "$OUT" '"decision":"block"'
+
+printf '%s' '{"issue_number":4242,"tasks":[],"satisfiability_proof":{"reference_impl_run":true,"criteria_proven":[],"criteria_unproven":[],"configs_run":["a"]}}' > "$TEMP_ISSUE_DIR/tasks.json"
+hook "$PAYLOAD_QA"
+assert_contains "a record naming no criterion in either list is BLOCKED" "$OUT" "names no criterion"
+
+# Below the architectural tier the block is not required (QA does not author the contract).
+printf '%s' '{"issue_number":4242,"title":"t","problem":"p","requirements":["r"],"acceptance_criteria":["AC1. x"],"impacted_domains":["api"],"trivial":false,"risk_tier":"standard"}' > "$TEMP_ISSUE_DIR/spec.json"
+printf '%s' '{"issue_number":4242,"tasks":[]}' > "$TEMP_ISSUE_DIR/tasks.json"
+hook "$PAYLOAD_QA"
+assert_not_contains "standard tier: no satisfiability block required" "$OUT" "satisfiability_proof"
+
+# Once impl-report.json exists this is the Phase 4 QA stop and tasks.json is Dev's; check is off.
+printf '%s' '{"issue_number":4242,"title":"t","problem":"p","requirements":["r"],"acceptance_criteria":["AC1. x"],"impacted_domains":["api"],"trivial":false,"risk_tier":"architectural"}' > "$TEMP_ISSUE_DIR/spec.json"
+printf '%s' "$VALID_REPORT" > "$TEMP_ISSUE_DIR/impl-report.json"
+hook "$PAYLOAD_QA"
+assert_not_contains "with impl-report.json present (Phase 4 QA stop) the 3a check is off" "$OUT" "satisfiability_proof"
+rm -f "$TEMP_ISSUE_DIR/impl-report.json" "$TEMP_ISSUE_DIR/tasks.json"
+[ -f "$SAVED_REPORT" ] && mv "$SAVED_REPORT" "$TEMP_ISSUE_DIR/impl-report.json"
+
 finish

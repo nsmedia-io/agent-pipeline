@@ -56,6 +56,61 @@ export function hasRecoverableVerdict(block) {
   );
 }
 
+// PROVISIONAL SHARD REFUSAL (#155). A shard that declares itself unfinished, or that carries a
+// verdict with nothing behind it, is refused exactly as a missing shard is. Origin: two panelists
+// ran out of turns and left placeholder shards ({"verdict":"APPROVE_WITH_NOTES","concerns":[],
+// "notes":"PROVISIONAL - review in progress"}), and the merge folded both into peer-review.json as
+// real verdicts. A missing shard halts; a hollow one passed, which is the worse failure because
+// it looks like a review that happened. Two tests, either one refuses:
+//   (1) any top-level string field matches the self-declared-unfinished vocabulary;
+//   (2) the shard carries no concerns AND no evidence-bearing prose at all (no non-empty string
+//       value other than the verdict and the reviewed_* identifiers): the bare
+//       {"verdict":"APPROVE"} shape, which is what an agent writes as a placeholder before it
+//       starts and never returns to. A verdict with nothing behind it is a verdict nobody rendered.
+// A real APPROVE with any note, a VETO carrying its veto_ground, or an APPROVE_WITH_NOTES with one
+// concern all pass; the threshold is deliberately "nothing", not a word count, so a terse but
+// real review is never refused for being short.
+export const PROVISIONAL_RE = /\b(provisional|in progress|in-progress|not yet complete|placeholder|will update before final|review pending)\b/i;
+const NON_EVIDENCE_KEYS = new Set(["verdict", "verdict_as_returned", "reviewed_at", "reviewed_sha", "reviewed_commit", "role", "agent"]);
+
+function evidenceStrings(value, key, out) {
+  if (typeof value === "string") {
+    if (!NON_EVIDENCE_KEYS.has(key)) out.push(value);
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const v of value) evidenceStrings(v, key, out);
+    return;
+  }
+  if (value && typeof value === "object") {
+    for (const [k, v] of Object.entries(value)) evidenceStrings(v, k, out);
+  }
+}
+
+// Returns null for a full shard, or a one-line reason when the (unwrapped) block is provisional.
+export function provisionalReason(block) {
+  if (!block || typeof block !== "object") return null;
+  for (const [k, v] of Object.entries(block)) {
+    if (typeof v === "string" && !NON_EVIDENCE_KEYS.has(k) && PROVISIONAL_RE.test(v)) {
+      return `top-level "${k}" declares the review unfinished: ${JSON.stringify(v.slice(0, 80))}`;
+    }
+  }
+  const concerns = Array.isArray(block.concerns) ? block.concerns.length : 0;
+  if (concerns === 0) {
+    const strings = [];
+    evidenceStrings(block, "", strings);
+    const chars = strings.join("").trim().length;
+    if (chars === 0) {
+      return "no concerns and no evidence-bearing text of any kind: a verdict with nothing behind it";
+    }
+  }
+  return null;
+}
+
+export function isProvisionalShard(block) {
+  return provisionalReason(block) !== null;
+}
+
 // Counts verdicts across the FULL panel (pass the original panel_roles, not the
 // delta subset) so the tally reflects the whole panel after a delta round. A role
 // with no recoverable verdict is not counted; the caller halts on a missing review.
@@ -116,6 +171,15 @@ function main(argv) {
     shards[role] = JSON.parse(readFileSync(file, "utf-8"));
   }
   const merged = additiveMerge(existing, shards);
+  // HALT on a self-declared-unfinished or evidence-less shard BEFORE anything is written (#155),
+  // naming the role and the reason. Checked on the unwrapped block, like the verdict check below.
+  for (const role of Object.keys(shards)) {
+    const reason = provisionalReason(merged[role]);
+    if (reason !== null) {
+      console.error(`PROVISIONAL SHARD: ${role} (${reason}); re-dispatch the reviewer, do not merge a placeholder`);
+      process.exit(2);
+    }
+  }
   // HALT on a present-but-verdict-less shard (recovered-but-null), matching the
   // pipeline.md rubric: such a role carries no verdict the rubric can read, so it is a
   // missing review, not a pass. Checked against the merged (unwrapped) block.
