@@ -104,6 +104,19 @@ export const DEFAULT_INFRA_GLOBS = [
  */
 const NARROW_EXCLUDED_EXTENSIONS = [".md", ".mdx"];
 
+/**
+ * Second code-resident NARROW exclusion (#156): a migration artifact is never a TEST FILE. Without
+ * it a one-line import repoint in a TypeScript test that happens to live under a `migrations/`
+ * directory (a project keeping tests ABOUT its migrations beside them: 69 such files on the
+ * origin project, zero SQL) fires BOTH halting controls, the mis-tier tripwire and the pre-Phase-4
+ * gate's down-section check, and neither can be narrowed from config by design. Matched against
+ * the normalized path: a `.test.` or `.spec.` infix in the basename, or any `__tests__/`, `tests/`
+ * or `test/` directory segment. Extensions are deliberately NOT allowlisted here: the preset rows
+ * that carry non-SQL migration artifacts (`**\/db/schema.ts`, `**\/schema.prisma`, Rails `.rb`,
+ * Alembic `.py`) would be disarmed by any extension list short enough to be correct.
+ */
+const NARROW_EXCLUDED_TEST_RE = /(^|\/)(__tests__|tests?)\/|\.(test|spec)\.[^\/]+$/;
+
 function projectRoot() {
   return process.env.CLAUDE_PROJECT_DIR || process.cwd();
 }
@@ -204,6 +217,7 @@ export function isMigrationPath(p, globs = DEFAULT_MIGRATION_GLOBS) {
   const dot = norm.lastIndexOf(".");
   const ext = dot === -1 ? "" : norm.slice(dot).toLowerCase();
   if (NARROW_EXCLUDED_EXTENSIONS.includes(ext)) return false;
+  if (NARROW_EXCLUDED_TEST_RE.test(norm)) return false;
   return matchesAny(norm, globs);
 }
 

@@ -1077,6 +1077,49 @@ export function groundFalsifiability(data, failures = []) {
 export const SPEC_SIZE_REQUIREMENTS = 10;
 export const SPEC_SIZE_CRITERIA = 12;
 
+// QA'S SATISFIABILITY RECORD (#158). At the architectural tier QA authors the failing contract
+// first and Dev implements against it; rule 12 of QA's test discipline asks for a throwaway
+// reference implementation so the contract is known SATISFIABLE and not only red. It was a norm
+// with no enforcement: on one run QA committed 129 cases with no such proof, three were
+// unsatisfiable by any implementation, and Dev spent its turn cap repairing them. This check is
+// the enforcement. It reads tasks.json (which QA writes first at 3a) and refuses the QA stop when
+// the block is absent or carries neither a proven list nor an unproven list.
+//
+// KEYED TO THE MOMENT, deliberately: it applies only when spec.risk_tier is architectural, when
+// tasks.json exists, and when impl-report.json does NOT yet exist (so it binds at 3a, where QA
+// owns tasks.json, and never at the Phase 4 QA stop, where impl-report.json is present and the
+// record is Dev's). Below the architectural tier QA does not author the contract, so the block
+// is not required. FAILS OPEN on an unreadable tasks.json (a wedge here helps nobody) and reads
+// nothing but the two files.
+export function groundSatisfiability(spec, tasks, implReportPresent, failures = []) {
+  if (!spec || spec.risk_tier !== "architectural") return failures;
+  if (implReportPresent) return failures;
+  if (!tasks || typeof tasks !== "object") return failures;
+  const sp = tasks.satisfiability_proof;
+  const remedy =
+    "write tasks.json satisfiability_proof per agents/qa.md: reference_impl_run plus criteria_proven[] " +
+    "(the criteria a throwaway implementation took green) or criteria_unproven[] (each with its reason), " +
+    "and configs_run[] naming every test config the committed files land in";
+  if (!sp || typeof sp !== "object") {
+    failures.push(`tasks.json satisfiability_proof is absent at the architectural tier; ${remedy}`);
+    return failures;
+  }
+  const proven = Array.isArray(sp.criteria_proven) ? sp.criteria_proven.filter((c) => typeof c === "string" && c.trim()) : [];
+  const unproven = Array.isArray(sp.criteria_unproven) ? sp.criteria_unproven.filter((u) => u && typeof u === "object" && typeof u.criterion === "string" && typeof u.reason === "string" && u.reason.trim()) : [];
+  if (proven.length === 0 && unproven.length === 0) {
+    failures.push(`tasks.json satisfiability_proof names no criterion in either list; ${remedy}`);
+    return failures;
+  }
+  if (proven.length > 0 && sp.reference_impl_run !== true) {
+    failures.push("tasks.json satisfiability_proof lists criteria_proven but reference_impl_run is not true; a criterion is proven only against a reference implementation that was run");
+  }
+  const configs = Array.isArray(sp.configs_run) ? sp.configs_run.filter((c) => typeof c === "string" && c.trim()) : [];
+  if (configs.length === 0) {
+    failures.push("tasks.json satisfiability_proof configs_run is empty; name every test config or pool the committed files land in (an import that resolves under one pool and not another is invisible to a run under the wrong one)");
+  }
+  return failures;
+}
+
 export function groundSpecSize(data, warnings = []) {
   if (!data || typeof data !== "object") return warnings;
   const reqs = Array.isArray(data.requirements) ? data.requirements.length : 0;
@@ -1358,6 +1401,27 @@ export function checkArtifacts(agentType, input, now = Date.now(), rootsOverride
           }
         }
       }
+      // #158: QA's 3a satisfiability record lives in tasks.json, which no AGENT_RULES row names
+      // (tasks.json is Dev's artifact in every other phase). Read it here for the qa stop only,
+      // under the same RECENT window as every other artifact, and count it as this agent's own
+      // recent artifact so the stop is validated rather than reported as "nothing written".
+      if (agent === "qa") {
+        try {
+          const tasksPath = path.join(issueDir, "tasks.json");
+          const specPath = path.join(issueDir, "spec.json");
+          let ts = null;
+          try { ts = statSync(tasksPath); } catch { ts = null; }
+          if (ts && now - ts.mtimeMs <= RECENT_MS && existsSync(specPath)) {
+            sawRecent = true;
+            const spec = JSON.parse(readFileSync(specPath, "utf8"));
+            let tasks = null;
+            try { tasks = JSON.parse(readFileSync(tasksPath, "utf8")); } catch { tasks = null; }
+            groundSatisfiability(spec, tasks, existsSync(path.join(issueDir, "impl-report.json")), failures);
+          }
+        } catch {
+          // grounding must never wedge a stop
+        }
+      }
       if (!sawRecent && !detail) {
         detail = `no artifact owned by "${agent}" was written under .pipeline/${issue} in the last ${RECENT_MS / 60000} minutes`;
       }
@@ -1505,6 +1569,27 @@ function selfTest() {
     groundFalsifiability(fpSpec([...twoACs, "AC3. added by a later revision."], bothCovered), []), true);
   check("falsifiability: the block absent at the architectural tier (fail)",
     groundFalsifiability(fpSpec(twoACs, undefined), []), true);
+  // #158 satisfiability record (QA 3a, architectural tier only, before impl-report exists)
+  const archSpec = { risk_tier: "architectural" };
+  const goodProof = { satisfiability_proof: { reference_impl_run: true, criteria_proven: ["AC1"], criteria_unproven: [], configs_run: ["vitest.config.ts"] } };
+  check("satisfiability: a complete proven record passes",
+    groundSatisfiability(archSpec, goodProof, false, []), false);
+  check("satisfiability: an honest all-unproven record with reasons passes",
+    groundSatisfiability(archSpec, { satisfiability_proof: { reference_impl_run: false, criteria_proven: [], criteria_unproven: [{ criterion: "AC1", reason: "needs the live stack" }], configs_run: ["a"] } }, false, []), false);
+  check("satisfiability: the block absent at the architectural tier (fail)",
+    groundSatisfiability(archSpec, { tasks: [] }, false, []), true);
+  check("satisfiability: a block naming no criterion in either list (fail)",
+    groundSatisfiability(archSpec, { satisfiability_proof: { reference_impl_run: true, criteria_proven: [], criteria_unproven: [], configs_run: ["a"] } }, false, []), true);
+  check("satisfiability: proven criteria without a run reference implementation (fail)",
+    groundSatisfiability(archSpec, { satisfiability_proof: { reference_impl_run: false, criteria_proven: ["AC1"], configs_run: ["a"] } }, false, []), true);
+  check("satisfiability: empty configs_run (fail)",
+    groundSatisfiability(archSpec, { satisfiability_proof: { reference_impl_run: true, criteria_proven: ["AC1"], configs_run: [] } }, false, []), true);
+  check("satisfiability: FAILS OPEN below the architectural tier",
+    groundSatisfiability({ risk_tier: "standard" }, { tasks: [] }, false, []), false);
+  check("satisfiability: FAILS OPEN once impl-report.json exists (the Phase 4 QA stop)",
+    groundSatisfiability(archSpec, { tasks: [] }, true, []), false);
+  check("satisfiability: FAILS OPEN on an unreadable tasks.json",
+    groundSatisfiability(archSpec, null, false, []), false);
   // FAIL OPEN below architectural, where pipeline.md does not require the block.
   check("falsifiability: the block absent at the standard tier (pass, fails open)",
     groundFalsifiability(fpSpec(twoACs, undefined, "standard"), []), false);

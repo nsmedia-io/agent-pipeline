@@ -72,6 +72,48 @@
     "experiment_id": {
       "type": "string",
       "description": "Present only on an experiment run: the exp-<slug> placeholder id used in place of a tracker issue."
+    },
+    "satisfiability_proof": {
+      "type": "object",
+      "description": "QA's Phase 3a satisfiability record (#158), architectural tier. Written by QA into tasks.json before it returns: whether a throwaway reference implementation took the contract green (reference_impl_run), which criteria it proved (criteria_proven), which it could not and why (criteria_unproven), and every test config or pool the committed files run under (configs_run). The SubagentStop validator refuses a QA stop at the architectural tier when this block is absent or carries neither list; the orchestrator halts before dispatching Dev on the same condition.",
+      "properties": {
+        "reference_impl_run": {
+          "type": "boolean"
+        },
+        "criteria_proven": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "criteria_unproven": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "criterion",
+              "reason"
+            ],
+            "properties": {
+              "criterion": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "configs_run": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "notes": {
+          "type": "string"
+        }
+      }
     }
   }
 }

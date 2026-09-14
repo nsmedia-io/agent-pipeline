@@ -545,6 +545,7 @@ Return a short summary with the test commit SHA, the test files authored, and th
 After QA returns:
 - Record QA's test commit SHA in `status.json` (e.g. `"phase3_qa_test_commit": "<sha>"`), and append a `flags` entry. Confirm the commit exists (`git -C <WORKTREE_PATH> show --stat <sha>`).
 - If no commit was made or the tests do not fail, halt and re-run QA. Do NOT proceed to Dev.
+- **Read `<ARTIFACT_DIR>/tasks.json` `satisfiability_proof` (#158).** QA's contract must be known SATISFIABLE, not only red: `reference_impl_run` true with the criteria it took green listed in `criteria_proven`, or a non-empty `criteria_unproven` naming each criterion QA could not prove and why, plus `configs_run` naming every test config or pool the committed files land in. A record with neither list, or absent entirely, means QA skipped test-discipline rule 12; halt and re-dispatch QA with that rule quoted. The SubagentStop validator refuses the QA stop in that state too (`groundSatisfiability`), so this line is the orchestrator's half of the same control. Origin: 129 cases handed to Dev with no satisfiability proof; three were unsatisfiable by any implementation and Dev spent its turn cap repairing them.
 
 ### Phase 3b (architectural tier): Dev implements to green (dispatch SECOND, only after the SHA is recorded)
 
@@ -810,6 +811,7 @@ cp "$PIPELINE_BASE/<issue>/status.json" "$ARTIFACT_DIR/status.json" 2>/dev/null 
 
 Dispatch via the **Workflow tool**, one `agent()` call per role in `PANEL_ROLES`, run inside a single `parallel([...])`. This is the one fan-out in this file that dispatches this way rather than through a single message of parallel Agent tool calls; see "Dispatch via Workflow" below for why this phase specifically, and only this phase, migrated. Each reviewer still writes a **shard file** (`peer-review.<agent>.json`), never `peer-review.json` directly, for the same lost-update reason as Phase 2, and the merge step below reads those files exactly as it always has -- the dispatch mechanism changed, the verdict contract did not. Every Phase 4 prompt includes this **shared preamble** (substitute the absolute values), followed by its lens-specific line (templates for all six follow; dispatch only the resolved panel):
 
+<!-- BEGIN PHASE4-PREAMBLE -->
 ```
 Phase 4 peer review for #<issue>.
 Active worktree path: <WORKTREE_PATH>. cd there first; the diff (git diff origin/main...HEAD) only resolves on the issue branch.
@@ -858,27 +860,29 @@ A before/after `git status` pair does not settle whether a measurement taken in 
 
 WRITE YOUR SHARD FIRST, BEFORE you compose your reply text. Write your verdict as a BARE block (verdict at the top level, no "<role>" wrapper key, no stray sibling keys) to <ARTIFACT_DIR>/peer-review.<role>.json, then write your summary. Do NOT write peer-review.json; the orchestrator merges shards. Agents routinely finish the analysis, announce "now writing my shard", and stop before doing it, which costs a full round trip and can strand a binding verdict; writing the file first makes that failure impossible. Before you return, PARSE-CHECK the shard: `node -e 'JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"))' <ARTIFACT_DIR>/peer-review.<role>.json` must exit 0, and every concern's `likelihood`, `reversibility` and `harm` must be one of the enum tokens above, never a sentence (origin: one shard carried a stray closing bracket and another carried prose where the enum belongs; the merge refused both, correctly, and the orchestrator hand-repaired them, which is a repair no shard should need).
 ```
+<!-- END PHASE4-PREAMBLE -->
 
-Construct and run ONE `Workflow` call. `PREAMBLE` is the shared preamble above with its placeholders substituted; each role's `agent()` call appends its own lens-specific line to it, unchanged from the line that role carried as an `Agent({...})` call before this migration -- only the wrapper changed. Include only the roles actually in `PANEL_ROLES`:
+**Render the Workflow script; do not hand-write it (#157).** Every value in the panel script is computed by `scripts/render-panel.mjs`: the reviewed sha is `git rev-parse HEAD` of the worktree, the preamble is the marked block above (sliced between `<!-- BEGIN PHASE4-PREAMBLE -->` and `<!-- END PHASE4-PREAMBLE -->`, placeholders substituted), the lens per role comes from `scripts/panel-lenses.json` (the ONE lens table; there is no second copy in this file), and model and effort come from the two dispatch resolvers for `(role, <risk_tier>, 4, panel-lens, workflow)`: for the two lenses that carry a model row the renderer resolves exactly what a hand-written dispatch was told to, `dispatch-model.mjs ba <risk_tier> 4 --site panel-lens` and `dispatch-model.mjs dev <risk_tier> 4 --site panel-lens` (sonnet today), emitting `model:` only when the resolver printed one token, and it resolves `effort` for every role with `--surface workflow`. Every string is emitted through `JSON.stringify`, so no quoting class can break the script. Origin: seven hand-written panel scripts over four issues produced one mistyped reviewed sha and one parse error.
+
+```bash
+# Full round. PANEL_ROLES was recorded in status.json above; the renderer reads it from there.
+node "${CLAUDE_PLUGIN_ROOT}/scripts/render-panel.mjs" \
+  --status "$PIPELINE_BASE/<issue>/status.json" --worktree "<WORKTREE_PATH>" --check \
+  --out "$ARTIFACT_DIR/panel.workflow.mjs"
+```
+
+Then pass the file's contents verbatim as the Workflow tool's `script`. `--check` parses the rendered script with `node --check` under the runtime's async wrapper and exits non-zero on a parse error, so the failure surfaces here and not as a Workflow tool rejection. The rendered file is a per-issue artifact (gitignored with the rest); the sha it carries in its header comment is the sha the panel reviewed, and the merge step below reads shards from disk exactly as before, so the dispatch mechanism changed and the verdict contract did not. The shape the renderer emits, for readers of this file (one `agent()` per role, the lens appended to the shared preamble, `agentType` namespaced, `model` present only when the resolver printed one token, `effort` always present on the workflow surface, `label` per role):
 
 ```
-Workflow({
-  script: `
-    export const meta = { name: 'phase4-panel', description: 'Phase 4 peer review panel for #<issue>', phases: [{ title: 'Panel' }] }
-    phase('Panel')
-    const results = await parallel([
-      () => agent(PREAMBLE + 'Read <ARTIFACT_DIR>/spec.json and <ARTIFACT_DIR>/impl-report.json. Verify: does implementation match spec intent? Any unflagged scope drift? Return verdict APPROVE | APPROVE_WITH_NOTES | REQUEST_CHANGES.', { agentType: 'pipeline:ba', <model: from `dispatch-model.mjs ba <risk_tier> 4 --site panel-lens`, omitted when it does not print exactly one token>, effort: <from `dispatch-effort.mjs ba <risk_tier> 4 --site panel-lens --surface workflow`, always present>, label: 'ba-panel' }),
-      () => agent(PREAMBLE + 'Re-verify schema/migration/access-control diff against DBA checklist. Return verdict APPROVE | APPROVE_WITH_NOTES | REQUEST_CHANGES.', { agentType: 'pipeline:dba', effort: <from `dispatch-effort.mjs dba <risk_tier> 4 --surface workflow`, always present>, label: 'dba-panel' }),
-      () => agent(PREAMBLE + 'Re-verify infrastructure config, workflows, deploy order, secrets. Return verdict APPROVE | APPROVE_WITH_NOTES | REQUEST_CHANGES.', { agentType: 'pipeline:devops', effort: <from `dispatch-effort.mjs devops <risk_tier> 4 --surface workflow`, always present>, label: 'devops-panel' }),
-      () => agent(PREAMBLE + 'Re-verify auth/encryption/validation/logging. Return verdict APPROVE | APPROVE_WITH_NOTES | REQUEST_CHANGES | VETO.', { agentType: 'pipeline:secops', effort: <from `dispatch-effort.mjs secops <risk_tier> 4 --surface workflow`: xhigh at architectural, high at standard, medium at trivial, unless dispatchEfforts moves it>, label: 'secops-panel' }),
-      () => agent(PREAMBLE + 'Review code quality, DRY, SOLID, readability of the diff. Return verdict APPROVE | APPROVE_WITH_NOTES | REQUEST_CHANGES.', { agentType: 'pipeline:dev', <model: from `dispatch-model.mjs dev <risk_tier> 4 --site panel-lens`, omitted when it does not print exactly one token>, effort: <from `dispatch-effort.mjs dev <risk_tier> 4 --site panel-lens --surface workflow`, always present>, label: 'dev-panel' }),
-      () => agent(PREAMBLE + 'You are the binding independent test verdict. This is an ADVERSARIAL gap-check, not an auto-pass on green: green proves only that the tests that exist pass. Audit coverage against the diff and the Phase-3 behavioral test contract (you authored it at the architectural tier; Dev authored it at standard/trivial, which makes your fresh-eyes audit the FIRST independent look at those tests, so scrutinize them hardest): every changed path tested, webhooks cover idempotency/replay, integration tests hit a real backing service (not mocks), failure modes covered, behavior outside the existing tests not left untested (overfitting), and no test weakened to force a pass. Name specific missing tests. Return verdict APPROVE | APPROVE_WITH_NOTES | REQUEST_CHANGES | REQUEST_REFACTOR.', { agentType: 'pipeline:qa', effort: <from `dispatch-effort.mjs qa <risk_tier> 4 --surface workflow`: high at architectural, medium at standard and trivial, unless dispatchEfforts moves it>, label: 'qa-panel' }),
-      // design_review ONLY when it is in PANEL_ROLES (frontend-touching diffs):
-      () => agent(PREAMBLE + 'You are dispatched ONLY because the diff touches a frontend surface. Run the three lenses per your agent definition: token conformance (binding, your token-lint rule; # CUSTOMIZE), accessibility (axe deterministic + the mandatory human-residual caveat), and critique/copy (advisory only). A REQUEST_CHANGES is valid ONLY when a concerns[] blocker/major cites a token_lint or axe failure; taste-only findings are advisory. Write your bare shard to <ARTIFACT_DIR>/peer-review.design_review.json. You hold NO veto. Return verdict APPROVE | APPROVE_WITH_NOTES | REQUEST_CHANGES.', { agentType: 'pipeline:design', effort: <from `dispatch-effort.mjs design_review <risk_tier> 4 --surface workflow`, always present>, label: 'design-panel' }),
-    ])
-    return { returns: results }
-  `
-})
+export const meta = { name: 'phase4-panel-<issue>', description: '...', phases: [{ title: 'Panel' }] }
+phase('Panel')
+const PREAMBLE = "<the marked block, substituted>"
+const results = await parallel([
+  () => agent(PREAMBLE + "<lens for ba>", { agentType: 'pipeline:ba', model: 'sonnet', effort: 'medium', label: 'ba-panel' }),
+  () => agent(PREAMBLE + "<lens for secops>", { agentType: 'pipeline:secops', effort: 'high', label: 'secops-panel' }),
+  // ... one per role in panel_roles (design_review and art_director only when seated)
+])
+return { returns: results }
 ```
 
 **The Workflow return value is a convenience, never the verdict source.** `results` above is discarded by the orchestrator once the call returns; nothing reads a verdict out of it. The merge step below reads `peer-review.<role>.json` off disk exactly as it did before this migration, because that file, not an in-memory return value, is what `merge-peer-review.mjs` validates and what the `SubagentStop` hook gates on. `agent()` returns `null` when a subagent dies or is skipped, and a `null` entry in `results` is not itself a failure signal to act on: the missing shard IS the signal, and the merge step below already halts on it (`MISSING SHARD`, exit 2), the identical path a stalled or refused Agent-tool dispatch takes today. Do not add a second check that reads `results` for a verdict; that would be a second derivation of a decision the shard-file gate already makes, and the two could disagree.
@@ -1044,7 +1048,7 @@ rm -f "$FIX_CHANGED_PATHS"
 ROLES_TO_MERGE="$DELTA"
 ```
 
-SecOps and QA are seated on a delta round by the same rule as every other role: they objected, or the fix commits touched their surface (security or data-layer paths for SecOps, test files for QA). Otherwise the round-1 verdict stands. SecOps is still never trimmed from a FULL round; what changed is that a fix to a layout file no longer buys a fresh xhigh security pass. (A SecOps `VETO` on a delta round, on a named `veto_ground`, halts to BA as always.) Dispatch ONLY `$ROLES_TO_MERGE` with the same Phase 4 prompts, then run the merge block above but WITHOUT the `rm -f "$ARTIFACT_DIR/peer-review.json"` line, so `merge-peer-review.mjs` folds the delta shards INTO the existing file and the standing approvals of the NON-delta roles survive. After the delta merge:
+SecOps and QA are seated on a delta round by the same rule as every other role: they objected, or the fix commits touched their surface (security or data-layer paths for SecOps, test files for QA). Otherwise the round-1 verdict stands. SecOps is still never trimmed from a FULL round; what changed is that a fix to a layout file no longer buys a fresh xhigh security pass. (A SecOps `VETO` on a delta round, on a named `veto_ground`, halts to BA as always.) Dispatch ONLY `$ROLES_TO_MERGE`, rendered the same way as the first round with the delta form (`node "${CLAUDE_PLUGIN_ROOT}/scripts/render-panel.mjs" --status ... --worktree ... --delta "$ROLES_TO_MERGE" --first-round-head "$FIRST_ROUND_HEAD" --check --out "$ARTIFACT_DIR/panel.delta.workflow.mjs"`; the delta paragraph it prepends names the first-round head, the fix diff and the introduced-defect stance), then run the merge block above but WITHOUT the `rm -f "$ARTIFACT_DIR/peer-review.json"` line, so `merge-peer-review.mjs` folds the delta shards INTO the existing file and the standing approvals of the NON-delta roles survive. After the delta merge:
 
 - `peer-review.json` carries a verdict for the FULL panel: the objecting and surface-touched roles are freshly re-reviewed, and every other role's standing verdict is preserved.
 - Compute `peer_review_verdict_counts` over the FULL `$FULL_PANEL` (not the delta subset), via a `node -e` one-liner against the `countVerdicts` export of `${CLAUDE_PLUGIN_ROOT}/scripts/merge-peer-review.mjs` or by reading the merged file, so the tally reflects the whole panel.

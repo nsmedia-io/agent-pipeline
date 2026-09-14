@@ -100,6 +100,11 @@ for cand in $(grep -oE 'scripts/[a-zA-Z0-9_-]+\.mjs' "$PIPELINE_MD" | sort -u); 
     # guard and both Dev dispatch prompts. It routes where a deferred item is WRITTEN and takes
     # a command plus a ref, never a (role, tier, phase) triple. Excluded by NAME, like the rest.
     deferral.mjs) continue ;;
+    # 0.42.0: the Phase 4 panel RENDERER (#157), referenced from the panel dispatch and the delta
+    # round. It CALLS both resolvers (it is their first non-prose consumer) but resolves no model
+    # itself and takes --status/--worktree, never a (role, tier, phase) triple. Excluded by NAME,
+    # like the rest; it is exactly the "next scripts/*.mjs reference" the halt exists to name.
+    render-panel.mjs) continue ;;
   esac
   # The data-layer surface module is referenced from the same file by R3; it is not this.
   grep -q 'migrationGlobsForTripwire' "$PLUGIN_DIR/$cand" 2>/dev/null && continue

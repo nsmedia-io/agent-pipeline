@@ -456,6 +456,16 @@ write_report "AC1 handled" '[{"sha":"a1","message":"m","files_changed":["src/x.t
 gate --issue "$ISSUE"
 assert_eq "the shared fixture is schema-valid and passes on its own" "$RC" "0"
 
+new_project mig-test-file
+write_spec "AC1: migrations are reversible"
+# #156: a MODIFIED TypeScript test under a migrations/ directory is not a migration. There is no
+# such file on disk in this fixture, exactly as on the origin run (the gate inferred a migration
+# from files_changed, then failed closed on the missing down section of a test file).
+write_report "AC1 handled" '[{"sha":"a1","message":"m","files_changed":["packages/db/src/migrations/233_widen_v_webhook_events.test.ts"]}]'
+gate --issue "$ISSUE"
+assert_eq "a .test.ts under migrations/ in files_changed does not fire the migration rule" "$RC" "0"
+assert_not_contains "no down-section message for a test file" "$ERR" "has no down section"
+
 new_project mig-good
 write_spec "AC1: migrations are reversible"
 write_report "AC1 handled" '[{"sha":"a1","message":"m","files_changed":["migrations/001_good.sql"]}]'

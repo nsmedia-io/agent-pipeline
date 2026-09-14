@@ -110,12 +110,60 @@ assert_eq "a target with no shards exits 1" "$RC" "1"
 
 suite "merge-peer-review: the written file is well-formed"
 
-printf '%s' '{"verdict":"APPROVE"}' > "$W/peer-review.ba.json"
+printf '%s' '{"verdict":"APPROVE","notes":"clean"}' > "$W/peer-review.ba.json"
 merge "$W/out.json" "ba=$W/peer-review.ba.json"
 node -e 'JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"))' "$W/out.json"
 assert_eq "the target is valid JSON" "$?" "0"
 LAST=$(tail -c 1 "$W/out.json")
 assert_eq "the target ends with a trailing newline" "$(printf '%s' "$LAST" | wc -c | tr -d ' ')" "0"
+
+suite "merge-peer-review: a PROVISIONAL shard is refused like a missing one (#155)"
+
+# The exact shard two panelists left on disk when they ran out of turns. The merge folded both in
+# as real APPROVE_WITH_NOTES verdicts; the orchestrator noticed only by file size.
+rm -f "$W/peer-review.json"
+printf '%s' '{"verdict":"APPROVE_WITH_NOTES","reviewed_at":"2026-09-11T00:00:00Z","reviewed_sha":"98192f87","concerns":[],"notes":"PROVISIONAL - review in progress, not yet complete."}' > "$W/peer-review.dba.json"
+merge "$W/peer-review.json" "dba=$W/peer-review.dba.json"
+assert_eq "a self-declared provisional shard exits 2" "$RC" "2"
+assert_contains "the halt names the role and says PROVISIONAL SHARD" "$ERR" "PROVISIONAL SHARD: dba"
+assert_eq "nothing is written on a provisional refusal" "$(test -e "$W/peer-review.json" && echo written || echo absent)" "absent"
+
+# The second placeholder shape from the same round: substantive-looking fields, still unfinished.
+printf '%s' '{"verdict":"APPROVE_WITH_NOTES","infra_changes":[{"kind":"script","summary":"provisional: pure parser"}],"concerns":[],"notes":"PROVISIONAL, still verifying remote CI. Will update before final reply."}' > "$W/peer-review.devops.json"
+merge "$W/peer-review.json" "devops=$W/peer-review.devops.json"
+assert_eq "a will-update-before-final shard exits 2" "$RC" "2"
+assert_contains "the second placeholder is named too" "$ERR" "PROVISIONAL SHARD: devops"
+
+# A bare verdict with nothing behind it is the same placeholder wearing fewer words.
+printf '%s' '{"verdict":"APPROVE"}' > "$W/peer-review.ba.json"
+merge "$W/peer-review.json" "ba=$W/peer-review.ba.json"
+assert_eq "a bare {verdict} shard with no concerns and no prose exits 2" "$RC" "2"
+assert_contains "the bare-shard halt says what was missing" "$ERR" "no evidence-bearing text"
+
+# A provisional shard on a DELTA round must not clobber the standing verdict either.
+cat > "$W/peer-review.json" <<'EOF'
+{"dba":{"verdict":"APPROVE","notes":"standing, round 1"},"qa":{"verdict":"APPROVE","notes":"standing"}}
+EOF
+printf '%s' '{"verdict":"APPROVE","concerns":[],"notes":"placeholder, review in progress"}' > "$W/peer-review.dba.json"
+merge "$W/peer-review.json" "dba=$W/peer-review.dba.json"
+assert_eq "a provisional delta shard exits 2" "$RC" "2"
+assert_eq "the standing round-1 verdict survives the refused delta" "$(jget "$W/peer-review.json" dba.notes)" "standing, round 1"
+
+# NON-ZERO CONTROLS: terse but real shards still merge.
+rm -f "$W/peer-review.json"
+printf '%s' '{"verdict":"APPROVE","notes":"clean"}' > "$W/peer-review.ba.json"
+merge "$W/peer-review.json" "ba=$W/peer-review.ba.json"
+assert_eq "a terse real APPROVE merges (notes: clean)" "$RC" "0"
+printf '%s' '{"verdict":"APPROVE_WITH_NOTES","concerns":[{"severity":"low","description":"one real concern","must_satisfy":"x","likelihood":"hypothetical","reversibility":"undo-button","harm":"internal"}]}' > "$W/peer-review.dev.json"
+merge "$W/peer-review.json" "dev=$W/peer-review.dev.json"
+assert_eq "an APPROVE_WITH_NOTES carrying one concern and no notes merges" "$RC" "0"
+printf '%s' '{"verdict":"VETO","veto_ground":"auth","concerns":[]}' > "$W/peer-review.secops.json"
+merge "$W/peer-review.json" "secops=$W/peer-review.secops.json"
+assert_eq "a VETO carrying only its veto_ground merges (the ground is evidence)" "$RC" "0"
+# The vocabulary is matched on WORDS: a real review that mentions a provisional table is not refused.
+printf '%s' '{"verdict":"APPROVE","notes":"The migration adds a provisionally-named column; verified the rename lands in 099."}' > "$W/peer-review.dba.json"
+merge "$W/peer-review.json" "dba=$W/peer-review.dba.json"
+assert_eq "a real note containing provisionally- (not the bare word) merges" "$RC" "0"
 
 suite "merge-peer-review: countVerdicts over the FULL panel"
 

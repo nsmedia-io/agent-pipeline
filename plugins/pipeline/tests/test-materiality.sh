@@ -113,7 +113,9 @@ assert_eq "normalizing an already-normalized block changes nothing" "$TWICE" "$O
 
 W="$TEMP_PROJECT/work"; mkdir -p "$W"
 printf '%s' '{"verdict":"REQUEST_CHANGES","concerns":[{"severity":"high","likelihood":"hypothetical","reversibility":"undo-button","harm":"internal","description":"only if someone edits the config to disable the guard"}]}' > "$W/peer-review.qa.json"
-printf '%s' '{"verdict":"APPROVE","concerns":[]}' > "$W/peer-review.secops.json"
+# notes present: 0.42.0's merge (#155) refuses a bare verdict with no concerns and no evidence text
+# as a placeholder, and this secops shard stands in for a real, terse approval.
+printf '%s' '{"verdict":"APPROVE","concerns":[],"notes":"clean"}' > "$W/peer-review.secops.json"
 ( cd "$TEMP_PROJECT" && node "$MERGE" "$W/peer-review.json" "qa=$W/peer-review.qa.json" "secops=$W/peer-review.secops.json" ) >"$W/out.txt" 2>"$W/err.txt"
 assert_eq "the merge CLI exits 0" "$?" "0"
 assert_eq "the merged qa verdict is the NORMALIZED one" \
