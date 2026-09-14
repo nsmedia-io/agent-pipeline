@@ -405,6 +405,8 @@ for cand in $(grep -oE 'scripts/[a-zA-Z0-9_-]+\.mjs' "$PIPELINE_MD" | sort -u); 
     # guard and both Dev dispatch prompts. It routes where a deferred item is WRITTEN and takes
     # a command plus a ref, never a (role, tier, phase) triple. Excluded by NAME, like the rest.
     deferral.mjs) continue ;;
+    # 0.42.0: the Phase 4 panel renderer (#157); calls both resolvers, resolves no model itself.
+    render-panel.mjs) continue ;;
   esac
   CANDIDATES_REL+=("$cand")
 done
