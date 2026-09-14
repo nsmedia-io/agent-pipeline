@@ -8,6 +8,7 @@ CONTROL: the same criterion passes once one check names AC23
 CONTROL: the same statements unwrapped ARE an up section
 GUARANTEE: an executable (uncommented) down region now halts
 NOT as commented-out: a `*/` past the marker must not vouch for the region
+a .test.ts under migrations/ in files_changed does not fire the migration rule
 a block that opens before the marker and closes after it halts
 a block-comment PREAMBLE above live statements is still an up section
 a block-commented up region is NOT an up section
@@ -86,6 +87,7 @@ naming the unanswered label
 naming the unterminated block and where it opened
 neither marker present still halts
 no TypeError reaches the operator
+no down-section message for a test file
 nor an incidental schema error
 one labelled check out of three does NOT arm the strict rule
 scope_drift.observations_reported_not_fixed is read the same way

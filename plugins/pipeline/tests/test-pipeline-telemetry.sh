@@ -111,7 +111,9 @@ suite "AC13: a shard that lands NOWHERE still HALTS -- recoverability never beca
 # VETO must never merge as an absent-therefore-fine review.
 MDIR="$TEMP_PROJECT/merge-fixture"
 mkdir -p "$MDIR"
-printf '%s' '{"verdict":"APPROVE","reviewed_at":"2026-08-01T00:00:00Z"}' > "$MDIR/peer-review.ba.json"
+# notes is present because 0.42.0's merge (#155) refuses a bare verdict with no evidence text as a
+# placeholder; this fixture is a REAL shard standing in for a present review, so it carries one.
+printf '%s' '{"verdict":"APPROVE","reviewed_at":"2026-08-01T00:00:00Z","notes":"present shard"}' > "$MDIR/peer-review.ba.json"
 ( cd "$MDIR" && node "$MERGE" "$MDIR/peer-review.json" ba="$MDIR/peer-review.ba.json" >/dev/null 2>&1 )
 assert_eq "a present shard merges (exit 0), so the halt below is not the script refusing everything" "$?" "0"
 ( cd "$MDIR" && node "$MERGE" "$MDIR/peer-review.json" secops="$MDIR/peer-review.secops.json" >/dev/null 2>&1 )
