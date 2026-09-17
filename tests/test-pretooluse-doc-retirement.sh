@@ -294,8 +294,12 @@ CITE_JSON="$("$GATE_REAL_NODE" "$CITE_MJS" "$GATE_REPO_ROOT" "${SHIPPED[@]}" 2>/
 CITE_TOTAL="$("$GATE_REAL_NODE" -e 'process.stdout.write(String(JSON.parse(process.argv[1]).total))' "$CITE_JSON")"
 CITE_BAD="$("$GATE_REAL_NODE" -e 'process.stdout.write(JSON.parse(process.argv[1]).bad.join(" | "))' "$CITE_JSON")"
 record "AC33: $CITE_TOTAL <path>:<n> citation(s) scanned across the shipped artifacts and comments"
+# The floor was 5 while "The property, not the fix" sat in ten files, each copy citing
+# validate-pipeline-artifact.mjs:95, so one citation counted ten times. #164 row 4 moved the block to
+# shared/, leaving 2 on the tree it shipped on. Non-empty is what the label asks; the scanner's
+# ability to see a citation at all is proven by the planted controls below.
 assert_eq "VACUITY: the citation scanner found a non-empty population (an empty scan proves nothing)" \
-  "$([[ "${CITE_TOTAL:-0}" -ge 5 ]] && echo enough || echo "ONLY ${CITE_TOTAL:-0} citations found -- the scanner is broken, not the artifacts")" "enough"
+  "$([[ "${CITE_TOTAL:-0}" -ge 1 ]] && echo enough || echo "ONLY ${CITE_TOTAL:-0} citations found -- the scanner is broken, not the artifacts")" "enough"
 assert_eq "AC33: every citation in the SHIPPED artifacts opens (path resolves from the repo root, line exists)" \
   "$CITE_BAD" ""
 
