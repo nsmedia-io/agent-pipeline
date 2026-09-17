@@ -440,15 +440,25 @@ export function surfaceReport(projectDir, cfg) {
  *
  * WHAT. A small, dependency-free parser for the YAML SUBSET agent frontmatter uses: top-level
  * `key: value` pairs whose values are plain, single-quoted, double-quoted, block (`|`, `>`) or
- * flow-sequence scalars, plus an indented block list or map under a bare key. It is stricter
- * than it needs to be in one direction only: a construct outside that subset (anchors, tags,
- * aliases) is REPORTED rather than guessed at, because a lint that silently accepts what the
- * loader may reject is the defect this exists for.
+ * flow-sequence scalars, plus a one-level indented block list or map under a bare key.
+ *
+ * AN ERROR ONLY WHERE THE PARSER UNDERSTANDS THE WHOLE CONSTRUCT (0.43.0). A construct outside
+ * that subset is valid YAML this parser does not model: a nested block deeper than one level
+ * (`mcpServers:` / `gh:` / `args:` / `- run`, a `command: |` block under `hooks:`), a flow map
+ * (`metadata: {a: 1}`), an anchor, alias or tag. Reporting those as "does not parse" told an owner
+ * a loading agent was skipped, which is the opposite of the silence this lint exists to end and
+ * just as wrong. They are recorded as NOT CHECKED instead: silent at session start, listed by
+ * `config-doctor.mjs --verbose-agents`, and the key's value is not linted (a `description` the
+ * parser did not read is not reported missing).
  *
  * It reports; it never edits a file and never changes the doctor's exit code.
  */
 export const KNOWN_AGENT_MODELS = ["inherit", "opus", "sonnet", "haiku", "fable"];
 const MODEL_ID_RE = /^claude-[a-z0-9][a-z0-9.-]*(\[1m\])?$/;
+// A model alias may carry a context-window suffix, as in `opus[1m]`.
+const MODEL_ALIAS_SUFFIX_RE = /^(opus|sonnet|haiku|fable)\[\d+[km]\]$/;
+/** The value a key holds in parseAgentFrontmatter's data when the parser did not read it. */
+export const NOT_CHECKED = Symbol.for("agent-pipeline.config-doctor.not-checked");
 // Mirrors ALLOWED_EFFORTS in dispatch-effort.mjs. Restated rather than imported so this file
 // does not pull a routing module into the SessionStart path; the agents suite pins the two
 // lists equal, so a drift is a red row rather than a silent disagreement.
@@ -512,8 +522,7 @@ function foldQuoted(lines) {
 
 function plainScalarProblem(value) {
   if (/^[@`]/.test(value)) return `starts with "${value[0]}", which YAML reserves; quote the value`;
-  if (/^[&*!%]/.test(value)) return `starts with "${value[0]}", which YAML reads as an anchor, alias, tag or directive; quote the value`;
-  if (/^[{]/.test(value)) return "starts with \"{\", which YAML reads as a flow mapping; quote the value";
+  if (/^%/.test(value)) return 'starts with "%", which YAML reads as a directive; quote the value';
   if (/^[?-](\s|$)/.test(value)) return `starts with "${value[0]} ", which YAML reads as structure; quote the value`;
   if (/:(\s|$)/.test(value)) return 'contains an unquoted ": ", which YAML reads as a second key on the same line; wrap the whole value in double quotes';
   return null;
@@ -532,7 +541,7 @@ function typedPlain(value) {
  *            warnings: {line:number,key?:string,message:string}[]}}
  */
 export function parseAgentFrontmatter(text) {
-  const result = { present: false, data: {}, errors: [], warnings: [] };
+  const result = { present: false, data: {}, errors: [], warnings: [], unchecked: [] };
   const lines = String(text ?? "").replace(/^﻿/, "").replace(/\r\n?/g, "\n").split("\n");
   if (lines[0].trimEnd() !== "---") return result;
   result.present = true;
@@ -551,6 +560,10 @@ export function parseAgentFrontmatter(text) {
   const lineNo = (i) => i + 2;
   const err = (i, message, key) => result.errors.push({ line: lineNo(i), key, message });
   const warn = (i, message, key) => result.warnings.push({ line: lineNo(i), key, message });
+  const notChecked = (i, message, key) => {
+    result.unchecked.push({ line: lineNo(i), key, message });
+    result.data[key] = NOT_CHECKED;
+  };
   const isIndented = (l) => /^[ \t]/.test(l) && l.trim() !== "";
 
   for (let i = 0; i < body.length; i++) {
@@ -592,6 +605,7 @@ export function parseAgentFrontmatter(text) {
       break;
     }
     const contStart = i + 1;
+    const keyIdx = i;
     i = j - 1;
 
     if (raw === "" || raw.startsWith("#")) {
@@ -599,21 +613,47 @@ export function parseAgentFrontmatter(text) {
         result.data[key] = null;
         continue;
       }
-      const items = cont.filter((l) => l.trim() !== "");
+      const items = cont.filter((l) => l.trim() !== "" && !/^\s*#/.test(l));
+      // More than one indentation under the key is a nested block (a map of maps, a list under a
+      // nested key, a block scalar under a nested key). Valid YAML, outside this parser's subset.
+      const indents = new Set(items.map((l) => /^[ \t]*/.exec(l)[0].length));
+      if (indents.size > 1) {
+        notChecked(keyIdx, `the block under "${key}" nests deeper than one level, which this lint does not parse`, key);
+        continue;
+      }
+      const KEY_LINE = /^\s+([^\s:#][^:]*?)\s*:(?:\s+(.*)|)$/;
       if (items.every((l) => /^\s+-(\s|$)/.test(l))) {
         result.data[key] = items.map((l) => l.replace(/^\s+-\s*/, "").trim());
+      } else if (items.every((l) => !KEY_LINE.test(l) && !/^\s+-(\s|$)/.test(l))) {
+        // `key:` then an indented plain scalar on the next line(s): one value, checked as one.
+        const bad = plainScalarProblem(items[0].trim()) || (items.some((l) => /:(\s|$)/.test(l)) ? plainScalarProblem("x: ") : null);
+        if (bad) {
+          err(i, `the value of "${key}" ${bad}`, key);
+          continue;
+        }
+        result.data[key] = typedPlain(items.map((l) => l.trim()).join(" "));
       } else {
         const map = {};
         for (const l of items) {
-          const mm = /^\s+([^\s:#][^:]*?)\s*:(?:\s+(.*)|)$/.exec(l);
+          const mm = KEY_LINE.exec(l);
           if (!mm) {
-            err(contStart + cont.indexOf(l), `a nested line under "${key}" is not "key: value" or "- item"`, key);
+            err(contStart + cont.indexOf(l), `a nested line under "${key}" mixes "key: value" and other lines at one indentation`, key);
             continue;
           }
           map[mm[1]] = mm[2] ?? null;
         }
         result.data[key] = map;
       }
+      continue;
+    }
+
+    // A flow map, an anchor, an alias or a tag: valid YAML this parser does not model.
+    if (raw.startsWith("{")) {
+      notChecked(keyIdx, `the value of "${key}" is a flow mapping ({...}), which this lint does not parse`, key);
+      continue;
+    }
+    if (/^[&*!]/.test(raw)) {
+      notChecked(keyIdx, `the value of "${key}" starts with an anchor, alias or tag ("${raw[0]}"), which this lint does not parse`, key);
       continue;
     }
 
@@ -676,7 +716,7 @@ export function parseAgentFrontmatter(text) {
 }
 
 /** Lint one agent file's text. Returns human-readable problem strings (empty when clean). */
-export function lintAgentText(text) {
+export function lintAgentText(text, { includeUnchecked = false } = {}) {
   const problems = [];
   const fm = parseAgentFrontmatter(text);
   if (!fm.present) {
@@ -686,20 +726,25 @@ export function lintAgentText(text) {
     problems.push(`does not parse, and Claude Code skips it without a message: line ${e.line}: ${e.message}`);
   }
   for (const w of fm.warnings) problems.push(`line ${w.line}: ${w.message}`);
+  if (includeUnchecked) {
+    for (const u of fm.unchecked) problems.push(`not checked: line ${u.line}: ${u.message}`);
+  }
   if (fm.errors.length > 0) return problems;
   const d = fm.data;
-  if (typeof d.name !== "string" || d.name.trim() === "") problems.push('is missing "name", so it cannot be dispatched by name');
+  if (d.name === NOT_CHECKED) {
+    /* not read by this parser: not linted */
+  } else if (typeof d.name !== "string" || d.name.trim() === "") problems.push('is missing "name", so it cannot be dispatched by name');
   else if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(d.name)) problems.push(`name "${d.name}" is not lowercase letters, digits and hyphens`);
-  if (typeof d.description !== "string" || d.description.trim() === "") {
+  if (d.description !== NOT_CHECKED && (typeof d.description !== "string" || d.description.trim() === "")) {
     problems.push('is missing "description", which is what decides when the agent is chosen');
   }
-  if (d.model !== undefined && d.model !== null) {
+  if (d.model !== undefined && d.model !== null && d.model !== NOT_CHECKED) {
     const model = String(d.model);
-    if (!KNOWN_AGENT_MODELS.includes(model) && !MODEL_ID_RE.test(model)) {
-      problems.push(`model "${model}" is not a known value (${KNOWN_AGENT_MODELS.join(", ")}, or a full claude-* model id)`);
+    if (!KNOWN_AGENT_MODELS.includes(model) && !MODEL_ALIAS_SUFFIX_RE.test(model) && !MODEL_ID_RE.test(model)) {
+      problems.push(`model "${model}" is not a known value (${KNOWN_AGENT_MODELS.join(", ")}, an alias with a context suffix such as opus[1m], or a full claude-* model id)`);
     }
   }
-  if (d.effort !== undefined && d.effort !== null) {
+  if (d.effort !== undefined && d.effort !== null && d.effort !== NOT_CHECKED) {
     const effort = String(d.effort);
     if (!KNOWN_AGENT_EFFORTS.includes(effort)) {
       problems.push(`effort "${effort}" is not a known value (${KNOWN_AGENT_EFFORTS.join(", ")})`);
@@ -724,7 +769,7 @@ function agentFiles(dir) {
  * @param {string} projectDir
  * @param {string} [pluginRoot] defaults to this script's plugin.
  */
-export function agentFrontmatterReport(projectDir, pluginRoot = path.resolve(SCRIPT_DIR, "..")) {
+export function agentFrontmatterReport(projectDir, pluginRoot = path.resolve(SCRIPT_DIR, ".."), { includeUnchecked = false } = {}) {
   const lines = [];
   const sources = [
     { label: "plugin agents/", dir: path.join(pluginRoot, "agents") },
@@ -738,7 +783,7 @@ export function agentFrontmatterReport(projectDir, pluginRoot = path.resolve(SCR
       } catch {
         continue;
       }
-      for (const p of lintAgentText(text)) lines.push(`  WARNING: agent ${label}${path.basename(file)} ${p}`);
+      for (const p of lintAgentText(text, { includeUnchecked })) lines.push(`  WARNING: agent ${label}${path.basename(file)} ${p}`);
     }
   }
   return lines;
@@ -765,7 +810,7 @@ function main() {
   // owner their config "needs attention".
   const surface = cfg && typeof cfg === "object" && !Array.isArray(cfg) ? surfaceReport(projectDir, cfg) : [];
   // Agent frontmatter problems ride with the surface lines: reported, never a banner change.
-  surface.push(...agentFrontmatterReport(projectDir));
+  surface.push(...agentFrontmatterReport(projectDir, undefined, { includeUnchecked: process.argv.includes("--verbose-agents") }));
   if (status === "ok") {
     console.log(lines[0]);
     for (const l of surface) console.log(l);

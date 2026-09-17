@@ -112,6 +112,51 @@ assert_not_contains "CONTROL: a block scalar may carry ': ', and a block list is
 assert_not_contains "CONTROL: README.md in the agents dir is not an agent" "$OUT" "README.md"
 assert_not_contains "CONTROL: CRLF line endings are clean" "$OUT" "crlf.md"
 
+# ---------------------------------------------------------------------------
+suite "agent frontmatter: valid YAML outside the parsed subset is NOT CHECKED, never a parse error"
+# ---------------------------------------------------------------------------
+# B3 review blocker. Each shape below is valid YAML that Claude Code loads, and the lint used to
+# report it as "does not parse, and Claude Code skips it". Outside the subset it is now recorded
+# as not checked: silent at session start, listed only under --verbose-agents.
+reset_agents
+agent mcp.md 'name: mcp' 'description: "x"' 'mcpServers:' '  gh:' '    command: npx' '    args:' '      - run'
+agent hooks.md 'name: hooks' 'description: "x"' 'hooks:' '  PreToolUse:' '    - matcher: Bash' '      hooks:' '        - type: command' '          command: |' '            echo one' '            echo two'
+agent flow.md 'name: flow' 'description: "x"' 'metadata: {a: 1, b: two}'
+agent anchor.md 'name: anchor' 'description: &d "x"' 'model: opus'
+doctor
+assert_not_contains "a nested map key followed by a plain list (mcpServers/gh/args/- run) is silent" "$OUT" "mcp.md"
+assert_not_contains "a nested command: | block scalar under hooks: is silent" "$OUT" "hooks.md"
+assert_not_contains "a flow map (metadata: {a: 1}) is silent" "$OUT" "flow.md"
+assert_not_contains "an anchor on description is silent, and not reported as a missing description" "$OUT" "anchor.md"
+OUT=$(CLAUDE_PROJECT_DIR="$TEMP_PROJECT" node "$DOCTOR" --verbose-agents 2>/dev/null)
+assert_contains "--verbose-agents lists the nested block as not checked" "$OUT" 'mcp.md not checked: line 4: the block under "mcpServers" nests deeper than one level'
+assert_contains "  ...the nested hooks block" "$OUT" 'hooks.md not checked: line 4: the block under "hooks"'
+assert_contains "  ...the flow map" "$OUT" 'flow.md not checked: line 4: the value of "metadata" is a flow mapping'
+assert_contains "  ...and the anchor" "$OUT" 'anchor.md not checked: line 3'
+assert_not_contains "  ...and calls none of them a parse failure" "$OUT" "does not parse, and Claude Code skips it"
+
+reset_agents
+agent mcp.md 'name: mcp' 'description: Owns: the ledger' 'mcpServers:' '  gh:' '    args:' '      - run'
+doctor
+assert_contains "CONTROL: a real parse error beside a not-checked block is still reported" "$OUT" 'mcp.md does not parse'
+reset_agents
+agent flat.md 'name: flat' 'description: "x"' 'env:' '  A: 1' '  - b'
+doctor
+assert_contains "CONTROL: a ONE-level block mixing key and list lines (fully parsed) is still an error" "$OUT" 'flat.md does not parse'
+reset_agents
+agent nextline.md 'name: nextline' 'description:' '  Reviews the money path.'
+doctor
+assert_not_contains "a plain scalar on the line after a bare key is a value, not a parse error" "$OUT" "nextline.md"
+
+reset_agents
+agent m1.md 'name: m1' 'description: "x"' 'model: opus[1m]'
+agent m2.md 'name: m2' 'description: "x"' 'model: sonnet[1m]'
+agent m3.md 'name: m3' 'description: "x"' 'model: gpt[1m]'
+doctor
+assert_not_contains "model opus[1m] (an alias with a context suffix) is clean" "$OUT" "m1.md"
+assert_not_contains "model sonnet[1m] is clean" "$OUT" "m2.md"
+assert_contains "CONTROL: an unknown name with the same suffix is still reported" "$OUT" 'model "gpt[1m]" is not a known value'
+
 reset_agents
 agent h.md 'name: h' 'description: Reviews things # and more'
 doctor
