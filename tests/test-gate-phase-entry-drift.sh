@@ -509,9 +509,10 @@ assert_eq "the three buckets ACCOUNT FOR every bare-word occurrence (a lost occu
 assert_eq "UNCLASSIFIED is EMPTY: no assignment the WIDER pattern can see is missed by the derivation this suite ships" \
   "$(tp "$TP_REAL" UNNAMED)" ""
 
-# THE EXCLUDED MULTISET. Captured by RUNNING the extraction above and pasted; five entries, of
-# which two pairs are identical by construction (one line, two occurrences). Re-captured at #164,
-# when the checkpoint and #110 prose became checkpoint.mjs calls and four excluded lines left.
+# THE EXCLUDED MULTISET. Captured by RUNNING the extraction above and pasted; three entries, of
+# which one pair is identical by construction (one line, two occurrences). Re-captured at #164,
+# when the checkpoint and #110 prose became checkpoint.mjs calls and four excluded lines left, and
+# again when pipeline-init.mjs took over the argument parse and its `--resume` pair left.
 # NOT a heredoc inside a $( ) capture: /bin/bash 3.2.57 scans a command substitution for its
 # closing paren WITHOUT honouring quoted-heredoc rules, so the UNPAIRED backtick left by a
 # 72-character truncation makes the whole file un-parseable. A multi-line single-quoted
@@ -521,14 +522,12 @@ assert_eq "UNCLASSIFIED is EMPTY: no assignment the WIDER pattern can see is mis
 # the assignment terminates mid-entry and the file stops parsing. Future pipeline.md edits will
 # hit this again, so the splice is the fixture's limitation being handled, not the prose bending.
 EXCLUDED_MULTISET_5='133|- **User interrupts mid-phase**: status.json preserves position. `/pipel
-285|- If starts with `--resume <issue>`: set `ISSUE=<issue>`, read `.pipelin
-285|- If starts with `--resume <issue>`: set `ISSUE=<issue>`, read `.pipelin
 443|**`events[]` entries are EXIT markers and `current_phase` is an ENTRY ma
 443|**`events[]` entries are EXIT markers and `current_phase` is an ENTRY ma'
 assert_eq "and the EXCLUDED bucket's MEMBERSHIP is what is asserted -- the sorted occurrence-text MULTISET, so an occurrence cannot be ADDED to or REMOVED from this bucket at constant bucket sizes. NARROWED deliberately from \"cannot move between buckets\": the key is a length-plus-72-character FINGERPRINT and it is non-injective (pipeline.md already holds a colliding pair, see above), so a swap BETWEEN two occurrences sharing one fingerprint is invisible here. The add/remove form is what this cell supports and is what the ghost fixture below exercises" \
   "$(tp_exfp "$TP_REAL")" "$EXCLUDED_MULTISET_5"
-assert_eq "MULTISET, NOT A SET: two of the three excluded LINES carry two occurrences each with identical text, so \`sort -u\` would collapse 5 entries to 3 and re-open the bypass. This cell measures that collapse rather than asserting it is absent by inspection" \
-  "$(tp_exfp "$TP_REAL" | sort -u | grep -c . | tr -d ' ')/$(tp_exfp "$TP_REAL" | grep -c . | tr -d ' ')" "3/5"
+assert_eq "MULTISET, NOT A SET: one of the two excluded LINES carries two occurrences with identical text, so \`sort -u\` would collapse 3 entries to 2 and re-open the bypass. This cell measures that collapse rather than asserting it is absent by inspection" \
+  "$(tp_exfp "$TP_REAL" | sort -u | grep -c . | tr -d ' ')/$(tp_exfp "$TP_REAL" | grep -c . | tr -d ' ')" "2/3"
 
 # ---------------------------------------------------------------------------
 suite "#53 AC3(i): the SYNTHETIC fixture -- six unclaimed assignment forms, each NAMED"

@@ -95,11 +95,59 @@ printf '%s\n' 'node "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch-model.mjs" dev <risk
 assert_eq "CONTROL: the same grep DOES find a byte-identical call" \
   "$(grep -c 'dispatch-model.mjs" dev <risk_tier> 2.5 --site bakeoff-judge' "$PROBE" | tr -d ' ')" "1"
 
-suite "AC13-adjacent: the emission rule is stated where the dispatch sites can read it"
+suite "AC13-adjacent: the emission rule is the resolver's --emit, stated where the dispatch sites read it"
 
-assert_contains "the file states the exit-0-and-one-token conjunction" \
-  "$(cat "$PIPELINE_MD")" "ONLY IF \`MODEL_RC\` is 0 AND \`\$MODEL\` is exactly one token"
+# #164 row 28 moved the emit-or-omit rule into the resolver. The prose used to tell each dispatch
+# site to check the exit status and count the tokens itself; now it tells the site to paste what
+# --emit prints. The old sentence stays gone, and the three prose sites pass --emit.
+assert_eq "the old exit-status-and-token-count rule is gone from the prose" \
+  "$(grep -c 'is exactly one token' "$PIPELINE_MD" | tr -d ' ')" "0"
+assert_contains "the routing file tells a site to paste what --emit prints" \
+  "$(cat "$PIPELINE_MD")" "line for the Agent call or nothing, and always exits 0."
+assert_eq "all three prose dispatch sites (map, sketches, judge) pass --emit" \
+  "$(grep -cE 'dispatch-model.mjs" (ba|dev) <risk_tier> (0[.]5|2[.]5) --site [a-z-]+ --emit' "$PIPELINE_MD" | tr -d ' ')" "3"
 assert_contains "and names the OPPOSITE fail direction so the two consumers are not unified" \
   "$(cat "$PIPELINE_MD")" "OPPOSITE fail direction from the mis-tier tripwire"
+
+suite "--emit: a model line or nothing, and always exit 0"
+
+emit_out() { ( cd "$NOCFG" && CLAUDE_PROJECT_DIR="$NOCFG" node "$RESOLVER" "$@" --emit 2>/dev/null ); }
+emit_rc() { ( cd "$NOCFG" && CLAUDE_PROJECT_DIR="$NOCFG" node "$RESOLVER" "$@" --emit >/dev/null 2>&1 ); printf '%s' "$?"; }
+assert_eq "a table row prints a whole model line" "$(emit_out dev architectural 2.5 --site bakeoff-judge)" "model: opus"
+assert_eq "the sketch site prints its own line" "$(emit_out dev architectural 2.5 --site design-sketch)" "model: sonnet"
+assert_eq "a pinned role prints nothing" "$(emit_out secops architectural 4)" ""
+assert_eq "and exits 0" "$(emit_rc secops architectural 4)" "0"
+assert_eq "a role with no row prints nothing" "$(emit_out devops standard 4)" ""
+assert_eq "a caller bug prints nothing on stdout" "$(emit_out nosuchrole standard 4)" ""
+assert_eq "and still exits 0 under --emit" "$(emit_rc nosuchrole standard 4)" "0"
+assert_eq "CONTROL: without --emit the same caller bug exits 2" "$(r_rc nosuchrole standard 4)" "2"
+assert_contains "and --emit still names the bug on stderr" "$(r_err nosuchrole standard 4 --emit)" "DISPATCH-SITE bug"
+CFG_EMIT="$TEMP_PROJECT/cfg-emit"
+mkdir -p "$CFG_EMIT"
+printf '{"dispatchModels":{"devops":"haiku"}}' > "$CFG_EMIT/pipeline.config.json"
+emit_cfg() { ( cd "$CFG_EMIT" && CLAUDE_PROJECT_DIR="$CFG_EMIT" node "$RESOLVER" "$@" 2>/dev/null ); }
+assert_eq "a config override reaches the emitted line" "$(emit_cfg devops standard 4 --emit)" "model: haiku"
+
+suite "--table: the resolved table, and no model literal left in the routing prose"
+
+TABLE="$(r --table)"
+row() { printf '%s\n' "$1" | grep -E "$2"; }
+assert_contains "the judge row resolves to opus" "$(row "$TABLE" 'bakeoff-judge')" "opus"
+assert_contains "the sketch row resolves to sonnet" "$(row "$TABLE" 'design-sketch')" "sonnet"
+assert_contains "the pinned roles are listed as pinned" "$(row "$TABLE" '^secops')" "pinned:secops"
+assert_contains "a tiered row's uncovered tier falls to frontmatter" "$(row "$TABLE" '^dba .*architectural')" "no-row:frontmatter"
+assert_contains "the frontmatter column is read from the agent files" "$(row "$TABLE" '^devops')" "sonnet"
+assert_contains "the table applies project config" "$(row "$(emit_cfg --table)" '^devops')" "config:dispatchModels.devops"
+ROUTING="$PLUGIN_DIR/orchestrator/dispatch-routing.md"
+for f in dispatch-routing.md phase-2.5-design.md phase-0.5-map.md; do
+  assert_eq "$f says no model is what a site resolves to today" \
+    "$(grep -cE '(sonnet|opus|haiku) today' "$PLUGIN_DIR/orchestrator/$f" | tr -d ' ')" "0"
+done
+assert_eq "dispatch-routing.md names no model a role or lens resolves to" \
+  "$(grep -cE 'resolve to .sonnet|frontmatter .opus|model: opus' "$ROUTING" | tr -d ' ')" "0"
+assert_eq "dispatch-routing.md names no per-tier effort level" \
+  "$(grep -cE 'runs .xhigh|resolve to .medium' "$ROUTING" | tr -d ' ')" "0"
+assert_contains "and points at the model --table instead" "$(cat "$ROUTING")" 'dispatch-model.mjs" --table'
+assert_contains "and at the effort --table" "$(cat "$ROUTING")" 'dispatch-effort.mjs" --table'
 
 finish

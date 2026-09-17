@@ -2,7 +2,8 @@
 // knowledge-store.mjs — dependency-free CLI over a project's `knowledge/` folder.
 // Search, write, list living-context docs, and archive finished pipeline runs. No network, no embeddings.
 
-import { readdirSync, readFileSync, writeFileSync, mkdirSync, existsSync, statSync } from "node:fs";
+import { readdirSync, readFileSync, writeFileSync, mkdirSync, existsSync, statSync, realpathSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { isMain as isMainScript, assertPathSegment } from "./lib.mjs";
 import { WORKTREE_PRODUCED } from "./artifact-ownership.mjs";
 import { join, resolve, relative, basename, isAbsolute, dirname, sep } from "node:path";
@@ -28,6 +29,16 @@ Usage:
   knowledge-store.mjs --write --file <path.json> [--collection <c>] [--supersede <slug>] [--root <dir>]
   knowledge-store.mjs --archive-issue <n> --from <artifact-dir> [--root <dir>]
   knowledge-store.mjs --list [--collection <c>] [--root <dir>]
+  knowledge-store.mjs --verify-commit --files <path> [<path> ...] [--root <dir>]
+  knowledge-store.mjs --lint [--stale-days <n>] [--root <dir>]
+  knowledge-store.mjs --drift-claims <artifact-dir>
+
+--verify-commit: exit 0 when knowledge/ is porcelain-clean and the newest commit touching
+  knowledge/ adds or modifies every --files path (a deletion does not count) (prints COMMIT: <sha>); 2 when either fails; 1 on usage or git.
+--lint: current living-context files older than --stale-days (default 60), duplicate current
+  titles, and a filename <domain>-- prefix that differs from "domain". Exit 2 on a finding, 0 clean.
+--drift-claims: every knowledge_drift_claims entry in spec, review, impl-report and peer-review
+  (and their shards) under <artifact-dir>, as JSON. Exit 0; 1 when the dir is missing.
 
 Collections: ${COLLECTIONS.join(" | ")}  (default: living-context)
 --archive-issue always writes to issue-archive and takes no --collection.
@@ -41,6 +52,13 @@ function parseArgs(argv) {
     const eq = a.indexOf("=");
     if (eq !== -1) { out[a.slice(2, eq)] = a.slice(eq + 1); continue; }
     const key = a.slice(2);
+    if (key === "files") {
+      // The one list-valued flag: every value up to the next --flag.
+      const list = [];
+      while (argv[i + 1] !== undefined && !argv[i + 1].startsWith("--")) list.push(argv[++i]);
+      out.files = list;
+      continue;
+    }
     const next = argv[i + 1];
     if (next !== undefined && !next.startsWith("--")) { out[key] = next; i++; }
     else out[key] = true;
@@ -691,6 +709,143 @@ function cmdList(args) {
   if (!any) console.log("Knowledge store is empty.");
 }
 
+// ---------------------------------------------------------------------------
+// VERIFY BEFORE REPORTING (#164 row 17). The Librarian's recorded failure mode is a report
+// claiming updates that were never committed, so the report's commit SHA comes from here, not
+// from memory: knowledge/ must be porcelain-clean, and the newest commit touching knowledge/
+// must touch every file claimed. Paths compare repo-relative with forward slashes.
+function git(root, args) {
+  const r = spawnSync("git", ["-C", root, ...args], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+  if (r.error || r.status !== 0) {
+    const why = r.error ? r.error.code : `exit ${r.status}`;
+    throw new Error(`git ${args.join(" ")} failed (${why}): ${(r.stderr || "").trim()}`);
+  }
+  return r.stdout;
+}
+
+export function verifyCommit({ root, files }) {
+  const top = git(root, ["rev-parse", "--show-toplevel"]).trim();
+  const dirty = git(top, ["status", "--porcelain", "--", "knowledge/"]).split("\n").filter(Boolean);
+  // --name-status, not --name-only: a commit that DELETED a claimed file touched it but did not
+  // land it, so a D row never verifies. A rename or copy counts for its destination only.
+  const log = git(top, ["log", "-1", "--format=%H", "--name-status", "--", "knowledge/"])
+    .split("\n").map((l) => l.trim()).filter(Boolean);
+  const sha = log.length ? log[0] : null;
+  const touched = new Set(
+    log.slice(1).map((l) => l.split("\t")).filter((f) => f.length > 1 && !f[0].startsWith("D")).map((f) => f[f.length - 1]),
+  );
+  // Both sides realpathed, so a symlinked root (macOS /tmp) compares equal to git's toplevel.
+  const rootAbs = realpathSync(resolve(root));
+  const topAbs = realpathSync(resolve(top));
+  const claimed = files.map((f) => relative(topAbs, isAbsolute(f) ? f : join(rootAbs, f)).split(sep).join("/"));
+  const missing = sha ? claimed.filter((f) => !touched.has(f)) : claimed;
+  return { sha, dirty, claimed, missing, ok: dirty.length === 0 && sha !== null && missing.length === 0 };
+}
+
+function cmdVerifyCommit(args) {
+  if (!Array.isArray(args.files) || args.files.length === 0) fail("--verify-commit requires --files <path> [<path> ...]");
+  let r;
+  try {
+    r = verifyCommit({ root: rootDir(args), files: args.files });
+  } catch (e) {
+    fail(e.message);
+  }
+  for (const d of r.dirty) console.log(`DIRTY: ${d}`);
+  if (!r.sha) console.log("NO COMMIT: no commit touches knowledge/");
+  else for (const m of r.missing) console.log(`NOT IN ${r.sha.slice(0, 12)}: ${m}`);
+  if (r.ok) {
+    console.log(`COMMIT: ${r.sha}\n  files verified: ${r.claimed.length}`);
+    process.exit(0);
+  }
+  console.log('FAILED: record these actions as status "failed"; a knowledge update with no commit behind it did not happen.');
+  process.exit(2);
+}
+
+// WEEKLY CONSISTENCY, the mechanical half: staleness, duplicate current titles, and the
+// <domain>-- filename prefix. The scanned count is printed on every path, clean or not, because
+// "0 problems" over 0 files and over 40 files are different results.
+export const DEFAULT_STALE_DAYS = 60;
+
+export function lintStore({ root, staleDays = DEFAULT_STALE_DAYS, now = Date.now() }) {
+  const dir = join(resolve(root), "knowledge", "living-context");
+  const files = listJsonFiles(dir).sort();
+  const problems = [];
+  const titles = new Map();
+  for (const path of files) {
+    const name = basename(path);
+    const doc = readJson(path);
+    if (!doc || typeof doc !== "object" || Array.isArray(doc)) {
+      problems.push({ kind: "unparseable", file: name, detail: "not a JSON object" });
+      continue;
+    }
+    const cut = name.indexOf("--");
+    const prefix = cut === -1 ? null : name.slice(0, cut);
+    if (prefix === null) problems.push({ kind: "prefix", file: name, detail: "filename has no <domain>-- prefix" });
+    else if (prefix !== doc.domain) {
+      problems.push({ kind: "prefix", file: name, detail: `prefix "${prefix}" differs from domain ${JSON.stringify(doc.domain ?? null)}` });
+    }
+    // A superseded file is history: neither stale nor a duplicate of its replacement.
+    if (doc.status === "superseded") continue;
+    const at = typeof doc.last_updated === "string" ? Date.parse(doc.last_updated) : NaN;
+    if (!Number.isFinite(at)) problems.push({ kind: "stale", file: name, detail: "last_updated missing or unparseable" });
+    else {
+      const days = Math.floor((now - at) / 86400000);
+      if (days > staleDays) problems.push({ kind: "stale", file: name, detail: `last_updated ${days} days ago (over ${staleDays})` });
+    }
+    const key = str(doc.title).trim().toLowerCase();
+    if (key) titles.set(key, [...(titles.get(key) || []), name]);
+  }
+  for (const [title, names] of titles) {
+    if (names.length > 1) {
+      problems.push({ kind: "duplicate", file: names.join(", "), detail: `${names.length} current files share the title "${title}"` });
+    }
+  }
+  return { scanned: files.length, problems };
+}
+
+function cmdLint(args) {
+  const raw = args["stale-days"];
+  const days = raw === undefined ? DEFAULT_STALE_DAYS : Number(raw);
+  if (raw === true || !Number.isInteger(days) || days < 0) fail("--stale-days requires a non-negative integer");
+  const { scanned, problems } = lintStore({ root: rootDir(args), staleDays: days });
+  for (const p of problems) console.log(`${p.kind.toUpperCase()}: ${p.file}: ${p.detail}`);
+  console.log(`SCANNED: ${scanned} living-context file(s); PROBLEMS: ${problems.length}`);
+  process.exit(problems.length ? 2 : 0);
+}
+
+// Drift claims other agents filed. Collected by a deep walk, because a merged review or
+// peer-review nests them under each role's block, and a shard carries its own.
+const CLAIM_SOURCES = /^(spec|review|impl-report|peer-review)(\.[A-Za-z0-9_-]+)?\.json$/;
+
+export function collectDriftClaims(dir) {
+  const abs = resolve(dir);
+  if (!existsSync(abs) || !statSync(abs).isDirectory()) throw new Error(`artifact dir not found: ${abs}`);
+  const scanned = readdirSync(abs).filter((f) => CLAIM_SOURCES.test(f)).sort();
+  const claims = [];
+  for (const file of scanned) {
+    const walk = (v, p) => {
+      if (Array.isArray(v)) return v.forEach((x, i) => walk(x, `${p}[${i}]`));
+      if (!v || typeof v !== "object") return;
+      for (const [k, x] of Object.entries(v)) {
+        if (k === "knowledge_drift_claims" && Array.isArray(x)) {
+          x.forEach((c, i) => claims.push({ source: file, path: `${p}.${k}[${i}]`, claim: c }));
+        } else walk(x, `${p}.${k}`);
+      }
+    };
+    walk(readJson(join(abs, file)), "");
+  }
+  return { scanned, claims };
+}
+
+function cmdDriftClaims(args) {
+  if (typeof args["drift-claims"] !== "string") fail("--drift-claims requires <artifact-dir>");
+  try {
+    console.log(JSON.stringify(collectDriftClaims(args["drift-claims"]), null, 2));
+  } catch (e) {
+    fail(e.message);
+  }
+}
+
 function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.help || args.h) return void console.log(HELP);
@@ -698,7 +853,10 @@ function main() {
   if ("write" in args) return cmdWrite(args);
   if ("archive-issue" in args) return cmdArchive(args);
   if ("list" in args) return cmdList(args);
-  fail("no command given. Use --search, --write, --archive-issue, or --list.");
+  if ("verify-commit" in args) return cmdVerifyCommit(args);
+  if ("lint" in args) return cmdLint(args);
+  if ("drift-claims" in args) return cmdDriftClaims(args);
+  fail("no command given. Use --search, --write, --archive-issue, --list, --verify-commit, --lint or --drift-claims.");
 }
 
 // Match the script NAME, the idiom the gates and the validator already use. Every PATH-

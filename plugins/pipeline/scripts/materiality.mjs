@@ -48,6 +48,8 @@
  * differ, so the archive shows both the finding and the ruling on it.
  */
 
+import { isMain } from "./lib.mjs";
+
 export const LIKELIHOODS = ["normal-use", "edge-case", "adversarial", "hypothetical"];
 export const REVERSIBILITIES = ["undo-button", "some-cleanup", "one-way-door"];
 /** Ordered worst first: the cap keeps blockers from the front of this list. */
@@ -403,3 +405,56 @@ export function finalVerdict(peerReview, roles) {
   if (blocks.length > 0 && blocks.every((b) => v(b) === "APPROVE")) return "APPROVE";
   return null;
 }
+
+/**
+ * The blocking table for one cost class, DERIVED from rateConcern rather than restated, so the
+ * printed rule and the applied rule are one function (#164 row 18). A row per merge_class that
+ * can block, a column per likelihood; the cell is what a blocker/critical/high concern rated that
+ * way does. Severity is not a column: below high nothing blocks at any cost class.
+ */
+export function explainTable(costClass) {
+  const cc = normCostClass(costClass);
+  const rows = MERGE_CLASSES.map((mc) => ({
+    merge_class: mc,
+    cells: LIKELIHOODS.map((lk) => (rateConcern({ severity: "high", likelihood: lk, harm: "internal", merge_class: mc }, cc).blocking ? "BLOCKS" : "note")),
+  }));
+  return { cost_class: cc, likelihoods: LIKELIHOODS, rows };
+}
+
+export function explainText(costClass) {
+  const t = explainTable(costClass);
+  const w = Math.max(...MERGE_CLASSES.map((m) => m.length));
+  const lw = Math.max(...LIKELIHOODS.map((l) => l.length));
+  const pad = (s, n) => s + " ".repeat(Math.max(0, n - s.length));
+  const lines = [
+    `Materiality at cost_class ${t.cost_class}: what a concern of severity ${BLOCKING_SEVERITIES.join(", ")} does.`,
+    `${pad("merge_class", w)}  ${t.likelihoods.map((l) => pad(l, lw)).join("  ")}`,
+    ...t.rows.map((r) => `${pad(r.merge_class, w)}  ${r.cells.map((c) => pad(c, lw)).join("  ")}`),
+    `Any other severity (${["major", "medium", "low", "nit", "info"].join(", ")}) is a note. A concern missing severity, likelihood, harm or merge_class is an UNRATED note.`,
+    `Cap: at most ${BLOCKING_CAP} blocking concerns per reviewer, ranked by merge_class (${MERGE_CLASS_RANK.join(", ")}), then harm (${HARMS.join(", ")}), then severity; the rest are demoted to notes and listed back on the next delta round.`,
+    `Verdicts: REQUEST_CHANGES or REQUEST_REFACTOR with no blocking concern reads as APPROVE_WITH_NOTES; APPROVE carrying one reads as REQUEST_CHANGES. VETO stands only from SecOps, on a veto_ground in [${VETO_GROUNDS.join(", ")}], with a blocking concern; otherwise it reads as REQUEST_CHANGES.`,
+  ];
+  return lines.join("\n");
+}
+
+const USAGE = `usage: node materiality.mjs --explain <${COST_CLASSES.join(" | ")}> [--json]`;
+
+export function cli(argv, { out = (s) => process.stdout.write(s), err = (s) => process.stderr.write(s) } = {}) {
+  const i = argv.indexOf("--explain");
+  const cc = i === -1 ? undefined : argv[i + 1];
+  if (i === -1 || cc === undefined || cc.startsWith("--")) {
+    err(`${USAGE}\n`);
+    return 1;
+  }
+  if (!COST_CLASSES.includes(lower(cc))) {
+    err(`unknown cost_class "${cc}"; one of ${COST_CLASSES.join(", ")}\n${USAGE}\n`);
+    return 1;
+  }
+  out(argv.includes("--json") ? `${JSON.stringify(explainTable(cc), null, 2)}\n` : `${explainText(cc)}\n`);
+  return 0;
+}
+
+// Self-run only as a real CLI entry: an eval that imports this module with its own path in argv[1]
+// must not run the CLI (the hazard voice-lint.mjs documents at its foot).
+const evalEntry = process.execArgv.some((x) => x === "-e" || x === "--eval" || x === "--input-type=module" || /^--eval=/.test(x));
+if (isMain("materiality.mjs") && !evalEntry) process.exit(cli(process.argv.slice(2)));

@@ -3,6 +3,7 @@
  * The dispatch EFFORT routing table, and the ONE resolver every dispatch site calls.
  *
  *   node dispatch-effort.mjs <role> <risk_tier> <phase> [--site <label>] [--surface <agent|workflow>] [--cost-class <product-money|product|tooling>]
+ *   node dispatch-effort.mjs --table     (both surfaces, as they resolve under this project's config)
  *
  * Sibling of dispatch-model.mjs and deliberately shaped like it: same argv conventions, same
  * fail-open-to-frontmatter direction, same "print at most one allowlisted token" contract.
@@ -408,11 +409,57 @@ export function resolve({ role: rawRole, tier, phase, site, surface, cfg, costCl
   return { effort: chosen, surface: surf, reports, error: null, rule };
 }
 
+/**
+ * The effort table as it RESOLVES for this project (#164 row 25). The agent surface emits nothing,
+ * so its section is each role's frontmatter; the workflow section is every row with config
+ * applied, then one line per role for every phase no row names. Prose cites this, never a level.
+ */
+export function renderTable(cfg) {
+  const pad = (lines) => {
+    const widths = lines[0].map((_, i) => Math.max(...lines.map((l) => l[i].length)));
+    return lines.map((l) => l.map((c, i) => c.padEnd(widths[i])).join("  ").trimEnd()).join("\n") + "\n";
+  };
+  const agent = [["role", "effort (agent surface: frontmatter governs, nothing is emitted)"]];
+  for (const role of KNOWN_ROLES) agent.push([role, FRONTMATTER_EFFORT[role] ?? "(none declared)"]);
+  const wf = [["role", "phase", "tier", "cost_class", "site", "emits", "rule"]];
+  const emitted = (r) => (r.error ? "error" : r.effort || "(none)");
+  for (const row of DEFAULT_TABLE) {
+    const tiers = row.tier ? [row.tier] : KNOWN_TIERS;
+    const results = tiers.map((tier) =>
+      resolve({ role: row.role, tier, phase: row.phase, site: row.site, surface: "workflow", costClass: row.costClass, cfg }),
+    );
+    const same = results.every((r) => emitted(r) === emitted(results[0]) && r.rule === results[0].rule);
+    const shown = same ? [[row.tier || "any", results[0]]] : tiers.map((t, i) => [t, results[i]]);
+    for (const [tier, r] of shown) {
+      wf.push([row.role, row.phase, tier, row.costClass || "any", row.site, emitted(r), r.rule]);
+    }
+    // A (role, phase) carried only by tiered rows falls to frontmatter at every other tier.
+    const peers = DEFAULT_TABLE.filter((r) => r.role === row.role && r.phase === row.phase && !r.costClass);
+    if (row === peers[peers.length - 1] && peers.every((r) => r.tier)) {
+      for (const tier of KNOWN_TIERS.filter((t) => !peers.some((r) => r.tier === t))) {
+        const r = resolve({ role: row.role, tier, phase: row.phase, surface: "workflow", cfg });
+        wf.push([row.role, row.phase, tier, "any", "-", emitted(r), r.rule]);
+      }
+    }
+  }
+  for (const role of KNOWN_ROLES) {
+    const rowed = new Set(DEFAULT_TABLE.filter((r) => r.role === role).map((r) => r.phase));
+    const phase = KNOWN_PHASES.find((p) => !rowed.has(p));
+    const r = resolve({ role, tier: "standard", phase, surface: "workflow", cfg });
+    wf.push([role, rowed.size ? "other" : "any", "any", "any", "-", emitted(r), r.rule]);
+  }
+  return `${pad(agent)}\n${pad(wf)}`;
+}
+
 function main(argv) {
   const positional = [];
   let site = null;
   let surface = null;
   let costClass = undefined;
+  if (argv.includes("--table")) {
+    process.stdout.write(renderTable(readConfig()));
+    return 0;
+  }
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--site") {
       site = argv[i + 1];

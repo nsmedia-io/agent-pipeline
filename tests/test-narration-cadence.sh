@@ -143,8 +143,10 @@ assert_contains "the Phase 3a/3b sequencing pair is distinguished, not silently 
   "$(cat "$RULE")" "NOT a Phase-2-style fan-out"
 
 # ---- AC5: no existing full-voice moment removed or weakened -------------------
-# The 8-item "Full voice" list, pinned verbatim. A future edit that drops or rewords a bullet
-# reddens here rather than silently shrinking the list this rule sits right next to.
+# The 8-item "Full voice" list, pinned verbatim. Since #164 row 21 the list is code:
+# FULL_VOICE_MOMENTS in scripts/voice-moment.mjs, printed at every checkpoint, and owner-handoff.md
+# carries the call instead of a copy. A future edit that drops or rewords a bullet reddens here
+# rather than silently shrinking the list this rule sits right next to.
 FULL_VOICE_ITEMS=(
   "A SecOps \`VETO\`, at Phase 2 or Phase 4."
   "A Phase 1 **blocking open question**"
@@ -156,7 +158,10 @@ FULL_VOICE_ITEMS=(
   "Any call the pipeline cannot make for itself"
 )
 MISSING_ITEMS=""
-FULL_VOICE_BLOCK="$(awk '/^\*\*3\. Full voice/{f=1} f{print} f&&/^When one of those needs a decision/{exit}' "$PIPELINE_MD")"
+FULL_VOICE_BLOCK="$(node --input-type=module -e '
+  const m = await import(process.argv[1]);
+  process.stdout.write(m.FULL_VOICE_MOMENTS.join("\n"));
+' "$PLUGIN_DIR/scripts/voice-moment.mjs" 2>/dev/null)"
 for item in "${FULL_VOICE_ITEMS[@]}"; do
   case "$FULL_VOICE_BLOCK" in
     *"$item"*) : ;;
@@ -167,6 +172,12 @@ assert_eq "AC5: all 8 pre-existing full-voice bullets are still present, unweake
   "${MISSING_ITEMS:-none}" "none"
 assert_eq "REPORTED, so the check above is not vacuous: full-voice bullets checked" \
   "${#FULL_VOICE_ITEMS[@]}" "8"
+assert_eq "and the script's list holds exactly 8 moments (a ninth is a new moment, not a reword)" \
+  "$(printf '%s\n' "$FULL_VOICE_BLOCK" | grep -c .)" "8"
+assert_contains "the orchestrator prose sends the full-voice decision to the script" \
+  "$(cat "$PIPELINE_MD")" 'scripts/voice-moment.mjs" --status'
+assert_not_contains "and no longer carries its own copy of the list (removed prose stays removed)" \
+  "$(cat "$PIPELINE_MD")" "Presenting a PR as ready for human merge."
 
 # ---- out of scope: this issue must not touch voice-lint.mjs or voice.md -------
 assert_eq "out of scope honored: voice-lint.mjs untouched by this suite's own subject matter (no cadence code added there)" \

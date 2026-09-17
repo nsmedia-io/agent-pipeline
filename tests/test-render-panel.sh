@@ -235,6 +235,84 @@ console.log(pre(77) === pre(912) ? "equal" : "differs");
 ')"
 assert_eq "CONTROL: a static part carrying the issue number is not byte-identical" "$CONTROL" "differs"
 
+suite "render-panel: the shared property block enters the static prefix through the INCLUDE line (#164 row 4)"
+
+# The preamble file no longer carries "The property, not the fix"; it carries one INCLUDE line and
+# the renderer reads shared/the-property-not-the-fix.md into the static prefix at that point. These
+# cells hold that the rendered preamble carries the shared text exactly once and no raw INCLUDE line,
+# that the text really comes from the shared file (a changed shared file changes the prefix, the
+# same way on every role), and that the prefix is still identical across two issues and two roles.
+INCL="$(MOD="$RENDER" ROOT="$PLUGIN_ROOT" SCRATCH="$TEMP_PROJECT/incl-root" node --input-type=module -e '
+import { readFileSync, cpSync, writeFileSync } from "node:fs";
+const m = await import(process.env.MOD);
+const root = process.env.ROOT, scratch = process.env.SCRATCH;
+const shared = m.includedText(readFileSync(root + "/shared/the-property-not-the-fix.md", "utf8"), "shared");
+const lenses = m.loadLenses(root);
+const one = (r, issue, head) => m.assemble({
+  status: { issue_number: issue, risk_tier: "standard", panel_roles: ["qa", "secops"] },
+  worktree: "/w/" + issue, head, pluginRoot: "/p/" + issue, lenses, preambleMarkdown: m.readPreambleMarkdown(r),
+});
+const a = one(root, 101, "a".repeat(40)), b = one(root, 202, "b".repeat(40));
+const count = (s, sub) => s.split(sub).length - 1;
+cpSync(root, scratch, { recursive: true });
+writeFileSync(scratch + "/shared/the-property-not-the-fix.md",
+  readFileSync(scratch + "/shared/the-property-not-the-fix.md", "utf8").replace("**Scope.**", "**Scope (planted).**"));
+const c = one(scratch, 101, "a".repeat(40));
+let rawThrows = "no";
+try { m.assemble({ status: { issue_number: 1, risk_tier: "standard", panel_roles: ["qa"] }, worktree: "/w", head: "c".repeat(40), pluginRoot: "/p", lenses, preambleMarkdown: readFileSync(root + "/orchestrator/phase-4-panel-preamble.md", "utf8") }); }
+catch (e) { rawThrows = /unexpanded INCLUDE/.test(e.message) ? "yes" : e.message; }
+console.log([
+  "shared_once=" + (count(a.preamble, shared) === 1),
+  "heading_once=" + (count(a.preamble, "## The property, not the fix") === 1),
+  "no_include_line=" + !a.preamble.includes("<!-- INCLUDE"),
+  "no_digest=" + !/HASHED SPAN|span.s sha1/.test(a.preamble),
+  "identical_across_issues=" + (a.preamble === b.preamble),
+  "every_role_starts_with_it=" + a.dispatches.every((d) => d.prompt.startsWith(a.preamble)),
+  "shared_edit_reaches_prefix=" + (c.preamble.includes("**Scope (planted).**") && c.preamble !== a.preamble),
+  "raw_markdown_refused=" + rawThrows,
+].join(" "));
+')"
+for k in shared_once=true heading_once=true no_include_line=true no_digest=true identical_across_issues=true every_role_starts_with_it=true shared_edit_reaches_prefix=true raw_markdown_refused=yes; do
+  assert_contains "shared block in prefix: $k" "$INCL" "$k"
+done
+
+# A preamble checked out with CRLF line endings (a Windows checkout without the repo's
+# .gitattributes) still carries the INCLUDE line, now ending in "\r". The expansion must match it:
+# an unmatched line would reach assemble() raw and refuse the whole panel. The control plants a
+# trailing space on the same CRLF INCLUDE line, which the pattern must not match, and requires
+# that render to be REFUSED: crlf_renders=true is then a result the cell has watched go the
+# other way on CRLF bytes, not a render that could never fail.
+CRLF="$(MOD="$RENDER" ROOT="$PLUGIN_ROOT" SCRATCH="$TEMP_PROJECT/crlf-root" node --input-type=module -e '
+import { readFileSync, cpSync, writeFileSync } from "node:fs";
+const m = await import(process.env.MOD);
+const root = process.env.ROOT, scratch = process.env.SCRATCH;
+const rel = "/orchestrator/phase-4-panel-preamble.md";
+cpSync(root, scratch, { recursive: true });
+const crlf = readFileSync(root + rel, "utf8").replace(/\r?\n/g, "\r\n");
+writeFileSync(scratch + rel, crlf);
+const shared = m.includedText(readFileSync(root + "/shared/the-property-not-the-fix.md", "utf8"), "s");
+const render = (md) => {
+  try {
+    const out = m.assemble({
+      status: { issue_number: 5, risk_tier: "standard", panel_roles: ["qa"] },
+      worktree: "/w", head: "d".repeat(40), pluginRoot: "/p", lenses: m.loadLenses(root), preambleMarkdown: md,
+    });
+    return String(out.preamble.includes(shared));
+  } catch (e) { return /unexpanded INCLUDE/.test(e.message) ? "refused" : "threw: " + e.message; }
+};
+const md = m.readPreambleMarkdown(scratch);
+writeFileSync(scratch + rel, crlf.replace(/(<!-- INCLUDE shared\/[^>]*-->)\r\n/, "$1 \r\n"));
+console.log([
+  "crlf_expanded=" + (!m.extractPreamble(md).includes("<!-- INCLUDE") && md.includes(shared)),
+  "crlf_kept_after_include=" + md.includes(shared + "\r\n"),
+  "crlf_renders=" + render(md),
+  "control_trailing_space_refused=" + render(m.readPreambleMarkdown(scratch)),
+].join(" "));
+')"
+for k in crlf_expanded=true crlf_kept_after_include=true crlf_renders=true control_trailing_space_refused=refused; do
+  assert_contains "CRLF preamble: $k" "$CRLF" "$k"
+done
+
 suite "render-panel: FAILS CLOSED on every input it owns"
 
 render --status "$STATUS" --worktree "$TEMP_PROJECT/no-such-worktree" --plugin-root "$PLUGIN_ROOT"
@@ -268,6 +346,13 @@ printf '# no markers here\n' > "$FAKE_ROOT/orchestrator/phase-4-panel-preamble.m
 render --status "$STATUS" --worktree "$WT" --plugin-root "$FAKE_ROOT"
 assert_eq "a command file without the PHASE4-PREAMBLE markers exits non-zero" "$RC" "2"
 assert_contains "the failure names the markers" "$ERR" "PHASE4-PREAMBLE"
+
+# A plugin root whose preamble INCLUDEs a shared file that is absent must refuse rather than render
+# a panel that never received the property-not-the-fix block.
+cp "$PLUGIN_ROOT/orchestrator/phase-4-panel-preamble.md" "$FAKE_ROOT/orchestrator/phase-4-panel-preamble.md"
+render --status "$STATUS" --worktree "$WT" --plugin-root "$FAKE_ROOT"
+assert_eq "a preamble whose INCLUDEd shared file is missing exits non-zero" "$RC" "2"
+assert_contains "the failure names the missing shared file" "$ERR" "shared/the-property-not-the-fix.md, which does not exist"
 
 suite "render-panel: --check catches a script that would not parse"
 

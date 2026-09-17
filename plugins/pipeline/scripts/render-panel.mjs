@@ -56,9 +56,38 @@ export const PREAMBLE_END = "<!-- END PHASE4-PREAMBLE -->";
 /** Where the marked block lives, relative to the plugin root. */
 export const PREAMBLE_FILE = path.join("orchestrator", "phase-4-panel-preamble.md");
 
-/** The markdown file carrying the preamble markers, read from a plugin root. */
+/**
+ * An INCLUDE line inside the preamble block names a shared/ file whose text goes into the static
+ * prefix at that point (#164 row 4). The shared file carries a short header for its human readers;
+ * what is included runs from its first `## ` heading to the end of the file, trailing whitespace
+ * dropped, so the included text is the same bytes on every render and the cached prefix stays
+ * identical across roles, rounds and issues. The line may end in CRLF (a checkout written with
+ * Windows line endings): it still expands, and the carriage return is kept after the included
+ * text so the line keeps the ending it had. A multiline `$` in JavaScript already stops before a
+ * lone "\r", so the explicit `\r?` states that tolerance in the pattern instead of leaning on it,
+ * and a later edit to `\n`-only anchoring cannot drop it silently (test-render-panel.sh pins it).
+ */
+export const INCLUDE_RE = /^<!-- INCLUDE (shared\/[a-z0-9.-]+\.md) -->(\r?)$/gm;
+
+/** The part of a shared file an INCLUDE line places: its first `## ` heading to end of file. */
+export function includedText(markdown, name) {
+  const m = /^## /m.exec(markdown);
+  if (!m) throw new Error(`${name} carries no "## " heading, so there is nothing to include`);
+  return markdown.slice(m.index).replace(/\s+$/, "");
+}
+
+/** Expand every INCLUDE line against a plugin root. Fails closed on a file it cannot read. */
+export function expandIncludes(markdown, pluginRoot) {
+  return markdown.replace(INCLUDE_RE, (_, rel, cr) => {
+    const file = path.join(pluginRoot, rel);
+    if (!existsSync(file)) throw new Error(`${PREAMBLE_FILE} includes ${rel}, which does not exist under ${pluginRoot}`);
+    return includedText(readFileSync(file, "utf8"), rel) + cr;
+  });
+}
+
+/** The markdown file carrying the preamble markers, read from a plugin root, INCLUDE lines expanded. */
 export function readPreambleMarkdown(pluginRoot) {
-  return readFileSync(path.join(pluginRoot, PREAMBLE_FILE), "utf8");
+  return expandIncludes(readFileSync(path.join(pluginRoot, PREAMBLE_FILE), "utf8"), pluginRoot);
 }
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -258,7 +287,13 @@ export function assemble({ status, worktree, head, pluginRoot, lenses, preambleM
     if (!lenses[r]) throw new Error(`role "${r}" has no entry in scripts/panel-lenses.json`);
   }
   const artifactDir = path.posix.join(worktree.replace(/\\/g, "/"), ".pipeline", String(issue));
-  const preamble = (delta ? DELTA_PARAGRAPH : "") + extractPreamble(preambleMarkdown) + "\n\n" + RUN_DATA_NOTE + "\n\n";
+  const body = extractPreamble(preambleMarkdown);
+  // A preamble read without readPreambleMarkdown still carries its INCLUDE line; rendering it would
+  // ship a panel that never saw the shared block, so refuse.
+  if (body.includes("<!-- INCLUDE ")) {
+    throw new Error("the PHASE4-PREAMBLE block carries an unexpanded INCLUDE line; read it with readPreambleMarkdown(pluginRoot)");
+  }
+  const preamble = (delta ? DELTA_PARAGRAPH : "") + body + "\n\n" + RUN_DATA_NOTE + "\n\n";
 
   const dispatches = roles.map((role) => {
     const lens = lenses[role];

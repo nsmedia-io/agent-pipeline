@@ -270,11 +270,12 @@ assert_eq "AC12: and names KNOWN_PHASES as the key source" \
 # inside 55-80, away from the fields entirely, and both cells stay green while the claim AC13
 # makes becomes false.
 #
-# The region is now THE SECTION THE TWO FIELDS LIVE IN. It opens at the status.json template
-# that declares them and closes at the next `###` heading. That is what AC13 actually claims,
+# The region is now THE SECTION THE TWO FIELDS LIVE IN. It opens at the line that names the
+# 0-setup record (#164: pipeline-init.mjs writes it, so the hand-written JSON template left
+# Phase 0) and closes at the next `###` heading. That is what AC13 actually claims,
 # that a reader who meets either field meets the convention before leaving the section, and no
 # absolute line range can express it. Both anchors are unique in the file.
-md_events_region() { sed -n '/^  "current_phase": "0-setup",$/,/^### /p' "$1"; }
+md_events_region() { sed -n '/is the initial `status.json` (`"current_phase": "0-setup"`)/,/^### /p' "$1"; }
 EVENTS_REGION=$(md_events_region "$PIPELINE_MD")
 
 # SCOPING CONTROLS, before the claims. A range that silently swallowed the whole file would
@@ -284,13 +285,13 @@ EVENTS_REGION=$(md_events_region "$PIPELINE_MD")
 assert_contains "AC13 SCOPE: the region opens at the status.json template that declares the fields" \
   "$EVENTS_REGION" '"current_phase": "0-setup"'
 assert_contains "AC13 SCOPE: and reaches the other field's definition, so a reader of either is inside it" \
-  "$EVENTS_REGION" '"events": []'
+  "$EVENTS_REGION" '`events[]` entries'
 assert_contains "AC13 SCOPE: and closes on the next heading" \
   "$EVENTS_REGION" "### Durable checkpoint convention"
 assert_not_contains "AC13 SCOPE: it does not run on into that section's body" \
   "$EVENTS_REGION" "post-hoc log"
 assert_not_contains "AC13 SCOPE: nor back above the template" \
-  "$EVENTS_REGION" "Resolve the absolute pipeline base"
+  "$EVENTS_REGION" "Exit 3: the tree is dirty"
 assert_not_contains "AC13 SCOPE: nor forward past the section after it" \
   "$EVENTS_REGION" "Risk-tiered orchestration depth"
 
@@ -306,7 +307,7 @@ assert_contains "AC13: and current_phase as an ENTRY marker" \
 #     line number is asserted to have MOVED, computed rather than pinned, so this control cannot
 #     pass by the padding having silently landed somewhere harmless.
 SHIFTED="$TEMP_PROJECT/pipeline-shifted.md"
-awk '{ print } /^3\. \*\*Fetch fresh integration branch/ { for (i = 0; i < 13; i++) print "<!-- padding -->" }' \
+awk '{ print } /^1\. \*\*Exit 3: the tree is dirty/ { for (i = 0; i < 13; i++) print "<!-- padding -->" }' \
   "$PIPELINE_MD" > "$SHIFTED"
 md_exit_line() { grep -n 'entries are EXIT markers' "$1" | head -1 | cut -d: -f1; }
 assert_eq "CONTROL: the padded copy really moved the paragraph 13 lines down" \
