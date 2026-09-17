@@ -84,9 +84,10 @@ assert_eq "and exits 0" "$RC" "0"
 run_check "$P/cache/agent-pipeline/pipeline/0.24.0" "$NEW_TMPDIR/no-plugins-dir"
 assert_eq "an absent plugins dir is silent" "$OUT" ""
 
+new_tmpdir || exit 90; P="$NEW_TMPDIR/plugins"
+fake_plugins "$P" 0.24.0 0.24.0
 printf '{ not json' > "$P/marketplaces/agent-pipeline/.claude-plugin/marketplace.json"
 printf '{ not json' > "$P/marketplaces/agent-pipeline/plugins/pipeline/.claude-plugin/plugin.json"
-rm -rf "$P/cache/agent-pipeline/pipeline/0.99.0"
 run_check "$P/cache/agent-pipeline/pipeline/0.24.0" "$P"
 assert_eq "an unparseable marketplace manifest is silent, not a crash" "$OUT" ""
 assert_eq "and exits 0" "$RC" "0"
