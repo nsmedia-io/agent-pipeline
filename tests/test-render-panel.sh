@@ -49,26 +49,53 @@ assert_eq "renders and passes --check" "$RC" "0"
 assert_contains "the reviewed sha in the script is git rev-parse HEAD of the worktree" "$OUT" "$HEAD_SHA"
 # C2: placeholders stay in the static text and are BOUND in the RUN DATA block at the end of each
 # prompt, so the static part is cacheable. The values must still reach the agent.
-assert_contains "RUN DATA binds the worktree's artifact dir" "$OUT" "ARTIFACT_DIR: $WT/.pipeline/77"
-assert_contains "RUN DATA binds \${CLAUDE_PLUGIN_ROOT} to the plugin root" "$OUT" "CLAUDE_PLUGIN_ROOT: $PLUGIN_ROOT"
+# A path value is compared as node resolves it (forward slashes), and read out of the first prompt's
+# RUN DATA with any TOON quoting removed: a Windows path renders quoted ("C:/..."), and the quotes
+# are not part of the value, which is what the RUN DATA note tells the agent.
+native_path() { node -e 'console.log(require("path").resolve(process.argv[1]).replace(/\\/g, "/"))' "$1"; }
+run_value() {  # <name> -> the value bound to <name> in the first prompt's RUN DATA, unquoted
+  OUT="$OUT" node -e '
+const out = process.env.OUT;
+const call = out.match(/^  \(\) => agent\(PREAMBLE \+ (".*"), \{.*\}\),$/m);
+const run = call ? JSON.parse(call[1]).split("RUN DATA\n")[1] || "" : "";
+const m = run.match(new RegExp("^" + process.argv[1] + ": (.*)$", "m"));
+if (m) console.log(m[1].startsWith("\"") ? JSON.parse(m[1]) : m[1]);
+' "$1"
+}
+assert_eq "RUN DATA binds the worktree's artifact dir" "$(run_value ARTIFACT_DIR)" "$(native_path "$WT")/.pipeline/77"
+assert_eq "RUN DATA binds \${CLAUDE_PLUGIN_ROOT} to the plugin root" "$(run_value CLAUDE_PLUGIN_ROOT)" "$(native_path "$PLUGIN_ROOT")"
 assert_contains "RUN DATA binds <REVIEWED_SHA> to the git HEAD" "$OUT" "REVIEWED_SHA: $HEAD_SHA"
 assert_contains "the static preamble keeps the placeholder form" "$OUT" '${CLAUDE_PLUGIN_ROOT}/evidence.md'
 assert_contains "the prompt says once that its tables are TOON" "$OUT" "Tables below are TOON: header lists the fields, one row per item"
-# Every UPPER_CASE placeholder and <issue> in the static text has a binding in every RUN DATA
-# block. A placeholder added to the command file or the lens table without a binding is caught here.
-UNBOUND="$(OUT="$OUT" node -e '
+# Every UPPER_CASE placeholder and every lowercase one that stands for a run value (<issue>) in the
+# static text has a binding in every RUN DATA block. A lowercase placeholder is either such a value
+# or one the agent fills itself (<role> is the role its lens names; <path>, <dest>, <parent>,
+# <isolated> and <observation> are what the agent picks while it works). A lowercase name in
+# neither list is reported too, so a new run value spelled in lowercase cannot slip past the
+# upper-case pattern unbound. A placeholder added to the preamble or the lens table without a
+# binding is caught here.
+BIND_CHECK='
 const out = process.env.OUT;
+const plant = process.env.PLANT || "";
+const AGENT_FILLED = new Set(["role", "path", "dest", "parent", "isolated", "observation"]);
 const pre = JSON.parse(out.match(/^const PREAMBLE = (.*)$/m)[1]);
 const calls = [...out.matchAll(/^  \(\) => agent\(PREAMBLE \+ (".*"), \{.*\}\),$/gm)].map((m) => JSON.parse(m[1]));
 const bad = [];
 for (const c of calls) {
   const [lens, run] = c.split("RUN DATA\n");
-  const names = new Set([...(pre + lens).matchAll(/<([A-Z][A-Z_]+|issue)>|\$\{(CLAUDE_PLUGIN_ROOT)\}/g)].map((m) => m[1] || m[2]));
+  const text = pre + lens + plant;
+  const names = new Set([...text.matchAll(/<([A-Z][A-Z_]+)>|\$\{(CLAUDE_PLUGIN_ROOT)\}/g)].map((m) => m[1] || m[2]));
+  for (const m of text.matchAll(/<([a-z][a-z_-]*)>/g)) if (!AGENT_FILLED.has(m[1])) names.add(m[1]);
   for (const n of names) if (!new RegExp("^" + n + ": ", "m").test(run)) bad.push(n);
 }
-console.log(calls.length === 0 ? "no calls parsed" : bad.join(" ") || "none");
-')"
+console.log(calls.length === 0 ? "no calls parsed" : [...new Set(bad)].join(" ") || "none");
+'
+UNBOUND="$(OUT="$OUT" node -e "$BIND_CHECK")"
 assert_eq "every placeholder in the static text is bound in RUN DATA" "$UNBOUND" "none"
+# NON-ZERO CONTROL: a lowercase run-value placeholder with no binding is reported, and so is an
+# upper-case one, so the "none" above is not a pattern that can never match.
+assert_eq "NON-ZERO CONTROL: an unbound lowercase placeholder (<head_sha>) and an unbound <BASE_SHA> are reported" \
+  "$(OUT="$OUT" PLANT=' <head_sha> <BASE_SHA>' node -e "$BIND_CHECK")" "BASE_SHA head_sha"
 assert_eq "exactly four agent() calls for four roles" "$(count_agents "$OUT")" "4"
 assert_contains "meta is a pure literal naming the issue" "$OUT" 'export const meta = { name: "phase4-panel-77"'
 assert_contains "ba is dispatched as pipeline:ba" "$OUT" '"agentType":"pipeline:ba"'

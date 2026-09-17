@@ -133,7 +133,7 @@ export function loadLenses(pluginRoot) {
 // still works, it just pays for the whole preamble on every dispatch.
 
 export const RUN_DATA_NOTE =
-  "Placeholders. The issue placeholder, the plugin-root variable and every capitalised name in angle brackets, above and in your lens, stand for the value of the same name in the RUN DATA block at the very end of this prompt; substitute it before you run, read or write anything. The role placeholder is the role your lens names. " +
+  "Placeholders. The issue placeholder, the plugin-root variable and every capitalised name in angle brackets, above and in your lens, stand for the value of the same name in the RUN DATA block at the very end of this prompt; substitute it before you run, read or write anything. A value written in double quotes there is a quoted string: the quotes are not part of the value (a Windows path, for one, renders quoted). The role placeholder is the role your lens names. " +
   "Tables below are TOON: header lists the fields, one row per item (`name[N]{a,b}:` then N rows of a,b; `name[N]: x,y` is an inline list; a quoted cell is a JSON string). " +
   "Every file RUN DATA names is the full JSON artifact; Read it when a table is not enough.";
 
