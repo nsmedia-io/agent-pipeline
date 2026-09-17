@@ -280,6 +280,12 @@ export function validate(value, schema, root, pathStr = "", errors = []) {
   if (schema.enum && value !== undefined && !schema.enum.includes(value)) {
     errors.push(`${label}: ${JSON.stringify(value)} is not one of ${JSON.stringify(schema.enum)}`);
   }
+  // B1 review-convergence: draft-07 if/then, so a required field can be conditional on another
+  // field (peer-review concerns require an `id` only at blocker/critical/high severity). `if`
+  // matches when validating against it yields no errors; `else` is not implemented.
+  if (schema.if && schema.then && value !== undefined && validate(value, schema.if, root).length === 0) {
+    validate(value, schema.then, root, pathStr, errors);
+  }
   if (typeOk(value, "object") && (schema.properties || schema.required)) {
     for (const req of schema.required || []) {
       if (value[req] === undefined) errors.push(`${label}: missing required field "${req}"`);
@@ -1554,18 +1560,24 @@ function selfTest() {
   // A security reviewer's CVE-style concern severity validates cleanly alongside the canonical
   // blocker|major|nit vocabulary; a garbage severity still rejects.
   check("panel concern severity 'low' accepted (CVE-style)", validate({ verdict: "APPROVE", concerns: [{ severity: "low", description: "d", ...RATED }] }, panelVerdict, peerSchema), false);
-  check("panel concern severity 'critical' accepted (CVE-style)", validate({ verdict: "REQUEST_CHANGES", concerns: [{ severity: "critical", description: "d", ...RATED }] }, panelVerdict, peerSchema), false);
+  check("panel concern severity 'critical' accepted (CVE-style)", validate({ verdict: "REQUEST_CHANGES", concerns: [{ id: "secops-1", severity: "critical", description: "d", ...RATED }] }, panelVerdict, peerSchema), false);
   check("panel concern severity rejects a garbage value", validate({ verdict: "APPROVE", concerns: [{ severity: "spicy", description: "d", ...RATED }] }, panelVerdict, peerSchema), true);
   for (const missing of ["severity", "likelihood", "harm", "merge_class"]) {
-    const concern = { severity: "high", description: "d", ...RATED };
+    const concern = { id: "qa-1", severity: "high", description: "d", ...RATED };
     delete concern[missing];
     check(`panel concern missing ${missing} rejected (required since review-convergence)`,
       validate({ verdict: "REQUEST_CHANGES", concerns: [concern] }, panelVerdict, peerSchema), true);
   }
   check("panel concern merge_class wrong-pass accepted (shared definition resolves)",
-    validate({ verdict: "REQUEST_CHANGES", concerns: [{ severity: "high", description: "d", ...RATED, merge_class: "wrong-pass" }] }, panelVerdict, peerSchema), false);
+    validate({ verdict: "REQUEST_CHANGES", concerns: [{ id: "qa-1", severity: "high", description: "d", ...RATED, merge_class: "wrong-pass" }] }, panelVerdict, peerSchema), false);
   check("panel concern merge_class off-enum rejected (shared definition resolves)",
     validate({ verdict: "REQUEST_CHANGES", concerns: [{ severity: "high", description: "d", ...RATED, merge_class: "annoying" }] }, panelVerdict, peerSchema), true);
+  check("panel concern at severity high with no id rejected (a blocker needs a stable id)",
+    validate({ verdict: "REQUEST_CHANGES", concerns: [{ severity: "high", description: "d", ...RATED }] }, panelVerdict, peerSchema), true);
+  check("panel concern at severity high WITH an id accepted",
+    validate({ verdict: "REQUEST_CHANGES", concerns: [{ id: "qa-1", severity: "high", description: "d", ...RATED }] }, panelVerdict, peerSchema), false);
+  check("panel concern at severity major with no id accepted (the id is conditional)",
+    validate({ verdict: "APPROVE", concerns: [{ severity: "major", description: "d", ...RATED }] }, panelVerdict, peerSchema), false);
   check("panel concern harm money accepted",
     validate({ verdict: "APPROVE", concerns: [{ severity: "nit", description: "d", ...RATED, harm: "money" }] }, panelVerdict, peerSchema), false);
   check("panel veto_ground on the shared enum accepted",

@@ -65,17 +65,41 @@ export function checkRoundBudget(status, kind) {
   if (!KINDS.includes(kind)) throw new Error(`unknown kind ${JSON.stringify(kind)}; expected one of ${KINDS.join(", ")}`);
   const st = status && typeof status === "object" ? status : {};
   const warnings = [];
-  if (st.cost_class === undefined) warnings.push("status.json carries no cost_class; reading it as product");
-  else if (!COST_CLASSES.includes(st.cost_class)) warnings.push(`status.json cost_class ${JSON.stringify(st.cost_class)} is not one of ${COST_CLASSES.join(", ")}; reading it as product`);
   const costClass = normCostClass(st.cost_class);
+  // The warning names the class the budget ACTUALLY applies: a mixed-case "Tooling" is read as
+  // tooling (normCostClass lowercases), and only a value that normalizes to nothing known reads
+  // as product.
+  if (st.cost_class === undefined) warnings.push("status.json carries no cost_class; reading it as product");
+  else if (!COST_CLASSES.includes(st.cost_class)) {
+    warnings.push(
+      costClass === String(st.cost_class).trim().toLowerCase()
+        ? `status.json cost_class ${JSON.stringify(st.cost_class)} is not spelled as one of ${COST_CLASSES.join(", ")}; reading it as ${costClass}`
+        : `status.json cost_class ${JSON.stringify(st.cost_class)} is not one of ${COST_CLASSES.join(", ")}; reading it as ${costClass}`,
+    );
+  }
   const field = COUNTER[kind];
   const raw = st[field];
+  const budget = budgetFor(kind, costClass);
   let done = 0;
   if (raw === undefined) warnings.push(`status.json carries no ${field} (a record older than schema_version ${STATUS_SCHEMA_VERSION}); counting from 0`);
   else if (Number.isInteger(raw) && raw >= 0) done = raw;
-  else throw new Error(`status.json ${field} is ${JSON.stringify(raw)}, not a non-negative integer`);
+  else {
+    // A counter that is present but unreadable (null, a string, a negative) cannot say the round
+    // is inside the budget, and no override can cover a round nobody can number. It is a
+    // REFUSAL with the owner decision, not a bare error: the owner still needs the choice.
+    warnings.push(`status.json ${field} is ${JSON.stringify(raw)}, not a non-negative integer; the round cannot be counted`);
+    return {
+      allowed: false,
+      kind,
+      next: null,
+      budget,
+      costClass,
+      override: null,
+      warnings,
+      decision: decisionBlock({ kind, next: null, budget, costClass, issue: st.issue_number, unreadable: field }),
+    };
+  }
   const next = done + 1;
-  const budget = budgetFor(kind, costClass);
   const override = next > budget ? coveringOverride(st, kind, next) : null;
   const allowed = next <= budget || override !== null;
   return {
@@ -91,17 +115,21 @@ export function checkRoundBudget(status, kind) {
 }
 
 /** The plain-language owner decision block, in voice.md's shape. */
-export function decisionBlock({ kind, next, budget, costClass, issue }) {
+export function decisionBlock({ kind, next, budget, costClass, issue, unreadable = null }) {
   const what = kind === "fix-round" ? "fix round" : "spec revision";
   const issueRef = issue === undefined || issue === null ? "this issue" : `issue #${issue}`;
-  const why =
-    kind === "fix-round"
+  const nextLabel = next === null ? "another" : String(next);
+  const why = unreadable
+    ? `The record that counts ${what}s (${unreadable} in status.json) is unreadable, so the pipeline cannot tell whether another round is inside the budget of ${budget} for a ${costClass} change.`
+    : kind === "fix-round"
       ? `The reviewers still hold a blocking finding after ${budget} fix round(s), which is the budget for a ${costClass} change. Another round is more likely to trade one finding for the next than to finish.`
       : `The spec has already been revised ${budget} time(s) after its first review. A spec that keeps changing after review usually holds more than one piece of work.`;
   return [
     "### I need a decision",
     "",
-    `**What I'm asking:** ${issueRef} has used its ${what} budget (${budget}). Should we ship it with the open findings written down, split it, or stop?`,
+    unreadable
+      ? `**What I'm asking:** ${issueRef} cannot count its ${what}s. Should we ship it with the open findings written down, split it, or stop?`
+      : `**What I'm asking:** ${issueRef} has used its ${what} budget (${budget}). Should we ship it with the open findings written down, split it, or stop?`,
     "",
     `**Why I'm asking:** ${why} Going past the budget is your call, not the pipeline's.`,
     "",
@@ -109,7 +137,9 @@ export function decisionBlock({ kind, next, budget, costClass, issue }) {
     "  A) Ship with deferrals - merge what passed; every open finding goes on the issue's deferral checklist, and only a finding that could cost money, data, security or a false green gets its own tracker issue.",
     `  B) Split - keep the part that passed review in this issue and open a new issue for the rest, which starts with a fresh budget.`,
     `  C) Stop - leave the branch unmerged; nothing changes for users, and the work so far stays on the branch.`,
-    `  D) Keep going - allow ${what} ${next}. I record your answer in status.json owner_overrides as {"kind": "${kind}", "up_to": ${next}, "at": "<now>", "reason": "<your reason>"} and continue.`,
+    unreadable
+      ? `  D) Keep going - I first correct ${unreadable} in status.json to the number of ${what}s actually run, then run the budget check again, and record an owner_overrides entry only if that round is past the budget.`
+      : `  D) Keep going - allow ${what} ${nextLabel}. I record your answer in status.json owner_overrides as {"kind": "${kind}", "up_to": ${nextLabel}, "at": "<now>", "reason": "<your reason>"} and continue.`,
     "",
     "**My recommendation:** [fill in from the open blockers: A when they are notes in all but name, B when they sit in a different part of the change from the rest]",
     "",
@@ -176,7 +206,11 @@ export function main(argv, io = { out: (s) => process.stdout.write(s), err: (s) 
       const r = checkRoundBudget(status, kind);
       for (const w of r.warnings) io.err(`round-budget: ${w}\n`);
       if (!r.allowed) {
-        io.err(`round-budget: REFUSED ${kind} ${r.next}: the budget at cost_class ${r.costClass} is ${r.budget} and no owner_overrides entry covers it. Bring the owner the decision below; do not start the round.\n`);
+        io.err(
+          r.next === null
+            ? `round-budget: REFUSED ${kind}: the counter is unreadable, so the round cannot be counted against the budget of ${r.budget}. Bring the owner the decision below; do not start the round.\n`
+            : `round-budget: REFUSED ${kind} ${r.next}: the budget at cost_class ${r.costClass} is ${r.budget} and no owner_overrides entry covers it. Bring the owner the decision below; do not start the round.\n`,
+        );
         io.out(`${r.decision}\n`);
         return 2;
       }

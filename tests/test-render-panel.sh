@@ -109,6 +109,11 @@ render --status "$STATUS" --worktree "$WT" --plugin-root "$PLUGIN_ROOT" --delta 
 assert_eq "a delta render with --peer-review passes --check" "$RC" "0"
 assert_contains "the qa lens lists qa's open blocker ids" "$OUT" "Your open blockers: qa-2, qa-7."
 assert_contains "a role holding none is told it was seated by surface" "$OUT" "Your open blockers: none. You were seated because the fix commits touched your surface"
+printf '%s' '{"qa":{"verdict":"REQUEST_CHANGES","materiality":{"open_blocker_ids":["qa-2","qa-7"],"demoted_ids":["qa-9"],"blocks_merge":true}},"dba":{"verdict":"REQUEST_CHANGES","materiality":{"blocks_merge":true}}}' > "$PR_FILE"
+render --status "$STATUS" --worktree "$WT" --plugin-root "$PLUGIN_ROOT" --delta "qa dba" --first-round-head "$FIRST" --peer-review "$PR_FILE" --check
+assert_eq "a delta render with demoted and legacy records passes --check" "$RC" "0"
+assert_contains "a demoted blocker stays visible to its role on the next delta round" "$OUT" "Demoted past the cap last round, and still yours to rule on: qa-9."
+assert_contains "a legacy blocks_merge:true with no ids tells the role to rule on every blocker it raised" "$OUT" "Your open blockers: not named"
 assert_contains "meta names the delta" "$OUT" 'name: "phase4-delta-77"'
 assert_not_contains "ba is NOT rendered on a qa+dba delta" "$OUT" '"agentType":"pipeline:ba"'
 

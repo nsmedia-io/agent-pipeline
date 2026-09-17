@@ -140,16 +140,28 @@ export function openBlockerLine(role, openBlockers) {
   if (openBlockers === null || openBlockers === undefined) {
     return " Your open blockers: none recorded (no peer-review.json was given to the renderer); rule on the blocking concerns you raised last round.";
   }
-  const ids = Array.isArray(openBlockers[role]) ? openBlockers[role] : [];
-  return ids.length > 0
-    ? ` Your open blockers: ${ids.join(", ")}. For each, say closed or still open, with evidence.`
-    : " Your open blockers: none. You were seated because the fix commits touched your surface; only a new merge_class finding the fix introduced can block.";
+  const entry = openBlockers[role];
+  const rec = Array.isArray(entry) ? { open: entry, demoted: [], unnamed: false } : entry || { open: [], demoted: [], unnamed: false };
+  const demoted = rec.demoted.length > 0
+    ? ` Demoted past the cap last round, and still yours to rule on: ${rec.demoted.join(", ")}.`
+    : "";
+  if (rec.open.length > 0) {
+    return ` Your open blockers: ${rec.open.join(", ")}. For each, say closed or still open, with evidence.${demoted}`;
+  }
+  if (rec.unnamed) {
+    return " Your open blockers: not named (a legacy record marks your block as refusing the merge without ids); rule on every blocking concern you raised last round, with evidence.";
+  }
+  return " Your open blockers: none. You were seated because the fix commits touched your surface; only a new merge_class finding the fix introduced can block.";
 }
 
-/** { role: [open blocker ids] } from a merged peer-review.json. */
+/** { role: { open: [ids], demoted: [ids], unnamed } } from a merged peer-review.json. */
 export function openBlockerMap(peerReview) {
   const out = {};
-  for (const { role, id } of listOpenBlockers(peerReview)) (out[role] ||= []).push(id);
+  for (const { role, id, demoted } of listOpenBlockers(peerReview)) {
+    const rec = (out[role] ||= { open: [], demoted: [], unnamed: false });
+    if (id === null) rec.unnamed = true;
+    else (demoted ? rec.demoted : rec.open).push(id);
+  }
   return out;
 }
 

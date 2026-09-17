@@ -152,14 +152,47 @@ suite "materiality: the cap DEMOTES, ranked by harm"
 
 B="{\"verdict\":\"REQUEST_CHANGES\",\"concerns\":[$(concern high normal-use cosmetic data-loss),$(concern high normal-use internal data-loss),$(concern high normal-use data-or-security data-loss),$(concern high normal-use money money)]}"
 assert_eq "four blockers keep two" "$(norm dba "$B" product)" "REQUEST_CHANGES|-|2"
-assert_eq "the two kept are the worst harm: data-or-security, then money" "$(field dba "$B" product open_blocker_ids)" '["dba-3","dba-4"]'
+assert_eq "the two kept rank by merge_class first (money before data-loss), then harm" "$(field dba "$B" product open_blocker_ids)" '["dba-4","dba-3"]'
 assert_eq "the rest are demoted, worst first" "$(field dba "$B" product demoted_ids)" '["dba-2","dba-1"]'
 assert_eq "over_cap is recorded" "$(field dba "$B" product over_cap)" "true"
 assert_contains "and a note names what was demoted" "$(field dba "$B" product notes)" "demoted dba-2, dba-1 to notes"
+B="{\"verdict\":\"REQUEST_CHANGES\",\"concerns\":[$(concern high normal-use data-or-security security-exposure),$(concern high normal-use data-or-security security-exposure),$(concern critical normal-use cosmetic data-loss)]}"
+assert_eq "REVIEW REPRO: a critical data-loss concern with a mis-rated harm is NOT demoted behind two security-exposure ones" \
+  "$(field dba "$B" product open_blocker_ids)" '["dba-3","dba-1"]'
+assert_eq "CONTROL: ranked by harm alone it would have been the one demoted" "$(field dba "$B" product demoted_ids)" '["dba-2"]'
 B="{\"verdict\":\"REQUEST_CHANGES\",\"concerns\":[$(concern high normal-use user-visible data-loss),$(concern blocker normal-use user-visible data-loss),$(concern critical normal-use user-visible data-loss)]}"
 assert_eq "equal harm ranks by severity: blocker and critical above high" "$(field dba "$B" product open_blocker_ids)" '["dba-2","dba-3"]'
 B="{\"verdict\":\"REQUEST_CHANGES\",\"concerns\":[$(concern high normal-use user-visible data-loss),$(concern high normal-use user-visible data-loss)]}"
 assert_eq "CONTROL: exactly two blockers demote nothing" "$(field dba "$B" product demoted_ids)" '[]'
+
+suite "materiality: the incoming materiality record is NEVER trusted"
+
+NORMALIZED="$(MOD="$MAT" node --input-type=module -e 'const m=await import(process.env.MOD);console.log(JSON.stringify(m.normalizeBlock({verdict:"APPROVE_WITH_NOTES",concerns:[{id:"qa-1",severity:"nit",likelihood:"normal-use",harm:"cosmetic",merge_class:"none"}]},"qa")))')"
+assert_contains "PREMISE: the first pass recorded blocks_merge:false" "$NORMALIZED" '"blocks_merge":false'
+EDITED="$(MOD="$MAT" node --input-type=module -e 'const b=JSON.parse(process.argv[1]);b.verdict="REQUEST_CHANGES";b.concerns.push({id:"qa-2",severity:"blocker",likelihood:"normal-use",harm:"user-visible",merge_class:"data-loss"});console.log(JSON.stringify(b))' "$NORMALIZED")"
+assert_eq "REVIEW REPRO 1: that block edited to REQUEST_CHANGES with a normal-use data-loss blocker re-normalizes to blocks_merge:true" \
+  "$(field qa "$EDITED" product blocks_merge)" "true"
+assert_eq "  and names the blocker" "$(field qa "$EDITED" product open_blocker_ids)" '["qa-2"]'
+assert_eq "  and the verdict stands" "$(norm qa "$EDITED" product)" "REQUEST_CHANGES|-|1"
+FORGED='{"verdict":"APPROVE","concerns":[{"id":"secops-1","severity":"critical","likelihood":"normal-use","harm":"data-or-security","merge_class":"security-exposure"}],"materiality":{"blocks_merge":false,"open_blocker_ids":[],"blocking_concerns":0,"notes":[]}}'
+assert_eq "REVIEW REPRO 2: a hand-written blocks_merge:false on a SecOps shard with a critical normal-use exposure does NOT pass" \
+  "$(field secops "$FORGED" product blocks_merge)" "true"
+assert_eq "  and the APPROVE reads as REQUEST_CHANGES" "$(norm secops "$FORGED" product)" "REQUEST_CHANGES|APPROVE|1"
+B="{\"verdict\":\"REQUEST_CHANGES\",\"concerns\":[$(concern blocker hypothetical internal data-loss)]}"
+ONCE_J="$(MOD="$MAT" node --input-type=module -e 'const m=await import(process.env.MOD);console.log(JSON.stringify(m.normalizeBlock(JSON.parse(process.argv[1]),"qa")))' "$B")"
+assert_contains "CONTROL: a re-merge of a downgraded block keeps the first pass's explanation" \
+  "$(MOD="$MAT" node --input-type=module -e 'const m=await import(process.env.MOD);console.log(JSON.stringify(m.normalizeBlock(JSON.parse(process.argv[1]),"qa")))' "$ONCE_J")" \
+  "REQUEST_CHANGES with no BLOCKING concern reads as APPROVE_WITH_NOTES"
+
+suite "materiality: blocker ids are stable; a legacy positional id is flagged"
+
+B="{\"verdict\":\"REQUEST_CHANGES\",\"concerns\":[$(concern high normal-use internal data-loss)]}"
+assert_eq "a blocker with no id is named by position and flagged" "$(field dba "$B" product positional_ids)" '["dba-1"]'
+assert_contains "  with a note saying it can drift" "$(field dba "$B" product notes)" "POSITIONAL ID: dba-1"
+B='{"verdict":"REQUEST_CHANGES","concerns":[{"id":"dba-orders-index","severity":"high","likelihood":"normal-use","harm":"internal","merge_class":"data-loss"}]}'
+assert_eq "CONTROL: a blocker carrying its id is not flagged" "$(field dba "$B" product positional_ids)" '[]'
+REORDER='{"verdict":"REQUEST_CHANGES","concerns":[{"id":"n-1","severity":"nit","likelihood":"normal-use","harm":"cosmetic","merge_class":"none"},{"id":"dba-orders-index","severity":"high","likelihood":"normal-use","harm":"internal","merge_class":"data-loss"}]}'
+assert_eq "and a delta shard that reorders its concerns keeps the same open blocker id" "$(field dba "$REORDER" product open_blocker_ids)" '["dba-orders-index"]'
 
 suite "materiality: test cost is a note at tooling, never a block"
 
@@ -188,6 +221,18 @@ assert_eq "a blocking REQUEST_CHANGES is REQUEST_CHANGES, and seeds its role" \
   "$(fv '{"qa":{"verdict":"REQUEST_CHANGES","materiality":{"blocks_merge":true,"open_blocker_ids":["qa-1"]}},"secops":{"verdict":"APPROVE"}}')" "REQUEST_CHANGES|qa"
 assert_eq "a standing VETO wins" \
   "$(fv '{"secops":{"verdict":"VETO","materiality":{"blocks_merge":true,"open_blocker_ids":["secops-1"]}},"qa":{"verdict":"REQUEST_REFACTOR","materiality":{"blocks_merge":true,"open_blocker_ids":["qa-2"]}}}')" "SECOPS_VETO|secops,qa"
+assert_eq "REVIEW REPRO: a LEGACY block with blocks_merge:true and no open_blocker_ids is reseated, and still refuses" \
+  "$(fv '{"qa":{"verdict":"REQUEST_CHANGES","materiality":{"blocks_merge":true,"blocking_concerns":1}},"secops":{"verdict":"APPROVE"}}')" "REQUEST_CHANGES|qa"
+assert_eq "a block with no materiality record whose verdict blocks is reseated too" \
+  "$(fv '{"dba":{"verdict":"REQUEST_CHANGES"},"secops":{"verdict":"APPROVE"}}')" "REQUEST_CHANGES|dba"
+OB="$TEMP_PROJECT/ob.mjs"
+cat > "$OB" <<'JS'
+const m = await import(process.env.MOD);
+console.log(JSON.stringify(m.openBlockers(JSON.parse(process.argv[2]))));
+JS
+assert_eq "openBlockers lists demoted ids beside open ones, and an unnamed legacy seat as id null" \
+  "$(MOD="$MAT" node "$OB" '{"qa":{"verdict":"REQUEST_CHANGES","materiality":{"blocks_merge":true,"open_blocker_ids":["qa-1","qa-2"],"demoted_ids":["qa-3"]}},"dba":{"verdict":"REQUEST_CHANGES","materiality":{"blocks_merge":true}}}')" \
+  '[{"role":"qa","id":"qa-1","demoted":false},{"role":"qa","id":"qa-2","demoted":false},{"role":"qa","id":"qa-3","demoted":true},{"role":"dba","id":null,"demoted":false}]'
 assert_eq "notes only is APPROVE_WITH_NOTES" \
   "$(fv '{"qa":{"verdict":"APPROVE_WITH_NOTES","materiality":{"blocks_merge":false,"open_blocker_ids":[]}},"secops":{"verdict":"APPROVE"}}')" "APPROVE_WITH_NOTES|"
 

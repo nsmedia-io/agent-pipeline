@@ -61,8 +61,12 @@ and an `APPROVE` carrying a blocking concern is recorded as `REQUEST_CHANGES`. T
 rubric reads `materiality.blocks_merge` and `materiality.open_blocker_ids`, not the verdict word.
 
 **At most two blocking concerns per reviewer, enforced.** The merge ranks a reviewer's blocking
-concerns by harm (then severity) and keeps the top two as blockers; the rest are DEMOTED to notes
-and listed in `materiality.demoted_ids`. A reviewer that returns five blockers has not ranked, and
+concerns by `merge_class` (wrong-pass, money, data-loss, security-exposure), then harm, then
+severity, and keeps the top two as blockers; the rest are DEMOTED to notes, listed in
+`materiality.demoted_ids` and shown to that role again on the next delta round. Every blocking
+concern carries a stable `id`, so the ids a delta round rules on cannot drift when a shard
+reorders its concerns. The merge recomputes this record from the concerns on every pass and
+never keeps one it was handed. A reviewer that returns five blockers has not ranked, and
 the run cannot fix five things in one round anyway.
 
 **Notes ship.** A note with a `suggested_patch` (a unified diff or an exact replacement for a

@@ -161,6 +161,18 @@ export function rateConcern(c, costClass = DEFAULT_COST_CLASS) {
   return { blocking: true, unrated: false, reason: `${lk} ${mc} at severity ${sev} (cost_class ${cc})` };
 }
 
+/**
+ * The order the cap keeps blockers in, worst first. merge_class leads because it is the rating
+ * that decided the concern blocks at all; harm is a second, more subjective rating, and a
+ * critical normal-use data-loss concern with a mis-rated harm must not be demoted behind a
+ * lesser one.
+ */
+export const MERGE_CLASS_RANK = ["wrong-pass", "money", "data-loss", "security-exposure"];
+
+function mergeClassRank(c) {
+  const i = MERGE_CLASS_RANK.indexOf(lower(c && c.merge_class));
+  return i === -1 ? MERGE_CLASS_RANK.length : i;
+}
 function harmRank(c) {
   const i = HARMS.indexOf(lower(c && c.harm));
   return i === -1 ? HARMS.length : i;
@@ -173,11 +185,15 @@ function severityRank(c) {
 
 /**
  * Rank the blocking concerns and split them at the cap. `entries` is [{ concern, id, index }].
- * Stable: equal harm and severity keep the reviewer's own order.
+ * Ranked by merge_class, then harm, then severity; stable, so ties keep the reviewer's order.
  */
 export function applyCap(entries, cap = BLOCKING_CAP) {
   const ranked = [...entries].sort(
-    (a, b) => harmRank(a.concern) - harmRank(b.concern) || severityRank(a.concern) - severityRank(b.concern) || a.index - b.index,
+    (a, b) =>
+      mergeClassRank(a.concern) - mergeClassRank(b.concern) ||
+      harmRank(a.concern) - harmRank(b.concern) ||
+      severityRank(a.concern) - severityRank(b.concern) ||
+      a.index - b.index,
   );
   return { kept: ranked.slice(0, cap), demoted: ranked.slice(cap) };
 }
@@ -209,15 +225,51 @@ export function testCostNote(testCost, costClass) {
  */
 export function normalizeBlock(block, role, opts = {}) {
   if (!block || typeof block !== "object" || Array.isArray(block)) return block;
-  const raw = normVerdict(block.verdict);
-  if (!raw) return block;
+  const current = normVerdict(block.verdict);
+  if (!current) return block;
   const costClass = normCostClass(opts.costClass);
 
+  // THE INCOMING materiality RECORD IS NEVER TRUSTED. It is recomputed from the concerns on every
+  // pass: a record carried over from an earlier pass, or written by hand, would let a shard whose
+  // verdict or concerns changed since keep a blocks_merge:false it no longer earns (the review
+  // repro: a normalized block edited to REQUEST_CHANGES with a normal-use data-loss blocker
+  // re-normalized to blocks_merge:false).
+  //
+  // IDEMPOTENCE without trust: when the block records verdict_as_returned, the ruling is
+  // recomputed from THAT verdict too, and used when it reproduces the verdict the block now
+  // carries, so a re-merge keeps the first pass's notes. The rating itself comes from the
+  // concerns either way, so the choice changes only which explanation is recorded.
+  const fromCurrent = rule(block, current, role, costClass);
+  const asReturned = normVerdict(block.verdict_as_returned);
+  const fromReturned = asReturned && asReturned !== current ? rule(block, asReturned, role, costClass) : null;
+  const r = fromReturned && fromReturned.effective === current ? fromReturned : fromCurrent;
+
+  const out = { ...block, verdict: r.effective };
+  if (r === fromReturned) {
+    out.verdict_as_returned = block.verdict_as_returned;
+  } else if (r.effective !== String(block.verdict).trim().toUpperCase()) {
+    out.verdict_as_returned = block.verdict;
+  } else {
+    delete out.verdict_as_returned;
+  }
+  out.materiality = r.materiality;
+  return out;
+}
+
+/** One ruling of a block's concerns from a given returned verdict. Pure. */
+function rule(block, raw, role, costClass) {
   const concerns = Array.isArray(block.concerns) ? block.concerns : [];
-  const rated = concerns.map((c, index) => ({ concern: c, index, id: concernId(c, role, index), rating: rateConcern(c, costClass) }));
-  const { kept, demoted } = applyCap(rated.filter((r) => r.rating.blocking));
+  const rated = concerns.map((c, index) => ({
+    concern: c,
+    index,
+    id: concernId(c, role, index),
+    positional: !(c && typeof c === "object" && typeof c.id === "string" && c.id.trim() !== ""),
+    rating: rateConcern(c, costClass),
+  }));
+  const { kept, demoted } = applyCap(rated.filter((x) => x.rating.blocking));
   const blocking = kept.length;
-  const unratedIds = rated.filter((r) => r.rating.unrated).map((r) => r.id);
+  const unratedIds = rated.filter((x) => x.rating.unrated).map((x) => x.id);
+  const positionalIds = rated.filter((x) => x.positional && x.rating.blocking).map((x) => x.id);
   const notes = [];
   let effective = raw;
 
@@ -260,59 +312,77 @@ export function normalizeBlock(block, role, opts = {}) {
   }
   if (demoted.length > 0) {
     notes.push(
-      `${blocking + demoted.length} blocking concerns exceed the cap of ${BLOCKING_CAP}: kept ${kept.map((k) => k.id).join(", ")} (worst harm first) and demoted ${demoted.map((d) => d.id).join(", ")} to notes.`,
+      `${blocking + demoted.length} blocking concerns exceed the cap of ${BLOCKING_CAP}: kept ${kept.map((k) => k.id).join(", ")} (worst merge_class, then harm, first) and demoted ${demoted.map((d) => d.id).join(", ")} to notes; the demoted ids stay listed to this role on the next delta round.`,
+    );
+  }
+  if (positionalIds.length > 0) {
+    notes.push(
+      `POSITIONAL ID: ${positionalIds.join(", ")} block but carry no \`id\`, so they are named by position and can drift if a later shard reorders its concerns (a legacy shard; the schema requires an id on every blocker/critical/high concern).`,
     );
   }
   const costNote = lower(role) === "qa" ? testCostNote(block.test_cost, costClass) : null;
   if (costNote) notes.push(costNote);
 
-  const out = { ...block, verdict: effective };
-  // Compared to the verdict AS WRITTEN (so a legacy APPROVE_WITH_NITS is recorded as having
-  // been returned), and only set when it changed; a re-run on an already-normalized block
-  // finds the two equal and keeps whatever verdict_as_returned the first pass recorded.
-  if (effective !== String(block.verdict).trim().toUpperCase()) out.verdict_as_returned = block.verdict;
-  // IDEMPOTENT: a block that was already normalized under the same cost class (it carries a
-  // materiality record and this pass changed nothing) keeps that record, notes included.
-  // Recomputing would drop the notes that explain the first pass's ruling, and a delta-round
-  // re-merge must not re-rule.
-  const prior = block.materiality && typeof block.materiality === "object" ? block.materiality : null;
-  const unchanged = effective === raw && prior && (prior.cost_class === undefined || prior.cost_class === costClass);
   const openIds = VERDICTS_THAT_BLOCK.includes(effective) ? kept.map((k) => k.id) : [];
-  out.materiality = unchanged
-    ? prior
-    : {
-        cost_class: costClass,
-        blocking_concerns: blocking,
-        open_blocker_ids: openIds,
-        demoted_ids: demoted.map((d) => d.id),
-        unrated_concerns: unratedIds.length,
-        unrated_ids: unratedIds,
-        over_cap: demoted.length > 0,
-        blocks_merge: openIds.length > 0,
-        notes,
-      };
-  return out;
+  return {
+    effective,
+    materiality: {
+      cost_class: costClass,
+      blocking_concerns: blocking,
+      open_blocker_ids: openIds,
+      demoted_ids: demoted.map((d) => d.id),
+      positional_ids: positionalIds,
+      unrated_concerns: unratedIds.length,
+      unrated_ids: unratedIds,
+      over_cap: demoted.length > 0,
+      blocks_merge: openIds.length > 0,
+      notes,
+    },
+  };
+}
+
+/** True when a merged block refuses the merge, reading a legacy record the safe way. */
+function blockRefuses(block) {
+  if (!block || typeof block !== "object") return false;
+  const m = block.materiality;
+  if (m && typeof m === "object") {
+    if (m.blocks_merge === true) return true;
+    if (Array.isArray(m.open_blocker_ids) && m.open_blocker_ids.length > 0) return true;
+    return false;
+  }
+  // No materiality record at all: a block that never went through this normalizer. Its verdict
+  // word is the only evidence, and a blocking word is read as blocking.
+  return VERDICTS_THAT_BLOCK.includes(normVerdict(block.verdict));
 }
 
 /**
- * The roles that hold at least one open blocker id in a merged peer-review.json. A delta round
- * SEEDS its re-dispatch set with exactly these (commands/pipeline.md "Delta re-review").
+ * The roles that must be reseated on a delta round: every role whose merged block refuses the
+ * merge. That includes a LEGACY block carrying blocks_merge:true with no open_blocker_ids, and
+ * a block with no materiality record whose verdict blocks: an empty seed there would silently
+ * drop the objector (commands/pipeline.md "Delta re-review").
  */
 export function openBlockerRoles(peerReview) {
   if (!peerReview || typeof peerReview !== "object") return [];
   const out = [];
   for (const [role, block] of Object.entries(peerReview)) {
-    const ids = block && block.materiality && block.materiality.open_blocker_ids;
-    if (Array.isArray(ids) && ids.length > 0) out.push(role);
+    if (block && typeof block === "object" && !Array.isArray(block) && typeof block.verdict === "string" && blockRefuses(block)) out.push(role);
   }
   return out;
 }
 
-/** Every open blocker in a merged peer-review.json, as [{ role, id }]. */
+/**
+ * Every open and demoted blocker in a merged peer-review.json, as [{ role, id, demoted }]. A
+ * seated role whose record names no ids (a legacy block) yields one entry with id null.
+ */
 export function openBlockers(peerReview) {
   const out = [];
   for (const role of openBlockerRoles(peerReview)) {
-    for (const id of peerReview[role].materiality.open_blocker_ids) out.push({ role, id });
+    const m = peerReview[role].materiality || {};
+    const open = Array.isArray(m.open_blocker_ids) ? m.open_blocker_ids : [];
+    const demoted = Array.isArray(m.demoted_ids) ? m.demoted_ids : [];
+    for (const id of open) out.push({ role, id, demoted: false });
+    for (const id of demoted) out.push({ role, id, demoted: true });
+    if (open.length === 0) out.push({ role, id: null, demoted: false });
   }
   return out;
 }
@@ -324,7 +394,7 @@ export function openBlockers(peerReview) {
  */
 export function finalVerdict(peerReview, roles) {
   const blocks = (roles || []).map((r) => (peerReview && peerReview[r]) || null);
-  const blocking = blocks.filter((b) => b && b.materiality && b.materiality.blocks_merge === true);
+  const blocking = blocks.filter((b) => blockRefuses(b));
   const v = (b) => normVerdict(b && b.verdict);
   if (blocking.some((b) => v(b) === "VETO")) return "SECOPS_VETO";
   if (blocking.some((b) => v(b) === "REQUEST_REFACTOR")) return "REQUEST_REFACTOR";

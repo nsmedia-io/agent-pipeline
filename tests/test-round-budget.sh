@@ -108,7 +108,19 @@ assert_contains "and says it defaulted the cost class" "$ERR" "no cost_class; re
 assert_contains "and says it counted from 0" "$ERR" "counting from 0"
 status '{"fix_rounds":"two"}'
 rb check fix-round --status "$ST"
-assert_eq "a non-integer counter is exit 1, never an allow" "$RC" "1"
+assert_eq "a non-integer counter is REFUSED (exit 2), never an allow" "$RC" "2"
+assert_contains "  and still brings the owner the decision block" "$OUT" "### I need a decision"
+status '{"issue_number":7,"cost_class":"tooling","fix_rounds":null}'
+rb enter fix-round --status "$ST"
+assert_eq "REVIEW REPRO: fix_rounds null is REFUSED with exit 2, not a bare exit 1" "$RC" "2"
+assert_contains "  and prints the owner decision block" "$OUT" "issue #7 cannot count its fix rounds"
+assert_contains "  and says the counter is unreadable on stderr" "$ERR" "the counter is unreadable"
+assert_eq "  and writes nothing" "$(jget "$ST" fix_rounds)" "null"
+status '{"cost_class":"Tooling","fix_rounds":1}'
+rb check fix-round --status "$ST"
+assert_eq "a mixed-case Tooling is applied as tooling (round 2 refused)" "$RC" "2"
+assert_contains "REVIEW REPRO: and the warning says tooling, the class actually applied" "$ERR" 'cost_class "Tooling" is not spelled as one of product-money, product, tooling; reading it as tooling'
+assert_not_contains "  not product" "$ERR" "reading it as product"
 rb check fix-round --status "$TEMP_PROJECT/missing.json"
 assert_eq "an unreadable status is exit 1, never an allow" "$RC" "1"
 rb check nonsense --status "$ST"

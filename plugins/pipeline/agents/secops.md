@@ -183,6 +183,7 @@ Write this exact shape (top-level `verdict`, no `secops` wrapper). Note `concern
   "reviewed_at": "2026-04-17T14:45:00Z",
   "concerns": [
     {
+      "id": "secops-1  (REQUIRED at blocker, critical or high; keep it the same in later rounds)",
       "severity": "blocker | major | nit  (or critical | high | medium | low | info)",
       "likelihood": "normal-use | edge-case | adversarial | hypothetical",
       "harm": "data-or-security | money | user-visible | internal | cosmetic",

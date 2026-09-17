@@ -157,7 +157,7 @@ This is not a licence to skip the file, and not an excuse to pad the reply with 
   "verdict": "APPROVE | APPROVE_WITH_NOTES | REQUEST_CHANGES",
   "reviewed_at": "2026-06-26T14:45:00Z",
   "concerns": [
-    { "severity": "blocker | major | nit", "likelihood": "normal-use | edge-case | adversarial | hypothetical", "harm": "data-or-security | money | user-visible | internal | cosmetic", "merge_class": "wrong-pass | money | data-loss | security-exposure | none", "description": "<the defect>", "must_satisfy": "<what a correct fix must be true of, carrying the observation that decides it>", "location": "file:line" }
+    { "id": "design-1 (required at blocker)", "severity": "blocker | major | nit", "likelihood": "normal-use | edge-case | adversarial | hypothetical", "harm": "data-or-security | money | user-visible | internal | cosmetic", "merge_class": "wrong-pass | money | data-loss | security-exposure | none", "description": "<the defect>", "must_satisfy": "<what a correct fix must be true of, carrying the observation that decides it>", "location": "file:line" }
   ],
   "advisory_notes": [
     "design:design-critique and ux-copy findings, advisory only, never blocking"
