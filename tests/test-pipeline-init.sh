@@ -129,7 +129,7 @@ RC=$?; OUT=$(cat "$TEMP_PROJECT/o")
 assert_eq "--argument-stdin parses the whole argument from stdin (0)" "$RC" "0"
 assert_eq "  issue, mode and modifier come from stdin" "$(jf r.mode)/$(jf r.issue)/$(jf r.experiment_mode)" "issue/21/true"
 assert_eq "  and shell metacharacters stay literal text, never expanded" "$(jf r.ask_text)" '"quoted" $HOME `id`'
-rm -rf "$REPO/.pipeline/21"
+rm -r "$REPO/.pipeline/21"
 
 pi --no-fetch use key AKIAIOSFODNN7EXAMPLE now
 assert_eq "an ask carrying a credential shape still exits 0" "$RC" "0"
