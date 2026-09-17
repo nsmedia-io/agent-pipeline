@@ -504,4 +504,53 @@ assert_eq "--all beside a named file is a usage error" \
   "$(run_checker "$SCOPE_ROOT" --all .pipeline/1/status.json | cut -d'|' -f1)" "2"
 
 
+# ---------------------------------------------------------------------------
+suite "THE PHASE SHAPE (B2): a current_phase that fails the schema's pattern is refused before a commit"
+# ---------------------------------------------------------------------------
+# Before B2 nothing checked this field at write time, and every reader downstream treated a malformed
+# phase as one it had never heard of: the phase-entry guard went not-applicable for the rest of the
+# run. The pattern is READ out of the schema, like the cap; the literal below pins the value the
+# schema carries today, so a schema edit is a visible change here rather than a silent one.
+assert_eq "the schema's current_phase pattern is the one this refusal enforces" \
+  "$(node -e 'const s=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));process.stdout.write(s.properties.current_phase.pattern)' "$SCHEMA")" \
+  '^([0-5](\.5)?-[a-z0-9-]+|halted-error)$'
+
+# phase_root <phase-json-or-ABSENT> -> NEW_TMPDIR with .pipeline/42/status.json at that phase
+phase_root() {
+  new_tmpdir || return 90
+  mkdir -p "$NEW_TMPDIR/.pipeline/42"
+  node -e '
+    const s = { started_at: "2026-01-01T00:00:00Z", updated_at: new Date().toISOString(), branch: "b", events: [] };
+    if (process.argv[1] !== "ABSENT") s.current_phase = JSON.parse(process.argv[1]);
+    process.stdout.write(JSON.stringify(s));
+  ' "$1" > "$NEW_TMPDIR/.pipeline/42/status.json"
+}
+
+for bad in '"Phase 3"' '"3_impl"' '"9-invented"' '"3-Impl"' '""' '7' 'ABSENT'; do
+  phase_root "$bad" || exit 90
+  R="$(run_checker "$NEW_TMPDIR")"
+  assert_eq "a malformed current_phase ($bad) exits 1 (it exited 0 before B2)" "${R%%|*}" "1"
+  assert_contains "  ...naming the file" "$R" ".pipeline/42/status.json"
+  assert_contains "  ...and saying what is wrong with it" "$R" "not phase-shaped"
+done
+
+for good in '"0-setup"' '"0.5-map"' '"2.5-design-owner-decision"' '"3-impl-error"' '"halted-error"'; do
+  phase_root "$good" || exit 90
+  assert_eq "CONTROL: a phase-shaped current_phase ($good) exits 0" "$(run_checker "$NEW_TMPDIR")" "0|"
+done
+
+phase_root '"Phase 3"' || exit 90
+BADPHASE_REPORT="$(cd "$NEW_TMPDIR" && node "$CHECKER" --root "$NEW_TMPDIR" --report 2>/dev/null)"
+assert_contains "--report names the record under badphases" "$BADPHASE_REPORT" "badphases=.pipeline"
+
+# A schema with no pattern is refused as unusable (exit 2), exactly as a schema with no cap is:
+# a check with nothing to check against must say so, not pass.
+new_tmpdir || exit 90
+NOPATTERN_SCHEMA="$NEW_TMPDIR/status.schema.json"
+node -e 'const fs=require("fs");const s=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));delete s.properties.current_phase.pattern;fs.writeFileSync(process.argv[2],JSON.stringify(s))' "$SCHEMA" "$NOPATTERN_SCHEMA"
+phase_root '"3-impl"' || exit 90
+NOPAT="$(run_checker "$NEW_TMPDIR" --schema "$NOPATTERN_SCHEMA")"
+assert_eq "a schema carrying no current_phase pattern is unusable: exit 2" "${NOPAT%%|*}" "2"
+assert_contains "  ...and says it will not invent one" "$NOPAT" "pattern"
+
 finish

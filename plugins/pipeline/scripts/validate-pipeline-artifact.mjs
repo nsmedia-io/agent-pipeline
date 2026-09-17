@@ -2133,19 +2133,19 @@ function selfTest() {
       }
       check("unnamed-run: a status.json with no phase is NOT a run candidate",
         unnamedRunDirs(pipe).length === 1 ? [] : [`candidates: ${unnamedRunDirs(pipe).map((d) => path.basename(d.dir)).join(",")}`], false);
-      // A current_phase that IS a string but is not phase-SHAPED. Without this case the schema
-      // pattern clause is dead weight: every junk fixture above omits current_phase entirely, so
-      // the `typeof phase !== "string"` clause alone rejects them and deleting the pattern test
-      // changes nothing. Found by the mutation battery, which is what a battery is for.
-      // THE FIXTURE MATRIX, not a representative fixture. Recognition is a CONJUNCTION -- the
-      // schema's required keys are present AND current_phase is schema-shaped -- so a fixture that
-      // fails BOTH clauses proves nothing about either. `{current_phase:"archived"}` is rejected
-      // for its missing required keys whatever the pattern says, and a battery mutation deleting
-      // the pattern clause SURVIVED against it. Each clause therefore gets a fixture that fails
-      // ONLY that clause, with everything else valid.
+      // A FULL record whose current_phase is a string but NOT phase-shaped (0.42.x, B2). This used
+      // to be asserted NOT a candidate, and that was the defect: one mistyped checkpoint made a real
+      // run invisible to this validator. Recognition is now required keys present AND a non-empty
+      // string phase; the SHAPE is refused at write time by check-status-record.mjs and at the turn
+      // boundary by gate-phase-entry.mjs. The mirror cases below still pin the required-keys clause.
       writeFileSync(path.join(pipe, "_archived", "status.json"),
         JSON.stringify({ ...JSON.parse(runRecord), current_phase: "archived" }));
-      check("unnamed-run: a FULL record whose only defect is a non-phase-shaped current_phase is NOT a candidate",
+      check("unnamed-run: a FULL record whose only defect is a non-phase-shaped current_phase IS still a candidate",
+        unnamedRunDirs(pipe).length === 2 ? [] : [`candidates: ${unnamedRunDirs(pipe).map((d) => path.basename(d.dir)).join(",")}`], false);
+      // CONTROL on that: the same full record with its current_phase REMOVED is not a run.
+      writeFileSync(path.join(pipe, "_archived", "status.json"),
+        JSON.stringify((({ current_phase, ...rest }) => rest)(JSON.parse(runRecord))));
+      check("unnamed-run: CONTROL the same record with NO current_phase is NOT a candidate",
         unnamedRunDirs(pipe).length === 1 ? [] : [`candidates: ${unnamedRunDirs(pipe).map((d) => path.basename(d.dir)).join(",")}`], false);
       // And the mirror: a schema-shaped phase whose record is missing a required key.
       writeFileSync(path.join(pipe, "_archived", "status.json"),
