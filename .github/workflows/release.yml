@@ -1,0 +1,35 @@
+# Tags v<version> and publishes its GitHub release when a version reaches main.
+#
+# Releases 0.1.0 to 0.46.0 shipped with no tag and no release, because the checklist ended at the
+# version bump. Every input is fixed by then, so scripts/release.mjs does it and this runs it on
+# every push to main. A push that does not change the version finds the tag and release already
+# there and exits 0 in seconds.
+name: release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history and tags: the script walks plugin.json's history and reads existing tags.
+          fetch-depth: 0
+          fetch-tags: true
+      - name: Tag and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          node scripts/release.mjs

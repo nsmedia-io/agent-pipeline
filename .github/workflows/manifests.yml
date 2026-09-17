@@ -1,4 +1,4 @@
-# The only CI this repo has, and it exists because of a specific failure.
+# The first CI this repo had, and it exists because of a specific failure.
 #
 # `plugins/pipeline/.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json` each carry a
 # version, and the marketplace's copy is the one a consumer is offered an update from. They drifted
