@@ -72,6 +72,8 @@
  *     announceLine() for why the success case speaks and why that one silence stays. stdout is
  *     unaffected: the decision channel is still pure JSON or nothing.
  *   - `--self-test`: runs the built-in checks and exits 0 (all pass) or 1 (any fail).
+ *   - `--file <artifact> [--schema <name>] [--tier <tier>]`: CLI mode, one artifact on demand, not
+ *     fail-open; see cliMain.
  */
 
 import {
@@ -2440,6 +2442,122 @@ function selfTest() {
   process.exit(fail === 0 ? 0 : 1);
 }
 
+// ---- CLI mode: one artifact, named by path (#164 rows 27, 29) ---------------------------------
+//
+//   node validate-pipeline-artifact.mjs --file <artifact> [--schema <name>] [--tier <tier>]
+//
+// The SubagentStop sweep validates what an agent wrote when it stops; this mode runs the same
+// checks ON DEMAND, by the orchestrator before a phase (the architectural falsifiability gate) and
+// by a reviewer on its own shard before it returns. It reads one file, never a stdin payload and
+// never the recency window, and it is NOT fail-open: a file it cannot read or parse is INVALID.
+//
+// EXIT CODES. 0 VALID. 2 INVALID (one failure per line). 1 usage: an unknown flag or tier, or a
+// schema that cannot be inferred from the file name and was not named.
+
+/** --schema name -> [schema file, pointer for a `<name>.<role>.json` SHARD, pointer for a whole file]. */
+const CLI_SCHEMAS = {
+  spec: ["spec.schema.json", "#", "#"],
+  map: ["map.schema.json", "#", "#"],
+  design: ["design.schema.json", "#", "#"],
+  tasks: ["tasks.schema.json", "#", "#"],
+  "impl-report": ["impl-report.schema.json", "#", "#"],
+  "librarian-report": ["librarian-report.schema.json", "#", "#"],
+  "peer-review": ["peer-review.schema.json", "#/definitions/panelVerdict", "#"],
+  review: ["review.schema.json", "#/definitions/agentBlock", "#"],
+};
+
+/** The schema name and shard role a file name implies: `peer-review.qa.json` -> peer-review, qa. */
+export function schemaForFile(file) {
+  const m = /^([a-z-]+?)(?:\.([a-z_-]+))?\.json$/.exec(path.basename(String(file)));
+  if (!m || !CLI_SCHEMAS[m[1]]) return { name: null, role: null };
+  return { name: m[1], role: m[2] || null };
+}
+
+/**
+ * `measured_state` at the architectural tier: present and non-empty. Each row's grain, window and
+ * source are the schema's `required`, so presence is the half only this check sees.
+ */
+export function groundMeasuredState(data, tier, failures = []) {
+  if (!data || typeof data !== "object" || tier !== "architectural") return failures;
+  if (!Array.isArray(data.measured_state) || data.measured_state.length === 0) {
+    failures.push(
+      "spec.json measured_state is absent or empty at the architectural tier; every number the spec asserts belongs there with its grain, window and source",
+    );
+  }
+  return failures;
+}
+
+/** @returns {{usage: string|null, schema: string|null, failures: string[], warnings: string[]}} */
+export function validateFile(file, { schema, tier } = {}) {
+  const failures = [];
+  const warnings = [];
+  const inferred = typeof file === "string" ? schemaForFile(file) : { name: null, role: null };
+  const name = typeof schema === "string" ? schema : inferred.name;
+  if (!name || !CLI_SCHEMAS[name]) {
+    const what = name ? `named "${name}"` : `inferable from "${file}"`;
+    return { usage: `no schema ${what}; pass --schema, one of ${Object.keys(CLI_SCHEMAS).join(", ")}`, schema: null, failures, warnings };
+  }
+  if (tier !== undefined && tier !== null && !["trivial", "standard", "architectural"].includes(tier)) {
+    return { usage: `unknown tier "${tier}"`, schema: name, failures, warnings };
+  }
+  let data;
+  try {
+    data = loadJson(file);
+  } catch (e) {
+    failures.push(`${file}: not readable as JSON (${e.message})`);
+    return { usage: null, schema: name, failures, warnings };
+  }
+  const [schemaFile, shardPtr, wholePtr] = CLI_SCHEMAS[name];
+  const shard = inferred.name === name && inferred.role !== null;
+  let ptr = shard ? shardPtr : wholePtr;
+  if (shard && name === "review" && inferred.role === "secops") ptr = "#/properties/secops";
+  let root;
+  try {
+    root = loadJson(path.join(SCHEMA_DIR, schemaFile));
+  } catch (e) {
+    failures.push(`schemas/${schemaFile}: not readable (${e.message}); nothing was validated`);
+    return { usage: null, schema: name, failures, warnings };
+  }
+  for (const e of validate(data, schemaAt(root, ptr), root, "")) failures.push(e);
+  if (name === "spec" && data && typeof data === "object") {
+    const effective = tier ? { ...data, risk_tier: tier } : data;
+    groundOpenQuestions(effective, failures);
+    groundFalsifiability(effective, failures);
+    groundMeasuredState(effective, effective.risk_tier, failures);
+    groundSpecSize(effective, warnings);
+  }
+  return { usage: null, schema: name, failures, warnings };
+}
+
+function cliMain(argv) {
+  const a = {};
+  for (let i = 0; i < argv.length; i++) {
+    const k = argv[i];
+    if (k === "--file" || k === "--schema" || k === "--tier") {
+      a[k.slice(2)] = argv[++i];
+    } else {
+      process.stderr.write(`validate-pipeline-artifact: unknown argument ${k}\n`);
+      return 1;
+    }
+  }
+  if (!a.file) {
+    process.stderr.write("usage: node validate-pipeline-artifact.mjs --file <artifact> [--schema <name>] [--tier <tier>]\n");
+    return 1;
+  }
+  const r = validateFile(a.file, { schema: a.schema, tier: a.tier });
+  if (r.usage) {
+    process.stderr.write(`validate-pipeline-artifact: ${r.usage}\n`);
+    return 1;
+  }
+  for (const w of r.warnings) process.stderr.write(`WARNING: ${w}\n`);
+  if (r.failures.length === 0) {
+    process.stdout.write(`VALID: ${a.file} (${r.schema})\n`);
+    return 0;
+  }
+  process.stdout.write(`INVALID: ${a.file} (${r.schema})\n- ${r.failures.join("\n- ")}\n`);
+  return 2;
+}
+
 // ---- main -------------------------------------------------------------------
 
 async function main() {
@@ -2472,7 +2590,10 @@ async function main() {
 const isMain = isMainScript("validate-pipeline-artifact.mjs");
 
 if (isMain) {
-  if (process.argv.includes("--self-test")) {
+  if (process.argv.includes("--file")) {
+    // CLI mode is not the hook: it is not fail-open, and its exit status is the answer.
+    process.exit(cliMain(process.argv.slice(2)));
+  } else if (process.argv.includes("--self-test")) {
     // Self-test surfaces failures loudly (exit 1); it is NOT under the fail-open catch.
     selfTest();
   } else {
