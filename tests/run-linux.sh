@@ -41,6 +41,7 @@ BASE_IMAGE="node:22-bookworm"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 REPO_ROOT="$(cd "$HERE/.." && pwd -P)"
 COMMON_DIR="$(git -C "$REPO_ROOT" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
+GIT_DIR_ABS="$(git -C "$REPO_ROOT" rev-parse --absolute-git-dir 2>/dev/null || true)"
 
 if ! command -v docker >/dev/null 2>&1; then
   echo "run-linux.sh: docker is not on PATH; nothing was run" >&2
@@ -58,11 +59,34 @@ else
   fi
 fi
 
+# ON WINDOWS (Git Bash), git prints drive paths (C:/Users/...) and Docker's -v cannot parse a
+# drive path on BOTH sides of the colon ("too many colons"). The container side is therefore the
+# POSIX spelling bash already uses (/c/Users/...), the host side the drive spelling (cygpath -m),
+# and MSYS path conversion is switched off for the docker call so neither is rewritten. A
+# worktree's `.git` FILE still holds a drive-path `gitdir:` pointer no Linux git can follow, so a
+# one-line replacement pointing at the POSIX spelling of the same gitdir is mounted over it,
+# read-only. The host file is never edited. The worktree's `commondir` is relative, so git reaches
+# the mounted common dir through it unchanged.
+HOSTPATH() { printf '%s' "$1"; }
+POINTER_DIR=""
+if [[ "$(uname -s 2>/dev/null)" == MINGW* || "$(uname -s 2>/dev/null)" == MSYS* ]] && command -v cygpath >/dev/null 2>&1; then
+  export MSYS_NO_PATHCONV=1
+  HOSTPATH() { cygpath -m "$1"; }
+  [[ -n "$COMMON_DIR" ]] && COMMON_DIR="$(cygpath -u "$COMMON_DIR")"
+fi
+trap '[[ -n "$POINTER_DIR" && -d "$POINTER_DIR" ]] && rm -r "$POINTER_DIR"' EXIT
+
 MOUNTS=(-v "$REPO_ROOT:$REPO_ROOT")
+[[ "$(HOSTPATH /)" == "/" ]] || MOUNTS=(-v "$(HOSTPATH "$REPO_ROOT"):$REPO_ROOT")
 # A worktree's common dir lives outside the checkout; a plain repo's is $REPO_ROOT/.git, already
 # inside the first mount, and mounting it twice would shadow it.
 if [[ -n "$COMMON_DIR" && "$COMMON_DIR" != "$REPO_ROOT/.git" ]]; then
-  MOUNTS+=(-v "$COMMON_DIR:$COMMON_DIR:ro")
+  MOUNTS+=(-v "$(HOSTPATH "$COMMON_DIR"):$COMMON_DIR:ro")
+  if [[ -f "$REPO_ROOT/.git" && -n "$GIT_DIR_ABS" && "$(HOSTPATH /)" != "/" ]]; then
+    POINTER_DIR="$(mktemp -d)"
+    printf 'gitdir: %s\n' "$(cygpath -u "$GIT_DIR_ABS")" > "$POINTER_DIR/git"
+    MOUNTS+=(-v "$(HOSTPATH "$POINTER_DIR/git"):$REPO_ROOT/.git:ro")
+  fi
 fi
 
 # Inside the container: install the two distro packages only if the image lacks them (the built
@@ -87,7 +111,7 @@ for t in "$@"; do
 done
 exit $rc
 '
-exec docker run --rm "${MOUNTS[@]}" -w "$REPO_ROOT" \
+docker run --rm "${MOUNTS[@]}" -w "$REPO_ROOT" \
   -e PIPELINE_TESTS_REQUIRE_CAPABILITIES=1 \
   -e "PIPELINE_TESTS_FULL=${PIPELINE_TESTS_FULL:-}" \
   -e "PIPELINE_TESTS_JOBS=${PIPELINE_TESTS_JOBS:-}" \

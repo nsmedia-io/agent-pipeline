@@ -86,9 +86,21 @@ _cleanup_outdir() {
   esac
   return 0
 }
+# On INT/TERM the suites still running are stopped BEFORE their output dir goes: a background suite
+# left running would keep writing into a removed dir and outlive the run that started it. A running
+# suite's pid is in <t>.pid (the suite) and <t>.jpid (a parallel job's subshell) until <t>.res lands.
+_kill_running() {
+  local f
+  for f in "$OUTDIR"/*.pid "$OUTDIR"/*.jpid; do
+    [[ -f "$f" ]] || continue
+    [[ -f "${f%.*}.res" ]] && continue
+    kill "$(cat "$f" 2>/dev/null)" 2>/dev/null
+  done
+  return 0
+}
 trap '_cleanup_outdir' EXIT
-trap '_cleanup_outdir; exit 130' INT
-trap '_cleanup_outdir; exit 143' TERM
+trap '_kill_running; _cleanup_outdir; exit 130' INT
+trap '_kill_running; _cleanup_outdir; exit 143' TERM
 
 FAILED=0
 # A newline-delimited STRING and not an array, matching harness.sh's TMP_REGISTRY for the same
@@ -108,11 +120,27 @@ _run_suite() {
   local t="$1" t0 rc dt
   printf '\n\033[1m== %s ==\033[0m\n' "$t"
   t0="$(_now_ds)"
-  bash "$t" </dev/null
+  # In the background and waited on, so an INT/TERM trap in this shell fires while it runs.
+  bash "$t" </dev/null &
+  printf '%s\n' "$!" > "$OUTDIR/$t.pid"
+  wait "$!"
   rc=$?
   dt=$(( $(_now_ds) - t0 ))
   printf 'elapsed %s s  %s\n' "$(_fmt_ds "$dt")" "$t"
   printf '%s %s\n' "$rc" "$dt" > "$OUTDIR/$t.res.tmp" && mv "$OUTDIR/$t.res.tmp" "$OUTDIR/$t.res"
+}
+
+# _read_res <t> -> RES_RC and RES_DT. A result file that is missing, unreadable or malformed is a
+# FAILED suite (rc 1), never the previous suite's code.
+_read_res() {
+  RES_RC=1; RES_DT=0
+  local rc="" dt=""
+  if [[ -f "$OUTDIR/$1.res" ]] && read -r rc dt < "$OUTDIR/$1.res"; then
+    case "$rc" in ''|*[!0-9]*) ;; *) RES_RC="$rc" ;; esac
+    case "$dt" in ''|*[!0-9]*) ;; *) RES_DT="$dt" ;; esac
+  else
+    printf 'run.sh: %s left no result file; counted as FAILED\n' "$1"
+  fi
 }
 
 _tally() {  # <t> <rc> <ds>
@@ -125,15 +153,19 @@ _tally() {  # <t> <rc> <ds>
 "
 }
 
-# _reap: print and tally every running suite that has finished; leaves the rest in RUNNING.
+# _reap: print and tally every running suite that has finished; leaves the rest in RUNNING. A job
+# whose subshell has EXITED without writing a result (killed, or the write failed) is reaped as a
+# failure instead of being waited on forever. _read_res looks at the result again after the
+# liveness probe, so a job that finished between the two checks is read, not failed.
 _reap() {
-  local t still="" n=0 rc dt
+  local t still="" n=0 jpid
   while IFS= read -r t; do
     [[ -n "$t" ]] || continue
-    if [[ -f "$OUTDIR/$t.res" ]]; then
-      cat "$OUTDIR/$t.out"
-      read -r rc dt < "$OUTDIR/$t.res"
-      _tally "$t" "$rc" "$dt"
+    jpid="$(cat "$OUTDIR/$t.jpid" 2>/dev/null)"
+    if [[ -f "$OUTDIR/$t.res" ]] || ! kill -0 "${jpid:-0}" 2>/dev/null; then
+      cat "$OUTDIR/$t.out" 2>/dev/null
+      _read_res "$t"
+      _tally "$t" "$RES_RC" "$RES_DT"
     else
       still="${still}${t}
 "
@@ -167,6 +199,7 @@ while IFS= read -r t; do
     _reap
   done
   _run_suite "$t" > "$OUTDIR/$t.out" 2>&1 &
+  printf '%s\n' "$!" > "$OUTDIR/$t.jpid"
   RUNNING="${RUNNING}${t}
 "
   N_RUNNING=$((N_RUNNING + 1))
@@ -180,8 +213,8 @@ wait
 while IFS= read -r t; do
   [[ -n "$t" ]] || continue
   _run_suite "$t"
-  read -r rc dt < "$OUTDIR/$t.res"
-  _tally "$t" "$rc" "$dt"
+  _read_res "$t"
+  _tally "$t" "$RES_RC" "$RES_DT"
 done <<< "$SERIAL"
 
 printf '\nSuite wall time, slowest first (run total %s s, mode=%s, jobs=%s):\n' \
