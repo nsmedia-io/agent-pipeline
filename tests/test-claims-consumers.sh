@@ -7,7 +7,7 @@
 # WHY THESE LIVE IN THEIR OWN FILE. Every assertion here is about a site the #30 diff changes
 # INDIRECTLY. test-issue17-integration.sh:963 and :966-971 are cross-file consumers of a label
 # in the GATE suite, in a file a #16-scoped diff would never open; pipeline.md:534 and
-# README.md's Upgrading section are prose readers that go stale rather than wrong. A diff-scoped
+# CHANGELOG.md's upgrade bullets are prose readers that go stale rather than wrong. A diff-scoped
 # audit is structurally blind to all four: the breakage lives in the unchanged dependent, so it
 # never appears in `git diff origin/main...HEAD`.
 #
@@ -173,49 +173,21 @@ assert_contains "AC23: it names the executable-down-region halt" "$HALT_TEXT" "e
 assert_contains "AC23: and the unterminated-block-comment halt" "$HALT_TEXT" "unterminated block comment"
 assert_contains "AC23: and the empty-down halt that commit B adds" "$HALT_TEXT" "empty down"
 
-suite "AC29: the Upgrading section's count word equals the bullets beneath it"
+suite "AC29: the changelog carries the upgrade bullets, and the README points at it"
 
-# A stale count above the bullets is the SAME claim-more-than-you-measured defect, in the very
-# document that announces this fix. The count is asserted, not just the presence of the two new
-# bullets: presence alone cannot catch a stale count.
-UPGRADE=$(awk '/^### Upgrading$/{f=1} f{print} /^Four more customization points:/{if(f)exit}' "$README")
+# The Upgrading list moved out of README.md into CHANGELOG.md, grouped per release. The lead
+# paragraph used to spell the bullet COUNT in words ("Forty-two changes ..."), and this block
+# pinned that word to the bullet count. That was a per-release count pin: every release had to
+# re-spell a number, and the parse needed its own anti-vacuity machinery to stay honest. The
+# changelog states no count, so there is no count claim left to check. What stays is a FLOOR on
+# the population and the content pins below, which check that real instructions exist.
+CHANGELOG="$PLUGIN_DIR/CHANGELOG.md"
+UPGRADE=$(cat "$CHANGELOG" 2>/dev/null)
 BULLETS=$(printf '%s\n' "$UPGRADE" | grep -cE '^[0-9]+\. ' | tr -d ' ')
-assert_eq "AC29 CONTROL: the Upgrading section was found and has numbered bullets" \
+assert_eq "AC29 CONTROL: CHANGELOG.md was found and has numbered bullets" \
   "$([[ "${BULLETS:-0}" -ge 3 ]] && echo ok || echo "bullets=$BULLETS")" "ok"
-# There are TWO count words in that lead paragraph ("Three changes ... there are three things
-# to know"). Both must move, or the section contradicts itself one sentence later.
-#
-# THIS CHECK WAS VACUOUS FOR EVERY RELEASE ABOVE SEVEN, and that is why it is written this way
-# now. The vocabulary was `one|two|three|four|five|six|seven` and the bullet->word map was a
-# ten-element array, so once the section passed nine, `WORD_FOR` returned "?" and the scan
-# matched no word at all: an empty set minus "?" is empty, and the assertion reported green over
-# a population of ZERO. Measured on the shipped 0.27.0 README -- 20 bullets, lead word "Twenty",
-# words matched: none. It only reddened when a later count word happened to CONTAIN a vocabulary
-# token ("Twenty-five" -> "five"), which is a tripwire nobody designed.
-#
-# The parse is compound-aware and returns NUMBERS, so the comparison is against $BULLETS itself
-# rather than against a spelling. The anti-vacuity control below is the half that was missing:
-# a lead paragraph the parser reads NOTHING out of must be a failure, not a pass.
-#
-# AND THE WINDOW IS DERIVED, NOT COUNTED. It was `sed -n '1,4p'`, and a hand-picked line count
-# is the same outgrowable bound the vocabulary was: measured on this file's own README, moving
-# the second sentence into its own paragraph puts it on section line 5, where a stale `twelve`
-# under 25 bullets passed green while the first word still satisfied the anti-vacuity control
-# above. The lead is now everything before the first numbered bullet, so the assertion's "every
-# count word in the lead paragraph" is the population it actually scans.
-LEAD=$(printf '%s\n' "$UPGRADE" | awk '/^[0-9]+\. /{exit} {print}')
-COUNT_NUMS=$(printf '%s\n' "$LEAD" | tr '\n' ' ' | xargs -0 node "$TESTS_DIR/fixtures/count-words.mjs")
-assert_eq "AC29 CONTROL: the lead paragraph actually yields a spelled count (an unparsed lead is not a pass)" \
-  "$([[ -n "$COUNT_NUMS" ]] && echo found || echo "NOTHING PARSED: the assertion below would range over an empty set")" "found"
-# The vocabulary is finite, so the check must refuse an input it cannot evaluate rather than
-# report a mismatch that reads as a stale README. Above the parser's range "one hundred" reduces
-# to 1, which is a wrong number wearing a parse's authority. The bound is asked of the parser,
-# so extending its table is what moves this.
-WORD_MAX=$(node "$TESTS_DIR/fixtures/count-words.mjs" --max)
-assert_eq "AC29 CONTROL: the bullet count is inside the count-word vocabulary's range" \
-  "$([[ "${BULLETS:-0}" -le "${WORD_MAX:-0}" ]] && echo ok || echo "bullets=$BULLETS exceeds the largest spellable count ($WORD_MAX): extend count-words.mjs")" "ok"
-assert_eq "AC29: every count word in the lead paragraph matches the bullet count" \
-  "$COUNT_NUMS" "$BULLETS"
+assert_eq "AC29: the README's Upgrading section points at CHANGELOG.md" \
+  "$(awk '/^### Upgrading$/{f=1;next} f&&/^#/{exit} f' "$README" | grep -c 'CHANGELOG.md' | tr -d ' ' | sed 's/^[1-9][0-9]*$/points/')" "points"
 # The two new bullets, asserted INDEPENDENTLY of the count so each can redden alone.
 assert_contains "AC29: a bullet names the gate's new refusal" "$UPGRADE" "executable SQL"
 assert_contains "AC29: a bullet names the telemetry relabel" "$UPGRADE" "phase_elapsed_ms"

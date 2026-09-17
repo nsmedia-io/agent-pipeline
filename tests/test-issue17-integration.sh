@@ -1020,6 +1020,9 @@ suite "AC42: the upgrade note exists AND names all three behaviour changes"
 
 README="$PLUGIN_DIR/README.md"
 assert_eq "there is an Upgrading section" "$(grep -c '^### Upgrading' "$README" | tr -d ' ')" "1"
+# The upgrade bullets moved from the README's Upgrading section into CHANGELOG.md; the README
+# keeps the section as a pointer. The rows below read the changelog, where the prose now lives.
+README="$PLUGIN_DIR/CHANGELOG.md"
 # Each of the three is asserted SEPARATELY: a single "the section exists" check passes a stub.
 assert_contains "(1) the widened preset defaults and the un-narrowable tripwire" "$(cat "$README")" \
   "the mis-tier tripwire can no longer be narrowed by config"
