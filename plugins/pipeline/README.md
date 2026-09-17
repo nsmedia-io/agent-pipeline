@@ -70,6 +70,7 @@ Copy `pipeline.config.example.json` to `pipeline.config.json` at your project ro
 | `deferralDir` | The committed ledger directory, read only when `deferralTracker` is `directory` | `knowledge/deferred` |
 | `dispatchModels` | Per-role model overrides for the orchestrator's dispatches, allowlisted to `opus`/`sonnet`/`haiku`. `secops` and `qa` are pinned to opus in code and ignore this key | the built-in table in `scripts/dispatch-model.mjs` (DBA drops to sonnet on a standard or trivial panel) |
 | `dispatchEfforts` | Per-role effort overrides (`low`..`max`) for the Phase 4 panel, which dispatches through the Workflow tool. Every role is reachable, both directions | the tiered table in `scripts/dispatch-effort.mjs` (SecOps xhigh/high/medium and QA high/medium/medium by tier) |
+| `usageTelemetry` | Off by default. `{ "enabled": true }` appends one line per subagent dispatch (issue, phase, role, tier, cost class, model, effort, and the routing rule that chose them; never prompt text) to a JSONL dispatch log, which `scripts/usage-report.mjs` joins with token usage. Optional `usageTelemetry.dir` moves the log. `CLAUDE_PIPELINE_USAGE_TELEMETRY=1` or `0` overrides it for one session. See "Usage telemetry" below | off: no dispatch log is written (when on, the log is dispatch.jsonl under the git common dir's agent-pipeline-telemetry directory) |
 | `securitySurfaceGlobs` | Additive globs that re-seat SecOps on a Phase 4 DELTA round when a fix commit touches them (auth, session, crypto, secrets, webhooks, policies). Widen-only | the built-in set in `scripts/security-surface.mjs` |
 | `architecturalTriggers` | Paths/domains/keywords that force the architectural tier. ADVISORY: no script reads this key; the BA agent reads it as prose at intake (agents/ba.md duty 6), and `architecturalTriggers.keywords` in particular is a hint to that judgment, never a mechanical trigger | pipeline.config.json, the compliance domain, and the concrete security/data triggers in agents/ba.md duty 6 |
 | `x` | The PROJECT-OWNED namespace: an object for your own settings (a wrapper script's knobs, team notes). The plugin never reads inside it and the config doctor never flags it. A top-level key starting with `_` is exempt too. Any other unknown key is reported as read by nothing | absent |
@@ -84,6 +85,29 @@ Four more customization points:
 - **Model aliases and the dispatch routing table.** Every per-invocation `model:` override comes from ONE table, `scripts/dispatch-model.mjs`, which the orchestrator asks as `node dispatch-model.mjs <role> <risk_tier> <phase> [--site <label>]`; the dispatch emits `model:` only when that call exits 0 and prints exactly one token, and otherwise omits the key so the agent's frontmatter governs. Override a role with `dispatchModels` in `pipeline.config.json` (allowlisted to `opus`/`sonnet`/`haiku`). SecOps and QA are pinned in code, emit no override at any tier, and ignore that key: they hold the veto and the binding test verdict, and a cheap lens that misses returns APPROVE while nothing escalates. The values themselves are deliberate floating aliases, resolved by the harness to the latest model of each tier, not pinned full model IDs, so the pipeline rides model upgrades without a rename pass. Re-pin only on a specific regression.
 - **Agent constraint checklists.** `agents/dba.md`, `agents/devops.md`, and `agents/secops.md` each carry a marker-delimited `STANDARD-TIER CONSTRAINTS` block that the orchestrator injects into the Dev thread. Edit the checklist inside the markers to match your stack. Keep the marker comments intact.
 - **MCP tools.** Each agent's `tools:` frontmatter lists only the universal tools. Add your project's MCP tools (database, docs, browser) to the agents that need them.
+
+## Usage telemetry (token use per model, effort, role, phase and issue)
+
+Off by default. Two halves, joined by `scripts/usage-report.mjs`:
+
+1. **The dispatch log** (this plugin). Set `"usageTelemetry": { "enabled": true }` in `pipeline.config.json`, or export `CLAUDE_PIPELINE_USAGE_TELEMETRY=1`. A PreToolUse hook on the Agent, Task and Workflow tools (`hooks/dispatch-log.sh`) appends one JSONL line per dispatch: timestamp, session id, tool_use_id, issue, phase, role, tier, cost class, model, effort, the rule in `dispatch-model.mjs` or `dispatch-effort.mjs` that chose each (or the frontmatter file), and the session transcript path. No prompt, description or tool arguments. The log lives in the git common dir (never committed), shared by every worktree. A dispatch is never blocked; if the log cannot be written while telemetry is on, the hook says so on the systemMessage channel and in the disarm log (the 0.43.0 rule).
+2. **Token usage** (Claude Code). Either source works:
+   - **No collector: session transcripts.** Claude Code already writes `~/.claude/projects/<project>/<session>.jsonl` and a file per subagent, carrying each message's model and token counts. With no flags the report reads the transcripts the dispatch log names. Transcripts carry no cost and no effort: pass `--prices <file>` (USD per million tokens per model or family, e.g. `{"opus": {"input": 0, "output": 0, "cache_read": 0, "cache_write": 0}}` with your current rates) for cost; effort comes from the dispatch log.
+   - **OpenTelemetry to local files.** Claude Code exports `claude_code.token.usage` and `claude_code.cost.usage` metrics and a `claude_code.api_request` log event carrying tokens, `cost_usd`, `model`, `effort` and `session.id`. It has no file exporter of its own (`console` writes to the terminal), so run the OpenTelemetry Collector (contrib distribution) with `docs/otel-collector-file.yaml`, which receives OTLP on localhost and writes append-only JSON lines into the telemetry directory. Then set, in your shell or in `settings.json` under `env`:
+
+     ```bash
+     export CLAUDE_CODE_ENABLE_TELEMETRY=1
+     export OTEL_METRICS_EXPORTER=otlp
+     export OTEL_LOGS_EXPORTER=otlp
+     export OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+     export OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4317
+     export OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE=delta
+     # leave OTEL_LOG_USER_PROMPTS, OTEL_LOG_TOOL_DETAILS and OTEL_LOG_RAW_API_BODIES unset
+     ```
+
+     A collector that is not running costs the session nothing: Claude Code's exporter drops what it cannot send, the dispatch log does not depend on it, and the report falls back to transcripts when the telemetry directory holds no export files. Nothing here probes the collector.
+
+Report: `node "${CLAUDE_PLUGIN_ROOT}/scripts/usage-report.mjs"` from the project root, or with `--transcripts <dir>`, `--otel <dir>`, `--dispatch-log <file>`, `--issue <n>`, `--session <id>`, `--since`/`--until`, `--window-hours`, `--json`. It prints tokens (input, output, cache read, cache write) and cost by model, effort, model and effort, role, phase, issue, day, day by model and effort, and run, plus how much of the total it attributed to a role and phase and how much it did not. The header of `scripts/usage-report.mjs` states each join rule. The JSONL files are plain enough for DuckDB (`read_json_auto`) as well.
 
 ## The gates (portable disciplines, kept from the original)
 
