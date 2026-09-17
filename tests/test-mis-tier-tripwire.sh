@@ -6,8 +6,10 @@
 # That suite proves the PREDICATE is right. This one proves the predicate is WIRED right, and
 # the two are different failures. The production defect this issue closes is not a wrong
 # regex in a module; it is a correct decision that the shell around it discards. So every case
-# below EXTRACTS the bash block the orchestrator actually executes from commands/pipeline.md
-# and RUNS it. A hand-copied restatement of that block would be a restatement of the contract
+# below EXTRACTS the bash block the orchestrator actually executes from
+# orchestrator/phase-3-4-gate.md and RUNS it. Since #164 that block is one unpiped call to
+# scripts/phase3-exit.mjs plus a case on its exit status; the git diff, the surface-module
+# evaluation and the halt lines live in the script, and this suite still observes them end to end. A hand-copied restatement of that block would be a restatement of the contract
 # rather than an observation of it, and would track whoever last remembered to update it.
 #
 # THE FAIL DIRECTION IS THE POINT (spec R4a / C1). The tripwire fails CLOSED: module absent,
@@ -19,8 +21,8 @@
 #
 # WHAT DEV MUST PROVIDE FOR THIS SUITE TO GO GREEN
 # ------------------------------------------------
-# The `### Mis-tier tripwire` section of commands/pipeline.md must carry a self-contained bash
-# block that, given WORKTREE_PATH, RISK_TIER and CLAUDE_PLUGIN_ROOT in the environment:
+# The `## Phase 3 to 4 transition` section of orchestrator/phase-3-4-gate.md must carry a bash
+# block that, given WORKTREE_PATH, ARTIFACT_DIR (a standard-tier spec) and CLAUDE_PLUGIN_ROOT:
 #   * prints a line containing MIS-TIER when the diff carries a data-layer path;
 #   * prints a line containing the literal 3-impl-tripwire-indeterminate when the surface
 #     module cannot be evaluated (absent / throws / non-zero exit), for ANY diff;
@@ -55,12 +57,12 @@ DL_BASENAME="data-layer-surface.mjs"
 [[ -n "$DL_MODULE" ]] && DL_BASENAME="$(basename "$DL_MODULE")"
 
 # ---- extract the block the orchestrator really runs -------------------------
-# All fenced bash blocks under `### Mis-tier tripwire`, up to the next heading, concatenated.
+# All fenced bash blocks under `## Phase 3 to 4 transition`, up to the next heading, concatenated.
 # Concatenated rather than "the first one" so a Dev who splits the snippet across two fences
 # is not failed for a formatting choice.
 TRIPWIRE_BLOCK="$TEMP_PROJECT/tripwire-block.sh"
 awk '
-  /^### Mis-tier tripwire/ { inSec=1; next }
+  /^## Phase 3 to 4 transition/ { inSec=1; next }
   inSec && /^##+ / { inSec=0 }
   inSec && /^```bash$/ { inFence=1; next }
   inSec && inFence && /^```$/ { inFence=0; next }
@@ -72,7 +74,7 @@ suite "the tripwire block is extractable and non-empty (the harness's own precon
 # If this fails, every behavioral case below is measuring the empty string, and a suite that
 # quietly measures nothing is the failure this repo is built around. Asserted first, and
 # loudly, rather than discovered as forty confusing downstream failures.
-assert_eq "a bash block exists under '### Mis-tier tripwire' in commands/pipeline.md" \
+assert_eq "a bash block exists under '## Phase 3 to 4 transition' in orchestrator/phase-3-4-gate.md" \
   "$([[ -s "$TRIPWIRE_BLOCK" ]] && echo yes || echo no)" "yes"
 assert_eq "the extracted block invokes git against the worktree under review" \
   "$(grep -c 'WORKTREE_PATH' "$TRIPWIRE_BLOCK" | tr -d ' ')" "1"
@@ -130,17 +132,29 @@ cat > "$ROOT_EXITS/scripts/$DL_BASENAME" <<'EOF'
 process.exit(7);
 EOF
 
+# seed_artifacts <repo>: the Phase 3 artifacts the same call gates on, schema-valid and covering
+# their one criterion, so both pre-Phase-4 gates PASS and every verdict below is the tripwire's.
+# Untracked, so they are in neither the diff nor the tracked tree.
+seed_artifacts() {
+  local d="$1/.pipeline/17"
+  mkdir -p "$d"
+  printf '%s' '{"issue_number":17,"risk_tier":"standard","acceptance_criteria":["AC1: the thing works"]}' > "$d/spec.json"
+  printf '%s' '{"issue_number":17,"branch":"b","commits":[{"sha":"abc1234","message":"m","files_changed":["lib/notes.txt"]}],"checks_passed":{"typecheck":true,"test":true,"lint":true},"completed_at":"2026-01-01T00:00:00Z","requirement_checks":[{"requirement_index":0,"requirement_text":"AC1 the thing works","status":"PASS","notes":"fixture"}]}' > "$d/impl-report.json"
+}
+
 # run_tripwire <plugin-root> <repo> -- returns the block's combined output.
 # CLAUDE_PROJECT_DIR is the fixture repo, so the block reads THAT repo's pipeline.config.json
 # and never this checkout's.
 run_tripwire() {
   local root="$1" repo="$2"
+  seed_artifacts "$repo"
   ( cd "$repo" \
       && CLAUDE_PLUGIN_ROOT="$root" \
          WORKTREE_PATH="$repo" \
          CLAUDE_PROJECT_DIR="$repo" \
          RISK_TIER="standard" \
          ARTIFACT_DIR="$repo/.pipeline/17" \
+         PIPELINE_BASE="$repo/.pipeline" \
          bash "$TRIPWIRE_BLOCK" 2>&1 )
 }
 
@@ -412,6 +426,9 @@ for cand in $(grep -oE 'scripts/[a-zA-Z0-9_-]+\.mjs' "$PIPELINE_MD" | sort -u); 
     # Review convergence: the round budget; counts rounds, resolves no model. See the twin in
     # test-dispatch-model-resolver.sh.
     round-budget.mjs) continue ;;
+    # #164: the Phase 2 merge, the Phase 3 exit and the tier floor. None resolves a model or
+    # takes a (role, tier, phase) triple. Excluded by NAME, like the rest.
+    merge-review.mjs|phase3-exit.mjs|tier-floor.mjs) continue ;;
   esac
   CANDIDATES_REL+=("$cand")
 done
@@ -521,10 +538,11 @@ if optional_tool zsh; then RUNNERS+=(zsh); ZSH_PRESENT=yes; fi
 # itself, in a shell every checkout has, so this dimension is never skipped for want of zsh.
 run_tripwire_in() {  # $1 = runner, $2 = plugin root, $3 = repo, $4 = block file (default: the extracted one)
   local body=". \"${4:-$TRIPWIRE_BLOCK}\""
+  seed_artifacts "$3"
   (
     cd "$3" || return 1
     export CLAUDE_PLUGIN_ROOT="$2" WORKTREE_PATH="$3" CLAUDE_PROJECT_DIR="$3" \
-           RISK_TIER="standard" ARTIFACT_DIR="$3/.pipeline/17"
+           RISK_TIER="standard" ARTIFACT_DIR="$3/.pipeline/17" PIPELINE_BASE="$3/.pipeline"
     case "$1" in
       bash)         bash -c "$body" ;;
       bash-nosplit) bash -c "IFS=; $body" ;;
@@ -627,8 +645,11 @@ assert_contains "and the git failure is named with its own exit status, distinct
   "3-impl-tripwire-indeterminate: git diff --name-only -z exited"
 # The two indeterminate causes stay DISTINGUISHABLE: they need different operator responses
 # (fix your worktree, versus fix your plugin root).
-assert_contains "a stale plugin root names the module instead" \
+assert_contains "a stale plugin root (no script at all) is named as the call not reaching a verdict" \
   "$(run_tripwire_in bash "$ROOT_STALE" "$REPO_DBMIG")" \
+  "phase3-exit.mjs did not reach a verdict"
+assert_contains "and an absent surface module beside a present script names the module" \
+  "$(run_tripwire_in bash "$ROOT_ABSENT" "$REPO_DBMIG")" \
   "the data-layer surface module under"
 # NON-ZERO CONTROL for the pair above: the same block, same runner, on a healthy repo and root,
 # says neither -- so "names the git failure" is a verdict rather than a string that always appears.

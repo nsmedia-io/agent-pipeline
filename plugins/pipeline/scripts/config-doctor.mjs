@@ -126,6 +126,14 @@ const CODE_KEYS = {
     degrades:
       'the deferral ledger routes to `gh issue create` whatever your project uses. Legal values are "github", "gitlab" and "directory"; anything else is IGNORED and github applies, so a project on neither tracker records deferrals into a command it does not have and the pre-Phase-4 gate refuses every tracker_ref it writes. Set "directory" to keep the ledger in the repository instead.',
   },
+  architecturalTriggers: {
+    type: "object",
+    reader:
+      "scripts/tier-floor.mjs (paths and domains UNION the built-in floor; keywords printed as ADVISORY lines, never a trigger), and scripts/phase3-exit.mjs (paths against the Phase 3 diff)",
+    fallback: "the built-in floor: pipeline.config.json and the compliance domain",
+    degrades:
+      "nothing below the built-in floor: the key can only ADD triggers. A non-object value, a non-array sub-key or a non-string element is ignored, so a trigger you meant to add does not promote the tier.",
+  },
   deferralDir: {
     type: "string",
     reader: "scripts/deferral.mjs (directory mode only)",
@@ -135,14 +143,11 @@ const CODE_KEYS = {
   },
 };
 
-/** Keys consumed by AGENT JUDGMENT rather than by code. Valid, but no script enforces them. */
-const PROSE_KEYS = {
-  architecturalTriggers: {
-    type: "object",
-    reader:
-      "prose: agents/ba.md Phase 1 duty 6 (floor + config union) and commands/pipeline.md ### Risk-tiered orchestration depth (post-BA validation clause). ADVISORY: no script reads it; architecturalTriggers.keywords in particular is read only by the BA agent's judgment, so a keyword never forces a tier mechanically",
-  },
-};
+/**
+ * Keys consumed by AGENT JUDGMENT rather than by code. Empty since #164 moved architecturalTriggers
+ * into scripts/tier-floor.mjs; kept so a future judgment-only key has a table that says so.
+ */
+const PROSE_KEYS = {};
 
 /**
  * THE CONSUMER-OWNED NAMESPACE. A project that keeps its own settings in pipeline.config.json

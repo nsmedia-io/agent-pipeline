@@ -39,7 +39,7 @@
     "_paths_comment": "A diff touching this file is architectural, always. It governs whether the mis-tier tripwire fires, who is seated on the Phase 4 panel, and which model renders a binding verdict. Write access here already implies arbitrary command execution through checkCommand, so this is not a new trust boundary; it is closed because a narrowed glob is quiet and permanent and reads as a tuning change, where an RCE is immediate and loud.",
     "domains": ["compliance"],
     "_domains_comment": "The built-in floor is `compliance` plus the concrete security and data triggers in agents/ba.md duty 6 (migration, access policy, contract shape, new auth flow or authorization check, crypto, webhook verification, new external data intake, new retained data type). `data` and `security` as bare domains were removed from the floor in 0.40.0 because a feature that reads user data under existing auth was reaching the deep tier; add them back here if your risk profile wants that.",
-    "_keywords_comment": "ADVISORY. No script reads keywords; the BA agent reads them as prose at intake and weighs them, so a keyword match never forces the tier mechanically. paths and domains are read the same way, as a floor the agent unions onto its built-in list.",
+    "_keywords_comment": "ADVISORY. scripts/tier-floor.mjs prints a keyword match as a hint for the BA agent's judgement, so a keyword never forces the tier mechanically. paths and domains are unioned onto the built-in floor by the same script and DO force it.",
     "keywords": ["migration", "schema change", "auth", "encryption", "new external data source"]
   }
 }
