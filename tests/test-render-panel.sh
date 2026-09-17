@@ -276,6 +276,43 @@ for k in shared_once=true heading_once=true no_include_line=true no_digest=true 
   assert_contains "shared block in prefix: $k" "$INCL" "$k"
 done
 
+# A preamble checked out with CRLF line endings (a Windows checkout without the repo's
+# .gitattributes) still carries the INCLUDE line, now ending in "\r". The expansion must match it:
+# an unmatched line would reach assemble() raw and refuse the whole panel. The control plants a
+# trailing space on the same CRLF INCLUDE line, which the pattern must not match, and requires
+# that render to be REFUSED: crlf_renders=true is then a result the cell has watched go the
+# other way on CRLF bytes, not a render that could never fail.
+CRLF="$(MOD="$RENDER" ROOT="$PLUGIN_ROOT" SCRATCH="$TEMP_PROJECT/crlf-root" node --input-type=module -e '
+import { readFileSync, cpSync, writeFileSync } from "node:fs";
+const m = await import(process.env.MOD);
+const root = process.env.ROOT, scratch = process.env.SCRATCH;
+const rel = "/orchestrator/phase-4-panel-preamble.md";
+cpSync(root, scratch, { recursive: true });
+const crlf = readFileSync(root + rel, "utf8").replace(/\r?\n/g, "\r\n");
+writeFileSync(scratch + rel, crlf);
+const shared = m.includedText(readFileSync(root + "/shared/the-property-not-the-fix.md", "utf8"), "s");
+const render = (md) => {
+  try {
+    const out = m.assemble({
+      status: { issue_number: 5, risk_tier: "standard", panel_roles: ["qa"] },
+      worktree: "/w", head: "d".repeat(40), pluginRoot: "/p", lenses: m.loadLenses(root), preambleMarkdown: md,
+    });
+    return String(out.preamble.includes(shared));
+  } catch (e) { return /unexpanded INCLUDE/.test(e.message) ? "refused" : "threw: " + e.message; }
+};
+const md = m.readPreambleMarkdown(scratch);
+writeFileSync(scratch + rel, crlf.replace(/(<!-- INCLUDE shared\/[^>]*-->)\r\n/, "$1 \r\n"));
+console.log([
+  "crlf_expanded=" + (!m.extractPreamble(md).includes("<!-- INCLUDE") && md.includes(shared)),
+  "crlf_kept_after_include=" + md.includes(shared + "\r\n"),
+  "crlf_renders=" + render(md),
+  "control_trailing_space_refused=" + render(m.readPreambleMarkdown(scratch)),
+].join(" "));
+')"
+for k in crlf_expanded=true crlf_kept_after_include=true crlf_renders=true control_trailing_space_refused=refused; do
+  assert_contains "CRLF preamble: $k" "$CRLF" "$k"
+done
+
 suite "render-panel: FAILS CLOSED on every input it owns"
 
 render --status "$STATUS" --worktree "$TEMP_PROJECT/no-such-worktree" --plugin-root "$PLUGIN_ROOT"

@@ -19,7 +19,7 @@ The pipeline you sit in is exceptionally good at negative gates. Does it crash, 
 
 That is the gap you exist to close. **Not one existing gate asks whether the thing is good.** Design, your nearest neighbour, reviews token conformance, axe results and copy tone; its taste findings are explicitly advisory and it holds no veto, which is correct for taste-against-taste disputes and useless when the built thing is visibly worse than what was agreed.
 
-## The property, not the fix (identical for every pipeline agent)
+## The property, not the fix
 
 Read `${CLAUDE_PLUGIN_ROOT}/shared/the-property-not-the-fix.md` before you write any concern, property, remediation or `must_satisfy` in this dispatch, and hold each one to it. It is the one shared copy of this section for every pipeline agent and the Phase 4 panel preamble: what you may say about a fix (what must be TRUE of it and what that costs, never HOW), the observation a property must carry, the three things that stay allowed, and which agent stops refuse a violation.
 

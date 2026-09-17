@@ -61,9 +61,13 @@ export const PREAMBLE_FILE = path.join("orchestrator", "phase-4-panel-preamble.m
  * prefix at that point (#164 row 4). The shared file carries a short header for its human readers;
  * what is included runs from its first `## ` heading to the end of the file, trailing whitespace
  * dropped, so the included text is the same bytes on every render and the cached prefix stays
- * identical across roles, rounds and issues.
+ * identical across roles, rounds and issues. The line may end in CRLF (a checkout written with
+ * Windows line endings): it still expands, and the carriage return is kept after the included
+ * text so the line keeps the ending it had. A multiline `$` in JavaScript already stops before a
+ * lone "\r", so the explicit `\r?` states that tolerance in the pattern instead of leaning on it,
+ * and a later edit to `\n`-only anchoring cannot drop it silently (test-render-panel.sh pins it).
  */
-export const INCLUDE_RE = /^<!-- INCLUDE (shared\/[a-z0-9.-]+\.md) -->$/gm;
+export const INCLUDE_RE = /^<!-- INCLUDE (shared\/[a-z0-9.-]+\.md) -->(\r?)$/gm;
 
 /** The part of a shared file an INCLUDE line places: its first `## ` heading to end of file. */
 export function includedText(markdown, name) {
@@ -74,10 +78,10 @@ export function includedText(markdown, name) {
 
 /** Expand every INCLUDE line against a plugin root. Fails closed on a file it cannot read. */
 export function expandIncludes(markdown, pluginRoot) {
-  return markdown.replace(INCLUDE_RE, (_, rel) => {
+  return markdown.replace(INCLUDE_RE, (_, rel, cr) => {
     const file = path.join(pluginRoot, rel);
     if (!existsSync(file)) throw new Error(`${PREAMBLE_FILE} includes ${rel}, which does not exist under ${pluginRoot}`);
-    return includedText(readFileSync(file, "utf8"), rel);
+    return includedText(readFileSync(file, "utf8"), rel) + cr;
   });
 }
 
