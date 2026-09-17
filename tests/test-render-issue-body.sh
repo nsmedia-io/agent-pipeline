@@ -74,7 +74,8 @@ suite "render-issue-body: --compare and exit codes"
 
 BIN="$TEMP_PROJECT/bin"
 mkdir -p "$BIN"
-printf '#!/bin/sh\ncat "%s"\n' "$TEMP_PROJECT/b1.md" > "$BIN/gh"
+# cat by absolute path: the child PATH holds only the planted bin, so a bare cat is not found.
+printf '#!/bin/sh\nexec "%s" "%s"\n' "$(command -v cat)" "$TEMP_PROJECT/b1.md" > "$BIN/gh"
 chmod +x "$BIN/gh"
 ( cd "$TEMP_PROJECT" && PATH="$BIN" "$NODE_BIN" "$RIB" --spec "$SPEC" --compare 5 ) >"$TEMP_PROJECT/o" 2>&1
 assert_eq "--compare reads the planted gh body and finds the drift: exit 2" "$?" "2"
