@@ -24,7 +24,7 @@
  * refuse.
  */
 
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -39,11 +39,18 @@ const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "
 // WHY THE VOCABULARY IS READ RATHER THAN DECLARED. commands/pipeline.md is the file that WRITES
 // current_phase, and tests/test-status-schema-contract.sh already holds it to a both-directions
 // set comparison. A third private copy here is the drift this repo has already paid for once.
-// The extraction is the same one that suite performs.
+// The extraction is the same one that suite performs. The orchestrator prose is a core
+// (commands/pipeline.md) plus one file per phase under commands/pipeline/, and the literals are
+// spread across them, so every one is read. An unreadable core is still no vocabulary; an
+// unreadable phase directory is too, because a vocabulary read from the core alone would be
+// silently narrower than the one the orchestrator writes.
 function phase4Literals() {
   let src;
   try {
-    src = readFileSync(path.join(PLUGIN_ROOT, "commands", "pipeline.md"), "utf8");
+    const core = path.join(PLUGIN_ROOT, "commands", "pipeline.md");
+    const dir = path.join(PLUGIN_ROOT, "commands", "pipeline");
+    const parts = readdirSync(dir).filter((f) => f.endsWith(".md")).sort();
+    src = [core, ...parts.map((f) => path.join(dir, f))].map((f) => readFileSync(f, "utf8")).join("\n");
   } catch {
     return null;
   }
@@ -65,7 +72,7 @@ const NOTE = {
     "two or more in-flight runs and no honoured active-issue marker, so which run this call belongs to is undecidable",
   "record-has-no-phase": "the owning run records no current_phase",
   "phase-not-guarded": "the owning run is not at a Phase 4 phase",
-  "no-phase-vocabulary": "commands/pipeline.md could not be read, so the Phase 4 vocabulary is unknown",
+  "no-phase-vocabulary": "commands/pipeline.md or commands/pipeline/*.md could not be read, so the Phase 4 vocabulary is unknown",
 };
 
 function abstain(reason) {

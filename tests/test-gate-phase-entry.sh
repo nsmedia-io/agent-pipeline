@@ -1654,7 +1654,9 @@ suite "#43 the guard and pipeline.md must AGREE, in writing, about the 1-ba orde
 #
 # THIS STRING IS THE CONTRACT. Reword it here and in BOTH files, or not at all.
 ANCHOR_43='the 1-ba checkpoint is written before BA runs, so the risk_tier at 1-ba is whatever an EARLIER write left there, never the output of the BA dispatch this checkpoint precedes'
-PIPELINE_MD="$PLUGIN_ROOT/commands/pipeline.md"
+# The orchestrator prose is a core plus per-phase files; pins read all of it (harness.sh).
+pipeline_md_concat "$PLUGIN_ROOT" || exit 90
+PIPELINE_MD="$PIPELINE_MD_CONCAT"
 
 # block43 <file> <marker> -> the ONE comment block containing <marker>, comment leaders
 # stripped and whitespace squeezed; `<no-block>` when no block holds it. Co-location, not a

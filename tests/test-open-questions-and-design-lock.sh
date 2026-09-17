@@ -25,7 +25,9 @@
 require_node
 
 VALIDATOR="$SCRIPTS_DIR/validate-pipeline-artifact.mjs"
-PIPELINE_MD="$PLUGIN_ROOT/commands/pipeline.md"
+# The orchestrator prose is a core plus per-phase files; pins read all of it (harness.sh).
+pipeline_md_concat "$PLUGIN_ROOT" || exit 90
+PIPELINE_MD="$PIPELINE_MD_CONCAT"
 ISSUE=4243
 
 make_temp_project "$ISSUE" || exit 90

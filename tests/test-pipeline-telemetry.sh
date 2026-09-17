@@ -15,7 +15,9 @@ require_node
 make_temp_project || exit 90
 
 PLUGIN_DIR="$PLUGIN_ROOT"
-PIPELINE_MD="$PLUGIN_DIR/commands/pipeline.md"
+# The orchestrator prose is a core plus per-phase files; pins read all of it (harness.sh).
+pipeline_md_concat "$PLUGIN_DIR" || exit 90
+PIPELINE_MD="$PIPELINE_MD_CONCAT"
 SCHEMA="$PLUGIN_DIR/schemas/status.schema.json"
 TELEMETRY="$SCRIPTS_DIR/pipeline-telemetry.mjs"
 MERGE="$SCRIPTS_DIR/merge-peer-review.mjs"

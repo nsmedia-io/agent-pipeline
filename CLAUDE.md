@@ -20,6 +20,10 @@ file reads as a one-off SyntaxError (see `tests/run.sh` header).
 
 - `plugins/pipeline/commands/` the `/pipeline` orchestrator, `/phase`, `/warmup`. Prose the
   model executes; the deterministic parts live in `scripts/` and the prose calls them.
+  `pipeline.md` is the always-loaded core; each phase lives in `commands/pipeline/<file>.md`,
+  read when that phase starts (the core's loading map says when).
+- `plugins/pipeline/shared/` blocks the agent contracts read by reference (evidence discipline,
+  tracked-write isolation). `docs/rationale.md` holds incident histories no prompt loads.
 - `plugins/pipeline/agents/` nine role contracts (frontmatter sets model, effort, maxTurns).
 - `plugins/pipeline/scripts/` gates, surface predicates, dispatch routing, the merge, telemetry.
 - `plugins/pipeline/hooks/` SessionStart, Stop, SubagentStop, PreToolUse. All fail open.
@@ -32,8 +36,9 @@ file reads as a one-off SyntaxError (see `tests/run.sh` header).
 
 ## Conventions that bite
 
-- **Tests pin prose.** Many suites grep `commands/pipeline.md` and `agents/*.md` for exact
-  strings, extract bash blocks and RUN them. Editing prose can redden a test; that is the test
+- **Tests pin prose.** Many suites grep the orchestrator prose and `agents/*.md` for exact
+  strings, extract bash blocks and RUN them. They read the core plus every phase file through
+  `pipeline_md_concat` in `tests/harness.sh`; a new phase file goes in its `PIPELINE_MD_PARTS`. Editing prose can redden a test; that is the test
   working. Read the failing assertion's label before changing either side.
 - **The replicated block.** `## The property, not the fix` is byte-identical in the nine agent
   files plus `pipeline.md`, with a sha1 digest on the line after the span. Edit all ten

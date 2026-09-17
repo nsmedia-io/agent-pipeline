@@ -22,7 +22,9 @@
 require_node
 
 GUARD="$SCRIPTS_DIR/gate-phase-entry.mjs"
-PIPELINE_MD="$PLUGIN_ROOT/commands/pipeline.md"
+# The orchestrator prose is a core plus per-phase files; pins read all of it (harness.sh).
+pipeline_md_concat "$PLUGIN_ROOT" || exit 90
+PIPELINE_MD="$PIPELINE_MD_CONCAT"
 PHASE_MD="$PLUGIN_ROOT/commands/phase.md"
 STOP_SH="$HOOKS_DIR/stop.sh"
 

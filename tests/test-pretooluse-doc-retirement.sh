@@ -64,9 +64,31 @@ assert_eq "EXCLUSION CONTROL: tests/ really does still carry the string (the exc
 hygiene_para() {  # <file> -> the "**Commit hygiene.**" paragraph, verbatim
   awk '/^\*\*Commit hygiene\.\*\*/{f=1} f{print} f&&/^$/{exit}' "$1"
 }
+# THE BLOCK NOW LIVES IN ONE SHARED FILE that each of the nine contracts reads by reference
+# (shared/tracked-write-isolation.md). Nine-way byte identity is therefore held by construction,
+# and what can still drift is a contract that KEEPS or REGROWS its own copy, or stops pointing at
+# the shared one; the two cells after the resolver refuse both. Each agent is resolved to the text
+# it actually directs its reader to (its own paragraph if it still carries one, else the shared
+# file it names), and the digest comparison below runs over what each agent reads.
+ISOLATION_SHARED="$GATE_PLUGIN_DIR/shared/tracked-write-isolation.md"
+isolation_source() {  # <agent file> -> the file whose commit-hygiene paragraph that agent reads
+  if [[ -n "$(hygiene_para "$1" | tr -d '[:space:]')" ]]; then printf '%s' "$1"
+  elif grep -qF 'shared/tracked-write-isolation.md' "$1"; then printf '%s' "$ISOLATION_SHARED"
+  else printf '%s' "$1"; fi
+}
+assert_eq "the shared isolation file exists and carries the commit-hygiene paragraph" \
+  "$([[ -n "$(hygiene_para "$ISOLATION_SHARED" 2>/dev/null | tr -d '[:space:]')" ]] && echo carries || echo "ABSENT from $ISOLATION_SHARED")" "carries"
+OWN_COPIES=""
+NO_POINTER=""
+for f in "${AGENT_FILES[@]}"; do
+  [[ -n "$(hygiene_para "$f" | tr -d '[:space:]')" ]] && OWN_COPIES="$OWN_COPIES $(basename "$f")"
+  grep -qF 'shared/tracked-write-isolation.md' "$f" || NO_POINTER="$NO_POINTER $(basename "$f")"
+done
+assert_eq "no agent contract keeps its own copy of the isolation block (a second copy is what drifts)" "$OWN_COPIES" ""
+assert_eq "and every one of the nine points its reader at the shared copy" "$NO_POINTER" ""
 NINE_DIGESTS=""
 for f in "${AGENT_FILES[@]}"; do
-  d="$(hygiene_para "$f" | gate_digest)"
+  d="$(hygiene_para "$(isolation_source "$f")" | gate_digest)"
   NINE_DIGESTS="$NINE_DIGESTS$d $(basename "$f")
 "
 done
@@ -75,7 +97,7 @@ record "the nine agents/*.md commit-hygiene paragraphs hash to $DISTINCT_NINE di
 assert_eq "AC29: the replacement is BYTE-IDENTICAL across the NINE agents/*.md copies" "$DISTINCT_NINE" "1"
 # VACUITY: nine EMPTY paragraphs also hash to one digest. The paragraph must have been found.
 assert_eq "VACUITY: and the extracted paragraph is non-empty (nine empty strings are also byte-identical)" \
-  "$([[ -n "$(hygiene_para "${AGENT_FILES[0]}" | tr -d '[:space:]')" ]] && echo found || echo "EXTRACTED NOTHING from $(basename "${AGENT_FILES[0]}")")" "found"
+  "$([[ -n "$(hygiene_para "$(isolation_source "${AGENT_FILES[0]}")" | tr -d '[:space:]')" ]] && echo found || echo "EXTRACTED NOTHING from $(basename "${AGENT_FILES[0]}")")" "found"
 
 # ...and commands/pipeline.md's COMPRESSED restatement stays NON-identical, so an over-widening
 # reddens. Compression is WORDING, not content: the compressed copy carries all six residuals.
@@ -132,7 +154,7 @@ clause_label() {
 clause_scope() {  # <file> -> the replicated block's text
   case "$1" in
     *"/commands/pipeline.md") grep -F 'Phase 4 tracked-write isolation' "$1" ;;
-    *) hygiene_para "$1" ;;
+    *) hygiene_para "$(isolation_source "$1")" ;;
   esac
 }
 
@@ -265,7 +287,7 @@ for (const f of files) {
 process.stdout.write(JSON.stringify({ total, bad }));
 MJS
 
-SHIPPED=("${TEN_FILES[@]}" "$PLUGIN_README" "$PLUGIN_CHANGELOG" "$ROOT_README")
+SHIPPED=("${TEN_FILES[@]}" "$GATE_PLUGIN_DIR"/commands/pipeline/*.md "$GATE_PLUGIN_DIR"/shared/*.md "$PLUGIN_README" "$PLUGIN_CHANGELOG" "$ROOT_README")
 GATE_FILE="$(gate_resolved_command "$GATE_PLUGIN_DIR" | awk '{print $1}')"
 [[ -n "$GATE_FILE" && -f "$GATE_FILE" ]] && SHIPPED+=("$GATE_FILE")
 CITE_JSON="$("$GATE_REAL_NODE" "$CITE_MJS" "$GATE_REPO_ROOT" "${SHIPPED[@]}" 2>/dev/null)"

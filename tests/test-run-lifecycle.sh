@@ -20,7 +20,9 @@
 require_node
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PIPELINE_MD="$PLUGIN_ROOT/commands/pipeline.md"
+# The orchestrator prose is a core plus per-phase files; pins read all of it (harness.sh).
+pipeline_md_concat "$PLUGIN_ROOT" || exit 90
+PIPELINE_MD="$PIPELINE_MD_CONCAT"
 PHASE_MD="$PLUGIN_ROOT/commands/phase.md"
 GUARD="$SCRIPTS_DIR/gate-phase-entry.mjs"
 
