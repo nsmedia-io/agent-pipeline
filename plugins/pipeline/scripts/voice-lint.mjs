@@ -251,6 +251,7 @@ import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { isMain as isMainScript } from "./lib.mjs";
+import { VOICE_MOMENTS } from "./voice-moment.mjs";
 // IMPORTED, never restated. This file used to declare its own /^\d+$/, which silently exempted
 // `exp-<slug>` experiment runs from the voice check: the pattern did not match, resolveStatus
 // found no active issue, and the lint went quiet on exactly the runs nobody is watching. That
@@ -262,36 +263,11 @@ import { ISSUE_DIR_RE } from "./validate-pipeline-artifact.mjs";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 
-// current_phase -> what voice.md requires of the message that accompanies it.
-//
-// Keys are matched EXACTLY against status.current_phase and every one is a string pipeline.md
-// actually writes. That is not a stylistic note: the first version of this table invented four
-// keys ("5-complete", "5-pr-ready", "4-request-changes", "3-live-verification-required") that
-// no phase ever writes, so those checks could never fire, while the real completion report
-// ("5-archived") and the real live-verification halt ("3-impl-live-verify-unverified") went
-// uncovered. A table asserted from memory rather than derived from the source is the exact
-// defect this plugin keeps re-learning. tests/test-voice-lint.sh now parses every
-// `current_phase: "..."` out of pipeline.md and fails when one is neither listed here nor
-// explicitly declared non-voice, so the table cannot drift from the orchestrator again.
-// EXPORTED so tests/test-voice-lint.sh can assert SET MEMBERSHIP over the table itself. The
-// check it replaces was `grep -q "\"$phase\"" voice-lint.mjs`, a substring grep over this
-// source that a phase named in a COMMENT satisfies and that cannot tell a table key from a
-// mention.
-//
-// NEITHER TABLE IS FROZEN, and that is a ruling rather than an omission. Measured:
-// `Object.freeze(new Set(["a"]))` reports `Object.isFrozen === true` and then accepts
-// `.add("b")` with size going 1 -> 2, because a Set's members are not own properties. Freezing
-// the Set would report a protection it does not provide, and freezing only the object half
-// would leave a reader assuming both were covered.
-export const VOICE_MOMENTS = {
-  "1-ba-open-questions": { decision: true, label: "a blocking open question" },
-  "1-ba-rework-required": { scales: true, label: "a veto rework halt" },
-  "2.5-design-owner-decision": { decision: true, label: "the design-lock" },
-  "3-impl-live-verify-unverified": { scales: true, label: "the live-verification halt" },
-  "4-veto-rework-required": { scales: true, label: "a SecOps veto" },
-  "4-review-complete": { scales: true, label: "the panel result handed to the owner" },
-  "5-archived": { scales: true, replication: true, label: "the completion report" },
-};
+// current_phase -> what voice.md requires of the message that accompanies it. The table lives in
+// voice-moment.mjs, which tells the orchestrator the register, sections and facts for a phase; this
+// lint grades the message against the SAME table. Re-exported so importers of this module keep
+// reading it here.
+export { VOICE_MOMENTS };
 
 // Phases that are deliberately NOT voice moments: internal checkpoints the owner never sees.
 // Listed explicitly so the drift test can tell "decided this is silent" from "forgot about it".

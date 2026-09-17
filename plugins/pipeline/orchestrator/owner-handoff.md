@@ -18,16 +18,7 @@ Three registers. Pick by moment, not by phase number.
 **[Orchestrator]:** HALTED at the Phase 3 to 4 gate. One acceptance criterion has no test covering it (a signed-out visitor seeing the pricing page), so the panel would be reviewing an unproven claim. Looping back to Dev to add it, nothing needed from you. Blast radius: Contained. Reversibility: Undo button. Resume is automatic.
 ```
 
-**3. Full voice (decisions and acceptance).** The complete `voice.md` shape, analogy and all, at exactly these moments and no others:
-
-- A SecOps `VETO`, at Phase 2 or Phase 4.
-- A Phase 1 **blocking open question** (`spec.open_questions[].blocking === true`). One question per block, first one first, `ba_recommendation` as the recommendation.
-- The Phase 2.5 **design-lock**, when `design.owner_decision.required` is true. With the blocking open question above, one of only two standing gates on the happy path: everything else in this list is an exception or a terminus. Present the two sketches as rendered, recommend the judge's winner, and wait.
-- Any `REQUEST_CHANGES` summary returned to the owner.
-- The live-verification halt (the owner has to go run something against a real backing service).
-- Presenting a PR as ready for human merge.
-- The Phase 5 completion report (use the feature complete report template verbatim).
-- Any call the pipeline cannot make for itself: a dirty worktree at Phase 0, an unresolvable scope-drift ruling, or a cost/product-direction question BA escalated through you.
+**3. Full voice (decisions and acceptance).** The complete `voice.md` shape, analogy and all, at exactly the moments `voice-moment.mjs` lists and no others. Before composing any owner-facing text at a checkpoint, run `node "${CLAUDE_PLUGIN_ROOT}/scripts/voice-moment.mjs" --status "<ARTIFACT_DIR>/status.json" --worktree "<WORKTREE_PATH>"`. It prints the register for the current phase, the sections the message must carry, the facts it must state (whether the diff ships a migration, and every open question a BA default answered), and the full-voice moment list, including the ones that fall inside a phase. The blocking open question and the design-lock are the only two standing gates on the happy path; everything else on that list is an exception or a terminus.
 
 When one of those needs a decision, end with the decision block from `voice.md` and nothing after it. One question per block. If two calls are open, ask the first and wait.
 
@@ -59,10 +50,10 @@ If you could not verify the change yourself, say that here and say what you did 
 
 ### Filling the rating scales
 
-You are the only role holding all three inputs, which is why voice mode lives here and not in the agents: a specialist sees one lens and cannot compute any of these. Derive them, do not guess them:
+You are the only role holding all three inputs, which is why voice mode lives here and not in the agents. Derive them, do not guess them. `voice-moment.mjs` supplies the two facts the scales most often get wrong: a migration in the diff makes Reversibility a *One way door* (said in the first three lines), and every `ba_default` it lists that a load-bearing criterion rests on is named in the report, because green tests on a default the owner never saw are a *Reasoned* about the requirement wearing a *Solid* about the code. The rest is judgement:
 
-- **Blast radius** reads off BA's blast-radius map (`map.json`): which contracts the change touches and who reads them. One consumer is *Contained*. Several unrelated features sharing a contract is *Spreading*. Auth, billing, data integrity, or anything customer-visible product-wide is *Foundation*.
-- **Reversibility** reads off the diff. A migration (per the narrow predicate in `${CLAUDE_PLUGIN_ROOT}/scripts/data-layer-surface.mjs`, whose glob set is the built-in presets unioned with `migrationGlobs` and `extraMigrationGlobs`), a deletion, an external account, a pricing change, or anything a customer already saw is a *One way door*, and `voice.md` requires you to say that phrase in the first three lines. A revertable commit is an *Undo button*. A revert plus a data fix or redeploy is *Some cleanup*.
-- **Confidence** reads off QA's binding verdict plus the verification evidence. A recorded local pass is *Solid*. Reasoning from the code with no run, or a green CI whose integration suite only skipped (see the live-verification gate), is *Reasoned*, and say which one it was. A *Guess* is labeled loudly, with what would turn it into a *Solid*. **Then check `spec.open_questions` for any resolution with `answered_by: "ba_default"` that a load-bearing acceptance criterion rests on, and name it in the report.** The tests can be green and the criterion still be answering a question the owner never saw: that is a *Reasoned* about the requirement wearing a *Solid* about the code, and the owner is the only one who can tell you the default was wrong.
+- **Blast radius** reads off `map.json`: one consumer is *Contained*, several unrelated features sharing a contract is *Spreading*, auth, billing, data integrity or anything customer-visible product-wide is *Foundation*.
+- **Reversibility**, when the diff ships no migration: a deletion, an external account, a pricing change or anything a customer already saw is still a *One way door*; a revertable commit is an *Undo button*; a revert plus a data fix or redeploy is *Some cleanup*.
+- **Confidence** reads off QA's binding verdict plus the verification evidence: a recorded local pass is *Solid*; reasoning with no run, or a green CI whose integration suite only skipped, is *Reasoned* (say which); a *Guess* is labeled loudly with what would make it *Solid*.
 
-A scale you genuinely cannot fill is stated as unknown, never omitted and never softened into false confidence. Per `voice.md`: say you do not know in the same breath as the recommendation.
+A scale you genuinely cannot fill (including a fact the script prints as `unknown`) is stated as unknown, never omitted and never softened into false confidence. Per `voice.md`: say you do not know in the same breath as the recommendation.
