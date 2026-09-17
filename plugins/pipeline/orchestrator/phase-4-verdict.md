@@ -1,41 +1,21 @@
-Then:
+Then compute and record the verdict. The orchestrator's own `status.json` writes always target `$PIPELINE_BASE/<issue>/status.json` (the canonical, committed copy), regardless of where the worktree artifacts live.
 
-- Read `$ARTIFACT_DIR/peer-review.json` (the merged file you just wrote in the worktree).
-- Compute `final_verdict` using the rubric below. Precedence is from most-blocking to least; the first rule that matches wins. The orchestrator's own `status.json` writes always target `$PIPELINE_BASE/<issue>/status.json` (the canonical, committed copy), regardless of where the worktree artifacts live.
+### Final verdict: `scripts/record-verdict.mjs`
 
-### Final verdict rubric (strict precedence, first match wins)
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/record-verdict.mjs" --status "$PIPELINE_BASE/<issue>/status.json" --peer-review "$ARTIFACT_DIR/peer-review.json" --pr-body "$ARTIFACT_DIR/pr-summary.md" --commit
+```
 
-**The rubric reads `materiality.blocks_merge`, not the verdict word.** A role's block refuses the merge exactly when its `blocks_merge` is `true`, which is exactly when its `open_blocker_ids` is non-empty; the recorded verdict only says which loop a refusal takes. `finalVerdict(peerReview, panelRoles)` in `${CLAUDE_PLUGIN_ROOT}/scripts/materiality.mjs` is the code form of the five rows below, and a hand reading that disagrees with it is the defect.
+It applies the rubric (`finalVerdict` in `scripts/materiality.mjs`, which reads `materiality.blocks_merge` and not the verdict word) and the tally (`countVerdicts`) over the FULL `panel_roles`, and writes `final_verdict`, `peer_review_verdict_counts` and the `4-review` exit event in the same write as `current_phase: "4-review-complete"`, or `current_phase: "4-veto-rework-required"` on a veto (pass `--veto-reason "<one line>"`). It prints `final_verdict=`, `next=` (and `then=`) and the budget line, and writes the PR summary table to `--pr-body`: post that file as the PR comment. A hand reading that disagrees with the script is the defect. On a delta round add `--note "delta re-review: <the roles in roles-to-merge.txt, space-separated>"`.
 
-1. **`SECOPS_VETO`**: a block whose verdict is `VETO` has `blocks_merge: true`. After the merge that can only be SecOps, on a valid `veto_ground`, carrying at least one blocking concern; any other `VETO` was already recorded as `REQUEST_CHANGES` (or `APPROVE_WITH_NOTES` when nothing blocks) with `verdict_as_returned` beside it, and does not return the spec to BA. Sending the spec back to BA is a spec revision: run `round-budget.mjs enter spec-revision` first (see Phase 2's gate). Pipeline halts. The PR must not merge. Update `status.json` with `current_phase: "4-veto-rework-required"`, `veto_reason`. Return to the owner in **full voice mode** (see "Human-facing responses"); the line below is the factual spine, not the whole message:
-   ```
-   **[Orchestrator]:** PEER REVIEW VETO. SecOps blocked merge: <one-line reason>. Spec returns to BA for redesign. Resume with /pipeline --resume <issue>.
-   ```
-2. **`REQUEST_REFACTOR`**: a block whose verdict is `REQUEST_REFACTOR` has `blocks_merge: true` (QA, testability blocked by code structure, carrying a blocking concern; a REQUEST_REFACTOR with none was recorded as `APPROVE_WITH_NOTES`). It is a fix round, counted exactly like row 3: run `round-budget.mjs enter fix-round` before dispatching Dev, and on exit 2 bring the owner the decision instead. Pipeline returns to the Dev implementation step (3b at the architectural tier, the single Dev thread otherwise); the existing behavioral test contract stands (QA-authored at architectural, Dev-authored at standard), so this re-runs Dev only and then re-runs Phase 4 as a **delta re-review** (QA, which objected, plus any role whose surface the refactor touched; see "Delta re-review" above), not a fresh full panel. `final_verdict: "REQUEST_REFACTOR"`. Do NOT merge.
-3. **`REQUEST_CHANGES`**: any block has `blocks_merge: true` (after `merge-peer-review.mjs` its verdict is `REQUEST_CHANGES` and it carries at least one BLOCKING concern under the materiality rule in `${CLAUDE_PLUGIN_ROOT}/evidence.md`, at most two, listed in `open_blocker_ids`). (A returned `REQUEST_CHANGES` with no blocking concern was recorded as `APPROVE_WITH_NOTES` with `verdict_as_returned` beside it; say so in the summary, because the reviewer's finding is still real, it just ships as a note.) `final_verdict: "REQUEST_CHANGES"`. Collect the blocking concerns into the owner-facing summary. Do NOT merge. **Before dispatching Dev, count the round:** `node "${CLAUDE_PLUGIN_ROOT}/scripts/round-budget.mjs" enter fix-round --status "$PIPELINE_BASE/<issue>/status.json"`. Exit 0 records it in `fix_rounds` (budget: tooling 1, product 2, product-money 2); dispatch Dev, then a **delta re-review** (the roles holding open blocker ids, plus any role whose merge-class surface the fix commits touched, per "Delta re-review" above) via `/phase peer-review --issue <n>`, additively merged so the standing approvals hold. Exit 2 means the next round is past the budget and no `owner_overrides` entry covers it: do NOT dispatch Dev. Bring the owner the decision block the command printed (ship with deferrals, split, or stop) in full voice mode; only when the owner chooses to keep going, record `{"kind": "fix-round", "up_to": <n>, "at": "<iso>", "reason": "<their reason>"}` in `owner_overrides` and run the command again.
-4. **`APPROVE_WITH_NOTES`**: any agent returned `APPROVE_WITH_NOTES` (or the legacy alias `APPROVE_WITH_NITS`), no blockers above. `final_verdict: "APPROVE_WITH_NOTES"`. Notes SHIP. In this same turn, yourself, with no Dev dispatch and no panel re-run: apply every concern that carries a `suggested_patch` (explicit-path staging, one commit `chore: apply Phase 4 panel notes for #<issue>`, then run the check command and confirm it is green), and write every other note onto ONE deferral checklist for the issue: `node "${CLAUDE_PLUGIN_ROOT}/scripts/deferral.mjs" checklist --issue <issue> --peer-review "$ARTIFACT_DIR/peer-review.json" [--own <id>,<id>] [--unapplied <id>,<id>]`. It records one checklist entry holding every note with its role, id, ratings and location, and a SEPARATE entry only for a note whose `merge_class` is not `none` or whose id the owner named in `--own`; notes that carry a `suggested_patch` are left out as applied unless you name them in `--unapplied` because the patch did not apply. It routes by `deferralTracker` (`gh issue create`, `glab issue create`, or a committed file under `deferralDir`) and prints each ref. Record the refs in `status.json` `flags`. If the configured CLI is missing the script REFUSES rather than inventing a destination; set `"deferralTracker": "directory"` and re-run, so the note lands in the repository instead of nowhere. Neither path delays the merge. A note that turns out not to be local or obviously correct when you try to apply it is filed, not forced.
-5. **`APPROVE`**: every dispatched panel role's verdict is `APPROVE`. `final_verdict: "APPROVE"`. Ready for human merge to the integration branch.
-
-Rows 2 and 3 send the run back to Dev. Before the status.json write that loops back, read `${CLAUDE_PLUGIN_ROOT}/orchestrator/phase-4-delta.md` now: that same write clears the verdict, and the rule is stated there.
-
-Verdict-name normalization: `APPROVE_WITH_NOTES` is the canonical term (matches the DBA, DevOps, SecOps agent contracts). The alias `APPROVE_WITH_NITS` is accepted for backward compatibility but should be rewritten to `APPROVE_WITH_NOTES` when observed.
-
-### After computing `final_verdict`
-
-- Update `status.json` with `current_phase: "4-review-complete"`, `final_verdict`, and a `peer_review_verdict_counts` object: `{approve, approve_with_notes, request_changes, request_refactor, veto}`.
-- Append a markdown summary comment to the PR (one row per dispatched role; for a trimmed standard-tier panel, list undispatched lenses on a single line as `Not on panel (standard tier): DBA, DevOps` so the trim is visible, never ambiguous):
+- **Exit 1**: a panel role has no recoverable verdict, or `panel_roles` is empty. Nothing was written; halt and re-dispatch the missing reviewer.
+- **Exit 4 (`SECOPS_VETO`)**: the pipeline halts and the PR must not merge. Return to the owner in **full voice mode** (see "Human-facing responses"); the line below is the factual spine, not the whole message, then loop back per `next=` (`loop-backs.md`):
   ```
-  ## Phase 4 Peer Review (<tier> tier panel)
-  | Agent | Verdict | Blockers |
-  |---|---|---|
-  | BA | ... | ... |
-  | SecOps | ... | ... |
-  | Dev | ... | ... |
-  | QA | ... | ... |
-
-  Not on panel (standard tier): DBA, DevOps
-  **Final verdict:** <FINAL_VERDICT>
+  **[Orchestrator]:** PEER REVIEW VETO. SecOps blocked merge: <one-line reason>. Spec returns to BA for redesign. Resume with /pipeline --resume <issue>.
   ```
+- **Exit 3 (`REQUEST_CHANGES` or `REQUEST_REFACTOR`)**: do NOT merge. Collect the blocking concerns into the owner-facing summary; where a returned `REQUEST_CHANGES` was recorded as `APPROVE_WITH_NOTES` (`verdict_as_returned` beside it), say so, because the finding is still real and ships as a note. Read `${CLAUDE_PLUGIN_ROOT}/orchestrator/phase-4-delta.md` now, then loop back per `next=` with `checkpoint.mjs enter 3-impl --loopback` (`loop-backs.md`); `allowed=no` on the budget line means that command will refuse and the owner decides.
+- **Exit 0, `APPROVE_WITH_NOTES`**: notes SHIP. In this same turn, yourself, with no Dev dispatch and no panel re-run: apply every concern that carries a `suggested_patch` (explicit-path staging, one commit `chore: apply Phase 4 panel notes for #<issue>`, then run the check command and confirm it is green), and write every other note onto ONE deferral checklist: `node "${CLAUDE_PLUGIN_ROOT}/scripts/deferral.mjs" checklist --issue <issue> --peer-review "$ARTIFACT_DIR/peer-review.json" [--own <id>,<id>] [--unapplied <id>,<id>]`. It files a separate entry only for a note whose `merge_class` is not `none` or whose id the owner named in `--own`, leaves out applied patches unless named in `--unapplied`, routes by `deferralTracker`, and prints each ref; record the refs with `checkpoint.mjs flag`. If the configured CLI is missing it REFUSES rather than inventing a destination; set `"deferralTracker": "directory"` and re-run. A note that turns out not to be local or obviously correct when you try to apply it is filed, not forced.
+- **Exit 0, `APPROVE`**: ready for human merge to the integration branch.
 
 ### Sync Phase 3 artifacts to the orchestrator pipeline directory
 

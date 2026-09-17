@@ -1,6 +1,6 @@
 ## Phase 2-lite: Constraint injection (standard tier, no subagents)
 
-**Checkpoint first:** set `current_phase: "2-constraints"` and commit `status.json`.
+**Checkpoint first:** `checkpoint.mjs enter 2-constraints --exit-verdict <verdict> --commit` (`status-record.md`; it writes `current_phase: "2-constraints"`).
 
 At the standard tier the spec has, by definition, no schema/access-control/security/compliance dimension, so a pre-code reviewer fan-out mostly re-states standing rules at the cost of three context spin-ups and a lossy notes handoff. Instead, the orchestrator extracts each specialist's **standing constraint checklist** from its agent definition and hands the full text to the Phase 3 Dev thread. The checklists live in the agent files (single source of truth, marker-delimited); this step copies, never paraphrases: `node "${CLAUDE_PLUGIN_ROOT}/scripts/extract-constraints.mjs" --out "$ARTIFACT_DIR/constraints.md"`.
 

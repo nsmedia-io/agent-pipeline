@@ -1,6 +1,6 @@
 ## Phase 5: Knowledge Persistence (post-merge)
 
-**Checkpoint first:** set `current_phase: "5-archive"` and commit `status.json` BEFORE dispatching the Librarian.
+**Checkpoint first:** `checkpoint.mjs enter 5-archive --exit-verdict <verdict> --commit` (`status-record.md`; it writes `current_phase: "5-archive"`) BEFORE dispatching the Librarian.
 
 Trigger: after the owner confirms the PR merged. The owner can invoke `/pipeline --resume <issue>` to kick Phase 5 off.
 

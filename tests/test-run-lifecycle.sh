@@ -136,47 +136,40 @@ assert_contains "the LOOPBACK shape (a fix round at 3-impl still carrying the ve
   "$(scan_stale_verdict "$TEMP_PROJECT/planted-loopback" pipeline)" "1 :: .pipeline/43/status.json @ 3-impl / REQUEST_CHANGES"
 
 # ================================================================================================
-suite "#110: the instruction that keeps it zero is written where the write happens"
+suite "#110: the write that keeps it zero is a command, and the command clears"
 # ================================================================================================
 #
-# The cell above is a fact about today's tree. It stays true only because commands/pipeline.md
-# tells the orchestrator to clear the field, so that instruction is pinned here. A written
-# expectation no code reads is a comment; this is the code that reads it.
+# The cell above is a fact about today's tree. It stays true only because every write that enters
+# a remediation window clears the field. Since #164 that write is scripts/checkpoint.mjs, so the
+# clear is RUN here, on both clearing points, and the prose is pinned to call the command at the
+# two places the orchestrator makes those writes (and the manual /phase path).
+CKPT="$SCRIPTS_DIR/checkpoint.mjs"
+CL_DIR="$TEMP_PROJECT/clear110/.pipeline/43"; mkdir -p "$CL_DIR"
+cl_status() { printf '{"current_phase":"%s","started_at":"2026-08-21T00:00:00Z","updated_at":"2026-08-21T01:06:34Z","branch":"b","final_verdict":"REQUEST_CHANGES","peer_review_verdict_counts":{"approve":1},"review_rounds":4,"events":[]}' "$1" > "$CL_DIR/status.json"; }
+cl_field() { node -e 'const s=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));console.log(JSON.stringify(s[process.argv[2]]))' "$CL_DIR/status.json" "$1"; }
+cl_status 3-impl-complete
+( cd "$TEMP_PROJECT" && node "$CKPT" enter 4-review --status "$CL_DIR/status.json" ) >/dev/null 2>&1
+assert_eq "the 4-review re-entry write clears final_verdict and peer_review_verdict_counts in the SAME write" \
+  "$(cl_field final_verdict)/$(cl_field peer_review_verdict_counts)/$(cl_field current_phase)" 'null/null/"4-review"'
+cl_status 4-review-complete
+( cd "$TEMP_PROJECT" && node "$CKPT" enter 3-impl --loopback --status "$CL_DIR/status.json" ) >/dev/null 2>&1
+assert_eq "the LOOPBACK write (archive 43's shape: a fix round at 3-impl) clears them too, the earlier and broader point" \
+  "$(cl_field final_verdict)/$(cl_field peer_review_verdict_counts)/$(cl_field current_phase)" 'null/null/"3-impl"'
+cl_status 4-review-complete
+( cd "$TEMP_PROJECT" && node "$CKPT" enter 3-impl --status "$CL_DIR/status.json" ) >/dev/null 2>&1
+assert_eq "CONTROL: a 3-impl entry that is NOT a loop-back (and not 4-review) leaves the verdict, so the clear is keyed, not blanket" \
+  "$(cl_field final_verdict)" '"REQUEST_CHANGES"'
 
-# SCOPED to the PHASE 4 checkpoint, not the whole file and not to "Checkpoint first" alone:
-# `final_verdict` appears all over pipeline.md, so an unscoped grep passes before a word of the
-# rule is written, and there are five "Checkpoint first" instructions (0.5, 2, 3, 4, ...) of which
-# the FIRST is Phase 0.5's. Anchoring on the phase literal this rule is about is what makes the
-# band the right one -- an earlier draft of this cell took `head -1` and measured Phase 0.5's.
 CHECKPOINT_LINE="$(grep -n 'Checkpoint first.*current_phase: "4-review"' "$PIPELINE_MD" | head -1 | cut -d: -f1)"
-assert_eq "commands/pipeline.md still has a Phase 4 'Checkpoint first' instruction naming 4-review, to attach the rule to" \
+assert_eq "the Phase 4 checkpoint line is still present" \
   "$([[ -n "$CHECKPOINT_LINE" ]] && echo present || echo ABSENT)" "present"
-CHECKPOINT_BAND="$(sed -n "${CHECKPOINT_LINE:-1},$(( ${CHECKPOINT_LINE:-1} + 6 ))p" "$PIPELINE_MD")"
-assert_contains "the clearing rule is SITED at that checkpoint (within 6 lines), not filed somewhere a reader of the checkpoint will not meet it" \
-  "$CHECKPOINT_BAND" "clear \`final_verdict\`"
-assert_contains "and it clears peer_review_verdict_counts too -- a count derived from a superseded panel is the same staleness one field over" \
-  "$CHECKPOINT_BAND" "peer_review_verdict_counts"
-assert_contains "and it binds the two to the SAME write, so a split into two commits does not satisfy it" \
-  "$CHECKPOINT_BAND" "SAME write"
-
-# The MANUAL path must carry it too. `/phase peer-review --issue N` re-enters a delta round without
-# going through /pipeline's checkpoint prose at all, so a rule written only there is half a fix.
+assert_contains "and it is the checkpoint.mjs enter 4-review call" \
+  "$(sed -n "${CHECKPOINT_LINE:-1}p" "$PIPELINE_MD")" "checkpoint.mjs enter 4-review"
 DELTA_LINE="$(grep -n 'Delta re-run' "$PHASE_MD" | head -1 | cut -d: -f1)"
-assert_eq "commands/phase.md still documents the delta re-run" \
-  "$([[ -n "$DELTA_LINE" ]] && echo present || echo ABSENT)" "present"
-assert_contains "and the delta re-run carries the same clearing rule, so the manual path cannot reintroduce the state /pipeline stopped producing" \
-  "$(sed -n "${DELTA_LINE:-1}p" "$PHASE_MD")" "clear \`final_verdict\` and \`peer_review_verdict_counts\`"
-
-# THE LOOPBACK RULE, which is the earlier and broader of the two clearing points. Sited at the
-# rubric, where rows 2 and 3 send the run back to Dev. Without this the rule reads as "clear on
-# re-entry to 4-review", which archive 43 proves is not enough: that record never got there.
-RUBRIC_BAND="$(grep -A2 'Rows 2 and 3 loop back for remediation' "$PIPELINE_MD")"
-assert_contains "pipeline.md's verdict rubric carries the LOOPBACK clearing rule as well as the re-entry one" \
-  "$RUBRIC_BAND" "clear \`final_verdict\` and \`peer_review_verdict_counts\`"
-assert_contains "and it cites the record that forced it, so the next reader can re-take the observation rather than trust the rule" \
-  "$RUBRIC_BAND" "knowledge/issue-archive/43.json"
-assert_contains "and it states what clearing does NOT cost, since a rule that looks like it deletes the panel's result invites being ignored" \
-  "$RUBRIC_BAND" "events[]"
+assert_contains "the MANUAL delta re-run enters the round through the same command, so it cannot reintroduce the state" \
+  "$(sed -n "${DELTA_LINE:-1}p" "$PHASE_MD")" 'checkpoint.mjs" enter 4-review'
+assert_contains "and the verdict step loops back through --loopback" "$(cat "$PIPELINE_MD")" "checkpoint.mjs enter 3-impl --loopback"
+assert_not_contains "the hand-applied clearing paragraph is gone from the rubric" "$(cat "$PIPELINE_MD")" "Rows 2 and 3 loop back for remediation, and the write that DOES the looping back"
 
 # ================================================================================================
 suite "#110: the 4-review-complete row is unreachable, and that is stated rather than implied"
@@ -194,18 +187,17 @@ ROW_LINE="$(grep -n '"4-review-complete": { file: "peer-review.json"' "$GUARD" |
 assert_contains "and the 16 lines above it say it is unreachable, so a reader of the table is not left believing this phase is guarded" \
   "$(sed -n "$(( ${ROW_LINE:-17} - 16 )),${ROW_LINE:-1}p" "$GUARD")" "UNREACHABLE"
 
-# THE PREMISE OF THAT DEADNESS, ASSERTED. If this cell ever fails, the two writes have been split
-# and the row has come ALIVE. That is fine and possibly an improvement -- but the comment above the
-# row then says something false, and this is the only thing that would notice.
-# -F AND SINGLE QUOTES, both load-bearing, and this line is where the suite first went red on CI
-# while passing locally. A backtick inside a double-quoted shell string has to be backslashed, and
-# `\`` in a BASIC REGULAR EXPRESSION is a GNU extension meaning START OF BUFFER -- so the escaped
-# spelling matched nothing under GNU grep on ubuntu and matched a literal backtick under the grep
-# on the author's machine. Same pattern, same file, opposite answers. Single quotes keep the shell
-# off the backticks and -F keeps the regex engine off them, so neither layer gets an opinion.
-POSTVERDICT="$(grep -nF 'Update `status.json` with `current_phase: "4-review-complete"`' "$PIPELINE_MD" | head -1)"
-assert_contains "PREMISE: pipeline.md still writes current_phase 4-review-complete and final_verdict in ONE update. If this fails, the writes were split, the guard's 4-review-complete row is now REACHABLE, and the 'structurally unreachable' comment above it must be rewritten -- this cell is not asking you to put it back" \
-  "$POSTVERDICT" "\`final_verdict\`"
+# THE PREMISE OF THAT DEADNESS, RUN. record-verdict.mjs writes current_phase 4-review-complete and
+# final_verdict in ONE write. If this fails, the writes were split, the guard's 4-review-complete
+# row is now REACHABLE, and the 'structurally unreachable' comment above it must be rewritten --
+# this cell is not asking you to put it back.
+PV_DIR="$TEMP_PROJECT/postverdict/.pipeline/7"; mkdir -p "$PV_DIR"
+printf '{"current_phase":"4-review","started_at":"x","updated_at":"x","branch":"b","panel_roles":["qa"],"events":[]}' > "$PV_DIR/status.json"
+printf '{"qa":{"verdict":"APPROVE"}}' > "$PV_DIR/peer-review.json"
+( cd "$TEMP_PROJECT" && node "$SCRIPTS_DIR/record-verdict.mjs" --status "$PV_DIR/status.json" --peer-review "$PV_DIR/peer-review.json" ) >/dev/null 2>&1
+assert_eq "PREMISE: record-verdict.mjs writes current_phase 4-review-complete and final_verdict in ONE update. If this fails, the writes were split, the guard's 4-review-complete row is now REACHABLE, and the 'structurally unreachable' comment above it must be rewritten -- this cell is not asking you to put it back" \
+  "$(node -e 'const s=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));console.log(s.current_phase+"/"+s.final_verdict)' "$PV_DIR/status.json")" "4-review-complete/APPROVE"
+assert_contains "and the prose writes that phase through it" "$(cat "$PIPELINE_MD")" 'current_phase: "4-review-complete"'
 
 # ================================================================================================
 suite "#74 s2: the session-start notice dates a run by updated_at, not by the file's mtime"

@@ -1,6 +1,6 @@
 ## Phase 2: Technical Review (architectural tier, parallel)
 
-**Checkpoint first:** set `current_phase: "2-review"` and commit `status.json` BEFORE dispatching the parallel reviewers, so an interruption mid-review resumes into Phase 2.
+**Checkpoint first:** `checkpoint.mjs enter 2-review --exit-verdict <verdict> --commit` (`status-record.md`; it writes `current_phase: "2-review"`) BEFORE dispatching the parallel reviewers, so an interruption mid-review resumes into Phase 2.
 
 This phase runs ONLY when `spec.risk_tier === "architectural"`. DBA, DevOps, and SecOps review **independent dimensions** of the same spec: schema/migration safety, infrastructure/deploy impact, and security/compliance. None needs another's output to do its job, so they run concurrently. This is the read-heavy, low-coupling work where fan-out is a pure win, and at this tier the spec-level review earns its cost: migrations, access controls, and security postures are cheaper to fix before code exists.
 

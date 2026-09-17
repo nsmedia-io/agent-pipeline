@@ -1,6 +1,6 @@
 ## Phase 2.5: Design Bake-off (architectural tier only)
 
-**Checkpoint first:** set `current_phase: "2.5-design"` and commit `status.json` BEFORE dispatching the design sketches.
+**Checkpoint first:** `checkpoint.mjs enter 2.5-design --exit-verdict <verdict> --commit` (`status-record.md`; it writes `current_phase: "2.5-design"`) BEFORE dispatching the design sketches.
 
 This phase runs ONLY when `spec.risk_tier === "architectural"`. For trivial and standard tiers it is SKIPPED; proceed straight to Phase 3.
 

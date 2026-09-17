@@ -434,6 +434,10 @@ for cand in $(grep -oE 'scripts/[a-zA-Z0-9_-]+\.mjs' "$PIPELINE_MD" | sort -u); 
     # #164: the Phase 2 merge, the Phase 3 exit and the tier floor. None resolves a model or
     # takes a (role, tier, phase) triple. Excluded by NAME, like the rest.
     merge-review.mjs|phase3-exit.mjs|tier-floor.mjs) continue ;;
+    # #164: the checkpoint writer and the Phase 4 verdict recorder, referenced from every phase
+    # checkpoint and the verdict step. Both take --status and a subcommand or --peer-review, never a
+    # (role, tier, phase) triple, and resolve no model. Excluded by NAME, like the rest.
+    checkpoint.mjs|record-verdict.mjs) continue ;;
   esac
   CANDIDATES_REL+=("$cand")
 done

@@ -1,6 +1,6 @@
 ## Phase 3: Implementation (one thread; shape set by tier)
 
-**Checkpoint first:** set `current_phase: "3-impl"` and commit `status.json` BEFORE dispatching anything in Phase 3, so an interruption anywhere inside Phase 3 resumes into Phase 3 rather than re-running Phase 2.
+**Checkpoint first:** `checkpoint.mjs enter 3-impl --exit-verdict <verdict> --commit` (`status-record.md`; it writes `current_phase: "3-impl"`) BEFORE dispatching anything in Phase 3, so an interruption anywhere inside Phase 3 resumes into Phase 3 rather than re-running Phase 2.
 
 Phase 3 is coupled write-work and always runs as **a single coherent thread on one tree, one actor at a time**. The tier sets the shape:
 

@@ -32,9 +32,8 @@ Return a short summary with the test commit SHA, the test files authored, and th
 ```
 
 After QA returns:
-- Record QA's test commit SHA in `status.json` (e.g. `"phase3_qa_test_commit": "<sha>"`), and append a `flags` entry. Confirm the commit exists (`git -C <WORKTREE_PATH> show --stat <sha>`).
-- If no commit was made or the tests do not fail, halt and re-run QA. Do NOT proceed to Dev.
-- **Read `<ARTIFACT_DIR>/tasks.json` `satisfiability_proof` (#158).** QA's contract must be known SATISFIABLE, not only red: `reference_impl_run` true with the criteria it took green listed in `criteria_proven`, or a non-empty `criteria_unproven` naming each criterion QA could not prove and why, plus `configs_run` naming every test config or pool the committed files land in. A record with neither list, or absent entirely, means QA skipped test-discipline rule 12; halt and re-dispatch QA with that rule quoted. The SubagentStop validator refuses the QA stop in that state too (`groundSatisfiability`), so this line is the orchestrator's half of the same control. Origin: 129 cases handed to Dev with no satisfiability proof; three were unsatisfiable by any implementation and Dev spent its turn cap repairing them.
+- Record QA's contract: `node "${CLAUDE_PLUGIN_ROOT}/scripts/checkpoint.mjs" qa-contract --sha <sha> --tasks "<ARTIFACT_DIR>/tasks.json" --status "$PIPELINE_BASE/<issue>/status.json" --worktree <WORKTREE_PATH> --commit`. It confirms the sha names a commit, checks `tasks.json` `satisfiability_proof` with the SubagentStop validator's own `groundSatisfiability` (#158: QA's contract must be known SATISFIABLE, not only red), and only then records `phase3_qa_test_commit` with a `flags` entry. Exit 2: halt and re-dispatch QA with the printed reason (test-discipline rule 12 quoted); do NOT dispatch Dev. Origin: 129 cases handed to Dev with no satisfiability proof; three were unsatisfiable by any implementation and Dev spent its turn cap repairing them.
+- If QA reports no commit, or tests that do not fail for the right reason, halt and re-run QA. Do NOT proceed to Dev.
 
 ### Phase 3b (architectural tier): Dev implements to green (dispatch SECOND, only after the SHA is recorded)
 
