@@ -2939,7 +2939,7 @@ ac53_probe() {
 ac53_f() { printf '%s' "$1" | cut -d'|' -f"$2"; }
 
 AC53_SETUP="$(ac53_probe "0-setup")"
-AC53_GHOST="$(ac53_probe "9-invented")"
+AC53_GHOST="$(ac53_probe "4-invented")"
 AC53_HALT="$(ac53_probe "1-ba-open-questions")"
 AC53_TERM="$(ac53_probe "5-archived")"
 
@@ -2950,7 +2950,7 @@ reg53 "#53-A1"
 assert_eq "#53-A1 the reason for a record at \`0-setup\` carries the record-derived \`.pipeline/<dir> at \\\`<phase>\\\`\` span, and the anchored strip matches it. Without this premise a failed strip would return the WHOLE reason and #53-A4 would compare two strings that trivially differ" \
   "$([[ "$(ac53_f "$AC53_SETUP" 5)" -gt 0 ]] && echo stripped || echo "NO PREFIX MATCHED: $(ac53_f "$AC53_SETUP" 3)")" "stripped"
 reg53 "#53-A2"
-assert_eq "#53-A2 and so does the reason for a record at \`9-invented\`" \
+assert_eq "#53-A2 and so does the reason for a record at \`4-invented\` (a WELL-SHAPED phase nobody taught the table; the probe was \`9-invented\` until B2 made a shape-INVALID phase a refusal, see the malformed-phase suite)" \
   "$([[ "$(ac53_f "$AC53_GHOST" 5)" -gt 0 ]] && echo stripped || echo "NO PREFIX MATCHED: $(ac53_f "$AC53_GHOST" 3)")" "stripped"
 reg53 "#53-A7"
 assert_eq "#53-A7 THE STRIP CANNOT BE A FIXED-LENGTH CUT: the two records' interpolated spans have DIFFERENT byte lengths, so any \`cut -c N-\` makes the two clauses differ at HEAD and ships GREEN with the defect live. This cell is why the strip is an anchored pattern" \
@@ -3018,5 +3018,42 @@ assert_eq "#53-Z1 no #53 assertion id is used twice (a colliding label makes a m
 assert_eq "#53-Z2 every #53 id written in this file was REGISTERED by a cell that ran" \
   "$(printf '%s\n' "$AC53_UNIQ" | grep -c . | tr -d ' ')" \
   "$(grep -o '#53-[A-Za-z0-9][A-Za-z0-9]*' "${BASH_SOURCE[0]}" | sort -u | grep -c . | tr -d ' ')"
+
+# ---------------------------------------------------------------------------
+suite "B2: a MALFORMED current_phase is REFUSED, not skipped"
+# ---------------------------------------------------------------------------
+# THE DEFECT. A current_phase failing status.schema.json's pattern matched no table row and fell
+# through to the vocabulary fail-open (", which is not a guarded phase."), so one mistyped
+# checkpoint disarmed this guard for the rest of the run with nothing said. It now refuses while the
+# run is in flight. A WELL-SHAPED phase nobody taught the table still fails open (AC14 above).
+for p in "Phase 3" "3_impl" "9-invented" "3-IMPL" ""; do
+  new_case 4242 "$(mk_status "$p" '"architectural"' "$NO_EVENTS")"
+  gate "$CASE_ROOT"
+  assert_eq "malformed phase '$p', in flight -> refused (was not-applicable before B2)" "$GATE_DEC" "refused"
+  assert_eq "  ...exit 2" "$GATE_RC" "2"
+  assert_contains "  ...and stderr says the phase is not phase-shaped" "$GATE_ERR" "not phase-shaped"
+  assert_contains "  ...naming the record to fix" "$GATE_ERR" ".pipeline/4242/status.json"
+done
+
+# The phase VALUE is never echoed on stderr (the refusal template carries only table literals).
+new_case 4242 "$(mk_status "Phase SECRET-ish 3" '"architectural"' "$NO_EVENTS")"
+gate "$CASE_ROOT"
+assert_not_contains "the malformed value itself is not republished on stderr" "$GATE_ERR" "SECRET-ish"
+
+# CONTROLS. A stale malformed record never wedges a project; a concluded one is finished; a
+# well-shaped unknown phase keeps the vocabulary fail-open.
+MK_UPDATED="$STALE_ISO"
+new_case 4242 "$(mk_status "Phase 3" '"architectural"' "$NO_EVENTS")"
+unset MK_UPDATED
+gate "$CASE_ROOT"
+assert_eq "CONTROL: a malformed phase on a STALE record -> not-applicable, exit 0" "$GATE_DEC/$GATE_RC" "not-applicable/0"
+
+new_case 4242 "$(mk_status "Phase 3" '"architectural"' "$NO_EVENTS" ',"completed_at":"2026-01-01T00:00:00Z"')"
+gate "$CASE_ROOT"
+assert_eq "CONTROL: a malformed phase on a record with completed_at -> not-applicable" "$GATE_DEC" "not-applicable"
+
+new_case 4242 "$(mk_status "3-something-nobody-writes" '"architectural"' "$NO_EVENTS")"
+gate "$CASE_ROOT"
+assert_eq "CONTROL: a WELL-SHAPED unknown phase still fails open on vocabulary" "$GATE_DEC" "not-applicable"
 
 finish

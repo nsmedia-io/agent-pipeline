@@ -8,7 +8,8 @@
  *
  * It walks `.pipeline/<n>/status.json`, refuses any `events[].verdict` or `flags[].verdict`
  * longer than the cap it READS OUT OF schemas/status.schema.json, and names the file, the
- * json path, the value and both lengths. Silent and exit 0 when clean.
+ * json path, the value and both lengths. It also refuses a `current_phase` that fails the
+ * schema's own pattern (see phasePatternFromSchema). Silent and exit 0 when clean.
  *
  * WHY IT EXISTS. The cap was declared in the schema and restated as prose in
  * commands/pipeline.md, and nothing ran. status.json is in no AGENT_RULES entry in
@@ -61,7 +62,7 @@
  *   --report        machine-readable KEY=VALUE measurement on stdout, printed whatever the
  *                   verdict. Without it a clean run prints nothing at all.
  *
- * Exit: 0 clean, 1 a verdict exceeds its cap, 2 nothing could be checked (unreadable or
+ * Exit: 0 clean, 1 a verdict exceeds its cap or a current_phase is not phase-shaped, 2 nothing could be checked (unreadable or
  * mis-shaped record, no records found, bad usage, unusable schema). 2 is never a pass: a walk
  * that found nothing has no zero to report.
  */
@@ -105,6 +106,56 @@ export function capsFromSchema(schema) {
 }
 
 /**
+ * THE PHASE SHAPE, read out of the schema the same way the caps are (0.42.x, B2).
+ *
+ * WHY THIS CHECKER OWNS IT. A malformed `current_phase` used to reach a checkpoint commit with
+ * nothing saying so, and every reader downstream treated it as a phase it had never heard of:
+ * gate-phase-entry.mjs returned not-applicable (the phase-entry guard went quiet for the whole
+ * run), voice-lint.mjs matched no voice moment, and validate-pipeline-artifact.mjs stopped
+ * recognising an unnamed run dir. This script already runs before EVERY checkpoint commit
+ * (commands/pipeline.md's durable-checkpoint recipe), so it is the one write-time place that can
+ * refuse the shape before it is committed.
+ *
+ * Throws when the schema carries no usable pattern, for the reason capsFromSchema throws: a check
+ * that silently has nothing to check against is the defect, not a fallback.
+ */
+export function phasePatternFromSchema(schema) {
+  const pattern = schema?.properties?.current_phase?.pattern;
+  if (typeof pattern !== "string" || pattern.length === 0) {
+    throw new Error(
+      `schema declares no usable pattern for current_phase (got ${JSON.stringify(pattern)}); ` +
+        `refusing to check against a phase shape this script would have to invent`,
+    );
+  }
+  try {
+    return new RegExp(pattern);
+  } catch (e) {
+    throw new Error(`schema's current_phase pattern does not compile: ${e.message}`);
+  }
+}
+
+/**
+ * Is this value a schema-shaped phase? Returns true / false, or null when the schema cannot be
+ * read (the caller decides what a tooling gap means for it; gate-phase-entry.mjs fails open).
+ */
+let _phaseReCache;
+export function phaseShapeOk(phase, schemaPath = DEFAULT_SCHEMA) {
+  let re;
+  if (schemaPath === DEFAULT_SCHEMA && _phaseReCache !== undefined) {
+    re = _phaseReCache;
+  } else {
+    try {
+      re = phasePatternFromSchema(JSON.parse(readFileSync(schemaPath, "utf8")));
+    } catch {
+      re = null;
+    }
+    if (schemaPath === DEFAULT_SCHEMA) _phaseReCache = re;
+  }
+  if (!re) return null;
+  return typeof phase === "string" && re.test(phase);
+}
+
+/**
  * IS THIS PARSED OBJECT A RUN RECORD? Answered from the schema, for callers that must decide
  * whether a `.pipeline/` subdirectory holds a run AT ALL (#115).
  *
@@ -119,10 +170,12 @@ export function capsFromSchema(schema) {
  * that string, to notice the day status.json becomes a validated artifact. It has not.
  *
  * THIS IS RECOGNITION, NOT VALIDATION, and the difference is the whole point. It asks only whether
- * the schema's own `required` keys are PRESENT and whether `current_phase` matches the schema's own
- * pattern. It checks no type, reports no violation, blocks nothing and tells no one their record is
- * wrong. Nothing anywhere validates status.json against this schema, and the schema's prose saying
- * so stays true.
+ * the schema's own `required` keys are PRESENT and whether `current_phase` is a non-empty string.
+ * It checks no type beyond that, reports no violation, blocks nothing and tells no one their record
+ * is wrong. The phase SHAPE is deliberately not part of recognition any more (0.42.x, B2): a run
+ * whose orchestrator mistyped its phase is still a run, and dropping it from recognition made the
+ * artifact validator go quiet on exactly the record that most needed a look. The shape is refused
+ * at write time by main() below and by gate-phase-entry.mjs, which is where a refusal belongs.
  *
  * FAIL DIRECTION: an unreadable or unusable schema returns false, so recognition simply does not
  * happen and the caller stays as inert as it was before this existed. A record missing a required
@@ -138,9 +191,8 @@ export function runRecordShape(schemaPath = DEFAULT_SCHEMA) {
     const required = Array.isArray(schema?.required)
       ? schema.required.filter((k) => typeof k === "string")
       : [];
-    const pattern = schema?.properties?.current_phase?.pattern;
-    if (required.length > 0 && typeof pattern === "string" && pattern.length > 0) {
-      shape = { required, phasePattern: new RegExp(pattern) };
+    if (required.length > 0 && required.includes("current_phase")) {
+      shape = { required };
     }
   } catch {
     // unusable schema: recognise nothing (see FAIL DIRECTION above)
@@ -156,7 +208,7 @@ export function isRunRecord(status, schemaPath = DEFAULT_SCHEMA) {
   for (const key of shape.required) {
     if (!Object.prototype.hasOwnProperty.call(status, key)) return false;
   }
-  return shape.phasePattern.test(String(status.current_phase ?? ""));
+  return typeof status.current_phase === "string" && status.current_phase.length > 0;
 }
 
 /**
@@ -166,7 +218,7 @@ export function isRunRecord(status, schemaPath = DEFAULT_SCHEMA) {
  * than skipped, and `read` is reported beside `files`, so an empty `violations` can be told
  * apart from a walk that never inspected anything.
  */
-export function checkRecords(records, caps) {
+export function checkRecords(records, caps, phaseRe = null) {
   const out = {
     files: records.length,
     read: 0,
@@ -176,6 +228,7 @@ export function checkRecords(records, caps) {
     unreadable: [],
     badevents: [],
     badflags: [],
+    badphases: [],
     violations: [],
   };
   for (const { file, text } of records) {
@@ -187,6 +240,20 @@ export function checkRecords(records, caps) {
       continue;
     }
     out.read++;
+    // THE PHASE SHAPE. Absent and non-string count too: a record with no readable phase is the
+    // same silence downstream as a mistyped one. The value is quoted TRUNCATED, because it is a
+    // field of a committed record and this line lands in a transcript.
+    //
+    // ONLY ON A RECORD THAT HAS NOT CONCLUDED: no `completed_at` and no `final_verdict`. A finished
+    // run's record is the archive, nobody may rewrite it, and the harm this refusal prevents (the
+    // phase-entry guard going quiet mid-run) cannot happen to a run that is over. Without this bound
+    // one old malformed archive would make every future checkpoint exit 1.
+    const concluded = Boolean(s?.completed_at) || Boolean(s?.final_verdict);
+    if (phaseRe && !concluded && !(typeof s?.current_phase === "string" && phaseRe.test(s.current_phase))) {
+      const shown =
+        s?.current_phase === undefined ? "absent" : JSON.stringify(s.current_phase).slice(0, 48);
+      out.badphases.push(`${file} current_phase=${shown} does not match ${phaseRe.source}`);
+    }
     if (!Array.isArray(s.events)) {
       out.badevents.push(`${file} (events is ${s.events === undefined ? "absent" : typeof s.events})`);
     }
@@ -360,10 +427,13 @@ export function main(argv) {
   }
 
   let caps;
+  let phaseRe;
   try {
-    caps = capsFromSchema(JSON.parse(readFileSync(schemaPath, "utf8")));
+    const schemaDoc = JSON.parse(readFileSync(schemaPath, "utf8"));
+    caps = capsFromSchema(schemaDoc);
+    phaseRe = phasePatternFromSchema(schemaDoc);
   } catch (e) {
-    return usage(`cannot read the cap from ${schemaPath}: ${e.message}`);
+    return usage(`cannot read the cap or the phase pattern from ${schemaPath}: ${e.message}`);
   }
 
   if (capOverride !== null) {
@@ -394,7 +464,7 @@ export function main(argv) {
     }
   }
   const readable = records.filter((r) => r.text !== null);
-  const result = checkRecords(readable, caps);
+  const result = checkRecords(readable, caps, phaseRe);
   result.files = records.length;
   for (const r of records) {
     if (r.text === null) result.unreadable.push(`${r.file} (${r.ioError})`);
@@ -402,7 +472,7 @@ export function main(argv) {
 
   if (report) {
     let text = "";
-    for (const k of ["files", "read", "verdicts", "longest", "longestvalue", "unreadable", "badevents", "badflags", "violations"]) {
+    for (const k of ["files", "read", "verdicts", "longest", "longestvalue", "unreadable", "badevents", "badflags", "badphases", "violations"]) {
       text += `${k}=${flatten(result[k])}\n`;
     }
     process.stdout.write(text);
@@ -432,6 +502,17 @@ export function main(argv) {
     }
     return 2;
   }
+  if (result.badphases.length) {
+    process.stderr.write(
+      `check-status-record: ${result.badphases.length} record(s) carry a current_phase that is not phase-shaped.\n`,
+    );
+    for (const line of result.badphases) process.stderr.write(`  ${line}\n`);
+    process.stderr.write(
+      "Write the phase literal commands/pipeline.md names for the checkpoint (e.g. 3-impl, 4-review-complete, halted-error).\n" +
+        "A malformed phase is not a harmless label: the phase-entry guard refuses a turn at one, and before it did, every\n" +
+        "reader of this record treated it as a phase it had never heard of and checked nothing.\n",
+    );
+  }
   if (result.violations.length) {
     const capList = CAPPED.map(({ field }) => `${field}[].verdict <= ${caps[field]}`).join(", ");
     process.stderr.write(
@@ -445,7 +526,7 @@ export function main(argv) {
     );
     return 1;
   }
-  return 0;
+  return result.badphases.length ? 1 : 0;
 }
 
 if (isMain("check-status-record.mjs")) {

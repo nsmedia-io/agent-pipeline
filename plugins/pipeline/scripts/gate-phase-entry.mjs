@@ -70,6 +70,7 @@ import { KNOWN_TIERS } from "./dispatch-model.mjs";
 import { phaseKey } from "./pipeline-telemetry.mjs";
 import { activeIssueDir, MTIME_ONLY } from "./validate-pipeline-artifact.mjs";
 import { inFlightObservations } from "./run-candidates.mjs";
+import { phaseShapeOk } from "./check-status-record.mjs";
 
 /**
  * The 15 guarded rows: the 8 phases pipeline.md checkpoints into ("Checkpoint first:") and the
@@ -591,6 +592,29 @@ function decideForDir(issueDir, now) {
   const phase = typeof status.current_phase === "string" ? status.current_phase : "";
   const at = `.pipeline/${name} at \`${phase}\``;
 
+  // A MALFORMED PHASE IS REFUSED, NOT SKIPPED (0.42.x, B2). Checked after completed_at alone and
+  // BEFORE every vocabulary branch, because the vocabulary branches are exactly what a malformed
+  // phase used to fall through: it matched no table row and landed on the fail-open "not a guarded
+  // phase" below, so one mistyped checkpoint disarmed this guard for the rest of the run, silently.
+  // The fail-open on vocabulary stays for a WELL-SHAPED phase nobody taught the table; a phase that
+  // fails status.schema.json's own pattern is not a vocabulary gap, it is a broken record.
+  //
+  // BOUNDED THE SAME WAY EVERY REFUSAL HERE IS: only a record in flight is refused, so an abandoned
+  // malformed record in an old checkout never wedges a project. And a schema this module cannot read
+  // (phaseShapeOk -> null) is a tooling gap, which fails open like every other one.
+  //
+  // The phase VALUE is not echoed. It is free text from a committed record, and the one thing known
+  // about it here is that it is not one of this table's literals.
+  if (!status.completed_at && phaseShapeOk(status.current_phase) === false) {
+    const where = `.pipeline/${name}`;
+    if (!inFlight(status, now)) {
+      return decided("not-applicable", `${where} records a malformed current_phase but is not in flight.`);
+    }
+    return {
+      ...decided("refused", `${where} records a current_phase that does not match status.schema.json's pattern.`),
+      malformed: true,
+    };
+  }
   if (isTerminal(phase, status)) return decided("not-applicable", `${at} is finished.`);
   // AFTER the terminal check, and the order is the assertion's subject rather than a style
   // choice: measured, this branch placed BEFORE it renders a `0-setup` record carrying
@@ -670,6 +694,16 @@ const CONTENT_REPAIR = {
 
 function refusalMessage(result) {
   const dir = `.pipeline/${result.issue_dir}`;
+  if (result.malformed) {
+    return [
+      `Phase-entry guard: this turn cannot end while ${dir}/status.json records a current_phase that is not phase-shaped.`,
+      `The guard cannot tell which phase the run is at, so it cannot check that phase's prerequisite. Before this refusal existed, a malformed phase disarmed the guard for the rest of the run.`,
+      `Work already done in this turn is not undone; only the turn boundary is blocked.`,
+      `Ways to clear it:`,
+      `  1. Set current_phase to the literal commands/pipeline.md names for the checkpoint (e.g. 3-impl, 4-review-complete, halted-error), then run node "\${CLAUDE_PLUGIN_ROOT}/scripts/check-status-record.mjs" and commit ${dir}/status.json.`,
+      `  2. If this run is YOURS and is over, conclude it: give ${dir}/status.json a \`final_verdict\` or a \`completed_at\`.`,
+    ].join("\n");
+  }
   // A refusal on a PRESENT artifact must not send the operator after a missing file. Both of the
   // absent-case lines are false there -- the file is in front of them, and re-running the phase
   // that produced it changes nothing -- and this is the text a blocked turn reads.

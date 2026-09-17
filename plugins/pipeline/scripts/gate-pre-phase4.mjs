@@ -14,11 +14,13 @@
  *       COUNT, over one merged population: requirement_checks is contracted as one entry per
  *       spec.requirements, so a Dev following the contract puts criteria in
  *       acceptance_criteria_met, and a gate reading one array refused the panel over a report
- *       that had said everything it was asked to say. Matching is by AC LABEL first, and where
- *       a majority of the checks carry labels that match is AUTHORITATIVE: a labelled criterion
- *       no check names is uncovered, full stop, with no fall-through to token overlap. Only a
- *       label-free report is scored on token overlap, and that score now carries a
- *       proportional floor so a long criterion cannot be covered by three incidental words.
+ *       that had said everything it was asked to say. A criterion that carries its OWN leading
+ *       AC label is matched by that label and nothing else: an entry covers it only when the
+ *       entry's own leading label (requirement_text, or an acceptance_criteria_met criterion) or
+ *       its `ac_id` field is that label. A label MENTIONED elsewhere in an entry does not count,
+ *       and token overlap is not consulted. Only a criterion with no leading label is scored on
+ *       token overlap, with a proportional floor so a long criterion cannot be covered by three
+ *       incidental words. The gate prints how many criteria each method decided.
  *   (c) any migration file ADDED in the diff has BOTH an up section and a down section. A down
  *       section's PRESENCE is still the marker's job; an up section's is decided by the same
  *       scanner rule (d) uses on the down region, run over the text BEFORE the marker and read
@@ -36,7 +38,10 @@
  *       only the DISCOVERY of migrations from the impl-report; a path passed explicitly via
  *       --migrations-added is still checked, so the config cannot be used to disarm this
  *       gate for a named migration, and it does NOT disable the mis-tier tripwire, which
- *       reads the same key through a UNION resolver. The
+ *       reads the same key through a UNION resolver. NOR CAN IT PASS OVER ZERO FILES: when the
+ *       impl-report changed a file the tripwire's union classifies as a migration and the gate's
+ *       own globs matched nothing at all, the gate halts naming those files and the config key
+ *       (see migrationDiscoveryGap). The
  *       down-section marker defaults to a SQL line comment (`-- DOWN`); override it with
  *       `migrationDownMarker` if your rollback convention differs. A configured marker is
  *       ADDITIVE, not exclusive: the builtin `-- DOWN` keeps working alongside it.
@@ -163,6 +168,7 @@ import {
   DEFAULT_MIGRATION_GLOBS,
   isMigrationPath,
   migrationGlobsForGate,
+  migrationGlobsForTripwire,
 } from "./data-layer-surface.mjs";
 import {
   DEFAULT_DEFERRAL_DIR,
@@ -485,45 +491,56 @@ export function hasUpSection(sql, marker = DEFAULT_DOWN_MARKER) {
   return r !== null && r.kind === "executable";
 }
 
-// The TOKENIZER and the AC-LABEL EXTRACTOR are single-sourced from validate-pipeline-artifact.mjs
-// (imported above), so the fail-OPEN SubagentStop validator and this fail-CLOSED gate read the
-// same words and the same labels out of the same text. The POLICY built on top of them is this
-// gate's own and is deliberately stricter -- see the label rule below. Acceptance criteria and
-// requirement_text are written by different roles (BA vs Dev) and routinely differ in wording
-// while describing the same item, so exact-string matching would false-fail; AC labels
-// (AC1, AC2, ...) are the strongest signal when both sides carry them.
+// The TOKENIZER is single-sourced from validate-pipeline-artifact.mjs (imported above), so the
+// fail-OPEN SubagentStop validator and this fail-CLOSED gate read the same words out of the same
+// text. The POLICY built on top of it is this gate's own and is deliberately stricter.
 
-// A criterion is covered when some requirement_checks entry shares its AC label, OR -- only
-// where labels are not the shared vocabulary -- shares enough distinctive tokens.
+// A criterion is covered by its OWN LABEL, or -- only when it carries none -- by token overlap.
 //
-// THE LABEL RULE IS AUTHORITATIVE, NOT ADVISORY, AND THAT IS THE FIX FOR #48. A labelled
-// criterion whose label no check carries used to FALL THROUGH to token overlap, and on a real
-// 54-criterion spec that fall-through covered AC23 and AC28 out of the wording of the OTHER 52
-// checks: both were deleted from requirement_checks and the gate still reported full coverage.
-// A gate whose entire job is refusing "claims more than it enforces" was doing exactly that, on
-// the transition into the six-agent panel -- the most expensive phase in the system.
+// THE LABEL RULE IS AUTHORITATIVE (#48), AND SINCE 0.42.x IT READS ONLY OWN LABELS (B2). #48 made
+// an unmatched label a refusal instead of a fall-through to token overlap, after that fall-through
+// covered AC23 and AC28 of a real 54-criterion spec out of the wording of the other 52 checks. But
+// the matcher it kept still collected EVERY `AC<n>` mentioned anywhere in a criterion and anywhere
+// in an entry's requirement_text and notes, and called the criterion covered when any one of them
+// met. So "AC3. ... unlike AC1" was covered by an AC1 row, and any row whose notes said "see AC3"
+// covered AC3 whatever the row was about. That is the same claims-more-than-it-checks shape, one
+// level down.
 //
-// So when the criterion names its own label AND the checks speak that language, an unmatched
-// label is a REFUSAL and the token path is not consulted. What that refuses is a check which
-// genuinely covers AC23 but never writes "AC23" while its neighbours do; the remedy is one
-// token in requirement_text or notes, in the convention the report is already using.
+// So a criterion's label is its LEADING label (`AC3.` / `AC3:` / `AC3 `), and an entry answers
+// it only with ITS leading label (requirement_text for a check, criterion for an
+// acceptance_criteria_met entry) or with a dedicated `ac_id` field ("AC3", or the number 3). A
+// label mentioned mid-sentence or in notes is prose, not a claim of coverage.
 //
-// The precondition is a MAJORITY of checks carrying a label, not a single one. A lone
-// "see AC4 for context" in one entry's notes is not evidence that a report keeps the
-// convention, and letting it arm the strict rule would false-halt every labelled criterion in
-// an otherwise label-free report -- a mass refusal produced by one stray phrase.
-function labelVerdict(critLabels, checks) {
-  if (critLabels.size === 0) return "not-in-force";
-  let labelled = 0;
-  let matched = false;
-  for (const c of checks) {
-    const checkLabels = acLabels(`${c.requirement_text || ""} ${c.notes || ""}`);
-    if (checkLabels.size === 0) continue;
-    labelled++;
-    for (const lbl of critLabels) if (checkLabels.has(lbl)) matched = true;
-  }
-  if (matched) return "covered";
-  return checks.length > 0 && labelled * 2 >= checks.length ? "uncovered" : "not-in-force";
+// TOKEN OVERLAP IS KEPT ONLY FOR A CRITERION WITH NO LEADING LABEL. The old "a majority of checks
+// must carry labels before the label rule arms" precondition is gone with it: a labelled spec
+// whose report does not answer in labels is exactly the report this gate cannot verify, and the
+// remedy is one leading label or one ac_id per entry. The gate reports how many criteria each
+// method decided, so a report scored on wording is visible as such.
+export function leadingLabel(value) {
+  if (typeof value !== "string") return null;
+  const m = /^\s*ac\s*(\d+)\b/i.exec(value);
+  return m ? `ac${Number(m[1])}` : null;
+}
+
+// THE CRITERION'S OWN LABEL. Its leading label when it has one; otherwise the ONE AC label its text
+// carries anywhere ("the roster rotates (AC4)", "... per AC4"), because a criterion whose label
+// trails is still a labelled criterion and must not fall to word overlap. Two or more labels and no
+// leading one is ambiguous ("unlike AC1, AC3 ..."), so it is judged as unlabelled rather than guessed.
+export function criterionLabel(criterion) {
+  const lead = leadingLabel(criterion);
+  if (lead) return lead;
+  const all = [...acLabels(criterion)].map((l) => `ac${Number(l.slice(2))}`);
+  const distinct = [...new Set(all)];
+  return distinct.length === 1 ? distinct[0] : null;
+}
+
+function entryLabels(entry) {
+  const out = new Set();
+  const own = leadingLabel(entry && entry.requirement_text);
+  if (own) out.add(own);
+  const id = leadingLabel(entry && entry.ac_id);
+  if (id) out.add(id);
+  return out;
 }
 
 // Token threshold, for the label-free vocabularies the rule above steps aside for. Lenient by
@@ -564,27 +581,32 @@ export function coverageCandidates(report) {
   }
   for (const a of (report && report.acceptance_criteria_met) || []) {
     if (!a || typeof a !== "object") continue;
-    out.push({ requirement_text: a.criterion || "", notes: a.evidence || "" });
+    out.push({ requirement_text: a.criterion || "", notes: a.evidence || "", ac_id: a.ac_id });
   }
   return out;
 }
 
-export function criterionCovered(criterion, checks) {
+/** { covered, method: "label" | "tokens", label } for one criterion. */
+export function coverageVerdict(criterion, checks) {
   const list = checks || [];
-  const verdict = labelVerdict(acLabels(criterion), list);
-  if (verdict === "covered") return true;
-  if (verdict === "uncovered") return false;
-
+  const own = criterionLabel(criterion);
+  if (own) {
+    return { covered: list.some((c) => entryLabels(c).has(own)), method: "label", label: own };
+  }
   const critTokens = tokens(criterion);
-  if (critTokens.size === 0) return true; // nothing distinctive to match: do not block
+  if (critTokens.size === 0) return { covered: true, method: "tokens", label: null }; // nothing distinctive to match: do not block
   const need = Math.min(critTokens.size, Math.max(3, Math.ceil(critTokens.size / 4)));
   for (const c of list) {
     const cand = tokens(`${c.requirement_text || ""} ${c.notes || ""}`);
     let hit = 0;
     for (const t of critTokens) if (cand.has(t)) hit++;
-    if (hit >= need) return true;
+    if (hit >= need) return { covered: true, method: "tokens", label: null };
   }
-  return false;
+  return { covered: false, method: "tokens", label: null };
+}
+
+export function criterionCovered(criterion, checks) {
+  return coverageVerdict(criterion, checks).covered;
 }
 
 // The uncovered-criterion refusal. WHICH RULE refused decides which remedy is the true one:
@@ -595,18 +617,51 @@ function uncoveredCriterionFailure(criterion, checks) {
   const head =
     `acceptance criterion not covered by any requirement_check or acceptance_criteria_met ` +
     `entry: "${criterion.slice(0, 120)}"`;
-  const labels = acLabels(criterion);
-  if (labelVerdict(labels, checks || []) !== "uncovered") return head;
-  const named = [...labels].map((l) => l.toUpperCase()).join(", ");
+  const v = coverageVerdict(criterion, checks);
+  if (v.method !== "label") return head;
+  const named = v.label.toUpperCase();
   return (
     `${head}\n` +
-    `    the criterion names ${named} and the report's entries carry AC labels, so the label ` +
-    `IS the match and no check names ${named}, nor does any acceptance_criteria_met entry. ` +
-    `Token overlap is deliberately not consulted here: it is what covered two criteria out of ` +
+    `    the criterion's own label is ${named}, so the label IS the match, and no check and no ` +
+    `acceptance_criteria_met entry carries ${named} as its own leading label or its ac_id. A ` +
+    `label mentioned elsewhere in an entry (mid-sentence, or in notes) does not count, and ` +
+    `token overlap is deliberately not consulted here: it is what covered two criteria out of ` +
     `the wording of the other 52 on a real spec.\n` +
-    `    remedy: name ${named} in the covering check's requirement_text or notes, or in an ` +
-    `acceptance_criteria_met entry's criterion -- either place counts -- or add the entry if ` +
-    `it is genuinely missing.`
+    `    remedy: start the covering check's requirement_text (or an acceptance_criteria_met ` +
+    `entry's criterion) with ${named}, or set that entry's ac_id to "${named}" -- or add the ` +
+    `entry if it is genuinely missing.`
+  );
+}
+
+/**
+ * THE ZERO-FILE PASS (0.42.x, B2). `migrationGlobs` REPLACES the preset union for this gate's
+ * discovery, so a config that names the wrong directory makes migrationFilesFromReport return
+ * nothing, and the up/down check then passes over zero files -- while the mis-tier tripwire, which
+ * reads the same key through a UNION, still calls those same files migrations. The pipeline
+ * re-tiered the change as a migration and then verified no migration.
+ *
+ * Returns the report's changed paths the TRIPWIRE's union classifies as migrations, but only when
+ * the gate's own globs matched NONE. A gate that found at least one file is doing discovery, and a
+ * narrowing config is allowed to narrow; a gate that found zero while the tripwire found some is the
+ * disarm this closes. Explicit --migrations-added paths are the caller's business and skip it.
+ */
+export function migrationDiscoveryGap(report, gateGlobs, tripwireGlobs) {
+  if (!report || !Array.isArray(report.commits)) return [];
+  if (migrationFilesFromReport(report, ".", gateGlobs).length > 0) return [];
+  return migrationFilesFromReport(report, ".", tripwireGlobs).map((f) => f.rel);
+}
+
+function discoveryGapFailure(files) {
+  const shown = files.slice(0, 10).map((f) => `"${f}"`).join(", ");
+  const more = files.length > 10 ? ` and ${files.length - 10} more` : "";
+  return (
+    `impl-report changed ${files.length} file(s) the mis-tier tripwire classifies as migrations ` +
+    `(${shown}${more}), but this gate's own discovery globs matched none of them, so no up or ` +
+    `down section was checked.\n` +
+    `    cause: \`migrationGlobs\` in pipeline.config.json REPLACES the built-in migration presets ` +
+    `for this gate, and the configured value does not match these paths.\n` +
+    `    remedy: add their pattern to \`extraMigrationGlobs\` (additive, never narrows) or ` +
+    `correct \`migrationGlobs\`; or pass each file with --migrations-added.`
   );
 }
 
@@ -615,7 +670,9 @@ function loadSchema() {
   return JSON.parse(readFileSync(file, "utf8"));
 }
 
-// Discover migration files added in the diff. Production callers pass explicit paths
+// Discover migration files ADDED OR MODIFIED in the diff (#152 asked which: it is both, since
+// commits[].files_changed carries both and a modified migration's reversibility matters as much
+// as a new one's). Production callers pass explicit paths
 // (--migrations-added); when none are passed we infer from the impl-report's
 // commits[].files_changed, matching each path against the configured migration globs.
 // Both inputs are optional: an issue with no migration in scope has nothing to check here.
@@ -701,6 +758,7 @@ export function runGate({
   migrationSources,
   downMarker = DEFAULT_DOWN_MARKER,
   deferral = {},
+  discovery = null,
 }) {
   const failures = [];
 
@@ -720,11 +778,20 @@ export function runGate({
   // leniently it looks.
   const criteria = (spec && spec.acceptance_criteria) || [];
   const coverageEntries = coverageCandidates(report);
+  const coverage = { label: 0, tokens: 0 };
   for (const crit of criteria) {
     if (typeof crit !== "string") continue;
-    if (!criterionCovered(crit, coverageEntries)) {
+    const v = coverageVerdict(crit, coverageEntries);
+    coverage[v.method]++;
+    if (!v.covered) {
       failures.push(uncoveredCriterionFailure(crit, coverageEntries));
     }
+  }
+
+  // (c0) the zero-file pass: the tripwire saw migrations and the gate's globs saw none.
+  if (discovery && !discovery.explicit) {
+    const gap = migrationDiscoveryGap(report, discovery.gateGlobs, discovery.tripwireGlobs);
+    if (gap.length > 0) failures.push(discoveryGapFailure(gap));
   }
 
   // (c) each added migration has both an up and a down section
@@ -758,7 +825,16 @@ export function runGate({
   // (e) every deferral carries a resolvable tracker_ref
   for (const f of deferralFailures(report, deferral)) failures.push(f);
 
-  return { failures };
+  return { failures, coverage };
+}
+
+/** The one line saying WHICH coverage rule decided how many criteria. */
+export function coverageLine(coverage) {
+  const c = coverage || { label: 0, tokens: 0 };
+  return (
+    `coverage: ${c.label} acceptance criteria matched by their own AC label, ` +
+    `${c.tokens} by word overlap (criteria with no leading AC label)`
+  );
 }
 
 // ---- argv + I/O (production path) -------------------------------------------
@@ -880,21 +956,28 @@ async function main() {
     root: resolveMigrationRoot(args),
   };
 
-  const { failures } = runGate({
+  const { failures, coverage } = runGate({
     report,
     spec: specData,
     schema,
     migrationSources,
     downMarker,
     deferral,
+    discovery: {
+      gateGlobs: globs,
+      tripwireGlobs: migrationGlobsForTripwire(cfg),
+      explicit: args.migrationsAdded.length > 0,
+    },
   });
 
   if (failures.length === 0) {
     process.stdout.write("OK: pre-Phase-4 gate passed.\n");
+    process.stdout.write(`${coverageLine(coverage)}\n`);
     return;
   }
   process.stderr.write("FAIL: pre-Phase-4 gate blocked the panel.\n");
   for (const f of failures) process.stderr.write(`  - ${f}\n`);
+  process.stderr.write(`${coverageLine(coverage)}\n`);
   process.exit(1);
 }
 

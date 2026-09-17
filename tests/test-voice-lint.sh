@@ -1507,7 +1507,12 @@ vl56_fixture "$(vl56_dirs 4244 5-archived "$VL56_FRESH_MS")" '['"$(vl56_owner)"'
 VL56_AC7_DIR="$VL56_PROJECT"
 vl56_lint "$VL56_PROJECT/does-not-exist.jsonl" none
 assert_eq "AC7(4) UNREADABLE, spelling 1 (the path does not exist): exit 0. Today's behaviour, preserved deliberately -- there is no message to grade, so there is nothing to refuse. Mutation, and it is the misreading this cell exists to catch: make 'no human turn resolvable' CONTRIBUTE a failure rather than attach a line to a refusal that already exists, and this flips from 0 to 2" "$RC" "0"
-assert_eq "AC7(4): and ZERO bytes" "$ERR" ""
+# B2 CHANGED THIS CELL ON PURPOSE. It asserted ZERO bytes, which made "the lint could not read the
+# transcript" and "the lint read it and found nothing" the same observable. The exit stays 0 (there
+# is still nothing to refuse), and stderr now carries exactly ONE prefixed did-not-run line, which
+# hooks/stop.sh relays to the user and to the disarm log.
+assert_eq "AC7(4): and exactly ONE line on stderr, the did-not-run line (was ZERO bytes before B2)" \
+  "$(printf '%s\n' "$ERR" | grep -c .)/$(printf '%s' "$ERR" | grep -c '^agent-pipeline voice-lint did not run: ')" "1/1"
 
 cp "$VL56_TRANSCRIPT" "$VL56_PROJECT/locked.jsonl"
 chmod 000 "$VL56_PROJECT/locked.jsonl"

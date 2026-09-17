@@ -109,9 +109,10 @@ Commit the `status.json` checkpoints, but keep every other per-issue artifact (`
 
 ```bash
 # Run BEFORE entering each phase, after setting current_phase to the phase being ENTERED.
-# The checker refuses an over-cap events[]/flags[] verdict BEFORE it reaches a commit. It takes
-# no arguments, reads the cap out of schemas/status.schema.json, and is silent when clean; a
-# non-zero exit names the file, the json path and the value, and means fix the record.
+# The checker refuses an over-cap events[]/flags[] verdict, and a recorded phase that fails the
+# schema's pattern, BEFORE either reaches a commit. It takes no arguments, reads the cap and the
+# pattern out of schemas/status.schema.json, and is silent when clean; a non-zero exit names the
+# file, the json path and the value, and means fix the record.
 node "${CLAUDE_PLUGIN_ROOT}/scripts/check-status-record.mjs"
 git add .pipeline/<issue>/status.json
 git commit -m "chore(pipeline): checkpoint phase <n> for #<issue>"
