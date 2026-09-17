@@ -9,7 +9,8 @@
 // merge mechanism both the auto re-review (pipeline.md) and the manual re-run
 // (phase.md /phase peer-review) call, so the two cannot diverge.
 
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, readdirSync } from "node:fs";
+import path from "node:path";
 import { isMain as isMainScript } from "./lib.mjs";
 import { normalizeBlock } from "./materiality.mjs";
 
@@ -146,6 +147,29 @@ export function countVerdicts(merged, roles) {
   return counts;
 }
 
+// WHERE DID A MISSING SHARD GO? (0.42.x, B2.) A reviewer dispatched into a worktree once wrote its
+// shard into the main checkout's .pipeline/<issue>/ instead, and this refusal said only that the
+// shard was missing. So it now looks for a same-named file under the PROJECT dir's .pipeline/*/
+// and names any copy it finds. It reads and names; it never moves or merges a stray copy, because
+// which copy is the reviewer's final word is a question for the orchestrator.
+export function strayShardCopies(file, projectDir = process.env.CLAUDE_PROJECT_DIR || process.cwd()) {
+  const found = [];
+  const base = path.basename(file);
+  const want = path.resolve(file);
+  let entries;
+  try {
+    entries = readdirSync(path.join(projectDir, ".pipeline"), { withFileTypes: true });
+  } catch {
+    return found;
+  }
+  for (const e of entries) {
+    if (!e.isDirectory()) continue;
+    const candidate = path.resolve(projectDir, ".pipeline", e.name, base);
+    if (candidate !== want && existsSync(candidate)) found.push(candidate);
+  }
+  return found;
+}
+
 function main(argv) {
   const [target, ...pairs] = argv;
   if (!target || pairs.length === 0) {
@@ -166,6 +190,13 @@ function main(argv) {
     const file = pair.slice(eq + 1);
     if (!existsSync(file)) {
       console.error(`MISSING SHARD: ${role} (${file})`);
+      const strays = strayShardCopies(file);
+      for (const s of strays) {
+        console.error(`  a file with this name exists at ${s}: the reviewer may have written it into the wrong checkout; move it to ${file} and re-run the merge`);
+      }
+      if (strays.length === 0) {
+        console.error(`  no copy under ${path.join(process.env.CLAUDE_PROJECT_DIR || process.cwd(), ".pipeline")}/*/ either`);
+      }
       process.exit(2);
     }
     shards[role] = JSON.parse(readFileSync(file, "utf-8"));

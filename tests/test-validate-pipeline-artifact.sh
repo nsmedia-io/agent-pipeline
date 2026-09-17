@@ -466,4 +466,129 @@ assert_not_contains "with impl-report.json present (Phase 4 QA stop) the 3a chec
 rm -f "$TEMP_ISSUE_DIR/impl-report.json" "$TEMP_ISSUE_DIR/tasks.json"
 [ -f "$SAVED_REPORT" ] && mv "$SAVED_REPORT" "$TEMP_ISSUE_DIR/impl-report.json"
 
+
+suite "validate-pipeline-artifact: a MALFORMED phase does not make a run dir unrecognised (B2)"
+
+# Recognition of an unnamable run dir used to require a schema-SHAPED current_phase, so one mistyped
+# checkpoint made the whole run invisible to this validator. It now requires the schema's required
+# keys and a non-empty string phase; the shape itself is refused by check-status-record.mjs and the
+# phase-entry guard.
+new_tmpdir || exit 90
+MAL_ROOT="$NEW_TMPDIR"
+MAL_DIR="$MAL_ROOT/.pipeline/tracker-offline-20260916"
+mkdir -p "$MAL_DIR"
+node -e 'process.stdout.write(JSON.stringify({current_phase:"Phase 4 review",started_at:"2026-01-01T00:00:00Z",updated_at:new Date(Date.now()-60000).toISOString(),branch:"b",events:[]}))' > "$MAL_DIR/status.json"
+printf '%s' '{"verdict":"NOT_A_VERDICT"}' > "$MAL_DIR/peer-review.secops.json"
+mal_hook() {
+  local outf="$MAL_ROOT/out.txt" errf="$MAL_ROOT/err.txt"
+  printf '{"agent_type":"pipeline:secops","cwd":"%s"}' "$MAL_ROOT" \
+    | ( cd "$MAL_ROOT" && CLAUDE_PROJECT_DIR="$MAL_ROOT" node "$VALIDATOR" ) >"$outf" 2>"$errf"
+  OUT=$(cat "$outf"); ERR=$(cat "$errf")
+}
+mal_hook
+assert_contains "a run record with a malformed phase is still a run: its defect blocks (was silent before B2)" "$OUT" '"decision":"block"'
+assert_contains "  ...reported as the unnamed run it is" "$ERR" "verdict=unnamed-run"
+# CONTROL: take current_phase away entirely and the directory is no longer a run.
+node -e 'process.stdout.write(JSON.stringify({started_at:"2026-01-01T00:00:00Z",updated_at:new Date(Date.now()-60000).toISOString(),branch:"b",events:[]}))' > "$MAL_DIR/status.json"
+mal_hook
+assert_eq "CONTROL: the same record with NO current_phase is not a run, so nothing blocks" "$OUT" ""
+
+suite "validate-pipeline-artifact: map.json is validated at BA's stop (B2)"
+
+# gate-phase-entry.mjs REQUIRES map.json at 2-review, and nothing validated it against
+# map.schema.json. It is now one of BA's artifacts.
+# The #158 suite above leaves a spec.json behind; this suite asserts on map.json alone.
+rm -f "$TEMP_ISSUE_DIR/spec.json"
+PAYLOAD_BA_MAP="{\"agent_type\":\"pipeline:ba\",\"cwd\":\"$TEMP_PROJECT\",\"active_issue\":\"$ISSUE\"}"
+printf '%s' '{"mapped_at":"2026-01-01T00:00:00Z","depth":"shallow"}' > "$TEMP_ISSUE_DIR/map.json"
+hook "$PAYLOAD_BA_MAP"
+assert_contains "an invalid map.json (no contracts, bad depth) blocks BA's stop" "$OUT" '"decision":"block"'
+assert_contains "  ...naming map.json and the missing field" "$OUT" 'map.json (root): missing required field \"contracts\"'
+assert_contains "  ...and the enum violation" "$OUT" 'map.json /depth'
+printf '%s' '{"mapped_at":"2026-01-01T00:00:00Z","depth":"light","contracts":[{"name":"orders","kind":"table","readers":{}}]}' > "$TEMP_ISSUE_DIR/map.json"
+hook "$PAYLOAD_BA_MAP"
+assert_eq "CONTROL: a valid map.json does not block" "$OUT" ""
+rm -f "$TEMP_ISSUE_DIR/map.json"
+
+suite "validate-pipeline-artifact: a namespaced agent_type reaches the rules THROUGH THE HOOK (#66)"
+
+# #66's four-cell fixture, driven through hooks/subagent-stop.sh rather than checkArtifacts, so the
+# whole installed path is covered: the hook, the payload, the namespace strip, the rules table.
+new_tmpdir || exit 90
+NS_ROOT="$NEW_TMPDIR"
+write_run_record "$NS_ROOT/.pipeline/66/status.json" "4-review"
+printf '%s' '{"verdict":"NOT_A_VERDICT"}' > "$NS_ROOT/.pipeline/66/peer-review.secops.json"
+ns_hook() { # <plugin-root> <agent_type>
+  printf '{"agent_type":"%s","cwd":"%s"}' "$2" "$NS_ROOT" \
+    | ( cd "$NS_ROOT" && CLAUDE_PROJECT_DIR="$NS_ROOT" CLAUDE_PLUGIN_ROOT="$1" bash "$HOOKS_DIR/subagent-stop.sh" 2>/dev/null )
+}
+for t in secops SecOps pipeline:secops agent-pipeline:secops plugin:pipeline:secops Pipeline:SecOps; do
+  assert_contains "#66: agent_type '$t' blocks on the SAME defective shard through the hook" \
+    "$(ns_hook "$PLUGIN_ROOT" "$t")" '"decision":"block"'
+done
+# THE CONTROL THAT FAILS WITHOUT THE FIX: a copy of the plugin whose validator looks the agent up by
+# the raw lowercased agent_type, which is what #66 found shipped. The bare name still blocks there;
+# every namespaced spelling goes silent.
+new_tmpdir || exit 90
+NS_MUT="$NEW_TMPDIR"
+mkdir -p "$NS_MUT/scripts" "$NS_MUT/schemas" "$NS_MUT/hooks"
+cp "$SCRIPTS_DIR"/*.mjs "$SCRIPTS_DIR"/*.json "$NS_MUT/scripts/" 2>/dev/null
+cp "$PLUGIN_ROOT/schemas"/*.json "$NS_MUT/schemas/"
+node -e '
+  const fs = require("fs"); const f = process.argv[1];
+  const s = fs.readFileSync(f, "utf8");
+  const a = "const agent = bareRole(agentType);";
+  if (!s.includes(a)) { process.stdout.write("MUTATION-SITE-MISSING"); process.exit(0); }
+  fs.writeFileSync(f, s.replace(a, "const agent = String(agentType || \"\").toLowerCase();"));
+  process.stdout.write("mutated");
+' "$NS_MUT/scripts/validate-pipeline-artifact.mjs" > "$NS_MUT/mutation.txt"
+assert_eq "#66 CONTROL premise: the mutation site exists and was applied" "$(cat "$NS_MUT/mutation.txt")" "mutated"
+assert_contains "#66 CONTROL: under the mutation the BARE name still blocks" "$(ns_hook "$NS_MUT" secops)" '"decision":"block"'
+assert_eq "#66 CONTROL: under the mutation 'pipeline:secops' goes SILENT, which is the shipped defect" \
+  "$(ns_hook "$NS_MUT" pipeline:secops)" ""
+# And a VALID shard does not block under any spelling.
+printf '%s' '{"verdict":"APPROVE","reviewed_at":"2026-01-01T00:00:00Z","concerns":[],"notes":"n"}' > "$NS_ROOT/.pipeline/66/peer-review.secops.json"
+assert_eq "#66: a valid shard does not block under the namespaced spelling" "$(ns_hook "$PLUGIN_ROOT" pipeline:secops)" ""
+
+suite "validate-pipeline-artifact: a review shard written into the WRONG CHECKOUT refuses the stop (B2)"
+
+# The live shape: the orchestrator's project dir P, a dispatch worktree W nested under it (a `.git`
+# FILE marks W as its own checkout), and a QA panelist dispatched into W who wrote its shard into P.
+new_tmpdir || exit 90
+STRAY_P="$NEW_TMPDIR"
+mkdir -p "$STRAY_P/.git"
+STRAY_W="$STRAY_P/.claude/worktrees/4242-panel"
+mkdir -p "$STRAY_W"
+printf 'gitdir: %s/.git/worktrees/4242-panel\n' "$STRAY_P" > "$STRAY_W/.git"
+write_run_record "$STRAY_P/.pipeline/4242/status.json" "4-review"
+write_run_record "$STRAY_W/.pipeline/4242/status.json" "4-review"
+VALID_QA_SHARD='{"verdict":"APPROVE","reviewed_at":"2026-01-01T00:00:00Z","concerns":[],"notes":"n"}'
+printf '%s' "$VALID_QA_SHARD" > "$STRAY_P/.pipeline/4242/peer-review.qa.json"
+stray_hook() { # <cwd>
+  local outf="$STRAY_P/out.txt" errf="$STRAY_P/err.txt"
+  printf '{"agent_type":"pipeline:qa","cwd":"%s"}' "$1" \
+    | ( cd "$1" && CLAUDE_PROJECT_DIR="$STRAY_P" node "$VALIDATOR" ) >"$outf" 2>"$errf"
+  OUT=$(cat "$outf"); ERR=$(cat "$errf")
+}
+stray_hook "$STRAY_W"
+assert_contains "a shard in the project dir while dispatched to a worktree BLOCKS the stop" "$OUT" '"decision":"block"'
+assert_contains "  ...naming the stray path" "$OUT" "peer-review.qa.json was written to $STRAY_P/.pipeline/4242/peer-review.qa.json"
+assert_contains "  ...and the dispatch checkout" "$OUT" "4242-panel"
+assert_contains "  ...and saying where the merge reads it" "$OUT" "where the merge reads"
+
+# CONTROL 1: once the shard ALSO exists where the merge reads it, nothing is missing.
+printf '%s' "$VALID_QA_SHARD" > "$STRAY_W/.pipeline/4242/peer-review.qa.json"
+stray_hook "$STRAY_W"
+assert_eq "CONTROL: the same stray copy with the shard present in the worktree does not block" "$OUT" ""
+rm -f "$STRAY_W/.pipeline/4242/peer-review.qa.json"
+# CONTROL 2: an agent working in the project dir itself has no wrong checkout to write into.
+stray_hook "$STRAY_P"
+assert_eq "CONTROL: an agent whose cwd IS the project dir is not refused" "$OUT" ""
+# CONTROL 3: a shard older than this subagent (its transcript's first timestamp) is not its write.
+touch -t 202001010000 "$STRAY_P/.pipeline/4242/peer-review.qa.json"
+node -e 'process.stdout.write(JSON.stringify({type:"user",timestamp:new Date().toISOString()})+"\n")' > "$STRAY_P/agent-transcript.jsonl"
+printf '{"agent_type":"pipeline:qa","cwd":"%s","agent_transcript_path":"%s"}' "$STRAY_W" "$STRAY_P/agent-transcript.jsonl" \
+  | ( cd "$STRAY_W" && CLAUDE_PROJECT_DIR="$STRAY_P" node "$VALIDATOR" ) >"$STRAY_P/out.txt" 2>/dev/null
+assert_eq "CONTROL: a shard last modified BEFORE this subagent started is not attributed to it" "$(cat "$STRAY_P/out.txt")" ""
+
 finish

@@ -223,4 +223,27 @@ assert_eq "importing the module exits 0" "$IMPORT_RC" "0"
 assert_contains "importing exposes countVerdicts" "$IMPORT_OUT" "imported:function"
 assert_not_contains "importing does NOT execute main()" "$IMPORT_OUT" "usage: merge-peer-review.mjs"
 
+suite "merge-peer-review: a MISSING SHARD names any stray copy under the project dir (B2)"
+
+# Observed live: a reviewer dispatched into a worktree wrote its shard into the main checkout, and
+# this halt said only that the shard was missing. It still halts, and now says where a same-named
+# file sits.
+new_tmpdir || exit 90
+MS_P="$NEW_TMPDIR"
+mkdir -p "$MS_P/.pipeline/9" "$MS_P/wt/.pipeline/9"
+printf '%s' '{"verdict":"APPROVE","notes":"clean"}' > "$MS_P/.pipeline/9/peer-review.qa.json"
+( cd "$MS_P/wt" && CLAUDE_PROJECT_DIR="$MS_P" node "$MERGE" .pipeline/9/peer-review.json qa=.pipeline/9/peer-review.qa.json ) \
+  >"$MS_P/out.txt" 2>"$MS_P/err.txt"
+MS_RC=$?
+assert_eq "the stray case still exits 2: a shard in the wrong checkout is not merged" "$MS_RC" "2"
+assert_contains "  ...still says MISSING SHARD" "$(cat "$MS_P/err.txt")" "MISSING SHARD: qa"
+assert_contains "  ...and names the stray copy under the project dir (said nothing before B2)" \
+  "$(cat "$MS_P/err.txt")" "$MS_P/.pipeline/9/peer-review.qa.json"
+# CONTROL: with no stray copy anywhere it says that it looked and found none.
+rm -f "$MS_P/.pipeline/9/peer-review.qa.json"
+( cd "$MS_P/wt" && CLAUDE_PROJECT_DIR="$MS_P" node "$MERGE" .pipeline/9/peer-review.json qa=.pipeline/9/peer-review.qa.json ) \
+  >"$MS_P/out.txt" 2>"$MS_P/err.txt"
+assert_contains "CONTROL: with no stray copy it says none was found" "$(cat "$MS_P/err.txt")" "no copy under"
+assert_not_contains "CONTROL: and names no stray path" "$(cat "$MS_P/err.txt")" "a file with this name exists"
+
 finish
