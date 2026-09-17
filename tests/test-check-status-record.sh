@@ -381,7 +381,7 @@ assert_contains "the checkpoint module reads this checker's walk, so the two can
   "$(cat "$SCRIPTS_DIR/checkpoint.mjs")" 'import { capsFromSchema, phasePatternFromSchema, checkRecords } from "./check-status-record.mjs"'
 DOC_CMD_RESOLVED="${DOC_CMD//\"\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/checkpoint.mjs\"/\"$SCRIPTS_DIR/checkpoint.mjs\"}"
 DOC_CMD_RESOLVED="${DOC_CMD_RESOLVED//\$PIPELINE_BASE\/<issue>/$MULTI_ROOT/.pipeline/118}"
-DOC_CMD_RESOLVED="${DOC_CMD_RESOLVED//<phase>/4-review}"
+DOC_CMD_RESOLVED="${DOC_CMD_RESOLVED//<phase>/5-archive}"
 DOC_CMD_RESOLVED="${DOC_CMD_RESOLVED//<verdict token of the phase closing>/GATE_PASSED}"
 DOC_CMD_RESOLVED="${DOC_CMD_RESOLVED// --commit/}"
 status_body "$OVER_CAP" "" > "$MULTI_ROOT/.pipeline/118/status.json"
