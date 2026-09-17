@@ -590,7 +590,25 @@ write_spec "AC1: migrations are reversible"
 write_report "AC1 handled" '[{"sha":"a1","message":"m","files_changed":["migrations/013_bad.sql"]}]'
 write_migration "migrations/013_bad.sql" "$BAD_SQL"
 gate --issue "$ISSUE"
-assert_eq "migrationGlobs: [] disarms the INFERENCE path" "$RC" "0"
+# B2 (0.42.x) INVERTED THIS CELL. It pinned the zero-file pass as a feature: with discovery emptied,
+# the up/down check ran over no files and passed, while the mis-tier tripwire (a UNION over the same
+# key) still called migrations/013_bad.sql a migration. The gate now halts on that disagreement.
+assert_eq "migrationGlobs: [] no longer passes over ZERO files when the tripwire sees a migration" "$RC" "1"
+assert_contains "the halt names the file the tripwire classified" "$ERR" '"migrations/013_bad.sql"'
+assert_contains "and names the config key that emptied discovery" "$ERR" 'migrationGlobs'
+assert_contains "and the additive remedy" "$ERR" 'extraMigrationGlobs'
+assert_not_contains "and it is the discovery rule, not the down-section rule on a file the gate never read" \
+  "$ERR" 'has no down section'
+
+# NON-ZERO CONTROL: the same config with a diff that touches nothing migration-shaped still passes,
+# so the rule is about the disagreement and not about `migrationGlobs: []` itself.
+new_project globs-empty-no-migration
+write_config '{"migrationGlobs":[]}'
+write_spec "AC1: migrations are reversible"
+write_report "AC1 handled" '[{"sha":"a1","message":"m","files_changed":["src/x.ts"]}]'
+gate --issue "$ISSUE"
+assert_eq "CONTROL: migrationGlobs: [] with no migration-shaped change passes" "$RC" "0"
+assert_not_contains "CONTROL: and says nothing about discovery" "$ERR" 'discovery globs matched none'
 
 new_project globs-empty-explicit
 write_config '{"migrationGlobs":[]}'
@@ -624,7 +642,38 @@ write_spec "AC1: migrations are reversible"
 write_report "AC1 handled" '[{"sha":"a1","message":"m","files_changed":["migrations/016_bad.sql"]}]'
 write_migration "migrations/016_bad.sql" "$BAD_SQL"
 gate --issue "$ISSUE"
-assert_eq "a custom glob matches ONLY what it names" "$RC" "0"
+# B2 (0.42.x): the custom glob still DISCOVERS only what it names (the down-section rule never
+# reads migrations/016_bad.sql), but a gate that discovered NOTHING while the tripwire classified a
+# migration is now a halt rather than a pass over zero files.
+assert_eq "a custom glob that discovers nothing while the tripwire sees a migration halts" "$RC" "1"
+assert_contains "naming the file" "$ERR" '"migrations/016_bad.sql"'
+assert_not_contains "and the custom glob still did not DISCOVER it (no down-section verdict on it)" "$ERR" \
+  'migration "migrations/016_bad.sql" has no down section'
+
+# CONTROL: a narrowing config that DOES discover a file keeps its narrowing. The tripwire-only file
+# beside it is not checked and does not halt, because discovery found something to check.
+new_project globs-custom-narrowing-kept
+write_config '{"migrationGlobs":["db/changes/**"]}'
+write_spec "AC1: migrations are reversible"
+write_report "AC1 handled" '[{"sha":"a1","message":"m","files_changed":["db/changes/016_good.sql","migrations/016_bad.sql"]}]'
+write_migration "db/changes/016_good.sql" "$GOOD_SQL"
+write_migration "migrations/016_bad.sql" "$BAD_SQL"
+gate --issue "$ISSUE"
+assert_eq "CONTROL: a narrowing glob that found at least one file is still allowed to narrow" "$RC" "0"
+
+# #152's FIXTURE, in shape: a TypeScript helper under a migrations dir's __tests__/ beside a real SQL
+# migration. #156's test-path exclusion already classifies exactly one of them; this pins it end to
+# end through the gate, including the zero-file rule above not firing on the helper.
+new_project issue152-ts-helper
+write_spec "AC1: migrations are reversible"
+write_report "AC1 handled" '[{"sha":"a1","message":"m","files_changed":["supabase/migrations/__tests__/lib/probe-test-fixtures.ts","supabase/migrations/255_x.sql"]}]'
+write_migration "supabase/migrations/__tests__/lib/probe-test-fixtures.ts" 'export const APPLIED_MIGRATION_MAX_VERSION = 255;'
+write_migration "supabase/migrations/255_x.sql" "$GOOD_SQL"
+gate --issue "$ISSUE"
+assert_eq "#152: a .ts helper under migrations/__tests__/ is not checked for a down section" "$RC" "0"
+assert_eq "#152: isMigrationPath classifies exactly ONE of the two paths" \
+  "$(node -e 'import(process.argv[1]).then(m=>{const g=m.DEFAULT_MIGRATION_GLOBS;console.log(["supabase/migrations/__tests__/lib/probe-test-fixtures.ts","supabase/migrations/255_x.sql"].filter(p=>m.isMigrationPath(p,g)).join(","))})' "$SCRIPTS_DIR/data-layer-surface.mjs")" \
+  "supabase/migrations/255_x.sql"
 
 new_project globs-wrongtype
 write_config '{"migrationGlobs":"migrations/**"}'
@@ -847,11 +896,11 @@ gate --issue "$ISSUE"
 assert_eq "a labelled criterion no check names is uncovered, despite heavy token overlap" "$RC" "1"
 assert_contains "the halt says which rule fired" "$ERR" \
   "acceptance criterion not covered by any requirement_check"
-assert_contains "and names the label that went unanswered" "$ERR" "no check names AC23"
+assert_contains "and names the label that went unanswered" "$ERR" "carries AC23 as its own leading label or its ac_id"
 assert_contains "and says token overlap was deliberately not consulted" "$ERR" \
-  "Token overlap is deliberately not consulted here"
-assert_contains "and names the remedy in the convention the report already uses" "$ERR" \
-  "remedy: name AC23 in the covering check's requirement_text or notes"
+  "token overlap is deliberately not consulted here"
+assert_contains "and names the remedy: an own leading label or an ac_id" "$ERR" \
+  "remedy: start the covering check's requirement_text (or an acceptance_criteria_met entry's criterion) with AC23, or set that entry's ac_id to \"AC23\""
 assert_not_contains "the coverage halt is not an incidental schema error" "$ERR" "impl-report schema:"
 
 # NON-ZERO CONTROL: the same fixture with the label written down passes. This is what proves the
@@ -867,16 +916,19 @@ assert_eq "CONTROL: the same criterion passes once one check names AC23" "$RC" "
 # ...and the covering check's WORDING shares almost nothing with the criterion, so this also
 # pins the reason the label path exists at all: BA and Dev write these arrays independently.
 
-# THE PRECONDITION, first direction. A report whose checks carry no labels at all is NOT made
-# stricter -- the label is not a shared vocabulary there, and demanding one would false-halt
-# every project that does not use them. Coverage falls back to wording, as it always did.
+# B2 (0.42.x) RETIRED THE MAJORITY PRECONDITION, and the next two cells are inverted with it. A
+# labelled criterion is answered by an entry's OWN leading label or ac_id and nothing else, so a
+# report that does not answer in labels no longer gets its labelled criteria scored on wording:
+# that wording path is what the label rule exists to keep out of a labelled spec. Word overlap
+# stays for criteria that carry no leading label (cov-tokens, token-floor-* below).
 new_project label-not-in-force
 write_spec_criteria '["AC5: screenshots stay inside the pipeline issue directory"]'
 write_report_checks '[
   {"requirement_index": 0, "requirement_text": "verify screenshots remain inside the issue directory tree", "status": "PASS", "notes": "pinned by the fixture"}
 ]'
 gate --issue "$ISSUE"
-assert_eq "a labelled criterion still matches on wording when NO check carries a label" "$RC" "0"
+assert_eq "a labelled criterion is NOT matched on wording when no check carries a label (was 0 before B2)" "$RC" "1"
+assert_contains "and the halt is the label rule's" "$ERR" "carries AC5 as its own leading label or its ac_id"
 
 # THE PRECONDITION, second direction, and the reason it is a MAJORITY rather than "any". One
 # stray `see AC4 for context` in one entry's notes is not evidence a report keeps the
@@ -891,7 +943,7 @@ write_report_checks '[
   {"requirement_index": 2, "requirement_text": "screenshots stay inside the issue directory", "status": "PASS", "notes": "pinned by the fixture"}
 ]'
 gate --issue "$ISSUE"
-assert_eq "one labelled check out of three does NOT arm the strict rule" "$RC" "0"
+assert_eq "a stray 'see AC4' no longer decides anything: AC9 is unanswered and halts (was 0 before B2)" "$RC" "1"
 
 new_project label-majority-arms
 write_spec_criteria '["AC9: the courier roster rotates on the hour"]'
@@ -902,7 +954,47 @@ write_report_checks '[
 ]'
 gate --issue "$ISSUE"
 assert_eq "two labelled checks out of three DO arm it, and AC9 goes unanswered" "$RC" "1"
-assert_contains "naming the unanswered label" "$ERR" "no check names AC9"
+assert_contains "naming the unanswered label" "$ERR" "carries AC9 as its own leading label or its ac_id"
+
+suite "pre-Phase-4 gate: a criterion is covered by its OWN label, never a MENTIONED one (B2)"
+
+# THE DEFECT. The matcher collected every AC<n> MENTIONED anywhere in the criterion and anywhere in
+# an entry's requirement_text and notes, and covered the criterion when any pair met. Below, AC3's
+# text mentions AC1, and the only entry is AC1's, whose notes say "see AC3". Before B2 that was full
+# coverage twice over; AC3 has no entry at all.
+new_project own-label-mention
+write_spec_criteria '["AC1: the roster rotates on the hour","AC3: claims are rejected when they overlap, unlike AC1"]'
+write_report_checks '[
+  {"requirement_index": 0, "requirement_text": "AC1: roster rotation", "status": "PASS", "notes": "see AC3 for the claim path"}
+]'
+gate --issue "$ISSUE"
+assert_eq "a label MENTIONED in an entry's notes, or in the criterion's own text, covers nothing" "$RC" "1"
+assert_contains "the halt names the criterion whose own label went unanswered" "$ERR" "AC3: claims are rejected"
+assert_not_contains "and AC1 itself IS covered by the AC1 entry" "$ERR" '"AC1: the roster rotates'
+assert_contains "the gate reports which method decided each criterion" "$ERR" \
+  "coverage: 2 acceptance criteria matched by their own AC label, 0 by word overlap"
+
+# CONTROL, and the dedicated field: the same report with an entry whose ac_id is AC3 passes, even
+# though that entry's text carries no label and shares no words with the criterion.
+new_project own-label-ac-id
+write_spec_criteria '["AC1: the roster rotates on the hour","AC3: claims are rejected when they overlap, unlike AC1"]'
+write_report_checks '[
+  {"requirement_index": 0, "requirement_text": "AC1: roster rotation", "status": "PASS", "notes": "see AC3 for the claim path"},
+  {"requirement_index": 1, "requirement_text": "double booking guard", "status": "PASS", "notes": "n", "ac_id": "AC3"}
+]'
+gate --issue "$ISSUE"
+assert_eq "CONTROL: an entry whose ac_id is AC3 covers AC3" "$RC" "0"
+assert_contains "and the pass reports the label method" "$OUT" \
+  "coverage: 2 acceptance criteria matched by their own AC label, 0 by word overlap"
+
+# An UNLABELLED spec still uses word overlap, and says so.
+new_project own-label-unlabelled-spec
+write_spec "Screenshots stay inside the pipeline issue directory"
+write_report "verify screenshots remain inside the issue directory tree"
+gate --issue "$ISSUE"
+assert_eq "an unlabelled criterion is still matched on wording" "$RC" "0"
+assert_contains "and the pass reports the word-overlap method" "$OUT" \
+  "coverage: 0 acceptance criteria matched by their own AC label, 1 by word overlap"
 
 suite "pre-Phase-4 gate: the token floor is proportional, not flat (#48)"
 
@@ -921,7 +1013,7 @@ assert_eq "three incidental words do not cover a 19-token criterion" "$RC" "1"
 assert_contains "and the halt quotes the criterion" "$ERR" \
   "The orchestrator refuses a peer-review panel"
 assert_not_contains "the token-floor halt is not the label rule wearing its message" "$ERR" \
-  "Token overlap is deliberately not consulted here"
+  "token overlap is deliberately not consulted here"
 assert_not_contains "nor an incidental schema error" "$ERR" "impl-report schema:"
 
 # NON-ZERO CONTROL, and the one that keeps the floor honest. A stricter matcher that refused
