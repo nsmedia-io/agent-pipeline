@@ -39,42 +39,9 @@ Verdict-name normalization: `APPROVE_WITH_NOTES` is the canonical term (matches 
 
 ### Sync Phase 3 artifacts to the orchestrator pipeline directory
 
-Before any worktree cleanup, copy the Phase 3 and Phase 4 artifacts that QA, Dev, and the panel wrote into the worktree's `ARTIFACT_DIR` back to the canonical `$PIPELINE_BASE/<issue>/`. Phase 3 worktrees are removed by the post-merge cleanup mechanism, which would otherwise delete `tasks.json`, `impl-report.json`, and `peer-review.json` before Phase 5 archival reads them.
+Before any worktree cleanup, run `node "${CLAUDE_PLUGIN_ROOT}/scripts/sync-artifacts.mjs" --from "$ARTIFACT_DIR" --to "$PIPELINE_BASE/<issue>"`. It copies by ownership, the list in `scripts/artifact-ownership.mjs` that the archive's staleness check also reads: seeded files no-clobber, files produced in the worktree forced. Classify any `UNCLASSIFIED` line it prints in that module. Exit 1 is a failed copy: resolve it before cleanup, because the Phase 5 archive has no fallback to the worktree.
 
-**RUN THIS STEP TWICE: here, and AGAIN immediately before the Phase 5 Librarian dispatch.** Under the final-verdict rubric an `APPROVE_WITH_NOTES` panel means nits are fixed in place with no panel re-run, so Dev legitimately keeps writing to `impl-report.json`, `map.json` and `peer-review.json` *after* this point. A sync that runs only at the Phase 3 to 4 transition cannot capture work that happens after it, however the copy is flagged. This is not a belt-and-braces suggestion; a single sync is half a fix.
-
-```bash
-SRC="$ARTIFACT_DIR"                       # = $WORKTREE_PATH/.pipeline/<issue>
-DST="$PIPELINE_BASE/<issue>"
-if [ -d "$SRC" ] && [ "$SRC" != "$DST" ]; then
-  mkdir -p "$DST"
-  for f in "$SRC"/*; do
-    [ -f "$f" ] || continue
-    b="$(basename "$f")"
-    case "$b" in
-      # SEEDED IN. The orchestrator wrote these and copied them into the worktree, so the
-      # canonical copy is authoritative and the worktree's is the stale seed.
-      spec.json|review.json|review.*.json|constraints.md|status.json)
-        cp -n "$f" "$DST/" 2>/dev/null || true ;;
-      # PRODUCED THERE. Written IN the worktree by Dev, QA and the Phase 4 panel, so the
-      # worktree copy is the newer one and no-clobber freezes the wrong side.
-      map.json|tasks.json|impl-report.json|peer-review.json|peer-review.*.json)
-        cp -f "$f" "$DST/" 2>/dev/null || true ;;
-      # UNCLASSIFIED. Copy on the safe side and SAY SO, so a new artifact type surfaces as a
-      # line to classify rather than being silently frozen or silently clobbered.
-      *)
-        cp -n "$f" "$DST/" 2>/dev/null || true
-        printf 'sync: %s matches no ownership rule; copied no-clobber. Classify it above.\n' "$b" ;;
-    esac
-  done
-fi
-```
-
-**The split is by OWNERSHIP, not by first arrival.** Do not collapse this back to one flag in either direction -- both directions are wrong for half the files. The measurement behind it (#34) is in `${CLAUDE_PLUGIN_ROOT}/docs/rationale.md` ("Artifact sync").
-
-The `"$SRC" != "$DST"` guard is a no-op safety for the case where a future change runs Phases 3-4 in the same checkout as the orchestrator.
-
-The archive-time backstop behind the run-it-twice rule, and the case where it abstains, are described in `${CLAUDE_PLUGIN_ROOT}/docs/rationale.md` ("Artifact sync: the archive-time backstop"); it is not a substitute for the second sync.
+**Run it twice: here, and again immediately before the Phase 5 Librarian dispatch.** An `APPROVE_WITH_NOTES` round keeps writing `impl-report.json`, `map.json` and `peer-review.json` after this point. The measurement behind the ownership split and the archive-time backstop are in `${CLAUDE_PLUGIN_ROOT}/docs/rationale.md` ("Artifact sync").
 
 Do NOT merge. The owner merges to the integration branch. Presenting a PR as ready to merge is a **full voice mode** moment (see "Human-facing responses"): the owner is being asked to accept the change and owns what happens next, so give them the report, the scales, and the decision block if a call is open. Merges to the integration branch follow your project's review policy; production/release promotion needs the owner's explicit go. Remote CI-green is the MERGE precondition that ran concurrently with the panel: before presenting the PR as ready to merge, verify remote CI is green on the current head (the PR head SHA matches the reviewed HEAD, and the CI conclusion on that head is green), since the panel entered without waiting on it.
 
