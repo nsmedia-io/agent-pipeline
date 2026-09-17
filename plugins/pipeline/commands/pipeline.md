@@ -42,25 +42,24 @@ Non-negotiables (carry through to every subagent prompt you construct):
 
 ## How this command loads (read before anything else)
 
-This file is the core: operating model, argument, non-negotiables, this map, tiering and error handling. Every phase, gate and handoff is its own file under `${CLAUDE_PLUGIN_ROOT}/orchestrator/`. **Read the file with the Read tool when its row fires, before the first action it governs, and follow it as if it were written here.** A row is a pointer, not a summary: no rule in a phase file is optional because this table does not restate it. When a file says to read another now, do so before your next action. Re-read a file after a context compaction, or whenever unsure: a remembered gate is how a gate gets skipped.
+This file is the core: operating model, argument, non-negotiables, this map, tiering and error handling. Every phase, gate and handoff is its own file under `${CLAUDE_PLUGIN_ROOT}/orchestrator/`. **At every phase transition, and on `--resume` once Phase 0 has read the record, run `node "${CLAUDE_PLUGIN_ROOT}/scripts/next-phase.mjs" --status "$PIPELINE_BASE/<issue>/status.json" --spec "$PIPELINE_BASE/<issue>/spec.json"`** (`--existing-issue` on an `--issue <n>` start). It prints `RUN:` (the phase to run), `THEN:` and a `READ:` line per file: **Read each with the Read tool before the first action it governs, and follow it as if it were written here.** Exit 2 or 3: halt and report the output. Re-read a file after a context compaction, or whenever unsure: a remembered gate is how a gate gets skipped. The table is `next-phase.mjs --table`; a row is a pointer, not a summary.
 
 | When | Read now |
 |---|---|
-| Every run (fresh, `--issue`, `--resume`), before Phase 0 step 0 | `phase-0-setup.md`, then `status-record.md` before the record is first written or read |
-| `--resume`, once Phase 0 has read the record | the row for the phase the record names, and whatever that file sends you to |
-| Phase 0.5 | `phase-0.5-map.md` |
-| Phase 1, and every later BA dispatch | `phase-1-ba.md` |
-| Routing says standard | `phase-2-lite.md` |
-| Routing says architectural | `phase-2-review.md`, then `phase-2.5-design.md` |
-| Spec is frontend-scoped (at routing), or `visual-contract.json` exists at Phase 4 | `art-director-contract.md` |
-| Phase 3 | `phase-3-impl.md`; at architectural ALSO `phase-3-architectural.md` before any dispatch |
-| Phase 3 returned, panel not dispatched | `phase-3-4-gate.md`; then `live-verification.md` when the gate file says it applies |
-| A dispatch whose model you resolve (architectural 0.5 map, 2.5 sketches and judge), or any model/effort routing question | `dispatch-routing.md` |
-| Phase 4 | `phase-4-panel.md`, then `phase-4-verdict.md` after the merge |
-| A Phase 4 fix round, and every delta re-review | `phase-4-delta.md` |
-| Before ANY loop back (to BA, Dev or the judge), any spec revision or fix round, any `checkpoint.mjs --loopback` exit 2 | `loop-backs.md` |
-| Phase 5 | `phase-5-archive.md` |
-| Before the first owner-facing message that is not a between-phase progress tick, and before the first parallel fan-out | `owner-handoff.md` |
+| `0-setup`, every run | `phase-0-setup.md`; `status-record.md` (before the record is first read or written) |
+| `0.5-map` | `phase-0.5-map.md`; `dispatch-routing.md` (architectural) |
+| `1-ba`, and every later BA dispatch | `phase-1-ba.md` |
+| `2-constraints` (standard) | `phase-2-lite.md` |
+| `2-review` (architectural) | `phase-2-review.md` |
+| `2.5-design` (architectural) | `phase-2.5-design.md`; `dispatch-routing.md` |
+| `3-impl` | `phase-3-impl.md`; `phase-3-architectural.md` (architectural, before any dispatch); `phase-3-4-gate.md` (Phase 3 returned); `live-verification.md` (the gate says so) |
+| `4-review` | `phase-4-panel.md`; `phase-4-verdict.md` (after the merge) |
+| `5-archive` | `phase-5-archive.md` |
+| Frontend-scoped spec at routing, or `visual-contract.json` at Phase 4 | `art-director-contract.md` |
+| A fix round or delta re-review | `phase-4-delta.md` |
+| Before ANY loop back, spec revision or fix round, or on `checkpoint.mjs --loopback` exit 2 | `loop-backs.md` |
+| Any model or effort routing question | `dispatch-routing.md` |
+| Before the first owner-facing message that is not a progress tick, and the first parallel fan-out | `owner-handoff.md` |
 
 **Shared rule files load only where they bind.** `${CLAUDE_PLUGIN_ROOT}/voice.md`: where `owner-handoff.md` says, never at setup. `${CLAUDE_PLUGIN_ROOT}/evidence.md` (the preamble already sends every reviewer to it): when you grade a finding yourself, that is before arguing a residual down to a note (`phase-4-delta.md`) and before telling the owner why a `REQUEST_CHANGES` blocks or became a note. `${CLAUDE_PLUGIN_ROOT}/evidence-controls.md`: before you verify a control yourself ("Verify, do not relay") when the tier is architectural or the diff touches a control surface (auth, session, crypto, secrets, webhooks, a data-access policy, a migration, CI or deploy config, this pipeline's hooks and gates).
 

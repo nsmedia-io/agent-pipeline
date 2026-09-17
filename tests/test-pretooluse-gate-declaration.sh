@@ -572,14 +572,14 @@ assert_eq "AC36(a): a FUNCTION-SCOPE reverse edge is still a cycle and is still 
 # passing confidently: 16 at the reviewed commit, 17 once R6's leaf module landed, 18 with
 # #117's check-status-record.mjs, 19 with #132's check-knowledge-timeout-literals.mjs, 21 with
 # 0.40.0's materiality.mjs and security-surface.mjs, 22 with 0.41.0's deferral.mjs, 23 with
-# 0.42.0's render-panel.mjs, 24 with the review-convergence round-budget.mjs, 26 with version-check.mjs and migrate-records.mjs, 28 with C2's toon.mjs and prompt-weight.mjs, 30 with #163's dispatch-log.mjs and usage-report.mjs, 31 with #164's panel-roles.mjs, 32 with check-merged.mjs, 33 with extract-constraints.mjs, 34 with owner-gate.mjs, 36 with sync-artifacts.mjs and artifact-ownership.mjs, 37 with merge-ready.mjs, 40 with merge-review.mjs, phase3-exit.mjs and tier-floor.mjs, 42 with checkpoint.mjs and record-verdict.mjs. It went red on schedule when the eighteenth
+# 0.42.0's render-panel.mjs, 24 with the review-convergence round-budget.mjs, 26 with version-check.mjs and migrate-records.mjs, 28 with C2's toon.mjs and prompt-weight.mjs, 30 with #163's dispatch-log.mjs and usage-report.mjs, 31 with #164's panel-roles.mjs, 32 with check-merged.mjs, 33 with extract-constraints.mjs, 34 with owner-gate.mjs, 36 with sync-artifacts.mjs and artifact-ownership.mjs, 37 with merge-ready.mjs, 40 with merge-review.mjs, phase3-exit.mjs and tier-floor.mjs, 42 with checkpoint.mjs and record-verdict.mjs, 43 with next-phase.mjs. It went red on schedule when the eighteenth
 # module landed, again at the nineteenth, and again at the twenty-first, which is the behaviour
 # this pin is for -- bump the number, do not soften it to a floor. The assertion NAME is left as
 # it stands apart from the count: #132's AC15 compares this suite's row names against
 # origin/main with digits normalised, so a reworded row reads there as a DELETED one.
 MODULE_N="$(printf '%s' "$GRAPH_OUT" | sed -n 's/modules=\([0-9]*\).*/\1/p' | head -1)"
-assert_eq "AC36: scripts/ holds 42 modules -- R6's LEAF module plus #117's check-status-record.mjs, not the reviewed commit's 16" \
-  "$MODULE_N" "42"
+assert_eq "AC36: scripts/ holds 43 modules -- R6's LEAF module plus #117's check-status-record.mjs, not the reviewed commit's 16" \
+  "$MODULE_N" "43"
 
 # ===============================================================================================
 suite "AC36(b): three entry directions, PAIRED SAME-RUN CAPTURE against the reviewed commit"
