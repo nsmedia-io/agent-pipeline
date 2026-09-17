@@ -4,28 +4,37 @@ Behaviour changes that reach an existing project at its next plugin update, newe
 
 Entries keep the numbers they carried in the README's old Upgrading list, so a cross-reference such as "item 29 below" still resolves. Measured figures in an entry describe the commit that entry shipped with and are not re-taken afterwards.
 
-## Unreleased
+## 0.44.0 (2026-09-17)
 
 ### What changes for you
 
-- **`/pipeline` loads its instructions phase by phase.** `commands/pipeline.md` is now a core (operating model, argument, non-negotiables, a loading map, tiering, error handling, and the Phase 4 preamble `scripts/render-panel.mjs` slices out of it). Every phase, gate and handoff moved verbatim to its own file under `orchestrator/`, which the core tells the orchestrator to Read when that phase starts. `voice.md` is read at the owner boundary, `evidence.md` only when the orchestrator grades a finding itself, and `evidence-controls.md` only when it verifies a control on an architectural or control-surface change. No rule was dropped; incident histories and measurements that sat inline moved to `docs/rationale.md` (loaded by no prompt), with a one-line pointer where each was.
-- **Agent contracts read two shared blocks by reference.** The evidence discipline section (a 12.4 KB copy in six contracts, a near-identical copy in two more) and the Phase 4 tracked-write isolation section (9.8 KB, byte-identical in all nine) now live once each in `shared/evidence-discipline.md` and `shared/tracked-write-isolation.md`. Each contract keeps its heading, a pointer saying when to read the file, and its own additions. The replicated `## The property, not the fix` block and its sha1 digest are unchanged.
-- Nothing to do on update. A project that copied `commands/pipeline.md` into its own tree needs `orchestrator/` and `shared/` in the plugin root.
-- **Phase 4 prompts are cache-friendly.** `render-panel.mjs` no longer substitutes the issue number, worktree, reviewed sha, artifact directory or plugin root into the panel preamble and lenses. Each prompt is the static preamble, then the role's lens, then a `RUN DATA` block that binds those placeholders for that dispatch. The static part is byte-identical for every role of a panel and across issues on one plugin version, so repeated dispatches can reuse the prompt cache. Nothing to do: re-render any panel script you saved before updating, because an old one still works but carries the substituted form.
-- **Data in prompts is TOON; artifacts stay JSON.** `scripts/toon.mjs` encodes JSON as TOON (Token-Oriented Object Notation) for prompt text only. A delta round's open blockers reach the role as one table (`id, severity, likelihood, harm, merge_class, location`), with the path of `peer-review.json` beside it for the full record. Agents still read and write JSON, and no schema changed. The module header lists where the encoder departs from the published spec.
-- **`scripts/prompt-weight.mjs`** reports bytes and estimated tokens (ceil(chars/4), an estimate, not a tokenizer count) for the command files, `pipeline.md` per section, each agent definition, and, with `--fixture <issue dir>`, the rendered panel prompts and every JSON artifact as compact JSON vs TOON.
+- **`/pipeline` loads much less text.** The orchestrator used to load one 208 KB command file plus three rule files (288,089 bytes) on every run. A typical standard-tier run now loads 132,378 bytes (46.0% of that), and the always-loaded core is 17,695 bytes. Measured on this release's tree; see "Measured" below.
+- **Phase instructions load on demand.** Each phase, gate and handoff is its own file under `orchestrator/`, read when that phase starts. The Phase 4 reviewer preamble is its own file too, which the panel renderer reads and the orchestrator never loads.
+- **Agent contracts share two sections.** The evidence discipline and Phase 4 tracked-write isolation sections live once each under `shared/`, and each agent reads them when they apply.
+- **Uniform prompt data is sent as TOON tables.** Lists of same-shaped records (a delta round's open blockers, for one) reach an agent as a compact table instead of JSON. On the uniform arrays of one consumer run (`rome` #27) that is 9.2% fewer bytes. Artifacts on disk stay JSON.
+- **Panel prompts are cache-friendly.** Every Phase 4 prompt starts with the same static text (25,478 bytes on a full round for the `rome` #27 panel) and ends with that dispatch's run values, so repeated dispatches can reuse the prompt cache.
+- Nothing to do on update. A panel script you rendered and saved before updating still works but carries the old substituted form; render it again. A project that copied `commands/pipeline.md` into its own tree needs `orchestrator/` and `shared/` from the plugin root beside it.
 
-### Measured (bytes, `wc -c`, at 6a835a5 before and at this branch's head after)
+### In this release
+
+- **The orchestrator is a core plus phase files.** `commands/pipeline.md` keeps the operating model, argument, non-negotiables, a loading map, tiering and error handling. Every phase, gate and handoff moved verbatim to its own file under `orchestrator/`, which the core tells the orchestrator to Read when that phase starts. The files sit outside `commands/` because markdown in a subdirectory of a plugin's `commands/` can be exposed as a namespaced slash command. `voice.md` is read at the owner boundary, `evidence.md` only when the orchestrator grades a finding itself, and `evidence-controls.md` only when it verifies a control on an architectural or control-surface change. No rule was dropped; incident histories and measurements that sat inline moved to `docs/rationale.md` (loaded by no prompt), with a one-line pointer where each was. `/phase` names the orchestrator files it mirrors and reads them before acting.
+- **The Phase 4 preamble is `orchestrator/phase-4-panel-preamble.md`.** `render-panel.mjs` slices it from there; the block is byte-identical to the one it sliced from the core before. The replicated `## The property, not the fix` block moved with it, span and sha1 digest unchanged.
+- **Agent contracts read two shared blocks by reference.** The evidence discipline section (a 12.4 KB copy in six contracts, a near-identical copy in two more) and the Phase 4 tracked-write isolation section (9.8 KB, byte-identical in all nine) now live in `shared/evidence-discipline.md` and `shared/tracked-write-isolation.md`. Each contract keeps its heading, a pointer saying when to read the file, and its own additions.
+- **Prompt assembly: static first, run data last.** `render-panel.mjs` no longer substitutes the issue number, worktree, reviewed sha, artifact directory or plugin root into the preamble and lenses. Each prompt is the static preamble, then the role's lens, then a `RUN DATA` block that binds those placeholders for that dispatch; a quoted value's quotes are not part of the value. The static part is byte-identical for every role of a panel and across issues on one plugin version.
+- **TOON for prompt text only.** `scripts/toon.mjs` encodes JSON as TOON (Token-Oriented Object Notation). A delta round's open blockers reach the role as one table (`id, severity, likelihood, harm, merge_class, location`), with the path of `peer-review.json` beside it for the full record. Agents still read and write JSON, and no schema changed. The module header lists where the encoder departs from the published spec.
+- **`scripts/prompt-weight.mjs`** reports bytes and estimated tokens (ceil(chars/4), an estimate, not a tokenizer count) for the command files, each orchestrator file, three load sets (typical standard run, architectural run, worst case) against the 288,089-byte baseline, each agent definition, and, with `--fixture <issue dir>`, the rendered panel prompts and every JSON artifact as compact JSON vs TOON.
+
+### Measured: what the orchestrator loads
+
+Bytes (`wc -c`), at 6a835a5 (0.43.0) before and at this release after; the load sets are the ones `prompt-weight.mjs` reports.
 
 | What the orchestrator loads | Before | After |
 |---|---|---|
-| `commands/pipeline.md` alone | 208,012 | 42,694 (of which 24,820 is the Phase 4 preamble, kept in the core because `render-panel.mjs` reads only that file) |
+| `commands/pipeline.md` alone | 208,012 | 17,695 (the Phase 4 preamble, 25,286 B, is now `orchestrator/phase-4-panel-preamble.md`, rendered into panel prompts and loaded by no run) |
 | Before: `pipeline.md` plus the three files it told the orchestrator to read (`voice.md` 12,288, `evidence.md` 33,356, `evidence-controls.md` 34,433) | 288,089 | |
-| Typical standard-tier run: fresh ask, clean tree, no open questions, no frontend, one panel round ending APPROVE_WITH_NOTES, through Phase 5 (core, phase-0-setup, status-record, phase-0.5-map, phase-1-ba, phase-2-lite, phase-3-impl, phase-3-4-gate, phase-4-panel, phase-4-verdict, phase-5-archive, owner-handoff, `voice.md`) | 288,089 | 155,965 (54.1%) |
-| Architectural run, one panel round, frontend-scoped, with a migration (adds phase-2-review, phase-2.5-design, art-director-contract, phase-3-architectural, live-verification, dispatch-routing, `evidence-controls.md`; no delta round, no loop back) | 288,089 | 229,956 (79.8%) |
-| Worst case: core, every phase file (delta round and loop-backs included) and all three shared rule files | 288,089 | 288,665 (100.2%: the loading map and pointers, about 600 bytes, are the only addition) |
-
-The typical run falls short of half by about 12 KB; the preamble is the one block left in the core that the orchestrator never acts on, and moving it into a phase file needs `render-panel.mjs` to read it from there.
+| Typical standard-tier run: fresh ask, clean tree, no open questions, no frontend, one panel round ending APPROVE_WITH_NOTES, through Phase 5 (core, phase-0-setup, status-record, phase-0.5-map, phase-1-ba, phase-2-lite, phase-3-impl, phase-3-4-gate, phase-4-panel, phase-4-verdict, phase-5-archive, owner-handoff, `voice.md`) | 288,089 | 132,378 (46.0%) |
+| Architectural run, one panel round, frontend-scoped, with a migration (adds phase-2-review, phase-2.5-design, art-director-contract, phase-3-architectural, live-verification, dispatch-routing, `evidence-controls.md`; no delta round, no loop back) | 288,089 | 207,890 (72.2%) |
+| Worst case: core, every orchestrator file a run loads (delta round and loop-backs included) and all three shared rule files | 288,089 | 265,073 (92.0%) |
 
 | Agent contract | Before | After |
 |---|---|---|
@@ -41,18 +50,19 @@ The typical run falls short of half by about 12 KB; the preamble is the one bloc
 | shared/evidence-discipline.md (read by eight) | | 12,795 |
 | shared/tracked-write-isolation.md (read by nine, on Phase 4 and fix-commit dispatches) | | 9,921 |
 
-### For maintainers
+### Measured: TOON and panel prompts
 
-- Suites that pin orchestrator prose read the core plus every phase file through `pipeline_md_concat` in `tests/harness.sh`, in a fixed order (the order the single file ran in). `tests/test-pipeline-split.sh` holds that order list equal to `commands/pipeline/`, checks the core names every phase file, and checks no prompt tells the model to read `docs/rationale.md`.
-- The PreToolUse resolver (`hooks/pre-tool-use-resolve.mjs`) reads the Phase 4 phase vocabulary from the core and every phase file.
-
-### Measured (TOON and panel prompts)
-
-Population: one consumer run, `rome` issue 27 (`.pipeline/27`), copied into a temp fixture and read only: `spec.json` (844,405 B on disk, 79 acceptance criteria), `map.json` and `peer-review.ledger.json`. That run left no `impl-report.json` and no shard for a plugin panel role, so the delta figures below have no open-blocker table in them. Plugin tree: this commit. Tokens are ceil(chars/4) estimates.
+Population: one consumer run, `rome` issue 27 (`.pipeline/27`), copied into a temp fixture and read only: `spec.json` (844,405 B on disk, 79 acceptance criteria), `map.json`, `peer-review.ledger.json` and `status.json`. That run left no `impl-report.json` and no shard for a plugin panel role, so the delta figures below have no open-blocker table in them. Tokens are ceil(chars/4) estimates.
 
 - **Uniform arrays of objects** (39 in those files, the shape TOON tabulates; largest `spec.json` `flags`, 114 rows): compact JSON 122,572 B / 30,657 est. tokens, TOON 111,330 B / 27,847 est. tokens, 9.2% fewer bytes. `flags` alone saves 13.4%, `measured_state` (69 rows) 6.6%.
 - **Whole files**: compact JSON 792,519 B / 198,131 est. tokens, TOON 803,028 B / 200,758 est. tokens, so TOON is 1.3% LARGER. The spec is mostly arrays of long prose strings and deeply nested objects, where TOON's indentation costs more than JSON's punctuation. Against the files as stored (pretty JSON, 854,825 B) TOON is 6.1% smaller. This is why only uniform arrays are rendered as TOON in prompts, and whole artifacts stay files an agent Reads.
-- **Panel prompts** (plugin lenses for the run's seated roles ba, qa, secops and devops; rendered at architectural because the run's tier name is the consumer's own): the cacheable static preamble is 25,315 B / 6,329 est. tokens on a full round and 25,913 B / 6,478 on a delta round. Static prefix per role (preamble plus lens) 25,621 to 26,737 B; run data 210 B, so over 99% of each prompt is cacheable. Run data as compact JSON 221 B, as TOON 200 B (9.5%).
+- **Panel prompts** (plugin lenses for the run's seated roles that have one: ba, qa, secops and devops; rendered at architectural because the run's tier name is the consumer's own), at this release: the cacheable static preamble is 25,478 B / 6,369 est. tokens on a full round and 26,076 B / 6,519 on a delta round. Static prefix per role (preamble plus lens) 25,784 to 26,900 B; run data 210 B, so over 99% of each prompt is cacheable. Run data as compact JSON 221 B, as TOON 200 B (9.5%).
+
+### For maintainers
+
+- Suites that pin orchestrator prose read the core plus every orchestrator file through `pipeline_md_concat` in `tests/harness.sh`, in a fixed order (the order the single file ran in, the preamble first because it closed the core). `tests/test-pipeline-split.sh` holds that list equal to `orchestrator/`, checks the core names every file, keeps `commands/` free of subdirectory markdown, keeps the preamble markers in the one file the renderer reads, and checks no prompt tells the model to read `docs/rationale.md`.
+- The PreToolUse resolver (`hooks/pre-tool-use-resolve.mjs`) reads the Phase 4 phase vocabulary from the core and every orchestrator file.
+- `tests/test-prompt-weight.sh` pins the typical standard-tier load set at or under half of the baseline.
 
 ## 0.43.0 (2026-09-17)
 
