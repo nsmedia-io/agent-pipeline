@@ -4,7 +4,7 @@ Behaviour changes that reach an existing project at its next plugin update, newe
 
 Entries keep the numbers they carried in the README's old Upgrading list, so a cross-reference such as "item 29 below" still resolves. Measured figures in an entry describe the commit that entry shipped with and are not re-taken afterwards.
 
-## 0.46.1 (2026-09-17)
+## 0.46.2 (2026-09-17)
 
 ### What changes for you
 
@@ -16,6 +16,8 @@ Entries keep the numbers they carried in the README's old Upgrading list, so a c
 - `.github/workflows/release.yml` runs it on every push to main. A push that does not change the version exits 0 with nothing to do.
 - Tags `v0.1.0` to `v0.46.0` and their releases were backfilled by hand on 2026-09-17 with the same commit rule.
 - New suite: `test-release.sh` (a throwaway repo, a bare origin and a stubbed `gh`).
+- **`tests/run-linux.sh` runs the suite in a clone, as a non-root user.** Full mode was red on 0.46.0 in 6 suites for three reasons that were the runner, not the plugin: the container ran as root, so fixtures that make a path unreadable measured a readable one; a worktree's git directory was mounted read-only, so cells that check out a reviewed or historical commit could not; and plugin files were read over the Windows bind mount, so the gate's cost over a do-nothing stub measured the mount. The runner now clones the checkout onto the container's own filesystem (the host's `origin/*` refs, its branch at its HEAD, and its uncommitted and untracked changes applied on top) and runs as the image's `node` user. The host checkout is never written.
+- 0.46.1 was never released; its changes ship here.
 
 ## 0.46.0 (2026-09-17)
 

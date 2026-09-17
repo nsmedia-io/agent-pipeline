@@ -89,18 +89,43 @@ if [[ -n "$COMMON_DIR" && "$COMMON_DIR" != "$REPO_ROOT/.git" ]]; then
   fi
 fi
 
-# Inside the container: install the two distro packages only if the image lacks them (the built
-# test image has both), then either the whole suite through run.sh (the same command the workflow
-# ran) or the named suites one by one, exit non-zero if any of them did. Arguments pass through as
-# suite file names under tests/.
+# Inside the container, as root: install the two distro packages only if the image lacks them (the
+# built test image has both). Then, as the image's unprivileged `node` user, run the suite in a
+# CLONE on the container's own filesystem, never in the mount. Three full-mode failure classes
+# came from running in the mount, measured on 0.46.0 and 0.46.1 alike (6 suites red):
+#   - ROOT ignores mode bits, so every "this path is unreadable/unwritable" fixture measured a
+#     readable one (test-harness, test-voice-lint, test-gate-phase-entry-hook preconditions).
+#   - A worktree's common dir is mounted read-only, so every cell that runs `git worktree add`
+#     for a reviewed or historical commit could not check it out (gate-declaration,
+#     gate-ownership, issue17's revert probes).
+#   - Reading the plugin over Docker Desktop's Windows bind mount costs milliseconds per file, so
+#     the gate's marginal cost over a do-nothing stub (AC18, +-4 ms) measured the mount.
+# The clone keeps what the tests read: a bare mirror whose heads are the host's origin/* refs
+# (so the clone's origin/main is the host's origin/main, not a stale local main), the host's
+# branch at the host's HEAD, and the host's uncommitted and untracked changes applied on top, so
+# a run on a dirty tree still tests the edit. The host checkout is never written.
+# Arguments pass through as suite file names under tests/.
 INNER='
 set -uo pipefail
 if ! command -v zsh >/dev/null 2>&1 || ! command -v jq >/dev/null 2>&1; then
-  apt-get update -qq >/dev/null 2>&1 && apt-get install -y -qq zsh jq >/dev/null 2>&1 \
-    || { echo "run-linux.sh: apt-get failed inside the container" >&2; exit 92; }
+  apt-get update -qq >/dev/null 2>&1 && apt-get install -y -qq zsh jq >/dev/null 2>&1     || { echo "run-linux.sh: apt-get failed inside the container" >&2; exit 92; }
 fi
-git config --global --add safe.directory "*"
-echo "run-linux.sh: $(uname -srm) | $(bash --version | head -1) | node $(node -v) | zsh $(zsh --version) | git $(git --version)"
+git config --system --add safe.directory "*"
+mkdir -p /work && chown node:node /work
+exec runuser -u node -- env HOME=/home/node SRC="$PWD" bash -c '"'"'
+set -uo pipefail
+WORK="/work/$(basename "$SRC")"
+git clone -q --bare --no-local "$SRC" /work/origin.git || { echo "run-linux.sh: clone failed" >&2; exit 94; }
+git -C /work/origin.git fetch -q "$SRC" "+refs/remotes/origin/*:refs/heads/*" 2>/dev/null || true
+git clone -q /work/origin.git "$WORK" || { echo "run-linux.sh: clone failed" >&2; exit 94; }
+cd "$WORK"
+git fetch -q "$SRC" HEAD && git checkout -q -f --detach FETCH_HEAD
+BRANCH="$(git -C "$SRC" symbolic-ref -q --short HEAD || true)"
+[[ -n "$BRANCH" ]] && git checkout -q -B "$BRANCH"
+git -C "$SRC" diff --binary HEAD | git apply --allow-empty || { echo "run-linux.sh: uncommitted changes did not apply" >&2; exit 94; }
+( cd "$SRC" && git ls-files -o --exclude-standard -z | tar --null -T - -cf - ) | tar -xf -
+git config user.email tests@localhost && git config user.name tests
+echo "run-linux.sh: $(uname -srm) | $(bash --version | head -1) | node $(node -v) | zsh $(zsh --version) | git $(git --version) | user $(id -un) | tree $WORK at $(git rev-parse --short HEAD)"
 if [[ $# -eq 0 ]]; then
   exec bash tests/run.sh
 fi
@@ -110,6 +135,7 @@ for t in "$@"; do
   bash "tests/$t" || rc=1
 done
 exit $rc
+'"'"' run-linux "$@"
 '
 docker run --rm "${MOUNTS[@]}" -w "$REPO_ROOT" \
   -e PIPELINE_TESTS_REQUIRE_CAPABILITIES=1 \
