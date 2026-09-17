@@ -90,7 +90,7 @@ if [[ -n "$COMMON_DIR" && "$COMMON_DIR" != "$REPO_ROOT/.git" ]]; then
 fi
 
 # Inside the container, as root: install the two distro packages only if the image lacks them (the
-# built test image has both). Then, as the image's unprivileged `node` user, run the suite in a
+# built test image has both) and a `node` user if an override image lacks one. Then, as the image's unprivileged `node` user, run the suite in a
 # CLONE on the container's own filesystem, never in the mount. Three full-mode failure classes
 # came from running in the mount, measured on 0.46.0 and 0.46.1 alike (6 suites red):
 #   - ROOT ignores mode bits, so every "this path is unreadable/unwritable" fixture measured a
@@ -111,6 +111,7 @@ if ! command -v zsh >/dev/null 2>&1 || ! command -v jq >/dev/null 2>&1; then
   apt-get update -qq >/dev/null 2>&1 && apt-get install -y -qq zsh jq >/dev/null 2>&1     || { echo "run-linux.sh: apt-get failed inside the container" >&2; exit 92; }
 fi
 git config --system --add safe.directory "*"
+id -u node >/dev/null 2>&1 || useradd -m node || { echo "run-linux.sh: no node user and useradd failed" >&2; exit 92; }
 mkdir -p /work && chown node:node /work
 exec runuser -u node -- env HOME=/home/node SRC="$PWD" bash -c '"'"'
 set -uo pipefail
@@ -119,7 +120,7 @@ git clone -q --bare --no-local "$SRC" /work/origin.git || { echo "run-linux.sh: 
 git -C /work/origin.git fetch -q "$SRC" "+refs/remotes/origin/*:refs/heads/*" 2>/dev/null || true
 git clone -q /work/origin.git "$WORK" || { echo "run-linux.sh: clone failed" >&2; exit 94; }
 cd "$WORK"
-git fetch -q "$SRC" HEAD && git checkout -q -f --detach FETCH_HEAD
+{ git fetch -q "$SRC" HEAD && git checkout -q -f --detach FETCH_HEAD; } || { echo "run-linux.sh: could not check out the host HEAD" >&2; exit 94; }
 BRANCH="$(git -C "$SRC" symbolic-ref -q --short HEAD || true)"
 [[ -n "$BRANCH" ]] && git checkout -q -B "$BRANCH"
 git -C "$SRC" diff --binary HEAD | git apply --allow-empty || { echo "run-linux.sh: uncommitted changes did not apply" >&2; exit 94; }
