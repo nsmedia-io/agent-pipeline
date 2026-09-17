@@ -18,12 +18,7 @@ The phases are **gates, not a one-way waterfall**. The shape of the work, not th
 
 **Argument:** `$ARGUMENTS`
 
-Parse the argument:
-- If starts with `--resume <issue>`: set `ISSUE=<issue>`, read `.pipeline/<issue>/status.json`, and re-enter the phase named by `current_phase` from the top (see the durable-checkpoint convention below; `current_phase` is an ENTRY marker, so the phase it names has not been completed).
-- If starts with `--issue <number>`: set `ISSUE=<number>` (existing tracker issue), start at Phase 2 (skip BA spec creation; BA reads the existing issue and seeds spec.json).
-- Otherwise: treat as a fresh ask text. No issue number yet. BA will create one.
-
-Modifier (combinable with the fresh-ask form): if the argument contains `--dry-run` or `--experiment`, set `EXPERIMENT_MODE=true`, strip the flag from the ask text, and pass `EXPERIMENT_MODE` into the BA prompt. In experiment mode BA does NOT open a tracker issue (it uses a local `exp-<slug>` placeholder), so A/B harnesses and throwaway branches never pollute the production tracker.
+`scripts/pipeline-init.mjs` parses the argument in Phase 0 (`--resume <issue>`, `--issue <number>`, else a fresh ask; `--dry-run` or `--experiment` anywhere sets `experiment_mode`). `--resume` re-enters `resume_phase` from the top: `current_phase` is an ENTRY marker, so that phase has not completed. `--issue` is an existing tracker issue: start at Phase 2 (BA reads the issue and seeds spec.json). A fresh ask has no issue yet; BA creates one. Pass `experiment_mode` into the BA prompt as `EXPERIMENT_MODE`: BA then opens no tracker issue (a local `exp-<slug>` placeholder), so A/B harnesses and throwaway branches never pollute the production tracker.
 
 Non-negotiables (carry through to every subagent prompt you construct):
 - Every agent labels its human-facing text with `**[<role>]:**`.
