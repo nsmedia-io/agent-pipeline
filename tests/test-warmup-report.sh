@@ -32,7 +32,7 @@ gitq -C "$TEMP_PROJECT/wt-done" commit -q --allow-empty -m "the merged work"
 gitq -C "$WORK" merge -q --no-ff -m "Merge done-branch" done-branch
 gitq -C "$WORK" worktree add -q "$TEMP_PROJECT/wt-fresh" fresh-branch
 gitq -C "$WORK" worktree add -q "$TEMP_PROJECT/wt-gone" gone-branch
-rm -rf "$TEMP_PROJECT/wt-gone"
+mv "$TEMP_PROJECT/wt-gone" "$TEMP_PROJECT/wt-moved-away"
 gitq -C "$WORK" push -q origin trunk
 gitq -C "$WORK" commit -q --allow-empty -m "local only"
 

@@ -438,6 +438,8 @@ for cand in $(grep -oE 'scripts/[a-zA-Z0-9_-]+\.mjs' "$PIPELINE_MD" | sort -u); 
     # checkpoint and the verdict step. Both take --status and a subcommand or --peer-review, never a
     # (role, tier, phase) triple, and resolve no model. Excluded by NAME, like the rest.
     checkpoint.mjs|record-verdict.mjs) continue ;;
+    # #164 row 20: the phase router; takes --status/--spec, resolves no model.
+    next-phase.mjs) continue ;;
   esac
   CANDIDATES_REL+=("$cand")
 done
