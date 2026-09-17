@@ -2,7 +2,7 @@
 /**
  * The dispatch EFFORT routing table, and the ONE resolver every dispatch site calls.
  *
- *   node dispatch-effort.mjs <role> <risk_tier> <phase> [--site <label>] [--surface <agent|workflow>]
+ *   node dispatch-effort.mjs <role> <risk_tier> <phase> [--site <label>] [--surface <agent|workflow>] [--cost-class <product-money|product|tooling>]
  *
  * Sibling of dispatch-model.mjs and deliberately shaped like it: same argv conventions, same
  * fail-open-to-frontmatter direction, same "print at most one allowlisted token" contract.
@@ -199,7 +199,14 @@ export const DEFAULT_TABLE = [
   { role: "devops", phase: "4", tier: "trivial", site: "panel-lens", effort: "medium", siteDefault: true },
   { role: "design_review", phase: "4", tier: "standard", site: "panel-lens", effort: "medium", siteDefault: true },
   { role: "design_review", phase: "4", tier: "trivial", site: "panel-lens", effort: "medium", siteDefault: true },
+  // COST-CLASS Phase 4 rows (review convergence). A row with a `costClass` matches only a run of
+  // that cost_class and wins over any tier row for the same (role, phase): a tooling change is
+  // reached by no product user, so its one SecOps pass runs at medium whatever tier BA set. The
+  // SecOps SEAT is unchanged (it sits on every full round); what moved is how long it thinks.
+  { role: "secops", phase: "4", costClass: "tooling", site: "panel-lens", effort: "medium", siteDefault: true },
 ];
+
+export const KNOWN_COST_CLASSES = ["product-money", "product", "tooling"];
 
 /** One normalizer, one call path. Shared shape with dispatch-model.mjs on purpose. */
 export function normalizeRole(raw) {
@@ -271,8 +278,11 @@ export function configEfforts(cfg, reports) {
 // A row with a `tier` matches only that tier; a row without one matches every tier. When both
 // kinds exist for a (role, phase), the tier-specific rows win outright, so a generic row can
 // never shadow a tiered one and a tiered one never leaks into another tier.
-function rowsFor(role, phase, tier) {
-  const all = DEFAULT_TABLE.filter((r) => r.role === role && r.phase === phase);
+function rowsFor(role, phase, tier, costClass) {
+  const matching = DEFAULT_TABLE.filter((r) => r.role === role && r.phase === phase);
+  const byCost = matching.filter((r) => r.costClass !== undefined && r.costClass === costClass);
+  if (byCost.length > 0) return byCost;
+  const all = matching.filter((r) => r.costClass === undefined);
   const tiered = all.filter((r) => r.tier !== undefined && r.tier === tier);
   return tiered.length > 0 ? tiered : all.filter((r) => r.tier === undefined);
 }
@@ -281,7 +291,7 @@ function rowsFor(role, phase, tier) {
  * @returns {{effort: string|null, reports: string[], error: string|null, surface?: string}}
  * `effort: null` with no error means "emit no effort for this dispatch": frontmatter governs.
  */
-export function resolve({ role: rawRole, tier, phase, site, surface, cfg }) {
+export function resolve({ role: rawRole, tier, phase, site, surface, cfg, costClass }) {
   const reports = [];
   const role = normalizeRole(rawRole);
   if (!role) {
@@ -292,6 +302,9 @@ export function resolve({ role: rawRole, tier, phase, site, surface, cfg }) {
   }
   if (!KNOWN_PHASES.includes(phase)) {
     return { effort: null, reports, error: `malformed phase "${phase}"` };
+  }
+  if (costClass !== undefined && costClass !== null && !KNOWN_COST_CLASSES.includes(costClass)) {
+    return { effort: null, reports, error: `unknown cost_class "${costClass}"` };
   }
   const surf = surface === undefined || surface === null ? "agent" : surface;
   if (!KNOWN_SURFACES.includes(surf)) {
@@ -342,7 +355,7 @@ export function resolve({ role: rawRole, tier, phase, site, surface, cfg }) {
   }
 
   // --- workflow surface: a per-call effort genuinely exists, so resolve one. ---
-  const rows = rowsFor(role, phase, tier);
+  const rows = rowsFor(role, phase, tier, costClass);
   let row = null;
   if (site) {
     row = rows.find((r) => r.site === site) || null;
@@ -385,6 +398,7 @@ function main(argv) {
   const positional = [];
   let site = null;
   let surface = null;
+  let costClass = undefined;
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--site") {
       site = argv[i + 1];
@@ -392,12 +406,15 @@ function main(argv) {
     } else if (argv[i] === "--surface") {
       surface = argv[i + 1];
       i++;
+    } else if (argv[i] === "--cost-class") {
+      costClass = argv[i + 1];
+      i++;
     } else {
       positional.push(argv[i]);
     }
   }
   const [role, tier, phase] = positional;
-  const { effort, reports, error } = resolve({ role, tier, phase, site, surface });
+  const { effort, reports, error } = resolve({ role, tier, phase, site, surface, costClass });
   for (const r of reports) process.stderr.write(`dispatch-effort: ${r}\n`);
   if (error) {
     process.stderr.write(

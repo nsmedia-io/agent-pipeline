@@ -191,13 +191,15 @@ assert_eq "  and that denominator is non-zero, so the clean result is a result" 
   "$([[ "${NEG_N:-0}" -ge 4 ]] && echo checked || echo "checked only ${NEG_N:-<unparsed>} fields")" "checked"
 
 # THE PEER-REVIEW BOUNDARY, asserted rather than assumed. #38: peer-review.json's concerns[]
-# subschema has NO required list at all, so a blank must_satisfy there is invisible to a check
+# subschema had NO required list at all, so a blank must_satisfy there was invisible to a check
 # whose population is DERIVED from `required`. 123 of the 230 concerns[] rows #122 measured live
 # in that half. This is stated as a cell so the boundary is MEASURED, not believed.
 #
-# WHEN THIS CELL FAILS, #38 CLOSED and this check widened for free -- that is the payoff of a
-# derived population. Re-anchor the cell to the new boundary; do not re-open the hole to keep it
-# green.
+# RE-ANCHORED (review convergence): the concerns items now require severity, likelihood, harm and
+# merge_class. All four are ENUMS, not free text, so the derived blank-field population did not
+# widen: a blank must_satisfy or description is still unreachable, and the cell below still reads
+# 0 for that reason. The premise cell now pins the new required list, so the day a free-text
+# field joins it, this suite reddens and the boundary is re-measured rather than believed.
 fixture_dir 804 || exit 90
 cat > "$FIXDIR/peer-review.json" <<'FIX'
 {"final_verdict":"APPROVE","reviewed_at":"2026-08-31T00:00:00Z",
@@ -206,7 +208,7 @@ FIX
 archive 804 "$FIXDIR" "$FIXROOT"
 assert_eq "TODAY'S BOUNDARY (#38): a blank peer-review must_satisfy is not reachable by a required-derived check" \
   "$(printf '%s\n' "$OUT" | sed -n 's/.*blank required free-text fields: \([0-9]*\) .*/\1/p')" "0"
-assert_eq "  and the premise is REAL: peer-review's concerns items declare no required list" \
+assert_eq "  and the premise is REAL: peer-review's concerns items require only the four enum ratings" \
   "$(node -e '
      const s = JSON.parse(require("fs").readFileSync(process.argv[1] + "/peer-review.schema.json", "utf8"));
      let found = "none";
@@ -218,7 +220,7 @@ assert_eq "  and the premise is REAL: peer-review's concerns items declare no re
        for (const v of n.allOf || []) walk(v, p);
        for (const [k, v] of Object.entries(n.definitions || {})) walk(v, "#" + k);
      })(s, "");
-     process.stdout.write(found);' "$SCHEMA_DIR")" "none"
+     process.stdout.write(found);' "$SCHEMA_DIR")" "severity,likelihood,harm,merge_class"
 
 
 # =============================================================================

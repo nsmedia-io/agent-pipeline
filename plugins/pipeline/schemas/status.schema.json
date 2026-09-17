@@ -64,6 +64,40 @@
       "minimum": 0,
       "description": "How many Phase 4 panel rounds this issue has run (the first full panel is 1; each delta re-review adds 1). An EXPLICIT counter because events[] items carry only phase and at, with no round field, so the count cannot be inferred from them."
     },
+    "schema_version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Which status.json contract this record was written under. 2 is the review-convergence contract (cost_class, fix_rounds, spec_revisions, owner_overrides). A record with no schema_version is version 1: scripts/round-budget.mjs then reads cost_class as product and both counters as 0, and says so on stderr, rather than refusing a run that started before the fields existed."
+    },
+    "cost_class": {
+      "type": "string",
+      "enum": ["product-money", "product", "tooling"],
+      "description": "Set by BA in spec.json at Phase 1 and copied here by the orchestrator. Orthogonal to risk_tier: the tier says how DEEP the pipeline runs, cost_class says what a defect in this change COSTS and therefore what may block it. product-money: the change can move money (charges, payouts, fees, refunds, ledger). product: anything a user of the product reaches. tooling: the repository's own build, test, CI, hook, gate or developer tooling, reached by no product user. It decides which concerns block (scripts/materiality.mjs), the fix-round budget (scripts/round-budget.mjs: tooling 1, product 2, product-money 2), and the tooling panel shape (qa + secops + one surface specialist, one round). Absent reads as product."
+    },
+    "fix_rounds": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Phase 4 fix rounds ENTERED on this issue: +1 each time a REQUEST_CHANGES or REQUEST_REFACTOR loops back to Dev. Written by `node scripts/round-budget.mjs enter fix-round`, which refuses (exit 2) a round beyond the budget unless owner_overrides covers it. Distinct from review_rounds, which counts panels."
+    },
+    "spec_revisions": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Spec revisions made AFTER Phase 2 returned (a BA rework on a Phase 2 REQUEST_CHANGES or VETO, a scope ruling that changes requirements, a Phase 4 VETO sent back to BA). Written by `node scripts/round-budget.mjs enter spec-revision`, which refuses a third unless owner_overrides covers it."
+    },
+    "owner_overrides": {
+      "type": "array",
+      "description": "The owner's recorded decisions to go past a round budget. Written only after the owner said so in the conversation; never by an agent on its own judgement. An entry covers every round up to and including up_to.",
+      "items": {
+        "type": "object",
+        "required": ["kind", "up_to", "at"],
+        "properties": {
+          "kind": {"type": "string", "enum": ["fix-round", "spec-revision"]},
+          "up_to": {"type": "integer", "minimum": 1, "description": "The highest round this decision allows."},
+          "at": {"type": "string", "format": "date-time"},
+          "reason": {"type": "string", "description": "The owner's reason in one sentence. COMMITTED AND ARCHIVED VERBATIM, so whatever lands here reaches a public tree and stays in history; a fix-forward commit does not remove it. Must not carry copied credential material (API key, Bearer token, OAuth code, password, DSN with inline credentials, .env line). DELIBERATELY NO maxLength: the security-relevant dimension of this field is CONTENT, not length, and a cap would refuse correct work -- see commands/pipeline.md's free-text secret rule, which is where the writer reads it. Nothing validates status.json against this schema; the honorer is the writer, and the after-the-fact detector is the credential-shaped scan in tests/test-status-schema-contract.sh."}
+        }
+      }
+    },
     "telemetry": {
       "type": "object",
       "description": "Derived, NUMBERS ONLY. Computed from events[] by scripts/pipeline-telemetry.mjs. No note, no path, no command string: this file is archived verbatim.",

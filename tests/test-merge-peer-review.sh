@@ -74,9 +74,9 @@ suite "merge-peer-review: a wrapped shard is recovered, not read as null"
 # The failure this defends against: an agent writes {"dba": {...}} instead of a bare block, the
 # merge stores the wrapper, and the rubric reads merged.dba.verdict as undefined -- a missing
 # review that looks like a present one.
-# (A SecOps VETO on a named veto_ground: that is the one verdict the materiality normalizer
-# leaves standing without a rated concern, so the unwrap is what this cell measures.)
-printf '%s' '{"secops":{"verdict":"VETO","veto_ground":"auth","concerns":[]}}' > "$W/peer-review.secops.json"
+# (A SecOps VETO on a named veto_ground carrying a blocking concern: since review convergence
+# that is what a VETO needs to stand, so the unwrap is what this cell measures.)
+printf '%s' '{"secops":{"verdict":"VETO","veto_ground":"auth","concerns":[{"severity":"critical","likelihood":"normal-use","harm":"data-or-security","merge_class":"security-exposure","description":"token accepted unsigned"}]}}' > "$W/peer-review.secops.json"
 merge "$W/peer-review.json" "secops=$W/peer-review.secops.json"
 assert_eq "a wrapped shard merges cleanly" "$RC" "0"
 assert_eq "the wrapped verdict is recovered" "$(jget "$W/peer-review.json" secops.verdict)" "VETO"

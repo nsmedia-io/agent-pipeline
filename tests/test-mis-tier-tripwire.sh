@@ -407,6 +407,9 @@ for cand in $(grep -oE 'scripts/[a-zA-Z0-9_-]+\.mjs' "$PIPELINE_MD" | sort -u); 
     deferral.mjs) continue ;;
     # 0.42.0: the Phase 4 panel renderer (#157); calls both resolvers, resolves no model itself.
     render-panel.mjs) continue ;;
+    # Review convergence: the round budget; counts rounds, resolves no model. See the twin in
+    # test-dispatch-model-resolver.sh.
+    round-budget.mjs) continue ;;
   esac
   CANDIDATES_REL+=("$cand")
 done
