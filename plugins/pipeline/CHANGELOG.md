@@ -4,6 +4,42 @@ Behaviour changes that reach an existing project at its next plugin update, newe
 
 Entries keep the numbers they carried in the README's old Upgrading list, so a cross-reference such as "item 29 below" still resolves. Measured figures in an entry describe the commit that entry shipped with and are not re-taken afterwards.
 
+## 0.46.0 (2026-09-17)
+
+### What changes for you
+
+- **The second wave of #164: more written steps are now script calls.** Each script replaces instructions the model used to carry out by hand:
+  - `scripts/pipeline-init.mjs` runs Phase 0 and parses the `/pipeline` argument (config present, dirty tree, `PIPELINE_BASE`, the integration-branch fetch, the `0-setup` record, the resume phase, experiment mode), replacing Phase 0 steps 0 to 5 and the core's argument rules.
+  - `scripts/worktree.mjs` finds or creates the Phase 3 worktree and seeds its artifacts, replacing four different lookup recipes in `phase-3-impl.md`, `dev.md`, `qa.md` and `/phase`.
+  - `scripts/isolated-tree.mjs` checks that a Phase 4 panelist's own tree really is isolated, replacing the gitdir, tracked-file, sha and ancestor-directory commands in the isolation paragraph.
+  - `scripts/next-phase.mjs` says which phase runs now, which orchestrator files to read first and what follows, replacing the routing lines in `phase-1-ba.md` and `phase-0.5-map.md`. The loading table in `commands/pipeline.md` is its `--table` output.
+  - `dispatch-model.mjs --emit` and `--table`, and `dispatch-effort.mjs --table`, print the model line to paste and the resolved tables, so the routing prose no longer restates a model or effort level.
+  - `validate-pipeline-artifact.mjs --file` validates one artifact on demand; the architectural falsifiability gate and each panelist's shard parse-check run it.
+  - `scripts/warmup-report.mjs` computes the warmup's git state, worktrees, in-flight work and each role's knowledge domains, replacing those `/warmup` steps and the per-agent domain lines.
+  - `knowledge-store.mjs --verify-commit`, `--lint` and `--drift-claims` replace the Librarian's hand checks of its commit, of stale or duplicate entries, and its scan for drift claims.
+  - `materiality.mjs --explain` prints the blocking rule at a cost class, replacing the rule's restatement in `evidence.md` and the panel preamble.
+  - `scripts/voice-moment.mjs` names the register, required sections and facts for the current owner-facing moment, replacing the full-voice moment list in `owner-handoff.md`.
+  - `scripts/render-issue-body.mjs` renders the tracker issue body from `spec.json` and reports drift, and `scripts/scaffold-requirement-checks.mjs` prints Dev's coverage skeleton with each criterion's `ac_id`.
+- **"The property, not the fix" has one copy.** The section the nine agent files and the panel preamble each carried verbatim now lives in `shared/the-property-not-the-fix.md`. Agents are told to read it, and `render-panel.mjs` places it into the Phase 4 static prefix.
+- **Less text in front of the model.** The `.md` files under `commands/`, `orchestrator/`, `agents/` and `shared/` shrink by 89,231 bytes (16.9%) against 0.45.0. A typical standard-tier run's orchestrator load is 104,869 bytes, down from 108,057. See "Measured" below.
+- **One prompt cache miss after updating.** The Phase 4 static prefix and the agent definitions changed, so the first panel round and the first dispatch of each agent after the update write a new cache entry instead of reading the old one. Later rounds read from the cache as before.
+- **A stale worktree now halts.** A registered worktree whose directory is gone, or which is not a worktree root, used to resolve, and the run then wrote into a plain folder under the root checkout. `worktree.mjs` now exits 2 naming the entry and telling you to run `git worktree prune` (or restore the directory) and try again.
+- **Flags only count at the start of a `/pipeline` ask.** `--resume`, `--issue`, `--dry-run`, `--experiment` and `--no-fetch` are honoured only before the first word of the ask. "make the --issue 55 lookup case-insensitive" is now an ask, not a run on #55.
+- **A run resumed at `3-impl-complete` runs the pre-Phase-4 gate.** That state is written before `phase3-exit.mjs` runs, so resuming there now runs the tripwire and both pre-Phase-4 gates before the panel, at every tier, instead of going straight to Phase 4.
+- **Routing with no tier halts.** When neither `spec.json` nor `status.json` records a `risk_tier`, `next-phase.mjs` exits 2 for every phase that depends on it instead of quietly taking the standard shape. Setup, BA and a map pass before BA has written the spec still route.
+
+### In this release
+
+- The Phase 0 argument reaches `pipeline-init.mjs --argument-stdin` through a quoted heredoc with the delimiter `PIPELINE_ASK_EOF_7f3a`, so a pasted ask cannot end the heredoc early.
+- A tripwire hit or an indeterminate tripwire loops back to BA; a refused gate or an unverified live run loops back to Phase 3 (`next-phase.mjs`, `loop-backs.md`).
+- `render-panel.mjs` refuses a preamble whose `INCLUDE` line was not expanded or names a missing shared file, and expands an `INCLUDE` line ending in CRLF.
+- The standard-tier exemption in `dba.md`, `devops.md` and `secops.md` now points at the licence in the shared file, and the agent headings for the section drop "(identical for every pipeline agent)".
+- New suites: `test-pipeline-init.sh`, `test-worktree.sh`, `test-isolated-tree.sh`, `test-next-phase.sh`, `test-validate-artifact-cli.sh`, `test-warmup-report.sh`, `test-knowledge-store-hygiene.sh`, `test-materiality-explain.sh`, `test-voice-moment.sh`, `test-render-issue-body.sh`, `test-scaffold-requirement-checks.sh`. `test-pipeline-split.sh` fails on a pasted copy of the shared section or a missing pointer. `test-pretooluse-gate-declaration.sh` counts 50 script modules.
+
+### Measured: prose bytes and load sets
+
+Bytes of every `.md` file under `plugins/pipeline/commands/`, `orchestrator/`, `agents/` and `shared/`, as committed (LF), at 0.45.0 (e5d4daf) and at this release: 529,270 B before and 440,039 B after, 89,231 B (16.9%) removed. By directory: commands 42,860 to 40,825; orchestrator 157,761 to 141,299; agents 305,933 to 229,876; shared 22,716 to 28,039 (the one shared copy added). Load sets from `scripts/prompt-weight.mjs`, run on the 0.45.0 tree and on this release's tree: typical standard-tier run 108,057 B to 104,869 B (3.0% less), architectural run 180,878 B to 173,532 B (4.1% less), worst case 229,669 B to 221,414 B (3.6% less). The load sets count orchestrator files only, not agent definitions, which is why most of the byte reduction does not show there. These are bytes; the script's token column is an estimate.
+
 ## 0.45.0 (2026-09-17)
 
 ### What changes for you
