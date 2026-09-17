@@ -4,6 +4,19 @@ Behaviour changes that reach an existing project at its next plugin update, newe
 
 Entries keep the numbers they carried in the README's old Upgrading list, so a cross-reference such as "item 29 below" still resolves. Measured figures in an entry describe the commit that entry shipped with and are not re-taken afterwards.
 
+## 0.46.1 (2026-09-17)
+
+### What changes for you
+
+- Nothing in the plugin. This release changes how the repository publishes releases.
+
+### In this release
+
+- **Releases tag and publish themselves.** `scripts/release.mjs` reads the version from `plugin.json`, checks that `marketplace.json` agrees and that this changelog has a section for it, tags `v<version>` on the first commit on main that carries the version, pushes the tag and creates the GitHub release with that section as its notes and a compare link to the previous tag. It marks the release Latest only when no higher tag exists, reuses an existing tag, leaves an existing release alone and refuses a tag that points elsewhere. `--dry-run` prints the plan and notes.
+- `.github/workflows/release.yml` runs it on every push to main. A push that does not change the version exits 0 with nothing to do.
+- Tags `v0.1.0` to `v0.46.0` and their releases were backfilled by hand on 2026-09-17 with the same commit rule.
+- New suite: `test-release.sh` (a throwaway repo, a bare origin and a stubbed `gh`).
+
 ## 0.46.0 (2026-09-17)
 
 ### What changes for you

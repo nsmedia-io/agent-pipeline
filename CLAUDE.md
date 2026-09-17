@@ -11,7 +11,8 @@ PIPELINE_TESTS_FULL=1 bash tests/run.sh   # full mode: adds the release-only cel
 PIPELINE_TESTS_JOBS=1 bash tests/run.sh   # one suite at a time (default 4)
 bash tests/test-<name>.sh # one suite (routine mode unless PIPELINE_TESTS_FULL=1)
 bash tests/run-linux.sh [test-<name>.sh ...]  # the Linux answer, in a container built from tests/Dockerfile, on demand
-node scripts/sync-manifests.mjs --check    # marketplace.json matches plugin.json (the one remaining workflow)
+node scripts/sync-manifests.mjs --check    # marketplace.json matches plugin.json (the manifests workflow)
+node scripts/release.mjs --dry-run         # the tag and release notes the release workflow will publish
 ```
 
 Healthy output ends with a slowest-first wall-time list and `All test suites passed.`; each suite
@@ -54,7 +55,11 @@ file reads as a one-off SyntaxError (see `tests/run.sh` header).
   `scripts/config-doctor.mjs`, the README table, and `pipeline.config.example.json`.
 - **Versioning.** Run `PIPELINE_TESTS_FULL=1 bash tests/run-linux.sh` on the release commit and cut
   nothing unless it passes (routine mode skips cells a release needs). Bump
-  `plugins/pipeline/.claude-plugin/plugin.json`, run `node scripts/sync-manifests.mjs`, commit as
-  `<version>: <one-line what changed>`.
+  `plugins/pipeline/.claude-plugin/plugin.json`, run `node scripts/sync-manifests.mjs`, add a
+  `## <version>` section to `plugins/pipeline/CHANGELOG.md`, commit as `<version>: <one-line what changed>`.
+  Tagging and the GitHub release are not manual: `.github/workflows/release.yml` runs
+  `scripts/release.mjs` on every push to main, which tags `v<version>` on the commit that bumped it and
+  publishes that CHANGELOG section. It refuses (and the workflow goes red) when the manifests disagree
+  or the section is missing.
 - **Numbers carry their population.** A figure in prose names what it was measured on.
 - **Pipeline changes are judged on throughput.** Measure phase time before adding a gate.
