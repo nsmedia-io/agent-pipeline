@@ -67,6 +67,9 @@ assert_contains "and the missing section is named" "$OUT" "Acceptance criteria: 
 { printf 'Owner notes above the render.\n\n'; sed -e 's/- \[ \] AC1/- [x] AC1/' -e 's/^1\. Reject a second claim$/1. Reject a second\n   claim/' "$BODY"; } > "$TEMP_PROJECT/b5.md"
 rib --spec "$SPEC" --body-file "$TEMP_PROJECT/b5.md"
 assert_eq "CONTROL: a ticked box, an indented wrap and extra prose are not drift" "$RC" "0"
+awk '/^## Acceptance criteria/ { print "### Notes"; print ""; print "- a note list item, not a requirement"; print "" } { print }' "$BODY" > "$TEMP_PROJECT/b7.md"
+rib --spec "$SPEC" --body-file "$TEMP_PROJECT/b7.md"
+assert_eq "a ### heading ends a section: a list under it is not read as extra requirements" "$RC" "0"
 
 # GH AND EXIT CODES. --compare reads the body through gh; a planted gh stands in for the tracker so
 # the cell does not depend on the host. A gh failure is exit 1, never a match.

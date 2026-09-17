@@ -61,6 +61,12 @@ assert_eq "an uncommitted edit under knowledge/: exit 2 even though the commit t
 assert_contains "and it names the dirty path" "$OUT" "DIRTY:"
 g checkout -- knowledge/living-context/data--a.json
 
+g rm -q knowledge/living-context/data--b.json
+g commit -q -m "docs(knowledge): drop b"
+ks --verify-commit --files knowledge/living-context/data--b.json
+assert_eq "a commit that only DELETED the claimed file does not verify it: exit 2" "$RC" "2"
+assert_contains "and the deleted file is named" "$OUT" "knowledge/living-context/data--b.json"
+
 # NO COMMIT AND NO REPOSITORY. A repository whose commits never touched knowledge/ is a failure,
 # never a pass on an empty list, and a directory git cannot read is a usage error, not a verdict.
 suite "knowledge-store --verify-commit: nothing to stand on"

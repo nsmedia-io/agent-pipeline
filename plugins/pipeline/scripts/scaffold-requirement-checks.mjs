@@ -7,7 +7,7 @@
  *
  * Prints JSON: `requirement_checks`, one entry per spec.requirements item (requirement_index,
  * the first 80 characters as requirement_text, and an ac_id when the requirement carries its
- * own AC label), and `acceptance_criteria_met`, one entry per acceptance criterion with ac_id
+ * own LEADING AC label), and `acceptance_criteria_met`, one entry per acceptance criterion with ac_id
  * set whenever the criterion has its own label.
  *
  * THE LABEL IS THE GATE'S OWN RULE, IMPORTED. criterionLabel in gate-pre-phase4.mjs decides
@@ -27,7 +27,7 @@
 
 import { readFileSync } from "node:fs";
 import { isMain, nativePath } from "./lib.mjs";
-import { criterionLabel } from "./gate-pre-phase4.mjs";
+import { criterionLabel, leadingLabel } from "./gate-pre-phase4.mjs";
 
 export const TEXT_CHARS = 80;
 
@@ -40,7 +40,10 @@ export function scaffold(spec) {
   const requirement_checks = reqs.map((r, i) => {
     const text = String(r ?? "").replace(/\s+/g, " ").trim();
     const entry = { requirement_index: i, requirement_text: text.slice(0, TEXT_CHARS), status: null, notes: "" };
-    const id = acId(criterionLabel(text));
+    // A requirement answers a criterion only with its OWN leading label. criterionLabel would read
+    // "keep the fallback, unlike AC3" as AC3, and the gate would then count this check as covering
+    // a criterion it only mentions.
+    const id = acId(leadingLabel(text));
     if (id) entry.ac_id = id;
     return entry;
   });

@@ -34,7 +34,7 @@ Usage:
   knowledge-store.mjs --drift-claims <artifact-dir>
 
 --verify-commit: exit 0 when knowledge/ is porcelain-clean and the newest commit touching
-  knowledge/ touches every --files path (prints COMMIT: <sha>); 2 when either fails; 1 on usage or git.
+  knowledge/ adds or modifies every --files path (a deletion does not count) (prints COMMIT: <sha>); 2 when either fails; 1 on usage or git.
 --lint: current living-context files older than --stale-days (default 60), duplicate current
   titles, and a filename <domain>-- prefix that differs from "domain". Exit 2 on a finding, 0 clean.
 --drift-claims: every knowledge_drift_claims entry in spec, review, impl-report and peer-review
@@ -726,10 +726,14 @@ function git(root, args) {
 export function verifyCommit({ root, files }) {
   const top = git(root, ["rev-parse", "--show-toplevel"]).trim();
   const dirty = git(top, ["status", "--porcelain", "--", "knowledge/"]).split("\n").filter(Boolean);
-  const log = git(top, ["log", "-1", "--format=%H", "--name-only", "--", "knowledge/"])
+  // --name-status, not --name-only: a commit that DELETED a claimed file touched it but did not
+  // land it, so a D row never verifies. A rename or copy counts for its destination only.
+  const log = git(top, ["log", "-1", "--format=%H", "--name-status", "--", "knowledge/"])
     .split("\n").map((l) => l.trim()).filter(Boolean);
   const sha = log.length ? log[0] : null;
-  const touched = new Set(log.slice(1));
+  const touched = new Set(
+    log.slice(1).map((l) => l.split("\t")).filter((f) => f.length > 1 && !f[0].startsWith("D")).map((f) => f[f.length - 1]),
+  );
   // Both sides realpathed, so a symlinked root (macOS /tmp) compares equal to git's toplevel.
   const rootAbs = realpathSync(resolve(root));
   const topAbs = realpathSync(resolve(top));

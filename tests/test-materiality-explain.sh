@@ -75,6 +75,8 @@ assert_not_contains "evidence.md no longer restates the blocking predicate" "$(c
 assert_not_contains "evidence.md no longer restates the cap" "$(cat "$EVID")" "At most two blocking concerns per reviewer, enforced."
 assert_contains "the preamble points at --explain" "$(cat "$PRE")" "scripts/materiality.mjs --explain"
 assert_not_contains "the preamble no longer restates the predicate" "$(cat "$PRE")" "A concern BLOCKS only when its severity is blocker/critical/high"
-assert_not_contains "the preamble no longer restates the cap" "$(cat "$PRE")" "at most TWO stay blockers"
+assert_contains "the preamble keeps the cap as one rule" "$(cat "$PRE")" "at most TWO blocking concerns per reviewer stay blockers"
+assert_contains "and the VETO rule" "$(cat "$PRE")" "a VETO stands only from SecOps on a valid veto_ground carrying a blocking concern"
+assert_not_contains "the preamble no longer restates the ranking" "$(cat "$PRE")" "ranked by merge_class then harm"
 
 finish

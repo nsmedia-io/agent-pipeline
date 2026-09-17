@@ -54,7 +54,8 @@ export function sectionItems(body, heading) {
   if (start === -1) return null;
   const items = [];
   let inItem = false;
-  for (let i = start + 1; i < lines.length && !/^#{1,2}\s/.test(lines[i]); i++) {
+  // Any heading ends the section, `###` included: a list under a sub-heading is not an item here.
+  for (let i = start + 1; i < lines.length && !/^#{1,6}\s/.test(lines[i]); i++) {
     const m = /^\s*(?:\d+[.)]|[-*+])\s+(?:\[[ xX]\]\s+)?(.*)$/.exec(lines[i]);
     if (m) {
       items.push(flat(m[1]));

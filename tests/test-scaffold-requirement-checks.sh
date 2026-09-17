@@ -27,23 +27,26 @@ jq_() { node -e 'const j=JSON.parse(require("fs").readFileSync(process.argv[1],"
 
 LONG="AC9: the roster rotates on the hour and never assigns one courier to two overlapping deliveries at once"
 cat > "$SPEC" <<EOF
-{"requirements":["$LONG","plain requirement"],
+{"requirements":["$LONG","plain requirement","Keep the fallback path, unlike AC3 which changes it"],
  "acceptance_criteria":["AC1. leading label","the roster rotates (AC4)","unlike AC1, AC3 is ambiguous","no label at all"]}
 EOF
 
 # THE SHAPE AND THE LABEL RULE. One check per requirement with its index and first 80 characters;
 # one criterion entry per criterion. A leading label and a single trailing label both set ac_id;
 # two labels with none leading, or none at all, leave it unset, exactly as the gate reads them.
+# A REQUIREMENT answers only with its own leading label: one that mentions a label mid-sentence
+# must not claim it.
 suite "scaffold: shape and labels"
 
 sc --spec "$SPEC"
 assert_eq "a spec: exit 0" "$RC" "0"
 printf '%s' "$OUT" > "$SK"
-assert_eq "one check per requirement" "$(jq_ '.requirement_checks.length')" "2"
+assert_eq "one check per requirement" "$(jq_ '.requirement_checks.length')" "3"
 assert_eq "requirement_index is the position" "$(jq_ '.requirement_checks[1].requirement_index')" "1"
 assert_eq "requirement_text is the first 80 characters" "$(jq_ '.requirement_checks[0].requirement_text.length')" "80"
 assert_eq "a requirement's own label sets its ac_id" "$(jq_ '.requirement_checks[0].ac_id')" '"AC9"'
 assert_eq "an unlabelled requirement has none" "$(jq_ '.requirement_checks[1].ac_id')" "undefined"
+assert_eq "a requirement that only MENTIONS a label gets no ac_id (the gate would count it as covering AC3)" "$(jq_ '.requirement_checks[2].ac_id')" "undefined"
 assert_eq "a leading criterion label: AC1" "$(jq_ '.acceptance_criteria_met[0].ac_id')" '"AC1"'
 assert_eq "a single trailing label: AC4" "$(jq_ '.acceptance_criteria_met[1].ac_id')" '"AC4"'
 assert_eq "two labels, none leading: no ac_id" "$(jq_ '.acceptance_criteria_met[2].ac_id')" "undefined"
