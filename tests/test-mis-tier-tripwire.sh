@@ -443,6 +443,9 @@ for cand in $(grep -oE 'scripts/[a-zA-Z0-9_-]+\.mjs' "$PIPELINE_MD" | sort -u); 
     voice-moment.mjs|render-issue-body.mjs|scaffold-requirement-checks.mjs) continue ;;
     # #164 row 20: the phase router; takes --status/--spec, resolves no model.
     next-phase.mjs) continue ;;
+    # #164: the Phase 3 worktree lookup, the Phase 4 isolation check and Phase 0 setup; resolve no
+    # model. See the twin in test-dispatch-model-resolver.sh.
+    worktree.mjs|isolated-tree.mjs|pipeline-init.mjs) continue ;;
   esac
   CANDIDATES_REL+=("$cand")
 done

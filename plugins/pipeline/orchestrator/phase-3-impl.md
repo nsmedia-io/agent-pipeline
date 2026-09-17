@@ -12,21 +12,15 @@ All of these shapes preserve the property that killed the old `PENDING_CI` race:
 
 **Architectural tier: read `${CLAUDE_PLUGIN_ROOT}/orchestrator/phase-3-architectural.md` now, before any Phase 3 dispatch.** It holds the falsifiability gate and the hard sequencing gate, which run before the worktree steps below, the dual-build shape, and the Phase 3a (QA) and 3b (Dev) dispatches that replace the single Dev dispatch at that tier.
 
-Before dispatching, the orchestrator resolves the active worktree path:
-1. If a Phase-3 worktree for this issue already exists, read its path from `$PIPELINE_BASE/<issue>/tasks.json` `worktree_path`, or from `git worktree list --porcelain` matching the issue branch.
-2. If none exists, pre-create one: `WORKTREE_PATH=".claude/worktrees/<issue>-phase3-$(date +%Y%m%d-%H%M%S)"; git worktree add "$WORKTREE_PATH" -b <branch-type>/<issue>-<slug> origin/main`. Expand to the absolute path before substituting into the prompts.
+Before dispatching, resolve the worktree and seed its artifact dir with one command (the worktree is the artifact home for Phases 3 and 4; the Phase 4 sync copies the outputs back):
 
-**Do not write `worktree_path` into `status.json`. OMIT the field.** The worktree path lives in `tasks.json`, which is where Dev writes it and where every consumer (this step, QA's landing step, `validate-pipeline-artifact.mjs`) reads it; nothing reads it back out of `status.json`, and it is not in the schema's `required` list. `status.json` is committed AND archived verbatim, so the field is a standing leak surface with no reader. If you write it anyway, it must be a REPO-RELATIVE path (`.claude/worktrees/<issue>-phase3-<stamp>`) and nothing else: not an absolute path, and not an English sentence explaining where the path went, which is a free-text note in a field the schema types as a path.
-3. **Seed the worktree's artifact dir and set its `ARTIFACT_DIR`.** The fresh worktree is checked out from `origin/main`, where the gitignored per-issue artifacts do not exist, so QA's and Dev's inputs must be copied in. The worktree is the artifact home for Phase 3 and Phase 4 (the Phase 4 sync step copies the outputs back to `$PIPELINE_BASE/<issue>` before archival):
-   ```bash
-   ABS_WT="$(cd "$WORKTREE_PATH" && pwd)"
-   ARTIFACT_DIR="$ABS_WT/.pipeline/<issue>"
-   mkdir -p "$ARTIFACT_DIR"
-   for f in spec.json review.json constraints.md map.json design.json; do
-     cp "$PIPELINE_BASE/<issue>/$f" "$ARTIFACT_DIR/" 2>/dev/null || true
-   done
-   ```
-4. Substitute the absolute `WORKTREE_PATH` and the absolute `ARTIFACT_DIR` into the prompt(s) below (at the architectural tier, QA in 3a and Dev in 3b share the same worktree and the same `ARTIFACT_DIR`).
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/worktree.mjs" create --issue <issue> --type <fix|feat|chore> --slug <slug> --seed-from "$PIPELINE_BASE/<issue>"
+```
+
+It reuses the worktree `tasks.json` or the branch rule already names, else creates one, and prints the absolute `WORKTREE_PATH=` and `ARTIFACT_DIR=`. Exit 2 (none, or AMBIGUOUS with the candidates on stderr) halts Phase 3; never guess a tree. Substitute both printed values into the prompt(s) below (at the architectural tier QA in 3a and Dev in 3b share them).
+
+**Do not write `worktree_path` into `status.json`. OMIT the field.** The worktree path lives in `tasks.json`, which is where Dev writes it and where every consumer (`worktree.mjs`, `validate-pipeline-artifact.mjs`) reads it; nothing reads it back out of `status.json`, and it is not in the schema's `required` list. `status.json` is committed AND archived verbatim, so the field is a standing leak surface with no reader. If you write it anyway, it must be a REPO-RELATIVE path (`.claude/worktrees/<issue>-phase3-<stamp>`) and nothing else: not an absolute path, and not an English sentence explaining where the path went, which is a free-text note in a field the schema types as a path.
 
 ### Phase 3 dispatch, trivial/standard tier: single Dev thread (code and tests together)
 

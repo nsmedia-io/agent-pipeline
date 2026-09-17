@@ -44,14 +44,7 @@ This does not narrow your own licence: as one of the two roles the rule routes s
 
 Before authoring tests, reading the diff, running tests, or writing your review block, you MUST resolve the issue's worktree (where the branch lives) and `cd` into it, so the tests you author commit to the right tree and `git diff` / your test command later run against the right tree.
 
-When the orchestrator invokes you (Phase 3a authoring or the Phase 4 panel) it passes `WORKTREE_PATH` and an absolute `ARTIFACT_DIR` directly in your prompt: `cd "$WORKTREE_PATH"` and read/write pipeline artifacts at `ARTIFACT_DIR`. The numbered steps below are the fallback for a standalone `/phase qa` invocation that did not carry those values:
-
-1. Run `git rev-parse --show-toplevel` to see where you started. If that path contains `/.claude/worktrees/` and matches the issue branch, you are already correct and can skip to step 4.
-2. Read `<ARTIFACT_DIR>/tasks.json` (or the canonical `.pipeline/<issue>/tasks.json` if no `ARTIFACT_DIR` was given) and use its `worktree_path` field if present.
-3. Otherwise run `git worktree list --porcelain` and select the worktree whose `branch` line matches the pattern `refs/heads/(fix|feat|chore)/<issue>-*`, where `<issue>` is the number passed in your invocation. Concretely: `git worktree list --porcelain | grep -E "^branch refs/heads/(fix|feat|chore)/<issue>-"` returns the matching block; take the preceding `worktree <abs-path>` line. If multiple match, halt and ask the orchestrator.
-4. `cd` to that path. Every subsequent `Read`, `Write`, `Edit`, or `Bash` MUST use absolute paths rooted at that worktree, and pipeline artifacts go to the absolute `ARTIFACT_DIR`, never a cwd-relative `.pipeline/...`.
-
-Fail-fast: if `tasks.json` is absent AND no matching worktree is found via `git worktree list`, halt and ask the orchestrator for the path. Do NOT write to the root checkout, do NOT write to a stale worktree, do NOT guess.
+When the orchestrator invokes you (Phase 3a authoring or the Phase 4 panel) it passes `WORKTREE_PATH` and an absolute `ARTIFACT_DIR` directly in your prompt: `cd "$WORKTREE_PATH"` and read/write pipeline artifacts at `ARTIFACT_DIR`. A standalone `/phase qa` invocation that did not carry those values runs `node "${CLAUDE_PLUGIN_ROOT}/scripts/worktree.mjs" resolve --issue <issue>` and uses the `WORKTREE_PATH=` and `ARTIFACT_DIR=` it prints. Exit 2 (none, or AMBIGUOUS) means halt and ask the orchestrator for the path: do NOT write to the root checkout, do NOT write to a stale worktree, do NOT guess. Every subsequent `Read`, `Write`, `Edit`, or `Bash` uses absolute paths rooted at that worktree, and pipeline artifacts go to the absolute `ARTIFACT_DIR`, never a cwd-relative `.pipeline/...`.
 
 Rationale: QA artifacts landing at the root checkout instead of Dev's worktree force manual reconciliation.
 
