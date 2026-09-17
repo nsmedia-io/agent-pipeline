@@ -10,6 +10,30 @@ PLUGIN_ROOT="${PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../plugins/pipe
 # every root/output/cwd a test BINDS still resolves inside a per-case temp dir.
 SCRIPTS_DIR="${SCRIPTS_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../plugins/pipeline/scripts" && pwd)}"
 
+# ---- Git Bash on Windows ----------------------------------------------------
+#
+# The suites load modules under test with `import(<path>)`, which node's ESM loader refuses on
+# Windows for every path spelling bash can hand it: `C:/x` (Git Bash rewrites /c/x to that in
+# argv and the environment) reads as a URL scheme, and `/c/x` or `/tmp/x` interpolated into JS
+# source is not a Windows path at all. fixtures/windows-esm-paths.mjs converts those specifiers
+# to file URLs at the resolver, preloaded here and ONLY on MINGW/MSYS/CYGWIN, so Linux and macOS
+# never load it. Measured on this repo at 36522fc before the change: see CHANGELOG 0.43.0, item 60.
+PIPELINE_ON_WINDOWS=0
+case "$(uname -s 2>/dev/null)" in
+  MINGW*|MSYS*|CYGWIN*)
+    PIPELINE_ON_WINDOWS=1
+    if command -v cygpath >/dev/null 2>&1; then
+      _WIN_HOOK="$(cygpath -m "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/fixtures/windows-esm-paths.mjs")"
+      export PIPELINE_MSYS_TMP="$(cygpath -m /tmp)"
+      export PIPELINE_MSYS_ROOT="$(cygpath -m /)"
+      case " ${NODE_OPTIONS:-} " in
+        *windows-esm-paths.mjs*) ;;
+        *) export NODE_OPTIONS="${NODE_OPTIONS:+$NODE_OPTIONS }--import=file:///${_WIN_HOOK// /%20}" ;;
+      esac
+    fi
+    ;;
+esac
+
 TESTS_PASSED=0
 TESTS_FAILED=0
 CURRENT_SUITE=""
@@ -270,7 +294,16 @@ _remove_owned_tmpdir() {
 # process is the only writer of. $RANDOM widens the name beyond the pid so a pre-placed
 # squat has to win a race rather than read a counter.
 _LEDGER_DIR="${TMPDIR:-/tmp}/.pipeline-harness.$$.${RANDOM}"
-if mkdir -m 700 "$_LEDGER_DIR" 2>/dev/null; then
+# On Windows (Git Bash) `mkdir -m` CREATES the directory and then fails to chmod it, exit 1, so
+# the ledger was disabled on every suite and the directory leaked. Plain mkdir keeps the atomic
+# fail-on-existing property there; NTFS ACLs, not mode bits, are what protect a user temp dir.
+_LEDGER_MADE=0
+if [[ "$PIPELINE_ON_WINDOWS" == "1" ]]; then
+  mkdir "$_LEDGER_DIR" 2>/dev/null && _LEDGER_MADE=1
+elif mkdir -m 700 "$_LEDGER_DIR" 2>/dev/null; then
+  _LEDGER_MADE=1
+fi
+if [[ "$_LEDGER_MADE" == "1" ]]; then
   TMP_REGISTRY="${TMP_REGISTRY}${_LEDGER_DIR}
 "
   _ASSERT_LEDGER="$_LEDGER_DIR/ledger"

@@ -654,6 +654,10 @@ export function lintVoice(text, moment) {
  * whole check would go SILENT rather than loud. So the guard lives beside the thing it
  * protects. The pattern is read from the schema rather than copied, so the two cannot drift.
  */
+// A TOOLING GAP IS NOT A PASS (0.42.x, B2). The three fail-open returns below used to be `null`,
+// the same value a well-shaped phase returns, so an unreadable schema and a clean record were one
+// observable. They now return { skipped } and run() reports it; main() prints one did-not-run line
+// and still exits 0.
 function phaseShapeFailure(phase, scriptDir) {
   let pattern;
   try {
@@ -662,14 +666,14 @@ function phaseShapeFailure(phase, scriptDir) {
     );
     pattern = schema?.properties?.current_phase?.pattern;
   } catch {
-    return null; // no schema readable: fail open
+    return { skipped: "schemas/status.schema.json could not be read" };
   }
-  if (!pattern) return null;
+  if (!pattern) return { skipped: "schemas/status.schema.json declares no current_phase pattern" };
   let re;
   try {
     re = new RegExp(pattern);
   } catch {
-    return null;
+    return { skipped: "the current_phase pattern in schemas/status.schema.json does not compile" };
   }
   if (re.test(phase)) return null;
   return `status.json current_phase "${phase}" does not match status.schema.json's pattern ${pattern}. Nothing else validates this file, and a malformed phase silently disables the voice check rather than failing it.`;
@@ -682,13 +686,24 @@ export function run(payload, projectDir, scriptDir = SCRIPT_DIR) {
   const phase = resolved?.status?.current_phase;
   if (!phase) return { failures: [], phase: null };
   const shapeFailure = phaseShapeFailure(phase, scriptDir);
+  if (shapeFailure && shapeFailure.skipped) return { failures: [], phase, skipped: shapeFailure.skipped };
   if (shapeFailure) return { failures: [shapeFailure], phase };
   const moment = VOICE_MOMENTS[phase] || errorMoment(phase);
   if (!moment) return { failures: [], phase }; // a declared non-voice checkpoint
+  // AT A VOICE MOMENT, a transcript this lint cannot read is a check that DID NOT RUN, and it says
+  // so through `skipped`. It still refuses nothing: there is no message to grade.
   const transcript = payload?.transcript_path;
-  if (!transcript) return { failures: [], phase };
+  if (!transcript) {
+    return { failures: [], phase, skipped: `phase ${phase} is a voice moment but the Stop payload carried no transcript_path` };
+  }
   const { text, humanTurnMs } = scanTranscript(transcript);
-  if (text.trim() === "") return { failures: [], phase };
+  if (text.trim() === "") {
+    return {
+      failures: [],
+      phase,
+      skipped: `phase ${phase} is a voice moment but no assistant message text could be read from the transcript`,
+    };
+  }
   // TURN SCOPING, and it sits HERE for two reasons. It is downstream of resolution, so it applies
   // identically to both resolution branches and there is no second behaviour to keep in sync. And
   // it is downstream of the two unusable-transcript returns above, so no input that is silent
@@ -727,19 +742,29 @@ export function run(payload, projectDir, scriptDir = SCRIPT_DIR) {
 }
 
 function main() {
+  // THE DID-NOT-RUN LINE. One prefixed line on stderr at exit 0. hooks/stop.sh matches the prefix
+  // and relays it through hooks/disarm.sh; anything else on stderr at exit 0 is ignored there, and
+  // exit 2 stays the only refusal.
+  const notRun = (reason) => {
+    process.stderr.write(`agent-pipeline voice-lint did not run: ${String(reason).split("\n")[0].slice(0, 200)}\n`);
+    process.exit(0);
+  };
   let payload = null;
   try {
     payload = JSON.parse(readFileSync(0, "utf8"));
   } catch {
-    process.exit(0);
+    notRun("the Stop payload was not readable JSON");
   }
   let result;
   try {
     result = run(payload, payload?.cwd || process.env.CLAUDE_PROJECT_DIR || process.cwd());
-  } catch {
-    process.exit(0); // fail open, always
+  } catch (e) {
+    notRun(`voice-lint.mjs threw (${e && e.message ? e.message : e})`); // fail open, and say so
   }
-  if (!result.failures.length) process.exit(0);
+  if (!result.failures.length) {
+    if (result.skipped) notRun(result.skipped);
+    process.exit(0);
+  }
   const lines = [
     `Stop hook: this message accompanies pipeline phase "${result.phase}", which voice.md treats as a full voice mode moment, and the required shape is not there.`,
     "",

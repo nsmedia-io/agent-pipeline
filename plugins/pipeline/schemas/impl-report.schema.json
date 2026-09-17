@@ -91,6 +91,11 @@
           },
           "evidence": {
             "type": "string"
+          },
+          "ac_id": {
+            "type": "string",
+            "pattern": "^AC[0-9]+$",
+            "description": "OPTIONAL. The acceptance criterion this entry covers, as its label (e.g. AC3). scripts/gate-pre-phase4.mjs counts a labelled criterion covered only when an entry's own leading label or this field names it; a label mentioned elsewhere in the entry does not count."
           }
         }
       }
@@ -125,6 +130,11 @@
           },
           "notes": {
             "type": "string"
+          },
+          "ac_id": {
+            "type": "string",
+            "pattern": "^AC[0-9]+$",
+            "description": "OPTIONAL. The acceptance criterion this check covers, as its label (e.g. AC3). scripts/gate-pre-phase4.mjs counts a labelled criterion covered only when an entry's own leading label or this field names it; a label mentioned elsewhere in the entry does not count."
           },
           "justification": {
             "type": "string"

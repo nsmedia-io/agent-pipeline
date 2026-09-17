@@ -21,8 +21,12 @@
  * than a sentence in a review artifact nobody opens again. It is also the only mode that works
  * with no network, no credentials and no vendor.
  *
- * THREE COMMANDS:
+ * FOUR COMMANDS:
  *   record  -- write the deferral where the config says, print the ref
+ *   checklist -- write ALL of one issue's Phase 4 notes as ONE checklist entry, and a separate
+ *              entry only for a note with a merge_class other than none or one the owner marked
+ *              (--own). Before this, every note without a suggested_patch became its own tracker
+ *              issue: measured on one consumer, one tooling change produced 35 of them.
  *   verify  -- is this string a resolvable deferral ref in this configuration? (the gate's
  *              question; imported by scripts/gate-pre-phase4.mjs rather than shelled out to)
  *   list    -- what is in the ledger (directory mode; remote trackers say so and stop)
@@ -47,6 +51,7 @@ import { readFileSync, existsSync, mkdirSync, writeFileSync, readdirSync, statSy
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { assertPathSegment, isMain as isMainScript } from "./lib.mjs";
+import { concernId, MERGE_CLASSES } from "./materiality.mjs";
 
 const PROJECT_ROOT = process.env.CLAUDE_PROJECT_DIR || process.cwd();
 
@@ -84,7 +89,8 @@ export function trackerFromConfig(cfg) {
 /**
  * The configured ledger directory as a repo-relative path, or the default.
  *
- * Refuses an absolute path and any `..` segment: this value names a directory the pipeline
+ * Refuses an absolute path (a leading `/`, or a Windows drive path such as `C:/` or `C:\`, which
+ * read as relative while only `/` was checked) and any `..` segment: this value names a directory the pipeline
  * WRITES committed files into, so a config edit must not be able to place them outside the
  * repository. The refusal is a fall back to the default, not a throw, so a bad value cannot
  * wedge a run; config-doctor.mjs reports the key.
@@ -93,7 +99,7 @@ export function deferralDirFromConfig(cfg) {
   const d = cfg && cfg.deferralDir;
   if (typeof d !== "string" || d.trim() === "") return DEFAULT_DEFERRAL_DIR;
   const norm = d.replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/+$/, "");
-  if (norm === "" || norm.startsWith("/") || norm.split("/").includes("..")) {
+  if (norm === "" || norm.startsWith("/") || /^[A-Za-z]:(\/|$)/.test(norm) || norm.split("/").includes("..")) {
     return DEFAULT_DEFERRAL_DIR;
   }
   return norm;
@@ -359,6 +365,103 @@ export function recordDeferral({ tracker, root, dir, issue, title, body, evidenc
   return { ref: url, tracker };
 }
 
+// ---- checklist --------------------------------------------------------------
+
+const splitIds = (v) => (typeof v === "string" ? v.split(",").map((x) => x.trim()).filter(Boolean) : []);
+
+/**
+ * Every NOTE in a merged peer-review.json, as [{ role, id, concern }]. A note is a concern that is
+ * not one of its block's open_blocker_ids. A concern carrying a suggested_patch is left out as
+ * applied in the same turn, unless its id is in `unapplied` (the patch did not apply).
+ */
+export function collectNotes(peerReview, { unapplied = [] } = {}) {
+  const out = [];
+  if (!peerReview || typeof peerReview !== "object") return out;
+  for (const [role, block] of Object.entries(peerReview)) {
+    if (!block || typeof block !== "object" || Array.isArray(block) || typeof block.verdict !== "string") continue;
+    const openIds = block.materiality && Array.isArray(block.materiality.open_blocker_ids) ? block.materiality.open_blocker_ids : [];
+    const open = new Set(openIds);
+    const concerns = Array.isArray(block.concerns) ? block.concerns : [];
+    concerns.forEach((concern, index) => {
+      if (!concern || typeof concern !== "object" || Array.isArray(concern)) return;
+      const id = concernId(concern, role, index);
+      if (open.has(id)) return;
+      const patched = typeof concern.suggested_patch === "string" && concern.suggested_patch.trim() !== "";
+      if (patched && !unapplied.includes(id)) return;
+      out.push({ role, id, concern });
+    });
+  }
+  return out;
+}
+
+/** Split notes into the one checklist and the ones that earn their own tracker entry. */
+export function partitionNotes(notes, { own = [] } = {}) {
+  const checklist = [];
+  const ownEntries = [];
+  for (const n of notes) {
+    const mc = typeof n.concern.merge_class === "string" ? n.concern.merge_class.trim().toLowerCase() : "";
+    const hasClass = MERGE_CLASSES.includes(mc) && mc !== "none";
+    (hasClass || own.includes(n.id) ? ownEntries : checklist).push(n);
+  }
+  return { checklist, own: ownEntries };
+}
+
+function oneLine(v, max = 300) {
+  const t = String(v ?? "").replace(/\s+/g, " ").trim();
+  return t.length > max ? `${t.slice(0, max - 3)}...` : t;
+}
+
+function ratingOf(c) {
+  return ["severity", "likelihood", "harm", "merge_class"].map((k) => `${k} ${c[k] ?? "unrated"}`).join(", ");
+}
+
+/** The checklist body: one unchecked box per note, with its role, id, ratings and location. */
+export function renderChecklist(issue, notes) {
+  const lines = [
+    `Review notes from the Phase 4 panel on #${issue}. Each one shipped as a note: none blocked the merge under the materiality rule. Tick a box when the note is done or deliberately dropped.`,
+    "",
+  ];
+  for (const n of notes) {
+    const loc = n.concern.location ? ` (${oneLine(n.concern.location, 120)})` : "";
+    const text = oneLine(n.concern.description || n.concern.must_satisfy || "(no description)");
+    lines.push(`- [ ] **${n.role} ${n.id}**${loc}: ${text} [${ratingOf(n.concern)}]`);
+  }
+  return lines.join("\n");
+}
+
+/**
+ * Record one issue's notes: ONE checklist entry, plus one entry per own-issue note.
+ * `record` is injectable so a test can count calls without a tracker.
+ * @returns {{checklist: string|null, own: Array<{id: string, ref: string}>, counts: object}}
+ */
+export function recordChecklist({ tracker, root, dir, issue, peerReview, own = [], unapplied = [], now, record = recordDeferral }) {
+  const notes = collectNotes(peerReview, { unapplied });
+  const parts = partitionNotes(notes, { own });
+  const result = { checklist: null, own: [], counts: { notes: notes.length, checklist: parts.checklist.length, own: parts.own.length } };
+  if (parts.checklist.length > 0) {
+    result.checklist = record({
+      tracker, root, dir, issue, now,
+      title: `Deferred review notes for #${issue}`,
+      body: renderChecklist(issue, parts.checklist),
+      reason: "Phase 4 notes: real findings that did not block the merge under the materiality rule. One checklist per issue, not one issue per note.",
+      evidence: `peer-review.json of #${issue}: ${parts.checklist.map((n) => n.id).join(", ")}`,
+    }).ref;
+  }
+  for (const n of parts.own) {
+    const ref = record({
+      tracker, root, dir, issue, now,
+      title: `#${issue} ${n.role} ${n.id}: ${oneLine(n.concern.description || n.id, 80)}`,
+      body: `${n.concern.description || ""}\n\nMust satisfy: ${n.concern.must_satisfy || "(not stated)"}\n\nRatings: ${ratingOf(n.concern)}`,
+      reason: own.includes(n.id)
+        ? "The owner marked this note for its own issue."
+        : `A note with merge_class ${n.concern.merge_class}: it did not block this merge, and what it could cost earns its own issue.`,
+      evidence: n.concern.location || `peer-review.json of #${issue}, ${n.id}`,
+    }).ref;
+    result.own.push({ id: n.id, ref });
+  }
+  return result;
+}
+
 // ---- list -------------------------------------------------------------------
 
 /** Ledger entries in directory mode: [{ path, title, status, created }]. */
@@ -404,6 +507,7 @@ export function listLedger(root, dir) {
 const USAGE =
   `usage:\n` +
   `  node deferral.mjs record --issue <n> --title "<t>" --body-file <path> [--evidence "<text>"] [--reason "<text>"]\n` +
+  `  node deferral.mjs checklist --issue <n> --peer-review <peer-review.json> [--own <id,id>] [--unapplied <id,id>] [--dry-run]\n` +
   `  node deferral.mjs verify <ref> [--no-existence-check]\n` +
   `  node deferral.mjs list\n` +
   `\n` +
@@ -422,6 +526,10 @@ function parseArgs(argv) {
     else if (a === "--reason") args.reason = argv[++i];
     else if (a === "--root") args.root = argv[++i];
     else if (a === "--no-existence-check") args.noExistence = true;
+    else if (a === "--peer-review") args.peerReview = argv[++i];
+    else if (a === "--own") args.own = argv[++i];
+    else if (a === "--unapplied") args.unapplied = argv[++i];
+    else if (a === "--dry-run") args.dryRun = true;
     else if (a.startsWith("--")) args.unknown = a;
     else args._.push(a);
   }
@@ -473,6 +581,37 @@ export function main(argv) {
       return 0;
     } catch (e) {
       process.stderr.write(`deferral record: ${e.message}\n`);
+      return 1;
+    }
+  }
+
+  if (command === "checklist") {
+    if (!args.issue || !args.peerReview) {
+      process.stderr.write(`deferral checklist: --issue and --peer-review are required\n${USAGE}`);
+      return 1;
+    }
+    let peerReview;
+    try {
+      peerReview = JSON.parse(readFileSync(path.resolve(root, args.peerReview), "utf8"));
+    } catch (e) {
+      process.stderr.write(`deferral checklist: cannot read --peer-review: ${e.message}\n`);
+      return 1;
+    }
+    const own = splitIds(args.own);
+    const unapplied = splitIds(args.unapplied);
+    if (args.dryRun) {
+      const parts = partitionNotes(collectNotes(peerReview, { unapplied }), { own });
+      process.stdout.write(`${renderChecklist(args.issue, parts.checklist)}\n\nown issues: ${parts.own.map((n) => n.id).join(", ") || "none"}\n`);
+      return 0;
+    }
+    try {
+      const r = recordChecklist({ tracker, root, dir, issue: args.issue, peerReview, own, unapplied });
+      if (r.counts.notes === 0) process.stdout.write("no notes to defer\n");
+      if (r.checklist) process.stdout.write(`checklist\t${r.checklist}\n`);
+      for (const o of r.own) process.stdout.write(`issue\t${o.id}\t${o.ref}\n`);
+      return 0;
+    } catch (e) {
+      process.stderr.write(`deferral checklist: ${e.message}\n`);
       return 1;
     }
   }

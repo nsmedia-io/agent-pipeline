@@ -2939,7 +2939,7 @@ ac53_probe() {
 ac53_f() { printf '%s' "$1" | cut -d'|' -f"$2"; }
 
 AC53_SETUP="$(ac53_probe "0-setup")"
-AC53_GHOST="$(ac53_probe "9-invented")"
+AC53_GHOST="$(ac53_probe "4-invented")"
 AC53_HALT="$(ac53_probe "1-ba-open-questions")"
 AC53_TERM="$(ac53_probe "5-archived")"
 
@@ -2950,7 +2950,7 @@ reg53 "#53-A1"
 assert_eq "#53-A1 the reason for a record at \`0-setup\` carries the record-derived \`.pipeline/<dir> at \\\`<phase>\\\`\` span, and the anchored strip matches it. Without this premise a failed strip would return the WHOLE reason and #53-A4 would compare two strings that trivially differ" \
   "$([[ "$(ac53_f "$AC53_SETUP" 5)" -gt 0 ]] && echo stripped || echo "NO PREFIX MATCHED: $(ac53_f "$AC53_SETUP" 3)")" "stripped"
 reg53 "#53-A2"
-assert_eq "#53-A2 and so does the reason for a record at \`9-invented\`" \
+assert_eq "#53-A2 and so does the reason for a record at \`4-invented\` (a WELL-SHAPED phase nobody taught the table; the probe was \`9-invented\` until B2 made a shape-INVALID phase a refusal, see the malformed-phase suite)" \
   "$([[ "$(ac53_f "$AC53_GHOST" 5)" -gt 0 ]] && echo stripped || echo "NO PREFIX MATCHED: $(ac53_f "$AC53_GHOST" 3)")" "stripped"
 reg53 "#53-A7"
 assert_eq "#53-A7 THE STRIP CANNOT BE A FIXED-LENGTH CUT: the two records' interpolated spans have DIFFERENT byte lengths, so any \`cut -c N-\` makes the two clauses differ at HEAD and ships GREEN with the defect live. This cell is why the strip is an anchored pattern" \
@@ -3018,5 +3018,111 @@ assert_eq "#53-Z1 no #53 assertion id is used twice (a colliding label makes a m
 assert_eq "#53-Z2 every #53 id written in this file was REGISTERED by a cell that ran" \
   "$(printf '%s\n' "$AC53_UNIQ" | grep -c . | tr -d ' ')" \
   "$(grep -o '#53-[A-Za-z0-9][A-Za-z0-9]*' "${BASH_SOURCE[0]}" | sort -u | grep -c . | tr -d ' ')"
+
+# ---------------------------------------------------------------------------
+suite "B2: a MALFORMED current_phase is REFUSED, not skipped"
+# ---------------------------------------------------------------------------
+# THE DEFECT. A current_phase failing status.schema.json's pattern matched no table row and fell
+# through to the vocabulary fail-open (", which is not a guarded phase."), so one mistyped
+# checkpoint disarmed this guard for the rest of the run with nothing said. It now refuses while the
+# run is in flight. A WELL-SHAPED phase nobody taught the table still fails open (AC14 above).
+for p in "Phase 3" "3_impl" "9-invented" "3-IMPL" ""; do
+  new_case 4242 "$(mk_status "$p" '"architectural"' "$NO_EVENTS")"
+  gate "$CASE_ROOT"
+  assert_eq "malformed phase '$p', in flight -> refused (was not-applicable before B2)" "$GATE_DEC" "refused"
+  assert_eq "  ...exit 2" "$GATE_RC" "2"
+  assert_contains "  ...and stderr says the phase is not phase-shaped" "$GATE_ERR" "not phase-shaped"
+  assert_contains "  ...naming the record to fix" "$GATE_ERR" ".pipeline/4242/status.json"
+done
+
+# The phase VALUE is never echoed on stderr (the refusal template carries only table literals).
+new_case 4242 "$(mk_status "Phase SECRET-ish 3" '"architectural"' "$NO_EVENTS")"
+gate "$CASE_ROOT"
+assert_not_contains "the malformed value itself is not republished on stderr" "$GATE_ERR" "SECRET-ish"
+
+# CONTROLS. A stale malformed record never wedges a project; a concluded one is finished; a
+# well-shaped unknown phase keeps the vocabulary fail-open.
+MK_UPDATED="$STALE_ISO"
+new_case 4242 "$(mk_status "Phase 3" '"architectural"' "$NO_EVENTS")"
+unset MK_UPDATED
+gate "$CASE_ROOT"
+assert_eq "CONTROL: a malformed phase on a STALE record -> not-applicable, exit 0" "$GATE_DEC/$GATE_RC" "not-applicable/0"
+
+new_case 4242 "$(mk_status "Phase 3" '"architectural"' "$NO_EVENTS" ',"completed_at":"2026-01-01T00:00:00Z"')"
+gate "$CASE_ROOT"
+assert_eq "CONTROL: a malformed phase on a record with completed_at -> not-applicable" "$GATE_DEC" "not-applicable"
+
+new_case 4242 "$(mk_status "3-something-nobody-writes" '"architectural"' "$NO_EVENTS")"
+gate "$CASE_ROOT"
+assert_eq "CONTROL: a WELL-SHAPED unknown phase still fails open on vocabulary" "$GATE_DEC" "not-applicable"
+
+# ---------------------------------------------------------------------------
+suite "0.43.0: a Phase 4 fix round past its budget cannot end the turn without an owner override"
+# ---------------------------------------------------------------------------
+# round-budget.mjs refuses to START a round past the budget, but only when pipeline.md's prose calls
+# it. This guard asks checkRoundBudget the same question of the record at the turn boundary. Every
+# fixture below carries its prerequisite (impl-report.json at 4-review) so a refusal can only come
+# from the budget, and the first CONTROL proves that.
+FR_OVERRIDE='[{"kind":"fix-round","up_to":2,"at":"2026-09-16T10:00:00Z","reason":"owner chose round two"}]'
+fr_case() { # fr_case <phase> <extra-json-with-leading-comma>
+  new_case 4242 "$(mk_status "$1" '"standard"' "$NO_EVENTS" "$2")"
+  printf '{}' > "$CASE_DIR/impl-report.json"
+}
+
+fr_case 4-review ',"cost_class":"tooling","fix_rounds":1'
+gate "$CASE_ROOT"
+assert_eq "CONTROL: tooling fix round 1 at 4-review (inside the budget of 1) -> granted" "$GATE_DEC/$GATE_RC" "granted/0"
+
+fr_case 4-review ',"cost_class":"tooling","fix_rounds":2'
+gate "$CASE_ROOT"
+assert_eq "tooling fix round 2 at 4-review, no override -> refused, exit 2" "$GATE_DEC/$GATE_RC" "refused/2"
+assert_contains "  ...the reason names the round and the budget" "$GATE_REASON" "fix round 2, past the budget of 1 for cost_class tooling"
+assert_contains "  ...stderr carries the owner decision block" "$GATE_ERR" "### I need a decision"
+assert_contains "  ...with ship with deferrals, split and stop" "$GATE_ERR" "A) Ship with deferrals"
+assert_contains "  ...and how the owner's keep-going answer is recorded" "$GATE_ERR" '"kind": "fix-round", "up_to": 2'
+
+fr_case 3-impl ',"cost_class":"tooling","fix_rounds":2'
+printf '{}' > "$CASE_DIR/constraints.md"
+gate "$CASE_ROOT"
+assert_eq "the same over-budget round at 3-impl (the loopback write) -> refused" "$GATE_DEC" "refused"
+
+fr_case 4-review ',"cost_class":"tooling","fix_rounds":2,"owner_overrides":'"$FR_OVERRIDE"
+gate "$CASE_ROOT"
+assert_eq "an owner override up_to 2 covers tooling fix round 2 -> granted" "$GATE_DEC/$GATE_RC" "granted/0"
+
+fr_case 4-review ',"cost_class":"tooling","fix_rounds":3,"owner_overrides":'"$FR_OVERRIDE"
+gate "$CASE_ROOT"
+assert_eq "the override up_to 2 does NOT cover fix round 3 -> refused" "$GATE_DEC" "refused"
+
+fr_case 4-review ',"cost_class":"product","fix_rounds":2'
+gate "$CASE_ROOT"
+assert_eq "CONTROL: product fix round 2 is inside its budget of 2 -> granted" "$GATE_DEC" "granted"
+fr_case 4-review ',"fix_rounds":3'
+gate "$CASE_ROOT"
+assert_eq "no cost_class reads as product: fix round 3 -> refused" "$GATE_DEC" "refused"
+
+fr_case 4-review ',"cost_class":"tooling","fix_rounds":"two"'
+gate "$CASE_ROOT"
+assert_eq "an unreadable fix_rounds counter -> refused (nobody can number the round)" "$GATE_DEC" "refused"
+assert_contains "  ...and says the counter is unreadable" "$GATE_ERR" "not a non-negative integer"
+
+fr_case 4-review ',"cost_class":"tooling"'
+gate "$CASE_ROOT"
+assert_eq "CONTROL: a record older than schema_version 2 (no fix_rounds) is not judged on the budget" "$GATE_DEC" "granted"
+
+fr_case 4-review-complete ',"cost_class":"tooling","fix_rounds":5'
+gate "$CASE_ROOT"
+assert_not_contains "CONTROL: a phase outside the fix-round phases is not budget-checked" "$GATE_REASON" "past the budget"
+
+MK_UPDATED="$STALE_ISO"
+fr_case 4-review ',"cost_class":"tooling","fix_rounds":2'
+unset MK_UPDATED
+gate "$CASE_ROOT"
+assert_eq "CONTROL: an over-budget record that is not in flight never wedges the project" "$GATE_DEC/$GATE_RC" "not-applicable/0"
+
+new_case 4242 "$(mk_status 4-review '"standard"' "$NO_EVENTS" ',"cost_class":"tooling","fix_rounds":2,"owner_overrides":[{"kind":"fix-round","up_to":1,"at":"2026-09-16T10:00:00Z","reason":"SECRET-REASON-TEXT"}]')"
+printf '{}' > "$CASE_DIR/impl-report.json"
+gate "$CASE_ROOT"
+assert_not_contains "an override's free-text reason is never republished on stderr" "$GATE_ERR" "SECRET-REASON-TEXT"
 
 finish

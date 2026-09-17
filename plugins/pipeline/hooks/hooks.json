@@ -39,7 +39,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-use.sh || { echo \"agent-pipeline PreToolUse: gate unavailable (rc $?); allowing\" >&2; exit 0; }",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-use.sh || sh \"${CLAUDE_PLUGIN_ROOT}/hooks/disarm.sh\" PreToolUse pretooluse-gate \"the gate exited $? without a decision, so this Bash call was allowed unchecked\" || { echo \"agent-pipeline PreToolUse: gate unavailable (rc $?); allowing\" >&2; exit 0; }",
             "timeout": 30
           }
         ]

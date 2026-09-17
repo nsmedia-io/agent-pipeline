@@ -837,15 +837,20 @@ suite "AC7 NEGATIVE POPULATION: the staging-verb term has a boundary, and it is 
 # the deny to ANY `git` invocation passes every positive fixture above. It would also refuse
 # `git checkout -- .`, which agents/qa.md rule 13 mandates BY NAME for restoring a planted
 # mutation from git -- so the gate would break the very battery discipline #19 exists to protect.
+#
+# B2 MOVED SIX ROWS OUT OF THIS LIST. `git checkout -- .`, `git checkout -- <path>`, `git restore .`,
+# `git stash`, `git stash push -u` and `git clean -fd` are still not STAGING verbs, but they discard
+# uncommitted work, and since 0.42.x they are refused for every subagent by their own rule
+# (tests/test-pretooluse-destructive-git.sh). qa.md rule 13 now restores a planted mutation with
+# `git show HEAD:<path> > <path>` instead. The boundary this list pins is unchanged: a verb that
+# neither stages nor discards is not denied.
 NOT_STAGING=(
-  'git checkout -- .'
-  'git checkout -- plugins/pipeline/agents/qa.md'
-  'git restore .'
-  'git stash'
-  'git stash push -u'
-  'git clean -fd'
   'git diff --stat'
   'git log --oneline -5'
+  'git stash list'
+  'git checkout main'
+  'git restore --staged plugins/pipeline/agents/qa.md'
+  'git show HEAD:plugins/pipeline/agents/qa.md > plugins/pipeline/agents/qa.md'
 )
 for c in "${NOT_STAGING[@]}"; do
   assert_eq "ALLOW (not a staging verb): $c" "$(sub_verdict "$P4" "$c")" "none"

@@ -245,6 +245,31 @@ run record --issue 7 --title "Absolute" --body-file body.md
 assert_eq "an absolute deferralDir also falls back to the default" \
   "$([[ "$OUT" == knowledge/deferred/7-absolute.md ]] && echo contained || echo "GOT: $OUT")" "contained"
 
+# A WINDOWS drive path is absolute too. The check once accepted only a leading `/`, so `C:/x` and
+# `C:\x` were judged relative: a directory named `C:` inside the repo on Linux, outside it on Windows.
+new_project drive-dir-slash '{"deferralTracker":"directory","deferralDir":"C:/tmp/drive-escape"}'
+printf 'x\n' > "$PROJ/body.md"
+run record --issue 8 --title "Drive" --body-file body.md
+assert_eq "a C:/ drive deferralDir falls back to the default" \
+  "$([[ "$OUT" == knowledge/deferred/8-drive.md ]] && echo contained || echo "GOT: $OUT")" "contained"
+new_project drive-dir-backslash '{"deferralTracker":"directory","deferralDir":"C:\\tmp\\drive-escape"}'
+printf 'x\n' > "$PROJ/body.md"
+run record --issue 9 --title "Backslash" --body-file body.md
+assert_eq "a C:\\ drive deferralDir falls back to the default" \
+  "$([[ "$OUT" == knowledge/deferred/9-backslash.md ]] && echo contained || echo "GOT: $OUT")" "contained"
+# The unit cells: drive paths in both spellings and a bare drive are refused; a relative name that
+# merely CONTAINS a colon is not a drive path and is kept.
+DRIVE_UNIT="$(DEF="$SCRIPTS_DIR/deferral.mjs" node --input-type=module -e '
+  const m = await import(process.env.DEF);
+  const bs = String.fromCharCode(92);
+  const cells = [["C:/x", null], ["c:" + bs + "x", null], ["D:", null], ["C:x", "C:x"], ["docs/C:/x", "docs/C:/x"], ["docs/deferred", "docs/deferred"]];
+  process.stdout.write(cells.map(([v, want]) => {
+    const got = m.deferralDirFromConfig({ deferralDir: v });
+    return got === (want === null ? m.DEFAULT_DEFERRAL_DIR : want) ? "ok" : v + "->" + got;
+  }).join(" "));' 2>&1)"
+assert_eq "deferralDirFromConfig refuses C:/, c:\\ and a bare D:, and keeps C:x and docs/C:/x" \
+  "$DRIVE_UNIT" "ok ok ok ok ok ok"
+
 # ---------------------------------------------------------------------------
 suite "deferral, remote trackers: the FORMAT rule, in both directions"
 # ---------------------------------------------------------------------------

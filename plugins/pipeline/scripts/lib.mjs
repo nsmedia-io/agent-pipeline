@@ -48,3 +48,23 @@ export function assertPathSegment(value, label) {
   }
   return s;
 }
+
+/**
+ * A path as THIS platform's node understands it.
+ *
+ * Git Bash on Windows hands a child process MSYS spellings (`/c/Users/x`) wherever a script
+ * receives a path through an argument or an environment variable it set itself. Node on
+ * Windows reads `/c/Users/x` as `C:\c\Users\x`, a directory that does not exist, so every read
+ * under it fails and a fail-open caller reports nothing. On win32 this rewrites a leading
+ * `/<drive>/` to `<DRIVE>:/`; on every other platform, and for any other shape, it returns the
+ * value unchanged.
+ *
+ * @param {string} p
+ * @param {string} [platform] process.platform, injectable so the rewrite is testable anywhere.
+ */
+export function nativePath(p, platform = process.platform) {
+  const s = String(p ?? "");
+  if (platform !== "win32") return s;
+  const m = /^\/([a-zA-Z])(\/.*|)$/.exec(s);
+  return m ? `${m[1].toUpperCase()}:${m[2] || "/"}` : s;
+}

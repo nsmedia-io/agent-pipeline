@@ -222,9 +222,13 @@ assert_eq "and carries REAL margin over the measured guard+lint worst case (0 < 
 # clause that decides what happens when the gate is unavailable, and it has never been asserted
 # anywhere. Its own non-zero control is the SubagentStop row above, which the #132 contract drives
 # with a 15->20 edit to show this suite can see a timeout change at all.
+# B2 (0.42.x) inserted hooks/disarm.sh into the fail-open tail: a crashed gate still allows the
+# call, but now says so on the user-visible systemMessage channel and in the disarm log. The last
+# `|| { echo ...; exit 0; }` stays, for the case where disarm.sh itself cannot run. Behaviour of
+# the tail is asserted in tests/test-hook-disarm-visibility.sh.
 assert_eq "PreToolUse entry carries #132's raised (seconds) timeout and its fail-open tail, pinned exactly" \
   "$(gate_hook_probe 'JSON.stringify(h.hooks.PreToolUse)')" \
-  '[{"matcher":"Bash","hooks":[{"type":"command","command":"${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-use.sh || { echo \"agent-pipeline PreToolUse: gate unavailable (rc $?); allowing\" >&2; exit 0; }","timeout":30}]}]'
+  '[{"matcher":"Bash","hooks":[{"type":"command","command":"${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-use.sh || sh \"${CLAUDE_PLUGIN_ROOT}/hooks/disarm.sh\" PreToolUse pretooluse-gate \"the gate exited $? without a decision, so this Bash call was allowed unchecked\" || { echo \"agent-pipeline PreToolUse: gate unavailable (rc $?); allowing\" >&2; exit 0; }","timeout":30}]}]'
 
 # The declared command must actually be EXECUTABLE by the runtime, which runs the string through a
 # shell. A declaration pointing at a file that is not there is the #106 shape one level up.
@@ -558,14 +562,14 @@ assert_eq "AC36(a): a FUNCTION-SCOPE reverse edge is still a cycle and is still 
 # passing confidently: 16 at the reviewed commit, 17 once R6's leaf module landed, 18 with
 # #117's check-status-record.mjs, 19 with #132's check-knowledge-timeout-literals.mjs, 21 with
 # 0.40.0's materiality.mjs and security-surface.mjs, 22 with 0.41.0's deferral.mjs, 23 with
-# 0.42.0's render-panel.mjs. It went red on schedule when the eighteenth
+# 0.42.0's render-panel.mjs, 24 with the review-convergence round-budget.mjs, 26 with version-check.mjs and migrate-records.mjs. It went red on schedule when the eighteenth
 # module landed, again at the nineteenth, and again at the twenty-first, which is the behaviour
 # this pin is for -- bump the number, do not soften it to a floor. The assertion NAME is left as
 # it stands apart from the count: #132's AC15 compares this suite's row names against
 # origin/main with digits normalised, so a reworded row reads there as a DELETED one.
 MODULE_N="$(printf '%s' "$GRAPH_OUT" | sed -n 's/modules=\([0-9]*\).*/\1/p' | head -1)"
-assert_eq "AC36: scripts/ holds 23 modules -- R6's LEAF module plus #117's check-status-record.mjs, not the reviewed commit's 16" \
-  "$MODULE_N" "23"
+assert_eq "AC36: scripts/ holds 26 modules -- R6's LEAF module plus #117's check-status-record.mjs, not the reviewed commit's 16" \
+  "$MODULE_N" "26"
 
 # ===============================================================================================
 suite "AC36(b): three entry directions, PAIRED SAME-RUN CAPTURE against the reviewed commit"

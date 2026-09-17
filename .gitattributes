@@ -1,0 +1,5 @@
+# Every text file is stored and checked out with LF, whatever core.autocrlf says, so a Windows
+# checkout runs the suite on the same bytes Linux does (label pins, byte-identity checks and
+# extracted bash blocks all read line endings). No binary file is tracked today; add a
+# `*.<ext> binary` line here when one is.
+* text=auto eol=lf

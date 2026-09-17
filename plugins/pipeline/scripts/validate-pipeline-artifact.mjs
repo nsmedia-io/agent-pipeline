@@ -77,6 +77,7 @@
 import {
   readFileSync,
   readdirSync,
+  realpathSync,
   statSync,
   existsSync,
   mkdtempSync,
@@ -121,6 +122,10 @@ function reviewerRules(role) {
 const AGENT_RULES = {
   ba: [
     { artifact: "spec.json", schema: "spec.schema.json", schemaPtr: "#", dataPtr: "" },
+    // map.json (Phase 0.5) was validated by nothing, although gate-phase-entry.mjs REQUIRES it at
+    // 1-ba (architectural) and 2-review. BA writes it: folded into the Phase 1 dispatch at the
+    // standard tier, as the mapping pass at the architectural tier (commands/pipeline.md Phase 0.5).
+    { artifact: "map.json", schema: "map.schema.json", schemaPtr: "#", dataPtr: "" },
     { artifact: "peer-review.ba.json", schema: "peer-review.schema.json", schemaPtr: "#/definitions/panelVerdict", dataPtr: "" },
     { artifact: "peer-review.json", schema: "peer-review.schema.json", schemaPtr: "#/definitions/panelVerdict", dataPtr: "/ba" },
   ],
@@ -175,8 +180,28 @@ export function registeredAgents() {
 
 // ---- pointer + schema helpers ----------------------------------------------
 
+// B1 review-convergence (shared definitions): a $ref of the form
+// "<sibling>.schema.json#/<pointer>" resolves against that sibling file under SCHEMA_DIR, so a
+// vocabulary shared by two artifact schemas (veto_ground, merge_class) has one spelling in
+// schemas/definitions.schema.json. Only the bare sibling-file form is accepted; anything with a
+// path separator resolves to nothing, which the walker already treats as "no constraint".
+const siblingSchemas = new Map();
+function siblingSchemaAt(ptr) {
+  const hash = ptr.indexOf("#");
+  const file = hash === -1 ? ptr : ptr.slice(0, hash);
+  if (!/^[a-z0-9-]+\.schema\.json$/.test(file)) return undefined;
+  if (!siblingSchemas.has(file)) {
+    let sib = null;
+    try { sib = loadJson(path.join(SCHEMA_DIR, file)); } catch { sib = null; }
+    siblingSchemas.set(file, sib);
+  }
+  const sib = siblingSchemas.get(file);
+  return sib ? schemaAt(sib, hash === -1 ? "#" : ptr.slice(hash)) : undefined;
+}
+
 function schemaAt(root, ptr) {
   if (!ptr || ptr === "#") return root;
+  if (!ptr.startsWith("#")) return siblingSchemaAt(ptr);
   const parts = ptr.replace(/^#\//, "").split("/");
   let cur = root;
   for (const p of parts) cur = cur == null ? undefined : cur[p];
@@ -259,6 +284,12 @@ export function validate(value, schema, root, pathStr = "", errors = []) {
   }
   if (schema.enum && value !== undefined && !schema.enum.includes(value)) {
     errors.push(`${label}: ${JSON.stringify(value)} is not one of ${JSON.stringify(schema.enum)}`);
+  }
+  // B1 review-convergence: draft-07 if/then, so a required field can be conditional on another
+  // field (peer-review concerns require an `id` only at blocker/critical/high severity). `if`
+  // matches when validating against it yields no errors; `else` is not implemented.
+  if (schema.if && schema.then && value !== undefined && validate(value, schema.if, root).length === 0) {
+    validate(value, schema.then, root, pathStr, errors);
   }
   if (typeOk(value, "object") && (schema.properties || schema.required)) {
     for (const req of schema.required || []) {
@@ -1431,7 +1462,117 @@ export function checkArtifacts(agentType, input, now = Date.now(), rootsOverride
     // cross-worktree false blocks.
     if (sawRecent) break;
   }
+  // #6 (0.42.x, B2): a review shard this agent wrote into the WRONG CHECKOUT. Independent of which
+  // run the sweep resolved above, because the stray copy is by definition not where the sweep looks.
+  try {
+    for (const f of strayShardFailures(agent, input, now)) failures.push(f);
+  } catch {
+    // never wedge a stop over this check's own tooling
+  }
   return { failures, warnings, verdict, detail, agent, issue, roots: roots.length };
+}
+
+/**
+ * THE NEAREST ANCESTOR (inclusive) THAT CARRIES A `.git` ENTRY, file or directory, or null. A git
+ * worktree's `.git` is a FILE, so this finds a dispatch worktree nested under the project dir
+ * (`.claude/worktrees/<name>`) as its own root rather than walking up into the main checkout.
+ * No subprocess, same as every other check in this module.
+ */
+export function checkoutRootOf(start) {
+  let dir = path.resolve(start);
+  for (;;) {
+    if (existsSync(path.join(dir, ".git"))) return dir;
+    const up = path.dirname(dir);
+    if (up === dir) return null;
+    dir = up;
+  }
+}
+
+function samePath(a, b) {
+  const norm = (p) => {
+    try {
+      return realpathSync(p);
+    } catch {
+      return path.resolve(p);
+    }
+  };
+  return norm(a) === norm(b);
+}
+
+/**
+ * When did THIS subagent start? The first record of its own transcript
+ * (`agent_transcript_path` in the SubagentStop payload) carries a timestamp. Without a readable one
+ * the window falls back to RECENT_MS, the same recency every other rule here uses.
+ */
+export function subagentStartMs(input, now = Date.now()) {
+  const t = input && input.agent_transcript_path;
+  if (typeof t === "string" && t) {
+    try {
+      const first = readFileSync(t, "utf8").split("\n").find((l) => l.trim() !== "");
+      const ts = Date.parse(JSON.parse(first).timestamp);
+      if (Number.isFinite(ts)) return ts;
+    } catch {
+      // unreadable transcript: fall back below
+    }
+  }
+  return now - RECENT_MS;
+}
+
+/**
+ * A STRAY SHARD (0.42.x, B2). Observed live: a Phase 4 reviewer dispatched into a worktree wrote
+ * `.pipeline/<issue>/peer-review.<role>.json` into CLAUDE_PROJECT_DIR instead, the merge in the
+ * worktree reported `MISSING SHARD`, and nothing said where the shard had gone.
+ *
+ * REFUSES THE STOP when all of these hold, and names both paths:
+ *   - the payload's cwd sits in a checkout (see checkoutRootOf) that is NOT the checkout the project
+ *     dir sits in. CHECKOUT ROOT AGAINST CHECKOUT ROOT, never against the project dir itself: a
+ *     project dir that is a SUBDIRECTORY of a larger repository (a monorepo package) has a git root
+ *     above it, and comparing that root with the project dir refused every correctly placed shard;
+ *   - under the PROJECT dir's .pipeline/<issue>/ there is a review or peer-review shard this
+ *     agent's own rules name, modified since this subagent started;
+ *   - and the same file is ABSENT from the dispatch checkout's .pipeline/<issue>/.
+ *
+ * The last clause is what keeps this from refusing correct work: a shard that exists where the
+ * merge will read it is not missing, whatever else sits in the main checkout (the orchestrator's
+ * own artifact sync copies shards there on purpose). The shard names come from AGENT_RULES, so a
+ * sibling reviewer's shard written in the same window is never attributed to this agent.
+ */
+export function strayShardFailures(agent, input, now = Date.now(), projectDir = process.env.CLAUDE_PROJECT_DIR) {
+  const out = [];
+  const rules = AGENT_RULES[agent];
+  if (!rules || !projectDir || !input || typeof input.cwd !== "string" || !input.cwd) return out;
+  const shardNames = [
+    ...new Set(rules.map((r) => r.artifact).filter((a) => /^(peer-)?review\.[a-z_-]+\.json$/.test(a))),
+  ];
+  if (shardNames.length === 0) return out;
+  const dispatchRoot = checkoutRootOf(input.cwd);
+  const projectRoot = checkoutRootOf(projectDir);
+  if (!dispatchRoot || !projectRoot || samePath(dispatchRoot, projectRoot)) return out;
+  // The project's position INSIDE its checkout, carried over to the dispatch checkout: in a monorepo
+  // whose project is packages/app, the merge in the worktree reads <worktree>/packages/app/.pipeline.
+  const within = path.relative(path.resolve(projectRoot), path.resolve(projectDir));
+  const dispatchProject = within && !within.startsWith("..") ? path.join(dispatchRoot, within) : dispatchRoot;
+  const since = subagentStartMs(input, now);
+  for (const issueDir of issueDirs(path.join(path.resolve(projectDir), ".pipeline"))) {
+    for (const name of shardNames) {
+      const stray = path.join(issueDir, name);
+      let st;
+      try {
+        st = statSync(stray);
+      } catch {
+        continue;
+      }
+      if (st.mtimeMs < since) continue;
+      const expected = path.join(dispatchProject, ".pipeline", path.basename(issueDir), name);
+      if (existsSync(expected)) continue;
+      out.push(
+        `${name} was written to ${stray}, but this agent was dispatched to ${dispatchRoot}, where the ` +
+          `merge reads ${expected}. Write the shard there and delete the stray copy before finishing; a ` +
+          `shard left in the wrong checkout reaches the merge as MISSING SHARD.`,
+      );
+    }
+  }
+  return out;
 }
 
 /**
@@ -1523,15 +1664,43 @@ function selfTest() {
   check("panel REQUEST_REFACTOR accepted (QA)", validate({ verdict: "REQUEST_REFACTOR" }, panelVerdict, peerSchema), false);
   check("panel VETO accepted (SecOps)", validate({ verdict: "VETO" }, panelVerdict, peerSchema), false);
   check("panel notes-as-array accepted", validate({ verdict: "APPROVE", notes: ["a", "b"] }, panelVerdict, peerSchema), false);
-  check("panel major severity accepted", validate({ verdict: "APPROVE", concerns: [{ severity: "major", description: "d" }] }, panelVerdict, peerSchema), false);
+  // B1 review-convergence: a panel concern REQUIRES severity, likelihood, harm and merge_class, so
+  // every concern fixture below carries the four ratings (RATED); the vocabulary each case pins is
+  // unchanged. The new required list and the shared definitions get their own cases after them.
+  const RATED = { likelihood: "normal-use", harm: "internal", merge_class: "none" };
+  check("panel major severity accepted", validate({ verdict: "APPROVE", concerns: [{ severity: "major", description: "d", ...RATED }] }, panelVerdict, peerSchema), false);
   check("panel bad verdict rejected", validate({ verdict: "LGTM" }, panelVerdict, peerSchema), true);
   check("final_verdict SECOPS_VETO accepted", validate({ final_verdict: "SECOPS_VETO", reviewed_at: "2026-01-01T00:00:00Z" }, peerSchema, peerSchema), false);
   check("final_verdict APPROVE_WITH_NOTES accepted", validate({ final_verdict: "APPROVE_WITH_NOTES", reviewed_at: "2026-01-01T00:00:00Z" }, peerSchema, peerSchema), false);
   // A security reviewer's CVE-style concern severity validates cleanly alongside the canonical
   // blocker|major|nit vocabulary; a garbage severity still rejects.
-  check("panel concern severity 'low' accepted (CVE-style)", validate({ verdict: "APPROVE", concerns: [{ severity: "low", description: "d" }] }, panelVerdict, peerSchema), false);
-  check("panel concern severity 'critical' accepted (CVE-style)", validate({ verdict: "REQUEST_CHANGES", concerns: [{ severity: "critical", description: "d" }] }, panelVerdict, peerSchema), false);
-  check("panel concern severity rejects a garbage value", validate({ verdict: "APPROVE", concerns: [{ severity: "spicy", description: "d" }] }, panelVerdict, peerSchema), true);
+  check("panel concern severity 'low' accepted (CVE-style)", validate({ verdict: "APPROVE", concerns: [{ severity: "low", description: "d", ...RATED }] }, panelVerdict, peerSchema), false);
+  check("panel concern severity 'critical' accepted (CVE-style)", validate({ verdict: "REQUEST_CHANGES", concerns: [{ id: "secops-1", severity: "critical", description: "d", ...RATED }] }, panelVerdict, peerSchema), false);
+  check("panel concern severity rejects a garbage value", validate({ verdict: "APPROVE", concerns: [{ severity: "spicy", description: "d", ...RATED }] }, panelVerdict, peerSchema), true);
+  for (const missing of ["severity", "likelihood", "harm", "merge_class"]) {
+    const concern = { id: "qa-1", severity: "high", description: "d", ...RATED };
+    delete concern[missing];
+    check(`panel concern missing ${missing} rejected (required since review-convergence)`,
+      validate({ verdict: "REQUEST_CHANGES", concerns: [concern] }, panelVerdict, peerSchema), true);
+  }
+  check("panel concern merge_class wrong-pass accepted (shared definition resolves)",
+    validate({ verdict: "REQUEST_CHANGES", concerns: [{ id: "qa-1", severity: "high", description: "d", ...RATED, merge_class: "wrong-pass" }] }, panelVerdict, peerSchema), false);
+  check("panel concern merge_class off-enum rejected (shared definition resolves)",
+    validate({ verdict: "REQUEST_CHANGES", concerns: [{ severity: "high", description: "d", ...RATED, merge_class: "annoying" }] }, panelVerdict, peerSchema), true);
+  check("panel concern at severity high with no id rejected (a blocker needs a stable id)",
+    validate({ verdict: "REQUEST_CHANGES", concerns: [{ severity: "high", description: "d", ...RATED }] }, panelVerdict, peerSchema), true);
+  check("panel concern at severity high WITH an id accepted",
+    validate({ verdict: "REQUEST_CHANGES", concerns: [{ id: "qa-1", severity: "high", description: "d", ...RATED }] }, panelVerdict, peerSchema), false);
+  check("panel concern at severity major with no id accepted (the id is conditional)",
+    validate({ verdict: "APPROVE", concerns: [{ severity: "major", description: "d", ...RATED }] }, panelVerdict, peerSchema), false);
+  check("panel concern harm money accepted",
+    validate({ verdict: "APPROVE", concerns: [{ severity: "nit", description: "d", ...RATED, harm: "money" }] }, panelVerdict, peerSchema), false);
+  check("panel veto_ground on the shared enum accepted",
+    validate({ verdict: "VETO", veto_ground: "auth" }, panelVerdict, peerSchema), false);
+  check("panel veto_ground off the shared enum rejected",
+    validate({ verdict: "VETO", veto_ground: "code-style" }, panelVerdict, peerSchema), true);
+  check("review secops veto_ground off the shared enum rejected (same definition)",
+    validate({ ...goodBlock, verdict: "VETO", veto_ground: "code-style" }, secopsSchema, reviewSchema), true);
 
   // ---- grounding: impl-report claims vs evidence ----
   const evAllExist = { fileExists: () => true, testResults: () => null };
@@ -2133,19 +2302,19 @@ function selfTest() {
       }
       check("unnamed-run: a status.json with no phase is NOT a run candidate",
         unnamedRunDirs(pipe).length === 1 ? [] : [`candidates: ${unnamedRunDirs(pipe).map((d) => path.basename(d.dir)).join(",")}`], false);
-      // A current_phase that IS a string but is not phase-SHAPED. Without this case the schema
-      // pattern clause is dead weight: every junk fixture above omits current_phase entirely, so
-      // the `typeof phase !== "string"` clause alone rejects them and deleting the pattern test
-      // changes nothing. Found by the mutation battery, which is what a battery is for.
-      // THE FIXTURE MATRIX, not a representative fixture. Recognition is a CONJUNCTION -- the
-      // schema's required keys are present AND current_phase is schema-shaped -- so a fixture that
-      // fails BOTH clauses proves nothing about either. `{current_phase:"archived"}` is rejected
-      // for its missing required keys whatever the pattern says, and a battery mutation deleting
-      // the pattern clause SURVIVED against it. Each clause therefore gets a fixture that fails
-      // ONLY that clause, with everything else valid.
+      // A FULL record whose current_phase is a string but NOT phase-shaped (0.42.x, B2). This used
+      // to be asserted NOT a candidate, and that was the defect: one mistyped checkpoint made a real
+      // run invisible to this validator. Recognition is now required keys present AND a non-empty
+      // string phase; the SHAPE is refused at write time by check-status-record.mjs and at the turn
+      // boundary by gate-phase-entry.mjs. The mirror cases below still pin the required-keys clause.
       writeFileSync(path.join(pipe, "_archived", "status.json"),
         JSON.stringify({ ...JSON.parse(runRecord), current_phase: "archived" }));
-      check("unnamed-run: a FULL record whose only defect is a non-phase-shaped current_phase is NOT a candidate",
+      check("unnamed-run: a FULL record whose only defect is a non-phase-shaped current_phase IS still a candidate",
+        unnamedRunDirs(pipe).length === 2 ? [] : [`candidates: ${unnamedRunDirs(pipe).map((d) => path.basename(d.dir)).join(",")}`], false);
+      // CONTROL on that: the same full record with its current_phase REMOVED is not a run.
+      writeFileSync(path.join(pipe, "_archived", "status.json"),
+        JSON.stringify((({ current_phase, ...rest }) => rest)(JSON.parse(runRecord))));
+      check("unnamed-run: CONTROL the same record with NO current_phase is NOT a candidate",
         unnamedRunDirs(pipe).length === 1 ? [] : [`candidates: ${unnamedRunDirs(pipe).map((d) => path.basename(d.dir)).join(",")}`], false);
       // And the mirror: a schema-shaped phase whose record is missing a required key.
       writeFileSync(path.join(pipe, "_archived", "status.json"),

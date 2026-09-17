@@ -289,6 +289,8 @@ run_stop "$HOOK" "$HP_ROOT" ''
 assert_eq "  CONTROL: this same fixture DOES refuse when the tooling is present" "$STOP_RC" "2"
 run_stop "$HOOK" "$HP_ROOT" '' "${NO_NODE_ENV[@]}"
 assert_eq "(a) node absent -> exit 0, the guard does not wedge the operator's environment" "$STOP_RC" "0"
+assert_contains "  and it SAYS so (B2): one did-not-run line naming the guard and the missing node" "$STOP_ERR" \
+  "pipeline check phase-entry-guard did not run: node is not on this hook's PATH"
 # ...and it exited 0 because the guard never RAN, not because it ran and chose to allow. The
 # refusal template is the only thing that distinguishes those two from outside.
 assert_not_contains "  and it is silent about the phase it did not check" "$(lower "$STOP_ERR")" "cannot end"
@@ -307,6 +309,8 @@ run_stop "$HOOK" "$HP_ROOT" ''
 assert_eq "  CONTROL: the SAME fixture refuses through the installed hook, which has the guard" "$STOP_RC" "2"
 run_stop "$COPY_ROOT/hooks/stop.sh" "$HP_ROOT" ''
 assert_eq "(b) guard script absent -> exit 0" "$STOP_RC" "0"
+assert_contains "  and it SAYS so (B2): the guard did not run because its script is not installed" "$STOP_ERR" \
+  "pipeline check phase-entry-guard did not run: scripts/gate-phase-entry.mjs is not installed"
 
 # (c) a status.json that parses as nothing. R11 covers the TRUNCATED half; R14's write-order
 #     convention is what covers the semantically PARTIAL half, which is a different case.
@@ -350,7 +354,12 @@ run_stop "$HOOK" "$HP_ROOT" ''
 assert_eq "  CONTROL: the SAME fixture refuses through the intact install" "$STOP_RC" "2"
 run_stop "$BROKEN_ROOT/hooks/stop.sh" "$HP_ROOT" ''
 assert_eq "(d) a guard that RUNS and CRASHES -> exit 0, because only exit 2 blocks" "$STOP_RC" "0"
-assert_eq "  and the crash text is not republished as if it were a refusal" "$STOP_ERR" ""
+# B2: the crash text is still not republished, but the fail-open is no longer SILENT. stderr now
+# carries exactly one "did not run" line naming the guard and its exit code, and nothing else.
+assert_not_contains "  and the crash text is not republished as if it were a refusal" "$STOP_ERR" "lib.mjs"
+assert_contains "  but the hook SAYS the guard did not run (B2), naming the exit code" "$STOP_ERR" \
+  "pipeline check phase-entry-guard did not run: scripts/gate-phase-entry.mjs exited $BROKEN_RC without a decision"
+assert_eq "  and that line is the only thing on stderr" "$(printf '%s\n' "$STOP_ERR" | grep -c .)" "1"
 
 # ---------------------------------------------------------------------------
 suite "AC25: an ordinary developer session in a project that ran a pipeline once"

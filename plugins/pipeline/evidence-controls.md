@@ -10,6 +10,14 @@ standard tier they manufacture edge cases nobody will hit, which is why they liv
 in the core. Rule numbers are shared with `evidence.md`; a citation of "rule 18" resolves to
 the same rule from either file.
 
+**At `cost_class: tooling` the scope is narrower, whatever the tier.** These rules apply to a
+tooling change only where a wrong answer would be a merge class: the pass/fail logic of a gate or
+check itself (a mutation that survives there is a `wrong-pass`), or a diff that touches auth,
+secrets, or this pipeline's own hooks. A tooling diff that touches CI config, test scripts or
+developer tooling elsewhere is reviewed under `evidence.md` alone, and no mutation battery is owed
+on it. Measured on one consumer before this carve-out: a tooling issue pulled these batteries on
+every panel round and ended with a 676-assertion prover for a change no product user reaches.
+
 The one sentence still governs. **A check that cannot fail has not passed.**
 
 ---

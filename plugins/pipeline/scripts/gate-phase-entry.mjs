@@ -70,6 +70,8 @@ import { KNOWN_TIERS } from "./dispatch-model.mjs";
 import { phaseKey } from "./pipeline-telemetry.mjs";
 import { activeIssueDir, MTIME_ONLY } from "./validate-pipeline-artifact.mjs";
 import { inFlightObservations } from "./run-candidates.mjs";
+import { phaseShapeOk } from "./check-status-record.mjs";
+import { checkRoundBudget } from "./round-budget.mjs";
 
 /**
  * The 15 guarded rows: the 8 phases pipeline.md checkpoints into ("Checkpoint first:") and the
@@ -202,6 +204,42 @@ export const TERMINAL = ["5-archived"];
 export const PRELUDE = ["0-setup"];
 
 export const IN_FLIGHT_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * THE FIX-ROUND BUDGET, AT THE TURN BOUNDARY (0.43.0). round-budget.mjs counts Phase 4 fix rounds
+ * in status.json `fix_rounds` and refuses to START one past the budget; pipeline.md calls it
+ * before Dev is dispatched. That call is prose the orchestrator can skip or out-type, so this guard
+ * re-asks the same question of the record: a run sitting in a fix round (one of these phases, with
+ * `fix_rounds` >= 1) whose round number is past the budget for its cost_class, with no
+ * owner_overrides entry covering that round, cannot end its turn. The decision is
+ * round-budget.mjs's own checkRoundBudget, asked about the round already entered, so the budget
+ * table and the override rule have one copy.
+ *
+ * WHAT IT DOES NOT SEE. A fix round entered without the counter being raised at all reads as the
+ * round before it; this guard checks the count a record carries, not whether it is true. A record
+ * with no `fix_rounds` (older than schema_version 2) is not judged here, the same fail-open this
+ * table takes on vocabulary. A counter that is present but not a non-negative integer is refused,
+ * as round-budget.mjs refuses it: nobody can number that round.
+ */
+export const FIX_ROUND_PHASES = ["3-impl", "3-impl-complete", "4-review"];
+
+export function fixRoundOverBudget(status) {
+  if (!FIX_ROUND_PHASES.includes(status.current_phase)) return null;
+  const raw = status.fix_rounds;
+  if (raw === undefined || raw === 0) return null;
+  // Asked about the round ALREADY ENTERED: checkRoundBudget decides the NEXT round from the count
+  // done, so the count done before this round is fix_rounds - 1. Only integers and the free-text
+  // fields the decision block does not print are passed through: issue_number is echoed only when
+  // it is an integer, and owner_overrides reasons are never read.
+  const probe = {
+    cost_class: status.cost_class,
+    owner_overrides: status.owner_overrides,
+    fix_rounds: Number.isInteger(raw) && raw >= 1 ? raw - 1 : raw,
+  };
+  if (Number.isInteger(status.issue_number)) probe.issue_number = status.issue_number;
+  const r = checkRoundBudget(probe, "fix-round");
+  return r.allowed ? null : r;
+}
 
 /**
  * An unusable risk_tier resolves to the STRICTEST row, never the loosest. That default is right
@@ -591,6 +629,29 @@ function decideForDir(issueDir, now) {
   const phase = typeof status.current_phase === "string" ? status.current_phase : "";
   const at = `.pipeline/${name} at \`${phase}\``;
 
+  // A MALFORMED PHASE IS REFUSED, NOT SKIPPED (0.42.x, B2). Checked after completed_at alone and
+  // BEFORE every vocabulary branch, because the vocabulary branches are exactly what a malformed
+  // phase used to fall through: it matched no table row and landed on the fail-open "not a guarded
+  // phase" below, so one mistyped checkpoint disarmed this guard for the rest of the run, silently.
+  // The fail-open on vocabulary stays for a WELL-SHAPED phase nobody taught the table; a phase that
+  // fails status.schema.json's own pattern is not a vocabulary gap, it is a broken record.
+  //
+  // BOUNDED THE SAME WAY EVERY REFUSAL HERE IS: only a record in flight is refused, so an abandoned
+  // malformed record in an old checkout never wedges a project. And a schema this module cannot read
+  // (phaseShapeOk -> null) is a tooling gap, which fails open like every other one.
+  //
+  // The phase VALUE is not echoed. It is free text from a committed record, and the one thing known
+  // about it here is that it is not one of this table's literals.
+  if (!status.completed_at && phaseShapeOk(status.current_phase) === false) {
+    const where = `.pipeline/${name}`;
+    if (!inFlight(status, now)) {
+      return decided("not-applicable", `${where} records a malformed current_phase but is not in flight.`);
+    }
+    return {
+      ...decided("refused", `${where} records a current_phase that does not match status.schema.json's pattern.`),
+      malformed: true,
+    };
+  }
   if (isTerminal(phase, status)) return decided("not-applicable", `${at} is finished.`);
   // AFTER the terminal check, and the order is the assertion's subject rather than a style
   // choice: measured, this branch placed BEFORE it renders a `0-setup` record carrying
@@ -610,6 +671,22 @@ function decideForDir(issueDir, now) {
   }
   if (!inFlight(status, now)) {
     return decided("not-applicable", `${at} is not in flight (stale or already concluded).`);
+  }
+
+  // Before the prerequisite row: a run past its fix-round budget is refused whatever its artifacts
+  // say, because the refusal is about whether this round should exist at all.
+  const overBudget = fixRoundOverBudget(status);
+  if (overBudget) {
+    return {
+      ...decided(
+        "refused",
+        overBudget.next === null
+          ? `${at} is in a Phase 4 fix round whose fix_rounds counter is unreadable.`
+          : `${at} is in Phase 4 fix round ${overBudget.next}, past the budget of ${overBudget.budget} for cost_class ${overBudget.costClass}, and no owner_overrides entry covers it.`,
+      ),
+      phase,
+      budget: overBudget,
+    };
   }
 
   // The RAW field, before normalizeTier resolves every unusable value to the strictest row.
@@ -670,6 +747,31 @@ const CONTENT_REPAIR = {
 
 function refusalMessage(result) {
   const dir = `.pipeline/${result.issue_dir}`;
+  if (result.budget) {
+    const b = result.budget;
+    return [
+      b.next === null
+        ? `Phase-entry guard: this turn cannot end while ${dir} is in a Phase 4 fix round whose fix_rounds counter is not a non-negative integer.`
+        : `Phase-entry guard: this turn cannot end with ${dir} in Phase 4 fix round ${b.next}; the budget at cost_class ${b.costClass} is ${b.budget} and no owner_overrides entry covers round ${b.next}.`,
+      `Going past the fix-round budget is the owner's decision, not the orchestrator's. Work already done in this turn is not undone; only the turn boundary is blocked.`,
+      `Ways to clear it:`,
+      `  1. Bring the owner the decision below. If they choose to keep going, record their answer in ${dir}/status.json owner_overrides as {"kind": "fix-round", "up_to": <round>, "at": "<iso>", "reason": "<their reason>"} and commit it.`,
+      `  2. If they choose to ship with deferrals, split or stop, move the run to that outcome (a final_verdict, or a halt state) and commit ${dir}/status.json.`,
+      `  3. If fix_rounds is wrong, correct it to the number of fix rounds actually run.`,
+      "",
+      b.decision,
+    ].join("\n");
+  }
+  if (result.malformed) {
+    return [
+      `Phase-entry guard: this turn cannot end while ${dir}/status.json records a current_phase that is not phase-shaped.`,
+      `The guard cannot tell which phase the run is at, so it cannot check that phase's prerequisite. Before this refusal existed, a malformed phase disarmed the guard for the rest of the run.`,
+      `Work already done in this turn is not undone; only the turn boundary is blocked.`,
+      `Ways to clear it:`,
+      `  1. Set current_phase to the literal commands/pipeline.md names for the checkpoint (e.g. 3-impl, 4-review-complete, halted-error), then run node "\${CLAUDE_PLUGIN_ROOT}/scripts/check-status-record.mjs" and commit ${dir}/status.json.`,
+      `  2. If this run is YOURS and is over, conclude it: give ${dir}/status.json a \`final_verdict\` or a \`completed_at\`.`,
+    ].join("\n");
+  }
   // A refusal on a PRESENT artifact must not send the operator after a missing file. Both of the
   // absent-case lines are false there -- the file is in front of them, and re-running the phase
   // that produced it changes nothing -- and this is the text a blocked turn reads.

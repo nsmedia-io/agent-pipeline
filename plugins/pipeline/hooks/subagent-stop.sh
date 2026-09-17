@@ -3,7 +3,9 @@
 # pipeline artifact against its JSON Schema and emits a decision:block (on stdout) only when an
 # artifact exists, was just written, and fails validation. Fail-open in every other case:
 # ad-hoc (non-pipeline) agent calls, missing node, no plugin root, absent validator, or a
-# validator error. A validation hook must never wedge an agent stop.
+# validator error. A validation hook must never wedge an agent stop. In a project with a .pipeline
+# directory each of those tooling gaps also records "pipeline check artifact-validator did not
+# run: <reason>" through hooks/disarm.sh, so the fail-open is visible rather than silent.
 #
 # The validator (scripts/validate-pipeline-artifact.mjs) reads the hook payload on stdin,
 # resolves the ONE .pipeline/<issue> dir whose RUN this stop belongs to -- the run that is in
@@ -24,12 +26,31 @@ PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-}"
 
 INPUT=$(cat)
 
+# A CHECK THAT CANNOT RUN SAYS SO (0.42.x, B2), and still exits 0. Recorded only in a project that
+# has a .pipeline directory, which is the validator's own silence floor: an ad-hoc session in a
+# project that never ran the pipeline pays no line.
+DISARM_LIB="$(dirname "${BASH_SOURCE[0]}")/disarm.sh"
+if [[ -f "$DISARM_LIB" ]]; then
+  DISARM_SOURCED=1
+  # shellcheck source=./disarm.sh
+  . "$DISARM_LIB"
+else
+  disarm_record() { printf 'agent-pipeline %s: pipeline check %s did not run: %s\n' "$1" "$2" "$3" >&2; }
+  disarm_flush() { :; }
+fi
+not_run() {
+  [[ -d "$PROJECT_DIR/.pipeline" ]] || exit 0
+  disarm_record SubagentStop "artifact-validator" "$1"
+  disarm_flush
+  exit 0
+}
+
 # Never wedge a stop because tooling is absent.
-command -v node >/dev/null 2>&1 || exit 0
-[[ -n "$PLUGIN_ROOT" ]] || exit 0
+command -v node >/dev/null 2>&1 || not_run "node is not on this hook's PATH"
+[[ -n "$PLUGIN_ROOT" ]] || not_run "CLAUDE_PLUGIN_ROOT is not set"
 
 VALIDATOR="$PLUGIN_ROOT/scripts/validate-pipeline-artifact.mjs"
-[[ -f "$VALIDATOR" ]] || exit 0
+[[ -f "$VALIDATOR" ]] || not_run "scripts/validate-pipeline-artifact.mjs is not installed"
 
 # Pass the project dir explicitly so the validator locates the user's .pipeline/ regardless of cwd.
 #
@@ -42,7 +63,11 @@ VALIDATOR="$PLUGIN_ROOT/scripts/validate-pipeline-artifact.mjs"
 # validator writes NOTHING at all in a project with no .pipeline dir, so an ad-hoc session pays
 # no line. A validator CRASH now also surfaces its trace here instead of vanishing, which is the
 # same trade in the same direction: still exit 0, still fail open, but no longer in silence.
-OUT=$(printf '%s' "$INPUT" | CLAUDE_PROJECT_DIR="$PROJECT_DIR" node "$VALIDATOR") || exit 0
+OUT=$(printf '%s' "$INPUT" | CLAUDE_PROJECT_DIR="$PROJECT_DIR" node "$VALIDATOR")
+VRC=$?
+if [[ "$VRC" -ne 0 ]]; then
+  not_run "scripts/validate-pipeline-artifact.mjs exited $VRC"
+fi
 
 # A non-empty payload is the decision:block JSON; pass it through to Claude Code.
 [[ -n "$OUT" ]] && printf '%s' "$OUT"
