@@ -13,15 +13,18 @@
  *      default is then recorded rather than assumed, which is what Phase 4 checks the build against.
  *   3. The FIRST blocking entry with no resolution is exit 2 (ASK), printed as JSON for the
  *      decision block. One question, not a batch: early answers routinely dissolve later ones.
+ *   A present resolution must be complete (non-blank answer and at, answered_by owner or
+ *   ba_default), and `blocking` must be a boolean; either defect is exit 2 (INVALID), never defaulted.
  *   Experiment mode (--experiment, or a spec whose issue_number is an exp-<slug> placeholder)
- *   never blocks: every unresolved entry resolves to ba_default, because an unattended harness
- *   cannot answer a question.
+ *   never blocks: every unresolved entry resolves to ba_default, and one with no recommendation is
+ *   printed UNRESOLVED and left as it is, because an unattended harness cannot answer a question.
  *
  * DESIGN-LOCK (Phase 2.5, after the judge returns; also on a resumed or seeded design.json).
  *   owner_decision absent, `required` not a boolean, or required true with any of question,
  *   option_a, option_b, recommendation missing or blank: exit 3, re-dispatch the JUDGE. The key
  *   is optional in design.schema.json and the validator has no if/then, so this is the only check.
- *   required false, or required true and resolved: exit 0.
+ *   required false, or required true and resolved (chosen in its enum, the owner's reasoning, and
+ *   resolved_at all present): exit 0.
  *   required true, complete, unresolved: exit 2, ask the owner (the block is printed as JSON).
  *
  * --status is read to refuse a spec or design whose issue_number disagrees with the run record,
@@ -59,29 +62,47 @@ export function openQuestionsGate(spec, { experiment = false, now = new Date().t
   const exp = experiment || isExperimentSpec(spec);
   const list = Array.isArray(spec.open_questions) ? spec.open_questions : [];
   const defaulted = [];
-  const unresolvedNoRec = [];
+  const unresolved = [];
+  const invalid = [];
   let changed = false;
   for (const q of list) {
-    if (!q || typeof q !== "object" || q.resolution) continue;
-    if (q.blocking === true && !exp) continue;
+    if (!q || typeof q !== "object") {
+      invalid.push("open_questions[] entry is not an object");
+      continue;
+    }
+    const id = q.id || "(no id)";
+    if (typeof q.blocking !== "boolean") {
+      invalid.push(`open_questions[${id}].blocking (not a boolean)`);
+      continue;
+    }
+    if (q.resolution !== undefined) {
+      if (!resolutionComplete(q.resolution)) invalid.push(`open_questions[${id}].resolution (needs a non-blank answer, answered_by owner or ba_default, and at)`);
+      continue;
+    }
+    if (q.blocking && !exp) continue;
     if (blank(q.ba_recommendation)) {
-      unresolvedNoRec.push(q.id || "(no id)");
+      // Experiment runs never halt: a question nobody can default stays visibly unresolved.
+      if (exp) unresolved.push(id);
+      else invalid.push(`open_questions[${id}].ba_recommendation`);
       continue;
     }
     q.resolution = { answer: q.ba_recommendation, answered_by: "ba_default", at: now };
-    defaulted.push(q.id || "(no id)");
+    defaulted.push(id);
     changed = true;
   }
-  if (unresolvedNoRec.length) {
-    return { code: 2, kind: "invalid", spec, changed, missing: unresolvedNoRec.map((id) => `open_questions[${id}].ba_recommendation`), defaulted };
-  }
-  const open = exp ? [] : list.filter((q) => q && typeof q === "object" && q.blocking === true && !q.resolution);
+  if (invalid.length) return { code: 2, kind: "invalid", spec, changed, missing: invalid, defaulted, unresolved };
+  const open = exp ? [] : list.filter((q) => q.blocking === true && q.resolution === undefined);
   if (open.length) {
     const q = open[0];
     const question = { id: q.id, question: q.question, why_it_matters: q.why_it_matters, options: q.options || [], ba_recommendation: q.ba_recommendation };
-    return { code: 2, kind: "ask", spec, changed, question, remaining: open.length - 1, defaulted };
+    return { code: 2, kind: "ask", spec, changed, question, remaining: open.length - 1, defaulted, unresolved };
   }
-  return { code: 0, kind: "proceed", spec, changed, defaulted };
+  return { code: 0, kind: "proceed", spec, changed, defaulted, unresolved };
+}
+
+/** A resolution the gate may stand on: non-blank answer and at, answered_by in its enum. */
+export function resolutionComplete(r) {
+  return !!r && typeof r === "object" && !blank(r.answer) && !blank(r.at) && (r.answered_by === "owner" || r.answered_by === "ba_default");
 }
 
 /** @returns {{code: 0|2|3, reason: string, block?: object}} */
@@ -99,7 +120,7 @@ export function designLockGate(design) {
     return { code: 3, reason: `owner_decision is required but ${gaps.join(", ")} missing or empty: re-dispatch the judge; do not fill it in yourself` };
   }
   const res = od.resolution;
-  if (res && typeof res === "object" && !blank(res.chosen) && !blank(res.resolved_at)) {
+  if (res && typeof res === "object" && ["option_a", "option_b", "variant"].includes(res.chosen) && !blank(res.reasoning) && !blank(res.resolved_at)) {
     return { code: 0, reason: `the owner resolved it (${res.chosen})` };
   }
   return {
@@ -151,6 +172,7 @@ export function main(argv, { out = (s) => process.stdout.write(s), err = (s) => 
       const r = openQuestionsGate(spec, { experiment: !!a.experiment, now });
       if (r.changed) writeFileSync(nativePath(a.spec), `${JSON.stringify(r.spec, null, 2)}\n`);
       if (r.defaulted.length) out(`DEFAULTED: ${r.defaulted.join(", ")} resolved to ba_default\n`);
+      if (r.unresolved && r.unresolved.length) out(`UNRESOLVED: ${r.unresolved.join(", ")} (experiment run: no recommendation to default to; proceeding)\n`);
       if (r.kind === "invalid") {
         out(`INVALID: missing or empty: ${r.missing.join(", ")}\n`);
         return 2;

@@ -44,7 +44,7 @@ After BA returns:
 
 ### Open-questions gate
 
-Run `node "${CLAUDE_PLUGIN_ROOT}/scripts/owner-gate.mjs" open-questions --spec "$PIPELINE_BASE/<issue>/spec.json" --status "$PIPELINE_BASE/<issue>/status.json"`, adding `--experiment` when `EXPERIMENT_MODE` is true. It checks the spec's required fields and records a `ba_default` resolution on every non-blocking question (on every question in experiment mode: an unattended run cannot answer one). Exit 0: proceed to tier routing. Exit 2 printing `INVALID`: report it to the owner and halt. Exit 2 printing `ASK`, the first unresolved blocking question:
+Run `node "${CLAUDE_PLUGIN_ROOT}/scripts/owner-gate.mjs" open-questions --spec "$PIPELINE_BASE/<issue>/spec.json" --status "$PIPELINE_BASE/<issue>/status.json"`, adding `--experiment` when `EXPERIMENT_MODE` is true. It checks the spec's required fields and records a `ba_default` resolution on every non-blocking question (on every question in experiment mode: an unattended run cannot answer one, so a question with no recommendation prints `UNRESOLVED` and the run proceeds). Exit 0: proceed to tier routing. Exit 2 printing `INVALID`: report it to the owner and halt. Any exit other than 0 or 2: halt and show the owner the output. Exit 2 printing `ASK`, the first unresolved blocking question:
 
 1. Update `status.json` with `current_phase: "1-ba-open-questions"` and commit.
 2. **Ask that ONE question in full voice mode** with the decision block from `${CLAUDE_PLUGIN_ROOT}/voice.md`: `question` is **What I'm asking**, `why_it_matters` is **Why I'm asking**, `options` (plus "do nothing for now") are **Options**, `ba_recommendation` is **My recommendation**. Serial, not batched: an early answer often dissolves a later question.

@@ -23,6 +23,7 @@ The one happy-path decision the pipeline does not make for itself: the approach 
 
 - **Exit 0**: proceed to Phase 3.
 - **Exit 3**: re-dispatch the judge with what the script printed. Do not fill in the block yourself: you did not read the sketches.
+- **Any other exit**: halt and show the owner the output.
 - **Exit 2**:
   1. Update `status.json` with `current_phase: "2.5-design-owner-decision"` and commit.
   2. Return to the owner in **full voice mode**, ending with the decision block from `${CLAUDE_PLUGIN_ROOT}/voice.md`. Options A and B are the two sketches as rendered, in plain language, never the stance labels: what each buys, costs and forecloses. The judge's winner is **My recommendation**. Fill Reversibility from the migration and contract shape of each option, and say this is the last cheap moment to change the answer.

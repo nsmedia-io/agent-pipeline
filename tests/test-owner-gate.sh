@@ -103,6 +103,38 @@ og open-questions --spec "$SPEC" --status "$ST"
 assert_eq "a non-blocking question with no recommendation cannot be defaulted: exit 2" "$RC" "2"
 assert_contains "and it names the question" "$OUT" "open_questions[q9].ba_recommendation"
 
+suite "open-questions: a resolution the gate may stand on"
+
+for R in '{}' '{"answered_by":"ba_default"}' '{"answer":"  ","answered_by":"owner","at":"2026-01-01T00:00:00Z"}' '{"answer":"a","answered_by":"owner"}' '{"answer":"a","answered_by":"someone","at":"2026-01-01T00:00:00Z"}'; do
+  spec "\"open_questions\":[{\"id\":\"q5\",\"question\":\"q\",\"why_it_matters\":\"w\",\"ba_recommendation\":\"rec\",\"blocking\":true,\"resolution\":$R}]"
+  og open-questions --spec "$SPEC" --status "$ST"
+  assert_eq "REGRESSION: a blocking question with resolution $R is not resolved: exit 2" "$RC" "2"
+  assert_contains "  and it is named INVALID, not silently accepted ($R)" "$OUT" "INVALID: missing or empty: open_questions[q5].resolution"
+done
+spec "\"open_questions\":[{\"id\":\"q5\",\"question\":\"q\",\"why_it_matters\":\"w\",\"ba_recommendation\":\"rec\",\"blocking\":false,\"resolution\":{}}]"
+og open-questions --spec "$SPEC" --status "$ST"
+assert_eq "an empty resolution on a NON-blocking question is not overwritten by a default either: exit 2" "$RC" "2"
+assert_eq "  and the spec is left as it was" "$(jget "$SPEC" open_questions.0.resolution)" "{}"
+for B in '"true"' 'null' '1'; do
+  spec "\"open_questions\":[{\"id\":\"q6\",\"question\":\"q\",\"why_it_matters\":\"w\",\"ba_recommendation\":\"rec\",\"blocking\":$B}]"
+  og open-questions --spec "$SPEC" --status "$ST"
+  assert_eq "REGRESSION: blocking $B is rejected, not defaulted: exit 2" "$RC" "2"
+  assert_contains "  and named ($B)" "$OUT" "open_questions[q6].blocking (not a boolean)"
+  assert_eq "  and no default was written ($B)" "$(jget "$SPEC" open_questions.0.resolution)" "undefined"
+done
+spec "\"open_questions\":[{\"id\":\"q7\",\"question\":\"q\",\"why_it_matters\":\"w\",\"blocking\":false}]"
+og open-questions --spec "$SPEC" --status "$ST"
+assert_eq "CONTROL: a missing ba_recommendation still halts a normal run: exit 2" "$RC" "2"
+
+suite "open-questions: an experiment run with no recommendation proceeds"
+
+spec "\"open_questions\":[{\"id\":\"q8\",\"question\":\"q\",\"why_it_matters\":\"w\",\"blocking\":true},$Q_NB]"
+og open-questions --spec "$SPEC" --status "$ST" --experiment
+assert_eq "REGRESSION: an experiment run with a blocking question and no ba_recommendation: exit 0" "$RC" "0"
+assert_contains "and records it as unresolved" "$OUT" "UNRESOLVED: q8"
+assert_eq "and writes no invented resolution for it" "$(jget "$SPEC" open_questions.0.resolution)" "undefined"
+assert_eq "while the question that has a recommendation is still defaulted" "$(jget "$SPEC" open_questions.1.resolution.answered_by)" '"ba_default"'
+
 suite "open-questions: usage and the wrong run"
 
 spec ''
@@ -149,6 +181,15 @@ assert_eq "required true and resolved: exit 0" "$RC" "0"
 design "\"owner_decision\":{$FULL,\"resolution\":{\"chosen\":\"\",\"reasoning\":\"r\"}}"
 og design-lock --design "$DESIGN" --status "$ST"
 assert_eq "a resolution with no choice is not resolved: exit 2" "$RC" "2"
+design "\"owner_decision\":{$FULL,\"resolution\":{\"chosen\":\"option_b\",\"resolved_at\":\"2026-01-01T00:00:00Z\"}}"
+og design-lock --design "$DESIGN" --status "$ST"
+assert_eq "REGRESSION: a resolution without the owner's reasoning is not resolved: exit 2" "$RC" "2"
+design "\"owner_decision\":{$FULL,\"resolution\":{\"chosen\":\"option_b\",\"reasoning\":\"   \",\"resolved_at\":\"2026-01-01T00:00:00Z\"}}"
+og design-lock --design "$DESIGN" --status "$ST"
+assert_eq "a blank reasoning is not reasoning: exit 2" "$RC" "2"
+design "\"owner_decision\":{$FULL,\"resolution\":{\"chosen\":\"whatever\",\"reasoning\":\"r\",\"resolved_at\":\"2026-01-01T00:00:00Z\"}}"
+og design-lock --design "$DESIGN" --status "$ST"
+assert_eq "a choice outside option_a/option_b/variant is not resolved: exit 2" "$RC" "2"
 design '"owner_decision":{"required":false}'
 og design-lock --design "$DESIGN" --status "$TEMP_PROJECT/st-other.json"
 assert_eq "a status naming a different issue: exit 1" "$RC" "1"
@@ -166,6 +207,9 @@ assert_not_contains "the ba_default write rule is gone from the prose" "$M1" "Fo
 assert_not_contains "the experiment paragraph is gone from the prose" "$M1" "Experiment runs never block"
 assert_contains "phase-2.5-design.md runs design-lock" "$M25" 'scripts/owner-gate.mjs" design-lock --design'
 assert_contains "phase-2.5-design.md still writes the halt phase" "$M25" '"2.5-design-owner-decision"'
+assert_contains "phase-1-ba.md halts on any exit other than 0 or 2" "$M1" "Any exit other than 0 or 2: halt and show the owner the output."
+assert_contains "phase-2.5-design.md halts on any other exit" "$M25" "**Any other exit**: halt and show the owner the output."
+assert_contains "phase-2-lite.md halts on any other exit" "$(cat "$PLUGIN_ROOT/orchestrator/phase-2-lite.md")" "Any other exit but 0: halt and show the owner the output."
 assert_not_contains "the absent-key branch is gone from the prose" "$M25" "key is absent entirely"
 assert_not_contains "the incomplete-block branch is gone from the prose" "$M25" "any of \`question\`, \`option_a\`, \`option_b\`, \`recommendation\` is missing"
 
