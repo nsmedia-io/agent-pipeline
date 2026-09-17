@@ -123,6 +123,9 @@ for cand in $(grep -oE 'scripts/[a-zA-Z0-9_-]+\.mjs' "$PIPELINE_MD" | sort -u); 
     # checkpoint and the verdict step. Both take --status and a subcommand or --peer-review, never a
     # (role, tier, phase) triple, and resolve no model. Excluded by NAME, like the rest.
     checkpoint.mjs|record-verdict.mjs) continue ;;
+    # #164: the owner-facing moment, the issue-body render and the coverage skeleton. None takes a
+    # (role, tier, phase) triple or resolves a model. Excluded by NAME, like the rest.
+    voice-moment.mjs|render-issue-body.mjs|scaffold-requirement-checks.mjs) continue ;;
   esac
   # The data-layer surface module is referenced from the same file by R3; it is not this.
   grep -q 'migrationGlobsForTripwire' "$PLUGIN_DIR/$cand" 2>/dev/null && continue

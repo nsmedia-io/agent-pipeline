@@ -48,26 +48,15 @@ that should block must be rated.
 - `reversibility` (optional): `undo-button`, `some-cleanup`, `one-way-door`. Recorded for the
   owner; it no longer decides anything.
 
-**What blocks.** ALL of: severity `blocker`, `critical` or `high`; `merge_class` not `none`;
-likelihood `normal-use`. The run's `cost_class` (set by BA, in `status.json`) widens or narrows
-that: at `product-money` an `edge-case` blocks too; at `tooling` only `wrong-pass` and
-`security-exposure` can block, because a change no product user reaches cannot lose them money or
-data. A `security-exposure` also blocks at `adversarial` likelihood, since an exposure is by
-definition reached by someone acting outside the documented flow. Nothing `hypothetical` blocks.
-Nothing at `major`, `medium`, `low`, `nit` or `info` blocks. `scripts/materiality.mjs` is the code
-form and `merge-peer-review.mjs` applies it to every shard, so a `REQUEST_CHANGES` with no
-blocking concern is recorded as `APPROVE_WITH_NOTES` with the returned verdict kept beside it,
-and an `APPROVE` carrying a blocking concern is recorded as `REQUEST_CHANGES`. The final-verdict
-rubric reads `materiality.blocks_merge` and `materiality.open_blocker_ids`, not the verdict word.
-
-**At most two blocking concerns per reviewer, enforced.** The merge ranks a reviewer's blocking
-concerns by `merge_class` (wrong-pass, money, data-loss, security-exposure), then harm, then
-severity, and keeps the top two as blockers; the rest are DEMOTED to notes, listed in
-`materiality.demoted_ids` and shown to that role again on the next delta round. Every blocking
-concern carries a stable `id`, so the ids a delta round rules on cannot drift when a shard
-reorders its concerns. The merge recomputes this record from the concerns on every pass and
-never keeps one it was handed. A reviewer that returns five blockers has not ranked, and
-the run cannot fix five things in one round anyway.
+**What blocks, and the cap.** `node "${CLAUDE_PLUGIN_ROOT}/scripts/materiality.mjs" --explain <cost_class>` prints the
+rule as the code applies it: which severity, likelihood and `merge_class` block at the run's
+`cost_class` (set by BA, in `status.json`), the cap of blocking concerns per reviewer and how the
+rest are ranked and demoted, and how a verdict word is re-read. `merge-peer-review.mjs` applies
+that code to every shard and recomputes the record on every pass, so the final-verdict rubric
+reads `materiality.blocks_merge` and `materiality.open_blocker_ids`, not the verdict word. Every
+blocking concern carries a stable `id`, so the ids a delta round rules on cannot drift when a
+shard reorders its concerns. A reviewer that returns five blockers has not ranked, and the run
+cannot fix five things in one round anyway.
 
 **Notes ship.** A note with a `suggested_patch` (a unified diff or an exact replacement for a
 local, obviously-correct fix) is applied by the orchestrator in the same turn, explicit-path
