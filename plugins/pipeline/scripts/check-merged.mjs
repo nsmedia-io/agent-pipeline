@@ -12,9 +12,10 @@
  *   1. The PR, when one is known (--pr-url, else status.json pr_url): `gh pr view --json
  *      mergedAt,state`. mergedAt set is MERGED. A readable PR that is OPEN or CLOSED unmerged is
  *      NOT MERGED, and it is the only source that can say so.
- *   2. The branch head (--branch, else status.json branch), remote ref first then local:
- *      `git merge-base --is-ancestor <head> <remote>/<base>` exit 0 is MERGED. Exit 1 proves
- *      nothing, because a squash merge never makes the head an ancestor.
+ *   2. The branch head (--branch, else status.json branch), remote ref first then local: an
+ *      ancestor of <remote>/<base> that is NOT on its first-parent line is MERGED (it arrived through
+ *      a merge). A head on the first-parent line proves nothing: a branch with no commits of its own
+ *      sits there, and so does a fast-forward. Not an ancestor proves nothing either (squash merge).
  *   3. A word-boundary match for `#N` in the subjects of <remote>/<base>: `#N` not followed by a
  *      digit. A hit is MERGED. No hit proves nothing, for the squash reason above.
  * Anything else is CANNOT TELL, never a guess.
@@ -112,8 +113,19 @@ export function checkMerged({ issue, prUrl, branch, base = "main", remote = "ori
     }
     if (head) {
       const a = exec("git", ["merge-base", "--is-ancestor", head, `refs/remotes/${target}`]);
-      if (a.ran && a.status === 0) return { code: 0, how: `branch ${branch} head ${head.slice(0, 12)} is in ${target}`, notes };
-      notes.push(`branch ${branch} head ${head.slice(0, 12)} is not an ancestor of ${target} (a squash merge also reads this way)`);
+      // An ancestor head proves a merge only when the head arrived through a merge. A head that is
+      // on the target's own first-parent line is where the branch FORKED (a branch with no commits
+      // of its own), or a fast-forward: the two are indistinguishable, so neither counts.
+      const fp = exec("git", ["rev-list", "--first-parent", `refs/remotes/${target}`]);
+      const onFirstParent = fp.ran && fp.status === 0 && fp.stdout.split("\n").includes(head);
+      if (a.ran && a.status === 0 && fp.ran && fp.status === 0 && !onFirstParent) {
+        return { code: 0, how: `branch ${branch} head ${head.slice(0, 12)} was merged into ${target}`, notes };
+      }
+      if (a.ran && a.status === 0) {
+        notes.push(`branch ${branch} head ${head.slice(0, 12)} is on ${target}'s own first-parent line: a branch with no commits of its own and a fast-forward read the same, so it proves nothing`);
+      } else {
+        notes.push(`branch ${branch} head ${head.slice(0, 12)} is not an ancestor of ${target} (a squash merge also reads this way)`);
+      }
     } else {
       notes.push(`branch ${branch} resolves neither on ${remote} nor locally`);
     }

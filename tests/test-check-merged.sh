@@ -34,7 +34,11 @@ gitq -C "$WORK" checkout -q -b squashed-branch
 gitq -C "$WORK" commit -q --allow-empty -m "squash me"
 gitq -C "$WORK" checkout -q main
 gitq -C "$WORK" commit -q --allow-empty -m "Squashed change (#77)"
-gitq -C "$WORK" push -q origin main merged-branch squashed-branch
+# A branch with no commits of its own: its head is main's tip at the fork, so it is an ancestor.
+gitq -C "$WORK" branch feat-12-empty main
+gitq -C "$WORK" push -q origin main merged-branch squashed-branch feat-12-empty
+gitq -C "$WORK" commit -q --allow-empty -m "later work on main"
+gitq -C "$WORK" push -q origin main
 
 # cm <args...> -> RC, OUT, ERR (run from the clone)
 cm() {
@@ -67,6 +71,10 @@ cm --issue 12 --branch merged-branch --no-fetch
 assert_eq "a branch whose head is an ancestor of origin/main is merged (0), with no issue ref anywhere" "$RC" "0"
 assert_contains "and names the branch" "$OUT" "merged-branch"
 
+cm --issue 12 --branch feat-12-empty --no-fetch
+assert_eq "REGRESSION: an ancestor head with no commits of its own is not a merge: cannot tell (3), not MERGED" "$RC" "3"
+assert_not_contains "and it never prints MERGED" "$OUT" "MERGED: #12"
+assert_contains "and says why the ancestor proves nothing" "$ERR" "no commits of its own"
 cm --issue 45 --branch squashed-branch --no-fetch
 assert_eq "a squashed branch with no ref and no PR is cannot tell (3), never not merged" "$RC" "3"
 assert_contains "and says a squash reads this way" "$ERR" "squash merge also reads this way"
@@ -111,6 +119,8 @@ assert_eq "a CLOSED unmerged PR is not merged (2)" "${R%%|*}" "2"
 R="$(pr FAIL 123)"
 assert_eq "gh unable to answer falls through to git evidence (0 via #123)" "${R%%|*}" "0"
 assert_contains "and the gh failure is noted, not swallowed" "$R" "gh could not read"
+R="$(pr FAIL 12 feat-12-empty)"
+assert_eq "REGRESSION: the empty branch with an unreadable --pr-url is still cannot tell (3)" "${R%%|*}" "3"
 R="$(pr FAIL 45 squashed-branch)"
 assert_eq "gh unable to answer and no git evidence is cannot tell (3)" "${R%%|*}" "3"
 R="$(pr 'not json' 45)"
