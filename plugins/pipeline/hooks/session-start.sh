@@ -311,6 +311,8 @@ if [[ -n "$PLUGIN_ROOT" ]] && [[ -f "$DOCTOR" ]] && command -v node >/dev/null 2
   [[ -n "$CONFIG_REPORT" ]] && { printf '%s\n' "$CONFIG_REPORT"; echo ""; }
 fi
 
+[[ -n "$PLUGIN_ROOT" && -f "$PLUGIN_ROOT/scripts/version-check.mjs" ]] && command -v node >/dev/null 2>&1 && node "$PLUGIN_ROOT/scripts/version-check.mjs" --plugin-root "$PLUGIN_ROOT" 2>/dev/null
+
 echo "=== Pipeline primitives loaded ==="
 echo "  Subagents: ba, dba, devops, secops, dev, qa, design, librarian"
 echo "  Commands: /pipeline, /phase, /warmup"

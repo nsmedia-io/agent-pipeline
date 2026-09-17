@@ -20,7 +20,7 @@
  * It is advisory. It never blocks, never exits non-zero on a bad config, and never writes.
  */
 
-import { readFileSync, existsSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { readFileSync, readdirSync, existsSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -140,14 +140,39 @@ const PROSE_KEYS = {
   architecturalTriggers: {
     type: "object",
     reader:
-      "prose: agents/ba.md Phase 1 duty 6 (floor + config union) and commands/pipeline.md ### Risk-tiered orchestration depth (post-BA validation clause)",
+      "prose: agents/ba.md Phase 1 duty 6 (floor + config union) and commands/pipeline.md ### Risk-tiered orchestration depth (post-BA validation clause). ADVISORY: no script reads it; architecturalTriggers.keywords in particular is read only by the BA agent's judgment, so a keyword never forces a tier mechanically",
   },
 };
+
+/**
+ * THE CONSUMER-OWNED NAMESPACE. A project that keeps its own settings in pipeline.config.json
+ * (a wrapper script's knobs, a team note) used to get a "read by nothing" warning every session,
+ * and the only way out was a `_` prefix documented nowhere. Two spellings are exempt now, and
+ * both are stated in the warning itself so the remedy travels with the complaint:
+ *   - any top-level key starting with `_` (the `_comment` convention, kept as it was);
+ *   - the `x` object, for structured project-owned settings. The doctor checks only that it
+ *     is an object and never reads inside it, and no plugin script ever will.
+ */
+const CONSUMER_KEYS = {
+  x: {
+    type: "object",
+    reader: "nothing in this plugin, by contract: the project-owned namespace, never read inside",
+    fallback: "absent",
+  },
+};
+
+export const CONSUMER_NAMESPACE_HINT =
+  'Project-owned settings belong under the "x" object or in a key starting with "_"; the plugin never reads either.';
+
+/** True for a top-level key the project owns and the plugin must never flag. */
+export function isConsumerOwnedKey(key) {
+  return key.startsWith("_") || Object.prototype.hasOwnProperty.call(CONSUMER_KEYS, key);
+}
 
 // Exported so a test can assert that every key the README table and commands/pipeline.md
 // name in backticks actually resolves to a key some script reads. A documented key that
 // resolves to nothing is the same defect as a configured key that is read by nothing.
-export const ALL_KEYS = { ...CODE_KEYS, ...PROSE_KEYS };
+export const ALL_KEYS = { ...CODE_KEYS, ...PROSE_KEYS, ...CONSUMER_KEYS };
 
 function typeOf(v) {
   if (Array.isArray(v)) return v.every((x) => typeof x === "string") ? "string[]" : "array";
@@ -178,6 +203,8 @@ export function nearestKey(unknown) {
   let best = null;
   let bestD = Infinity;
   for (const k of Object.keys(ALL_KEYS)) {
+    // Never suggest the one-letter namespace: every short typo is within 3 edits of "x".
+    if (CONSUMER_KEYS[k]) continue;
     const d = levenshtein(unknown.toLowerCase(), k.toLowerCase());
     if (d < bestD) {
       bestD = d;
@@ -225,14 +252,16 @@ export function diagnose(projectDir, opts = {}) {
   const problems = [];
 
   for (const [key, value] of Object.entries(cfg)) {
-    if (key.startsWith("_")) continue; // _comment and friends are conventional
+    // _comment and friends are conventional; `x` is the documented project-owned object. Only
+    // the `x` TYPE is checked below, never its contents.
+    if (key.startsWith("_")) continue;
     const spec = ALL_KEYS[key];
     if (!spec) {
       const near = nearestKey(key);
       problems.push(
         near
-          ? `"${key}" is read by nothing. Did you mean "${near}"? (${ALL_KEYS[near].type}, used by ${ALL_KEYS[near].reader})`
-          : `"${key}" is read by nothing in this plugin.`,
+          ? `"${key}" is read by nothing. Did you mean "${near}"? (${ALL_KEYS[near].type}, used by ${ALL_KEYS[near].reader}) If it is yours rather than a typo: ${CONSUMER_NAMESPACE_HINT}`
+          : `"${key}" is read by nothing in this plugin. ${CONSUMER_NAMESPACE_HINT}`,
       );
       continue;
     }
@@ -399,6 +428,322 @@ export function surfaceReport(projectDir, cfg) {
   return lines;
 }
 
+/**
+ * AGENT FRONTMATTER LINT.
+ *
+ * WHY. Claude Code skips an agent file whose YAML frontmatter does not parse, and says nothing.
+ * A consumer's repo-local agent carried an unquoted `: ` inside its description, which YAML
+ * reads as a second mapping on the same line; the agent was simply absent from the session and
+ * nothing anywhere named the file. Nothing in this plugin parsed agents/*.md either, so the
+ * plugin's own nine contracts were one careless edit away from the same silence (c432ec9 fixed
+ * exactly that by hand once).
+ *
+ * WHAT. A small, dependency-free parser for the YAML SUBSET agent frontmatter uses: top-level
+ * `key: value` pairs whose values are plain, single-quoted, double-quoted, block (`|`, `>`) or
+ * flow-sequence scalars, plus an indented block list or map under a bare key. It is stricter
+ * than it needs to be in one direction only: a construct outside that subset (anchors, tags,
+ * aliases) is REPORTED rather than guessed at, because a lint that silently accepts what the
+ * loader may reject is the defect this exists for.
+ *
+ * It reports; it never edits a file and never changes the doctor's exit code.
+ */
+export const KNOWN_AGENT_MODELS = ["inherit", "opus", "sonnet", "haiku", "fable"];
+const MODEL_ID_RE = /^claude-[a-z0-9][a-z0-9.-]*(\[1m\])?$/;
+// Mirrors ALLOWED_EFFORTS in dispatch-effort.mjs. Restated rather than imported so this file
+// does not pull a routing module into the SessionStart path; the agents suite pins the two
+// lists equal, so a drift is a red row rather than a silent disagreement.
+export const KNOWN_AGENT_EFFORTS = ["low", "medium", "high", "xhigh", "max"];
+
+const DQ_ESCAPES = { "0": "\0", a: "\x07", b: "\b", t: "\t", "\t": "\t", n: "\n", v: "\v", f: "\f", r: "\r", e: "\x1b", " ": " ", '"': '"', "/": "/", "\\": "\\", N: "\x85", _: "\xa0", L: " ", P: " " };
+
+function parseDoubleQuoted(text) {
+  // text starts at the opening quote. Returns {value, rest} or {error}.
+  let out = "";
+  for (let i = 1; i < text.length; i++) {
+    const c = text[i];
+    if (c === '"') return { value: out, rest: text.slice(i + 1) };
+    if (c !== "\\") {
+      out += c;
+      continue;
+    }
+    const n = text[i + 1];
+    if (n === undefined) return { error: "a double-quoted value ends in a lone backslash" };
+    if (n === "\n") {
+      i++;
+      continue;
+    }
+    const hex = { x: 2, u: 4, U: 8 }[n];
+    if (hex) {
+      const digits = text.slice(i + 2, i + 2 + hex);
+      if (!new RegExp(`^[0-9a-fA-F]{${hex}}$`).test(digits)) return { error: `invalid \\${n} escape in a double-quoted value` };
+      out += String.fromCodePoint(parseInt(digits, 16));
+      i += 1 + hex;
+      continue;
+    }
+    if (!(n in DQ_ESCAPES)) {
+      return { error: `invalid escape "\\${n}" in a double-quoted value (YAML allows only its own escapes; write "\\\\${n}" for a literal backslash)` };
+    }
+    out += DQ_ESCAPES[n];
+    i++;
+  }
+  return { error: "a double-quoted value is never closed" };
+}
+
+function parseSingleQuoted(text) {
+  let out = "";
+  for (let i = 1; i < text.length; i++) {
+    if (text[i] === "'") {
+      if (text[i + 1] === "'") {
+        out += "'";
+        i++;
+        continue;
+      }
+      return { value: out, rest: text.slice(i + 1) };
+    }
+    out += text[i];
+  }
+  return { error: "a single-quoted value is never closed" };
+}
+
+/** Fold a quoted scalar's physical lines the way YAML does: line breaks become spaces. */
+function foldQuoted(lines) {
+  return lines.map((l, i) => (i === 0 ? l.trimEnd() : l.trim())).join("\n");
+}
+
+function plainScalarProblem(value) {
+  if (/^[@`]/.test(value)) return `starts with "${value[0]}", which YAML reserves; quote the value`;
+  if (/^[&*!%]/.test(value)) return `starts with "${value[0]}", which YAML reads as an anchor, alias, tag or directive; quote the value`;
+  if (/^[{]/.test(value)) return "starts with \"{\", which YAML reads as a flow mapping; quote the value";
+  if (/^[?-](\s|$)/.test(value)) return `starts with "${value[0]} ", which YAML reads as structure; quote the value`;
+  if (/:(\s|$)/.test(value)) return 'contains an unquoted ": ", which YAML reads as a second key on the same line; wrap the whole value in double quotes';
+  return null;
+}
+
+function typedPlain(value) {
+  if (/^-?\d+$/.test(value)) return Number(value);
+  if (/^(true|false)$/.test(value)) return value === "true";
+  if (/^(null|~)$/.test(value)) return null;
+  return value;
+}
+
+/**
+ * Parse agent-file frontmatter. Never throws.
+ * @returns {{present: boolean, data: object, errors: {line:number,key?:string,message:string}[],
+ *            warnings: {line:number,key?:string,message:string}[]}}
+ */
+export function parseAgentFrontmatter(text) {
+  const result = { present: false, data: {}, errors: [], warnings: [] };
+  const lines = String(text ?? "").replace(/^﻿/, "").replace(/\r\n?/g, "\n").split("\n");
+  if (lines[0].trimEnd() !== "---") return result;
+  result.present = true;
+  let end = -1;
+  for (let i = 1; i < lines.length; i++) {
+    if (/^(---|\.\.\.)\s*$/.test(lines[i])) {
+      end = i;
+      break;
+    }
+  }
+  if (end < 0) {
+    result.errors.push({ line: 1, message: "the frontmatter opens with --- and is never closed" });
+    return result;
+  }
+  const body = lines.slice(1, end);
+  const lineNo = (i) => i + 2;
+  const err = (i, message, key) => result.errors.push({ line: lineNo(i), key, message });
+  const warn = (i, message, key) => result.warnings.push({ line: lineNo(i), key, message });
+  const isIndented = (l) => /^[ \t]/.test(l) && l.trim() !== "";
+
+  for (let i = 0; i < body.length; i++) {
+    const line = body[i];
+    if (line.trim() === "" || /^\s*#/.test(line)) continue;
+    if (/^\t/.test(line)) {
+      err(i, "a tab indents this line; YAML forbids tabs for indentation");
+      continue;
+    }
+    if (/^ /.test(line)) {
+      err(i, "an indented line with no key above it to belong to");
+      continue;
+    }
+    const m = /^([^\s:#"'][^:]*?)\s*:(?:([ \t]+)(.*)|)$/.exec(line);
+    if (!m) {
+      err(i, /^[^\s:]+:\S/.test(line)
+        ? 'a "key:value" with no space after the colon is not a mapping in YAML; write "key: value"'
+        : 'not a "key: value" line');
+      continue;
+    }
+    const key = m[1];
+    if (Object.prototype.hasOwnProperty.call(result.data, key)) err(i, `"${key}" is declared twice`, key);
+    let raw = (m[3] ?? "").trim();
+
+    // Collect the following indented (or blank-then-indented) lines as this key's continuation.
+    const cont = [];
+    let j = i + 1;
+    while (j < body.length) {
+      if (isIndented(body[j])) {
+        cont.push(body[j]);
+        j++;
+        continue;
+      }
+      if (body[j].trim() === "" && j + 1 < body.length && isIndented(body[j + 1])) {
+        cont.push("");
+        j++;
+        continue;
+      }
+      break;
+    }
+    const contStart = i + 1;
+    i = j - 1;
+
+    if (raw === "" || raw.startsWith("#")) {
+      if (cont.length === 0) {
+        result.data[key] = null;
+        continue;
+      }
+      const items = cont.filter((l) => l.trim() !== "");
+      if (items.every((l) => /^\s+-(\s|$)/.test(l))) {
+        result.data[key] = items.map((l) => l.replace(/^\s+-\s*/, "").trim());
+      } else {
+        const map = {};
+        for (const l of items) {
+          const mm = /^\s+([^\s:#][^:]*?)\s*:(?:\s+(.*)|)$/.exec(l);
+          if (!mm) {
+            err(contStart + cont.indexOf(l), `a nested line under "${key}" is not "key: value" or "- item"`, key);
+            continue;
+          }
+          map[mm[1]] = mm[2] ?? null;
+        }
+        result.data[key] = map;
+      }
+      continue;
+    }
+
+    if (/^[|>][+-]?[1-9]?\s*(#.*)?$/.test(raw)) {
+      const folded = raw[0] === ">";
+      const text = cont.map((l) => l.trim());
+      result.data[key] = folded ? text.join(" ").replace(/\s+/g, " ").trim() : text.join("\n");
+      continue;
+    }
+
+    if (raw.startsWith('"') || raw.startsWith("'")) {
+      const whole = foldQuoted([raw, ...cont]);
+      const parsed = raw.startsWith('"') ? parseDoubleQuoted(whole) : parseSingleQuoted(whole);
+      if (parsed.error) {
+        err(i, parsed.error, key);
+        continue;
+      }
+      const rest = parsed.rest.trim();
+      if (rest !== "" && !/^#/.test(rest) && !/^\s#/.test(parsed.rest)) {
+        err(i, `text after the closing quote ("${rest.slice(0, 30)}"); quote the whole value, not part of it`, key);
+        continue;
+      }
+      result.data[key] = parsed.value.replace(/\n/g, " ");
+      continue;
+    }
+
+    if (raw.startsWith("[")) {
+      const whole = [raw, ...cont.map((l) => l.trim())].join(" ");
+      const close = whole.lastIndexOf("]");
+      if (close < 0) {
+        err(i, "a flow sequence ([...]) is never closed", key);
+        continue;
+      }
+      result.data[key] = whole
+        .slice(1, close)
+        .split(",")
+        .map((s) => s.trim().replace(/^["']|["']$/g, ""))
+        .filter((s) => s !== "");
+      continue;
+    }
+
+    // Plain scalar, possibly multi-line.
+    const parts = [raw, ...cont.map((l) => l.trim()).filter((l) => l !== "")];
+    // Leading-indicator rules apply to the first physical line only; ": " applies to every line.
+    let bad = plainScalarProblem(raw);
+    if (!bad && parts.slice(1).some((p) => /:(\s|$)/.test(p))) bad = plainScalarProblem("x: ");
+    if (bad) {
+      err(i, `the value of "${key}" ${bad}`, key);
+      continue;
+    }
+    let value = parts.join(" ");
+    const hash = value.search(/\s#/);
+    if (hash >= 0) {
+      warn(i, `the value of "${key}" contains " #", and YAML drops everything from there as a comment; quote the value to keep it`, key);
+      value = value.slice(0, hash).trimEnd();
+    }
+    result.data[key] = typedPlain(value);
+  }
+  return result;
+}
+
+/** Lint one agent file's text. Returns human-readable problem strings (empty when clean). */
+export function lintAgentText(text) {
+  const problems = [];
+  const fm = parseAgentFrontmatter(text);
+  if (!fm.present) {
+    return ["has no frontmatter (the file must open with a --- line), so Claude Code does not load it as an agent"];
+  }
+  for (const e of fm.errors) {
+    problems.push(`does not parse, and Claude Code skips it without a message: line ${e.line}: ${e.message}`);
+  }
+  for (const w of fm.warnings) problems.push(`line ${w.line}: ${w.message}`);
+  if (fm.errors.length > 0) return problems;
+  const d = fm.data;
+  if (typeof d.name !== "string" || d.name.trim() === "") problems.push('is missing "name", so it cannot be dispatched by name');
+  else if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(d.name)) problems.push(`name "${d.name}" is not lowercase letters, digits and hyphens`);
+  if (typeof d.description !== "string" || d.description.trim() === "") {
+    problems.push('is missing "description", which is what decides when the agent is chosen');
+  }
+  if (d.model !== undefined && d.model !== null) {
+    const model = String(d.model);
+    if (!KNOWN_AGENT_MODELS.includes(model) && !MODEL_ID_RE.test(model)) {
+      problems.push(`model "${model}" is not a known value (${KNOWN_AGENT_MODELS.join(", ")}, or a full claude-* model id)`);
+    }
+  }
+  if (d.effort !== undefined && d.effort !== null) {
+    const effort = String(d.effort);
+    if (!KNOWN_AGENT_EFFORTS.includes(effort)) {
+      problems.push(`effort "${effort}" is not a known value (${KNOWN_AGENT_EFFORTS.join(", ")})`);
+    }
+  }
+  return problems;
+}
+
+function agentFiles(dir) {
+  try {
+    return readdirSync(dir)
+      .filter((f) => f.toLowerCase().endsWith(".md") && f.toLowerCase() !== "readme.md")
+      .sort()
+      .map((f) => path.join(dir, f));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Report lines for the plugin's own agents and the project's .claude/agents/*.md.
+ * @param {string} projectDir
+ * @param {string} [pluginRoot] defaults to this script's plugin.
+ */
+export function agentFrontmatterReport(projectDir, pluginRoot = path.resolve(SCRIPT_DIR, "..")) {
+  const lines = [];
+  const sources = [
+    { label: "plugin agents/", dir: path.join(pluginRoot, "agents") },
+    { label: ".claude/agents/", dir: path.join(projectDir, ".claude", "agents") },
+  ];
+  for (const { label, dir } of sources) {
+    for (const file of agentFiles(dir)) {
+      let text;
+      try {
+        text = readFileSync(file, "utf8");
+      } catch {
+        continue;
+      }
+      for (const p of lintAgentText(text)) lines.push(`  WARNING: agent ${label}${path.basename(file)} ${p}`);
+    }
+  }
+  return lines;
+}
+
 function main() {
   const projectDir = process.env.CLAUDE_PROJECT_DIR || process.cwd();
   let hasTypecheckScript = false;
@@ -419,6 +764,8 @@ function main() {
   // them: a surface that owns nothing is worth saying out loud and is never a reason to tell an
   // owner their config "needs attention".
   const surface = cfg && typeof cfg === "object" && !Array.isArray(cfg) ? surfaceReport(projectDir, cfg) : [];
+  // Agent frontmatter problems ride with the surface lines: reported, never a banner change.
+  surface.push(...agentFrontmatterReport(projectDir));
   if (status === "ok") {
     console.log(lines[0]);
     for (const l of surface) console.log(l);
@@ -507,7 +854,7 @@ function selfTest() {
     const examplePath = path.resolve(SCRIPT_DIR, "..", "pipeline.config.example.json");
     try {
       const example = JSON.parse(readFileSync(examplePath, "utf8"));
-      const unknown = Object.keys(example).filter((k) => !k.startsWith("_") && !ALL_KEYS[k]);
+      const unknown = Object.keys(example).filter((k) => !isConsumerOwnedKey(k) && !ALL_KEYS[k]);
       check(`the shipped example declares only real keys (${unknown.join(", ") || "none unknown"})`, unknown.length, 0);
     } catch {
       check("the shipped example is readable", false, true);
