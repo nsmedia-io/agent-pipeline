@@ -287,28 +287,38 @@ function rowsFor(role, phase, tier, costClass) {
   return tiered.length > 0 ? tiered : all.filter((r) => r.tier === undefined);
 }
 
+/** The dispatch-log label for a table row, or for no row at all. */
+export function effortRowRule(row) {
+  if (!row) return "no-row:frontmatter";
+  const qualifier = row.costClass || row.tier;
+  return `table:${row.role}/${row.phase}${qualifier ? `/${qualifier}` : ""}/${row.site}`;
+}
+
 /**
- * @returns {{effort: string|null, reports: string[], error: string|null, surface?: string}}
+ * @returns {{effort: string|null, reports: string[], error: string|null, surface?: string, rule: string}}
  * `effort: null` with no error means "emit no effort for this dispatch": frontmatter governs.
+ * `rule` names which rule chose the outcome, for the dispatch log (#163): `agent-surface:frontmatter`,
+ * `pinned:<role>`, `config:dispatchEfforts.<role>`, `table:<role>/<phase>[/<tier or cost class>]/<site>`,
+ * `no-row:frontmatter`, or `error`. A label over the decision, never an input to it.
  */
 export function resolve({ role: rawRole, tier, phase, site, surface, cfg, costClass }) {
   const reports = [];
   const role = normalizeRole(rawRole);
   if (!role) {
-    return { effort: null, reports, error: `unknown role "${rawRole}"` };
+    return { effort: null, reports, error: `unknown role "${rawRole}"`, rule: "error" };
   }
   if (!KNOWN_TIERS.includes(tier)) {
-    return { effort: null, reports, error: `malformed risk_tier "${tier}"` };
+    return { effort: null, reports, error: `malformed risk_tier "${tier}"`, rule: "error" };
   }
   if (!KNOWN_PHASES.includes(phase)) {
-    return { effort: null, reports, error: `malformed phase "${phase}"` };
+    return { effort: null, reports, error: `malformed phase "${phase}"`, rule: "error" };
   }
   if (costClass !== undefined && costClass !== null && !KNOWN_COST_CLASSES.includes(costClass)) {
-    return { effort: null, reports, error: `unknown cost_class "${costClass}"` };
+    return { effort: null, reports, error: `unknown cost_class "${costClass}"`, rule: "error" };
   }
   const surf = surface === undefined || surface === null ? "agent" : surface;
   if (!KNOWN_SURFACES.includes(surf)) {
-    return { effort: null, reports, error: `unknown surface "${surface}"` };
+    return { effort: null, reports, error: `unknown surface "${surface}"`, rule: "error" };
   }
 
   const config = cfg || readConfig();
@@ -327,6 +337,7 @@ export function resolve({ role: rawRole, tier, phase, site, surface, cfg, costCl
       effort: surf === "agent" ? null : pin,
       surface: surf,
       pinned: role,
+      rule: `pinned:${role}`,
       reports: [
         surf === "agent"
           ? `pinned: frontmatter governs for ${role} (the Agent tool carries no effort parameter, and agents/${role}.md declares ${FRONTMATTER_EFFORT[role]})`
@@ -346,6 +357,7 @@ export function resolve({ role: rawRole, tier, phase, site, surface, cfg, costCl
     return {
       effort: null,
       surface: surf,
+      rule: "agent-surface:frontmatter",
       reports: [
         `the Agent tool exposes no effort parameter, so no effort is emitted for ${role}; agents/${role}.md frontmatter governs and declares ${baseline}`,
         ...reports,
@@ -376,6 +388,7 @@ export function resolve({ role: rawRole, tier, phase, site, surface, cfg, costCl
   // meaning is contested between the vendor doc (session effort) and #98's observation
   // (frontmatter effort). See the header. This is why `chosen` is never left null here.
   let chosen = row ? row.effort : (FRONTMATTER_EFFORT[role] ?? null);
+  let rule = effortRowRule(row);
 
   // A role-level key cannot name one of two sites whose efforts differ on purpose, so it is
   // refused there exactly as dispatchModels is, rather than flattening both. Pinned roles never
@@ -388,10 +401,11 @@ export function resolve({ role: rawRole, tier, phase, site, surface, cfg, costCl
       );
     } else {
       chosen = overrides[role];
+      rule = `config:dispatchEfforts.${role}`;
     }
   }
 
-  return { effort: chosen, surface: surf, reports, error: null };
+  return { effort: chosen, surface: surf, reports, error: null, rule };
 }
 
 function main(argv) {

@@ -107,6 +107,13 @@ const CODE_KEYS = {
     degrades:
       "per-role effort overrides are ignored and every dispatch runs the built-in tiered assignment (SecOps xhigh/high/medium and QA high/medium/medium by tier on the Phase 4 panel). Every role is reachable, in both directions, allowlisted. NOTE this key only reaches the Workflow dispatch surface (the Phase 4 panel): the Agent tool carries no effort parameter, so on Agent-tool dispatches agents/<role>.md frontmatter governs whatever this says.",
   },
+  usageTelemetry: {
+    type: "object",
+    reader: "scripts/dispatch-log.mjs (through hooks/dispatch-log.sh) and scripts/usage-report.mjs",
+    fallback: "off: no dispatch log is written",
+    degrades:
+      'nothing breaks: this is off by default. When it is absent or not an object, no dispatch line is written, so scripts/usage-report.mjs can report tokens per model but cannot attribute them to an issue, phase or role. Set { "enabled": true } to log, and optionally "dir" (absolute, or relative to the project root) for where the log goes; the default is <git common dir>/agent-pipeline-telemetry. CLAUDE_PIPELINE_USAGE_TELEMETRY=1 or 0 overrides this key for one session.',
+  },
   securitySurfaceGlobs: {
     type: "string[]",
     reader: "scripts/security-surface.mjs (diffTouchesSecuritySurface)",

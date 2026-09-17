@@ -158,15 +158,24 @@ function rowsFor(role, phase, tier) {
   return tiered.length > 0 ? tiered : all.filter((r) => r.tier === undefined);
 }
 
+/** The dispatch-log label for a table row, or for no row at all. */
+export function rowRule(row) {
+  if (!row) return "no-row:frontmatter";
+  return `table:${row.role}/${row.phase}${row.tier ? `/${row.tier}` : ""}/${row.site}`;
+}
+
 /**
- * @returns {{model: string|null, reports: string[], error: string|null}}
+ * @returns {{model: string|null, reports: string[], error: string|null, rule: string}}
  * `model: null` with no error means "no override for this dispatch": omit the key.
+ * `rule` names WHICH rule chose the outcome, for the dispatch log (#163): `pinned:<role>`,
+ * `config:dispatchModels.<role>`, `table:<role>/<phase>[/<tier>]/<site>`, `no-row:frontmatter`,
+ * or `error`. It is a label over the decision already made, never an input to it.
  */
 export function resolve({ role: rawRole, tier, phase, site, cfg }) {
   const reports = [];
   const role = normalizeRole(rawRole);
   if (!role) {
-    return { model: null, reports, error: `unknown role "${rawRole}"` };
+    return { model: null, reports, error: `unknown role "${rawRole}"`, rule: "error" };
   }
   // PINNED is consulted here, before any config is read, so no config value can influence the
   // outcome. The config is read AFTERWARDS for REPORTING only.
@@ -182,13 +191,14 @@ export function resolve({ role: rawRole, tier, phase, site, cfg }) {
         ...pinReports.filter((r) => r.includes(role)),
       ],
       error: null,
+      rule: `pinned:${role}`,
     };
   }
   if (!KNOWN_TIERS.includes(tier)) {
-    return { model: null, reports, error: `malformed risk_tier "${tier}"` };
+    return { model: null, reports, error: `malformed risk_tier "${tier}"`, rule: "error" };
   }
   if (!KNOWN_PHASES.includes(phase)) {
-    return { model: null, reports, error: `malformed phase "${phase}"` };
+    return { model: null, reports, error: `malformed phase "${phase}"`, rule: "error" };
   }
 
   const config = cfg || readConfig();
@@ -225,10 +235,10 @@ export function resolve({ role: rawRole, tier, phase, site, cfg }) {
         `dispatchModels.${role}: ${role}/${phase} carries ${rows.length} dispatch sites with DIFFERENT models (${rows.map((r) => `${r.site}=${r.model}`).join(", ")}); a role-level key cannot name one of them, so the override is IGNORED for this phase and the table applies. Change the table in this file to move a specific site.`,
       );
     } else {
-      return { model: overrides[role], reports, error: null };
+      return { model: overrides[role], reports, error: null, rule: `config:dispatchModels.${role}` };
     }
   }
-  return { model: row ? row.model : null, reports, error: null };
+  return { model: row ? row.model : null, reports, error: null, rule: rowRule(row) };
 }
 
 function main(argv) {

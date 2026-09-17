@@ -30,6 +30,9 @@
 
   "_securitySurfaceGlobs_comment": "NOT SET ON PURPOSE. Additive globs that re-seat SecOps on a Phase 4 DELTA round when a fix commit touches them. The built-in set covers auth, session, crypto, secrets, tokens, webhooks, policies, middleware and .env files; add your own security-bearing paths here. Widen-only: this key can never narrow the set.",
 
+  "_usageTelemetry_comment": "OFF by default. Set enabled to true to append one line per subagent dispatch (issue, phase, role, tier, model, effort, routing rule; never prompt text) to <git common dir>/agent-pipeline-telemetry/dispatch.jsonl, or to dir if set (absolute, or relative to the project root; keep it out of the tracked tree). scripts/usage-report.mjs joins it with token usage from session transcripts or a local OpenTelemetry collector. CLAUDE_PIPELINE_USAGE_TELEMETRY=1 or 0 overrides this key for one session. See the README section Usage telemetry.",
+  "usageTelemetry": { "enabled": false },
+
   "_x_comment": "The project-owned namespace. Put your own settings under x (or in a key starting with _); the plugin never reads inside it and the config doctor never reports it. Any other key the plugin does not know is reported as read by nothing.",
   "x": {},
 
