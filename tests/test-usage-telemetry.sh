@@ -137,7 +137,7 @@ suite "#163 dispatch log: a crafted script or payload cannot write free text int
 
 SECRET_SCRIPT="$(printf '%s\n' \
   'export const meta = { name: "phase4-panel-SECRET sk-ant-xyz", description: "x", phases: [{ title: "Panel" }] }' \
-  '  () => agent(PREAMBLE + "lens", {"agentType":"pipeline:ba SECRET sk-ant-xyz","model":"sk-ant-xyz secret","effort":"medium; rm -rf","label":"ba-panel"}),' \
+  '  () => agent(PREAMBLE + "lens", {"agentType":"pipeline:ba SECRET sk-ant-xyz","model":"sk-ant-xyz secret","effort":"medium; touch pwned","label":"ba-panel"}),' \
   '  () => agent(PREAMBLE + "lens", {"agentType":"pipeline:qa","model":"opus","effort":"high","label":"qa-panel"}),')"
 SECRET_WF="$(SCRIPT="$SECRET_SCRIPT" node -e '
   process.stdout.write(JSON.stringify({ session_id: "s-1", tool_use_id: "toolu_secret", tool_name: "Workflow", tool_input: { script: process.env.SCRIPT } }));')"
