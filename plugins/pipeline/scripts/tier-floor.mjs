@@ -34,7 +34,8 @@ import { globToRegExp } from "./frontend-surface.mjs";
 import { readPipelineConfig } from "./data-layer-surface.mjs";
 
 export const TIERS = ["trivial", "standard", "architectural"];
-export const BUILTIN_PATHS = ["pipeline.config.json"];
+/** Any pipeline.config.json at any depth; the leading globstar matches zero segments, so the root file too (#76). */
+export const BUILTIN_PATHS = ["**/pipeline.config.json"];
 export const BUILTIN_DOMAINS = ["compliance"];
 
 function strings(v) {
@@ -62,11 +63,16 @@ function normPath(p) {
   return p.replace(/\\/g, "/").replace(/^\.\//, "");
 }
 
-/** The first path trigger a path matches, or null. */
+/**
+ * The first path trigger a path matches, or null. A bare directory ("infra", "infra/") matches a
+ * directory glob ending in "/**": an impacted package is usually named as its directory.
+ */
 export function matchPathTrigger(p, paths) {
   if (typeof p !== "string" || p.trim() === "") return null;
-  const norm = normPath(p.trim());
-  return paths.find((g) => globToRegExp(g).test(norm)) ?? null;
+  const norm = normPath(p.trim()).replace(/\/+$/, "");
+  return (
+    paths.find((g) => globToRegExp(g).test(norm) || (g.endsWith("/**") && globToRegExp(g.slice(0, -3)).test(norm))) ?? null
+  );
 }
 
 function specText(spec) {

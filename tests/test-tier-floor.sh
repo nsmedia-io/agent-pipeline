@@ -41,7 +41,7 @@ assert_eq "CONTROL: the same spec at architectural is ok" "$RC" "0"
 spec standard '["api"]' ',"requirements":["change the tripwire glob in `pipeline.config.json`."]'
 floor
 assert_eq "a spec that names pipeline.config.json under-tiers with no config present" "$RC" "2"
-assert_contains "and the path trigger is the reason" "$OUT" "matches path trigger pipeline.config.json"
+assert_contains "and the path trigger is the reason" "$OUT" "matches path trigger **/pipeline.config.json"
 
 spec standard '["api"]' ',"requirements":["edit plugins/pipeline/pipeline.config.example.json"]'
 floor
@@ -79,6 +79,18 @@ spec standard '["api"]' ',"requirements":["touch pipeline.config.json"]'
 floor
 assert_eq "the built-in path survives a config that lists other paths" "$RC" "2"
 
+suite "tier-floor: a bare directory name matches a directory glob"
+
+spec standard '["api"]' ',"impacted_packages":["infra"]'
+floor
+assert_eq "an impacted package named infra matches infra/** (exit 2)" "$RC" "2"
+spec standard '["api"]' ',"impacted_packages":["infra/"]'
+floor
+assert_eq "and so does infra/ with its trailing slash" "$RC" "2"
+spec standard '["api"]' ',"impacted_packages":["infrastructure"]'
+floor
+assert_eq "CONTROL: infrastructure is a different directory (exit 0)" "$RC" "0"
+
 suite "tier-floor: keywords are an ADVISORY signal, never a trigger"
 
 spec standard '["api"]' ',"problem":"the ledger total drifts"'
@@ -100,6 +112,10 @@ floor --changed src/app.ts --changed docs/pipeline.config.json.md
 assert_eq "CONTROL: a diff without it is ok" "$RC" "0"
 floor --changed './pipeline.config.json'
 assert_eq "a ./-prefixed spelling still matches" "$RC" "2"
+floor --changed packages/app/pipeline.config.json
+assert_eq "a pipeline.config.json at any depth is a config change too" "$RC" "2"
+floor --changed packages/app/pipeline.config.example.json
+assert_eq "CONTROL: the example file beside it is not" "$RC" "0"
 
 suite "tier-floor: an unreadable spec is not a pass"
 

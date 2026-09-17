@@ -58,7 +58,7 @@ Write <ARTIFACT_DIR>/impl-report.json at completion, including the requirement_c
 
 Before you return, run the Phase 3 exit against your own artifacts (no --status: the record is mine) and PASTE its output in your reply:
   node "${CLAUDE_PLUGIN_ROOT}/scripts/phase3-exit.mjs" --issue <issue> --worktree "<WORKTREE_PATH>" --artifact-dir "<ARTIFACT_DIR>"
-A non-zero exit is YOURS to fix, or to report as a tripwire, before you hand off; I run it again at the transition.
+Exit 2 is YOURS to fix before you hand off, exit 3 is a tripwire to report, and exit 4 or any other exit is not yours to fix: stop and report it to me. I run it again at the transition.
 
 Return a short summary with branch name, commit count, check status, acceptance mapping status, PR URL.
   """

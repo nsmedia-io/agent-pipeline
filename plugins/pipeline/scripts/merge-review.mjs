@@ -38,6 +38,52 @@ import {
 
 export const PHASE2_ROLES = ["dba", "devops", "secops", "design_review"];
 
+// DESIGN AT PHASE 2 KEEPS ITS OWN RULE. agents/design.md requires a merge_class other than none
+// only on the Phase 4 panel; at Phase 2 a Design REQUEST_CHANGES stands when a blocker or major
+// concern cites a deterministic token-lint or axe failure, and that sends the spec back to BA.
+// Running it through normalizeBlock would read the usual merge_class none of such a finding as a
+// note and let Phase 2 proceed over it. Taste alone stays advisory, and Design never vetoes.
+const DESIGN_EVIDENCE_RE = /token[-_ ]?lint|\baxe\b/i;
+
+function mentionsDeterministicFailure(value) {
+  if (typeof value === "string") return DESIGN_EVIDENCE_RE.test(value);
+  if (Array.isArray(value)) return value.some(mentionsDeterministicFailure);
+  if (value && typeof value === "object") return Object.values(value).some(mentionsDeterministicFailure);
+  return false;
+}
+
+/** Phase 2 ruling on a design_review block. Returns a NEW block; pure. */
+export function normalizeDesignPhase2(block) {
+  if (!block || typeof block !== "object" || Array.isArray(block)) return block;
+  const returned = normVerdict(block.verdict_as_returned) || normVerdict(block.verdict);
+  if (!returned) return block;
+  const concerns = Array.isArray(block.concerns) ? block.concerns : [];
+  const backing = concerns
+    .map((c, i) => ({ c, i }))
+    .filter(({ c }) => c && typeof c === "object" && ["blocker", "major"].includes(String(c.severity || "").trim().toLowerCase()) && mentionsDeterministicFailure(c))
+    .map(({ c, i }) => (typeof c.id === "string" && c.id.trim() ? c.id.trim() : "design_review-" + (i + 1)));
+  let effective = returned;
+  const notes = [];
+  if (effective === "VETO") {
+    effective = "REQUEST_CHANGES";
+    notes.push("VETO is SecOps's verdict alone; from design_review it reads as REQUEST_CHANGES.");
+  }
+  if ((effective === "REQUEST_CHANGES" || effective === "REQUEST_REFACTOR") && backing.length === 0) {
+    effective = "APPROVE_WITH_NOTES";
+    notes.push("Phase 2 Design rule: a REQUEST_CHANGES with no blocker or major concern citing a token-lint or axe failure is advisory.");
+  }
+  const out = { ...block, verdict: effective };
+  if (effective !== returned) out.verdict_as_returned = returned;
+  else delete out.verdict_as_returned;
+  const blocks = effective === "REQUEST_CHANGES";
+  out.materiality = { rule: "phase2-design", blocking_concerns: blocks ? backing.length : 0, open_blocker_ids: blocks ? backing : [], blocks_merge: blocks, notes };
+  return out;
+}
+
+function normalizeFor(role, block, costClass) {
+  return role === "design_review" ? normalizeDesignPhase2(block) : normalizeBlock(block, role, { costClass });
+}
+
 /** The two places a Phase 2 shard may be: the primary path, then the refused-write fallback. */
 export function shardCandidates(artifactDir, role) {
   return [
@@ -60,7 +106,7 @@ export function resolveShard(artifactDir, role) {
 export function gateReading(role, block, costClass) {
   if (!block || typeof block !== "object" || Array.isArray(block)) return null;
   let b = block;
-  if (!b.materiality) b = normalizeBlock(b, role, { costClass });
+  if (role === "design_review" ? b.materiality?.rule !== "phase2-design" : !b.materiality) b = normalizeFor(role, b, costClass);
   const v = normVerdict(b.verdict);
   if (v === "APPROVE" || v === "APPROVE_WITH_NOTES") return "APPROVE";
   if (v === "REQUEST_CHANGES" || v === "REQUEST_REFACTOR") return "CHANGES";
@@ -165,7 +211,7 @@ function main(argvIn) {
   }
   for (const role of roles) {
     const before = merged[role];
-    const after = normalizeBlock(before, role, { costClass });
+    const after = normalizeFor(role, before, costClass);
     merged[role] = after;
     if (after && after.verdict_as_returned !== undefined && after.verdict !== before.verdict) {
       console.error(`normalized ${role}: ${before.verdict} -> ${after.verdict} (${(after.materiality?.notes || []).join(" ")})`);

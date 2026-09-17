@@ -76,6 +76,34 @@ R_CFG3=$(repo cfg3 standard '["lib/a.txt"]' infra/main.tf)
 run "$R_CFG3"
 assert_eq "CONTROL: the same path with no config trigger exits 0" "$RC" "0"
 
+suite "phase3-exit: the config is read from the worktree it diffs, the project dir only as a fallback"
+
+# The orchestrator runs this from its own checkout while the diff lives in the worktree, so the
+# two can carry different configs. The worktree's is the one the change is being judged under.
+new_tmpdir || exit 90
+ELSEWHERE="$NEW_TMPDIR"
+TRIG='{"architecturalTriggers":{"paths":["infra/**"]}}'
+elsewhere_run() { # <repo> -> RC OUT, with the project dir pointed away from the worktree
+  OUT="$( cd "$ELSEWHERE" && CLAUDE_PROJECT_DIR="$ELSEWHERE" node "$PX" --worktree "$1" --artifact-dir "$1/.pipeline/17" 2>&1 )"
+  RC=$?
+}
+R_WT=$(repo wtcfg standard '["lib/a.txt"]' infra/main.tf)
+printf '%s' "$TRIG" > "$R_WT/pipeline.config.json"
+rm -f "$ELSEWHERE/pipeline.config.json"
+elsewhere_run "$R_WT"
+assert_eq "a trigger in the worktree's config fires with no config in the project dir (exit 3)" "$RC" "3"
+R_FB=$(repo fbcfg standard '["lib/a.txt"]' infra/main.tf)
+printf '%s' "$TRIG" > "$ELSEWHERE/pipeline.config.json"
+elsewhere_run "$R_FB"
+assert_eq "with no worktree config the project dir's is the fallback (exit 3)" "$RC" "3"
+R_WIN=$(repo wincfg standard '["lib/a.txt"]' infra/main.tf)
+printf '%s' '{}' > "$R_WIN/pipeline.config.json"
+elsewhere_run "$R_WIN"
+assert_eq "CONTROL: a worktree config wins over the project dir's, even when it adds nothing (exit 0)" "$RC" "0"
+R_NEST=$(repo nestcfg standard '["lib/a.txt"]' packages/app/pipeline.config.json)
+run "$R_NEST"
+assert_eq "a pipeline.config.json at any depth in the diff exits 3 (#76)" "$RC" "3"
+
 suite "phase3-exit: exit 2 when a gate refuses, with the state naming which"
 
 R_GATE=$(repo gate standard '["lib/a.txt"]' lib/a.txt)

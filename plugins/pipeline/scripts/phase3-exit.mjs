@@ -26,7 +26,7 @@
 // Any other exit (a stale plugin root with no such script, a module that exits at import) is
 // the caller's to read as indeterminate.
 
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -74,6 +74,11 @@ export function effectiveTier(tierArg, spec) {
   if (spec && TIERS.includes(spec.risk_tier)) return spec.risk_tier;
   if (spec && spec.trivial === true) return "trivial";
   return null;
+}
+
+/** Where pipeline.config.json is read from: the worktree under review, else the project dir. */
+export function configDir(worktree, fallback = process.env.CLAUDE_PROJECT_DIR || process.cwd()) {
+  return worktree && existsSync(path.join(worktree, "pipeline.config.json")) ? worktree : fallback;
 }
 
 /** git's changed-path list, or { error } naming git's exit status. Never an empty list on failure. */
@@ -160,7 +165,8 @@ async function main(argv) {
   const implReport = path.join(a.artifactDir, "impl-report.json");
   const specFile = path.join(a.artifactDir, "spec.json");
   const tier = effectiveTier(a.tier, readJson(specFile));
-  const projectDir = process.env.CLAUDE_PROJECT_DIR || process.cwd();
+  // The config is the one in the worktree being diffed; the project dir only when it has none.
+  const projectDir = configDir(a.worktree);
 
   let trip = { hits: [], notes: [], indeterminate: null };
   if (tier === "architectural") {

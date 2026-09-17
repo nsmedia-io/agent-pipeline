@@ -152,6 +152,40 @@ assert_eq "a shard written into another .pipeline dir is not merged" "$RC" "2"
 assert_contains "and the stray copy is named" "$ERR" "a file with this name exists at"
 assert_contains "  ...under the other issue dir" "$ERR" "99"
 
+suite "merge-review: design_review keeps the Phase 2 Design rule, not the merge_class test"
+
+# The review of this change found the one place the shared materiality rule is wrong at Phase 2.
+# The Design contract asks for a merge_class other than none only on the Phase 4 panel, so a real
+# accessibility or token failure found before any code exists is normally rated with merge_class
+# none, and the shared rule would read it as a note and let the spec through. These cases hold the
+# Design rule in place and show, in the same run, that the other reviewers still get the shared one.
+AXE_BLOCKER='{"id":"ds-1","severity":"blocker","likelihood":"normal-use","harm":"user-visible","merge_class":"none","description":"axe reports the new form has no label for the date input"}'
+LINT_MAJOR='{"id":"ds-2","severity":"major","likelihood":"normal-use","harm":"user-visible","merge_class":"none","description":"token-lint flags a hardcoded color in the proposed banner"}'
+TASTE='{"id":"ds-3","severity":"blocker","likelihood":"normal-use","harm":"cosmetic","merge_class":"none","description":"the spacing feels cramped"}'
+
+reset; approve_all
+shard "$A/review.design_review.json" '{"verdict":"REQUEST_CHANGES","concerns":['"$AXE_BLOCKER"'],"notes":"n"}'
+merge --fresh "$A" dba devops secops design_review
+assert_eq "a Design REQUEST_CHANGES backed by an axe blocker with merge_class none exits 3" "$RC" "3"
+assert_contains "  ...and is recorded under the Phase 2 Design rule" "$(cat "$A/review.json")" '"rule": "phase2-design"'
+
+reset; approve_all
+shard "$A/review.design_review.json" '{"verdict":"REQUEST_CHANGES","concerns":['"$LINT_MAJOR"'],"notes":"n"}'
+merge --fresh "$A" dba devops secops design_review
+assert_eq "a major token-lint finding backs it too (exit 3)" "$RC" "3"
+
+reset; approve_all
+shard "$A/review.design_review.json" '{"verdict":"REQUEST_CHANGES","concerns":['"$TASTE"'],"notes":"n"}'
+merge --fresh "$A" dba devops secops design_review
+assert_eq "CONTROL: a taste-only Design REQUEST_CHANGES is advisory (exit 0)" "$RC" "0"
+
+reset; approve_all
+shard "$A/review.dba.json" '{"verdict":"REQUEST_CHANGES","concerns":['"$AXE_BLOCKER"'],"notes":"n"}'
+merge --fresh "$A" dba devops secops
+assert_eq "CONTROL: the same finding from DBA still gets the merge_class test (exit 0)" "$RC" "0"
+
+assert_eq "phase-2-review.md states the Phase 2 Design rule"   "$(grep -c 'keeps the Phase 2 Design rule' "$PLUGIN_ROOT/orchestrator/phase-2-review.md" | tr -d ' ')" "1"
+
 suite "merge-review: a delta round keeps standing blocks; design_review folds in"
 
 reset; approve_all
