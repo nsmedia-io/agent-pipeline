@@ -286,7 +286,13 @@ assert_eq "MUTATION CONTROL: and the renamed slug is present, so the edit is not
 MUT_ROOT="$TEMP_PROJECT/mutated-plugin"
 mkdir -p "$MUT_ROOT"
 cp -R "$GATE_PLUGIN_DIR/." "$MUT_ROOT/" 2>/dev/null
-cp "$SCRATCH_MD_DIR/pipeline.md" "$MUT_ROOT/commands/pipeline.md" 2>/dev/null
+# The vocabulary is spread over the core and its per-phase files, and the gate reads all of them,
+# so the SAME rename is applied to every one in the mutated tree rather than to the core alone.
+for mf in "$MUT_ROOT/commands/pipeline.md" "$MUT_ROOT"/orchestrator/*.md; do
+  sed 's/4-review/4-reviewXQ/g' "$mf" > "$mf.mut" && mv "$mf.mut" "$mf"
+done
+assert_eq "MUTATION CONTROL: no file the gate reads in the mutated tree still writes the unrenamed '4-review'" \
+  "$(cat "$MUT_ROOT/commands/pipeline.md" "$MUT_ROOT"/orchestrator/*.md > "$SCRATCH_MD_DIR/mutated-all.md"; gate_pipeline_md_phases "$SCRATCH_MD_DIR/mutated-all.md" | grep -cx '4-review' | tr -d ' ')" "0"
 
 VOCAB_PROJECT="$TEMP_PROJECT/vocab"
 gate_inflight_status "$VOCAB_PROJECT/.pipeline/106/status.json" "4-review"
@@ -562,14 +568,14 @@ assert_eq "AC36(a): a FUNCTION-SCOPE reverse edge is still a cycle and is still 
 # passing confidently: 16 at the reviewed commit, 17 once R6's leaf module landed, 18 with
 # #117's check-status-record.mjs, 19 with #132's check-knowledge-timeout-literals.mjs, 21 with
 # 0.40.0's materiality.mjs and security-surface.mjs, 22 with 0.41.0's deferral.mjs, 23 with
-# 0.42.0's render-panel.mjs, 24 with the review-convergence round-budget.mjs, 26 with version-check.mjs and migrate-records.mjs. It went red on schedule when the eighteenth
+# 0.42.0's render-panel.mjs, 24 with the review-convergence round-budget.mjs, 26 with version-check.mjs and migrate-records.mjs, 28 with C2's toon.mjs and prompt-weight.mjs. It went red on schedule when the eighteenth
 # module landed, again at the nineteenth, and again at the twenty-first, which is the behaviour
 # this pin is for -- bump the number, do not soften it to a floor. The assertion NAME is left as
 # it stands apart from the count: #132's AC15 compares this suite's row names against
 # origin/main with digits normalised, so a reworded row reads there as a DELETED one.
 MODULE_N="$(printf '%s' "$GRAPH_OUT" | sed -n 's/modules=\([0-9]*\).*/\1/p' | head -1)"
-assert_eq "AC36: scripts/ holds 26 modules -- R6's LEAF module plus #117's check-status-record.mjs, not the reviewed commit's 16" \
-  "$MODULE_N" "26"
+assert_eq "AC36: scripts/ holds 28 modules -- R6's LEAF module plus #117's check-status-record.mjs, not the reviewed commit's 16" \
+  "$MODULE_N" "28"
 
 # ===============================================================================================
 suite "AC36(b): three entry directions, PAIRED SAME-RUN CAPTURE against the reviewed commit"

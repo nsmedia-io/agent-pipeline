@@ -241,7 +241,9 @@ suite "voice-lint: the table cannot drift from pipeline.md (config-derived)"
 #
 # THE WIDE FORM is the ONE extraction this suite performs; re-derive both copies with
 # `git grep -n "THE WIDE FORM" -- tests`.
-PIPELINE_MD="$PLUGIN_ROOT/commands/pipeline.md"
+# The orchestrator prose is a core plus per-phase files; pins read all of it (harness.sh).
+pipeline_md_concat "$PLUGIN_ROOT" || exit 90
+PIPELINE_MD="$PIPELINE_MD_CONCAT"
 LINT_SRC="$SCRIPTS_DIR/voice-lint.mjs"
 
 # THE PINNED LABEL SET (#33). Identical to the drift suite's, on purpose: two copies of the wide

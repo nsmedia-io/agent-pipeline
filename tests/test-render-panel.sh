@@ -47,11 +47,55 @@ write_status standard '["ba","dev","qa","secops"]'
 render --status "$STATUS" --worktree "$WT" --plugin-root "$PLUGIN_ROOT" --check
 assert_eq "renders and passes --check" "$RC" "0"
 assert_contains "the reviewed sha in the script is git rev-parse HEAD of the worktree" "$OUT" "$HEAD_SHA"
-assert_contains "the preamble names the worktree's artifact dir" "$OUT" "$WT/.pipeline/77"
-assert_contains "the plugin root is substituted for \${CLAUDE_PLUGIN_ROOT}" "$OUT" "$PLUGIN_ROOT/evidence.md"
-assert_not_contains "no raw \${CLAUDE_PLUGIN_ROOT} placeholder survives" "$OUT" 'CLAUDE_PLUGIN_ROOT}'
-assert_not_contains "no raw <ARTIFACT_DIR> placeholder survives" "$OUT" '<ARTIFACT_DIR>'
-assert_not_contains "no raw <issue> placeholder survives" "$OUT" '<issue>'
+# C2: placeholders stay in the static text and are BOUND in the RUN DATA block at the end of each
+# prompt, so the static part is cacheable. The values must still reach the agent.
+# A path value is compared as node resolves it (forward slashes), and read out of the first prompt's
+# RUN DATA with any TOON quoting removed: a Windows path renders quoted ("C:/..."), and the quotes
+# are not part of the value, which is what the RUN DATA note tells the agent.
+native_path() { node -e 'console.log(require("path").resolve(process.argv[1]).replace(/\\/g, "/"))' "$1"; }
+run_value() {  # <name> -> the value bound to <name> in the first prompt's RUN DATA, unquoted
+  OUT="$OUT" node -e '
+const out = process.env.OUT;
+const call = out.match(/^  \(\) => agent\(PREAMBLE \+ (".*"), \{.*\}\),$/m);
+const run = call ? JSON.parse(call[1]).split("RUN DATA\n")[1] || "" : "";
+const m = run.match(new RegExp("^" + process.argv[1] + ": (.*)$", "m"));
+if (m) console.log(m[1].startsWith("\"") ? JSON.parse(m[1]) : m[1]);
+' "$1"
+}
+assert_eq "RUN DATA binds the worktree's artifact dir" "$(run_value ARTIFACT_DIR)" "$(native_path "$WT")/.pipeline/77"
+assert_eq "RUN DATA binds \${CLAUDE_PLUGIN_ROOT} to the plugin root" "$(run_value CLAUDE_PLUGIN_ROOT)" "$(native_path "$PLUGIN_ROOT")"
+assert_contains "RUN DATA binds <REVIEWED_SHA> to the git HEAD" "$OUT" "REVIEWED_SHA: $HEAD_SHA"
+assert_contains "the static preamble keeps the placeholder form" "$OUT" '${CLAUDE_PLUGIN_ROOT}/evidence.md'
+assert_contains "the prompt says once that its tables are TOON" "$OUT" "Tables below are TOON: header lists the fields, one row per item"
+# Every UPPER_CASE placeholder and every lowercase one that stands for a run value (<issue>) in the
+# static text has a binding in every RUN DATA block. A lowercase placeholder is either such a value
+# or one the agent fills itself (<role> is the role its lens names; <path>, <dest>, <parent>,
+# <isolated> and <observation> are what the agent picks while it works). A lowercase name in
+# neither list is reported too, so a new run value spelled in lowercase cannot slip past the
+# upper-case pattern unbound. A placeholder added to the preamble or the lens table without a
+# binding is caught here.
+BIND_CHECK='
+const out = process.env.OUT;
+const plant = process.env.PLANT || "";
+const AGENT_FILLED = new Set(["role", "path", "dest", "parent", "isolated", "observation"]);
+const pre = JSON.parse(out.match(/^const PREAMBLE = (.*)$/m)[1]);
+const calls = [...out.matchAll(/^  \(\) => agent\(PREAMBLE \+ (".*"), \{.*\}\),$/gm)].map((m) => JSON.parse(m[1]));
+const bad = [];
+for (const c of calls) {
+  const [lens, run] = c.split("RUN DATA\n");
+  const text = pre + lens + plant;
+  const names = new Set([...text.matchAll(/<([A-Z][A-Z_]+)>|\$\{(CLAUDE_PLUGIN_ROOT)\}/g)].map((m) => m[1] || m[2]));
+  for (const m of text.matchAll(/<([a-z][a-z_-]*)>/g)) if (!AGENT_FILLED.has(m[1])) names.add(m[1]);
+  for (const n of names) if (!new RegExp("^" + n + ": ", "m").test(run)) bad.push(n);
+}
+console.log(calls.length === 0 ? "no calls parsed" : [...new Set(bad)].join(" ") || "none");
+'
+UNBOUND="$(OUT="$OUT" node -e "$BIND_CHECK")"
+assert_eq "every placeholder in the static text is bound in RUN DATA" "$UNBOUND" "none"
+# NON-ZERO CONTROL: a lowercase run-value placeholder with no binding is reported, and so is an
+# upper-case one, so the "none" above is not a pattern that can never match.
+assert_eq "NON-ZERO CONTROL: an unbound lowercase placeholder (<head_sha>) and an unbound <BASE_SHA> are reported" \
+  "$(OUT="$OUT" PLANT=' <head_sha> <BASE_SHA>' node -e "$BIND_CHECK")" "BASE_SHA head_sha"
 assert_eq "exactly four agent() calls for four roles" "$(count_agents "$OUT")" "4"
 assert_contains "meta is a pure literal naming the issue" "$OUT" 'export const meta = { name: "phase4-panel-77"'
 assert_contains "ba is dispatched as pipeline:ba" "$OUT" '"agentType":"pipeline:ba"'
@@ -96,7 +140,9 @@ FIRST="0123456789abcdef0123456789abcdef01234567"
 render --status "$STATUS" --worktree "$WT" --plugin-root "$PLUGIN_ROOT" --delta "qa dba" --first-round-head "$FIRST" --check
 assert_eq "delta render passes --check" "$RC" "0"
 assert_eq "exactly two agent() calls for two delta roles" "$(count_agents "$OUT")" "2"
-assert_contains "the delta paragraph names the first-round head" "$OUT" "The first round reviewed $FIRST"
+assert_contains "the delta paragraph names the first-round head (a placeholder)" "$OUT" "The first round reviewed <FIRST_ROUND_HEAD>"
+assert_contains "and RUN DATA binds it" "$OUT" "FIRST_ROUND_HEAD: $FIRST"
+assert_contains "RUN DATA lists the delta roles inline" "$OUT" "roles[2]: qa,dba"
 assert_contains "the delta paragraph names the fix diff" "$OUT" "git diff $FIRST...HEAD"
 # Review convergence: the delta stance rules on open blockers; the old "assume the remediation
 # introduced a defect" instruction is gone, because a reviewer told to find a defect finds one.
@@ -108,6 +154,7 @@ printf '%s' '{"qa":{"verdict":"REQUEST_CHANGES","materiality":{"open_blocker_ids
 render --status "$STATUS" --worktree "$WT" --plugin-root "$PLUGIN_ROOT" --delta "qa dba" --first-round-head "$FIRST" --peer-review "$PR_FILE" --check
 assert_eq "a delta render with --peer-review passes --check" "$RC" "0"
 assert_contains "the qa lens lists qa's open blocker ids" "$OUT" "Your open blockers: qa-2, qa-7."
+assert_contains "RUN DATA names the peer-review file the agent can Read" "$OUT" "peer_review: "
 assert_contains "a role holding none is told it was seated by surface" "$OUT" "Your open blockers: none. You were seated because the fix commits touched your surface"
 printf '%s' '{"qa":{"verdict":"REQUEST_CHANGES","materiality":{"open_blocker_ids":["qa-2","qa-7"],"demoted_ids":["qa-9"],"blocks_merge":true}},"dba":{"verdict":"REQUEST_CHANGES","materiality":{"blocks_merge":true}}}' > "$PR_FILE"
 render --status "$STATUS" --worktree "$WT" --plugin-root "$PLUGIN_ROOT" --delta "qa dba" --first-round-head "$FIRST" --peer-review "$PR_FILE" --check
@@ -116,6 +163,14 @@ assert_contains "a demoted blocker stays visible to its role on the next delta r
 assert_contains "a legacy blocks_merge:true with no ids tells the role to rule on every blocker it raised" "$OUT" "Your open blockers: not named"
 assert_contains "meta names the delta" "$OUT" 'name: "phase4-delta-77"'
 assert_not_contains "ba is NOT rendered on a qa+dba delta" "$OUT" '"agentType":"pipeline:ba"'
+# C2: a role's open blockers reach its prompt as ONE TOON table (fields named once), including a
+# legacy concern matched by its positional id; the prose fields stay in peer-review.json.
+printf '%s' '{"qa":{"verdict":"REQUEST_CHANGES","concerns":[{"id":"qa-2","severity":"blocker","likelihood":"normal-use","harm":"internal","merge_class":"wrong-pass","location":"a.mjs:3","description":"d"},{"id":"qa-5","severity":"nit","likelihood":"hypothetical","harm":"cosmetic","merge_class":"none"},{"severity":"high","likelihood":"normal-use","harm":"money","merge_class":"money"}],"materiality":{"open_blocker_ids":["qa-2","qa-3"],"blocks_merge":true}}}' > "$PR_FILE"
+render --status "$STATUS" --worktree "$WT" --plugin-root "$PLUGIN_ROOT" --delta "qa" --first-round-head "$FIRST" --peer-review "$PR_FILE" --check
+assert_eq "a delta render with concerns passes --check" "$RC" "0"
+assert_contains "the open blockers are a TOON table with one header" "$OUT" 'open_blockers[2]{id,severity,likelihood,harm,merge_class,location}:\n    qa-2,blocker,normal-use,internal,wrong-pass,\"a.mjs:3\"\n    qa-3,high,normal-use,money,money,null\n'
+assert_not_contains "a concern that is not an open blocker is not tabled" "$OUT" "qa-5,"
+assert_not_contains "the concern prose stays in the file, not the prompt" "$OUT" '"description"'
 
 suite "render-panel: surface-conditional roles render when seated"
 
@@ -124,6 +179,61 @@ render --status "$STATUS" --worktree "$WT" --plugin-root "$PLUGIN_ROOT" --check
 assert_eq "renders with design_review and art_director" "$RC" "0"
 assert_contains "design_review dispatches pipeline:design" "$OUT" '"agentType":"pipeline:design"'
 assert_contains "art_director dispatches pipeline:art-director" "$OUT" '"agentType":"pipeline:art-director"'
+
+suite "render-panel: the static prefix is byte-identical across issues and roles (prompt cache)"
+
+# Two dispatches that differ in everything per-run: issue, worktree, reviewed sha, plugin root,
+# tier, and role. Both roles are seated on the same panel shape, so they share the preamble. The
+# static prefix must be byte-identical and at least as long as the preamble the renderer computed
+# (N comes from the render, not a literal), and no per-run value may appear inside it. A second
+# pair holds the ROLE fixed across issues, so the whole static part, preamble plus lens, matches.
+CACHE="$(MOD="$RENDER" ROOT="$PLUGIN_ROOT" node --input-type=module -e '
+import { readFileSync } from "node:fs";
+const m = await import(process.env.MOD);
+const root = process.env.ROOT;
+const md = m.readPreambleMarkdown(root);
+const lenses = m.loadLenses(root);
+const one = (issue, tier, worktree, head, pluginRoot, delta) => m.assemble({
+  status: { issue_number: issue, risk_tier: tier, panel_roles: ["qa", "secops", "dba"] },
+  worktree, head, pluginRoot, lenses, preambleMarkdown: md,
+  delta, firstRoundHead: delta ? "f".repeat(40) : null, openBlockers: delta ? {} : null,
+});
+const a = one(48151, "standard", "/work/a/wt", "a".repeat(40), "/plugins/pipeline/0.43.0", null);
+const b = one(62342, "architectural", "/elsewhere/b-wt", "b".repeat(40), "/other/cache/pipeline", null);
+const qaA = a.dispatches.find((d) => d.role === "qa");
+const secB = b.dispatches.find((d) => d.role === "secops");
+const qaB = b.dispatches.find((d) => d.role === "qa");
+let i = 0;
+while (i < qaA.prompt.length && qaA.prompt[i] === secB.prompt[i]) i++;
+const shared = Buffer.byteLength(qaA.prompt.slice(0, i));
+const N = Buffer.byteLength(a.preamble);
+const staticA = a.preamble + qaA.lensText, staticB = b.preamble + qaB.lensText;
+const leaks = ["48151", "62342", "/work/a", "/elsewhere", "a".repeat(12), "b".repeat(12), "/plugins/pipeline/0.43.0", "/other/cache"]
+  .filter((v) => (a.preamble + a.dispatches.map((d) => d.lensText).join("")).includes(v) || (b.preamble + b.dispatches.map((d) => d.lensText).join("")).includes(v));
+const da = one(48151, "standard", "/work/a/wt", "a".repeat(40), "/p", "qa dba"), db = one(62342, "standard", "/w/b", "b".repeat(40), "/q", "qa");
+console.log([
+  "preambles_equal=" + (a.preamble === b.preamble),
+  "prefix_ge_N=" + (shared >= N && N > 1000),
+  "prompts_start_with_preamble=" + (qaA.prompt.startsWith(a.preamble) && secB.prompt.startsWith(b.preamble)),
+  "same_role_static_equal=" + (staticA === staticB && qaA.prompt.startsWith(staticA) && qaB.prompt.startsWith(staticB)),
+  "run_data_differs=" + (qaA.runData !== qaB.runData),
+  "run_data_last=" + (qaA.prompt.endsWith(qaA.runData) && qaA.runData.startsWith("RUN DATA\n")),
+  "delta_preambles_equal=" + (da.preamble === db.preamble),
+  "leaks=" + (leaks.join(",") || "none"),
+].join(" "));
+console.error("static prefix " + N + " bytes; shared across the two dispatches " + shared + " bytes");
+')"
+for k in preambles_equal=true prefix_ge_N=true prompts_start_with_preamble=true same_role_static_equal=true run_data_differs=true run_data_last=true delta_preambles_equal=true leaks=none; do
+  assert_contains "cache prefix: $k" "$CACHE" "$k"
+done
+# CONTROL: the same comparison sees a difference when a per-run value is put back into the static
+# part, so the byte-identity assertions above are not vacuous.
+CONTROL="$(MOD="$RENDER" node --input-type=module -e '
+const m = await import(process.env.MOD);
+const pre = (issue) => "Phase 4 peer review for #" + issue + ".\n" + m.RUN_DATA_NOTE;
+console.log(pre(77) === pre(912) ? "equal" : "differs");
+')"
+assert_eq "CONTROL: a static part carrying the issue number is not byte-identical" "$CONTROL" "differs"
 
 suite "render-panel: FAILS CLOSED on every input it owns"
 
@@ -150,11 +260,11 @@ write_status standard '["ba"]'
 render --status "$STATUS" --worktree "$WT" --plugin-root "$PLUGIN_ROOT" --delta "qa"
 assert_eq "--delta without --first-round-head exits non-zero" "$RC" "1"
 
-# A plugin root whose command file lost its markers must refuse rather than render an empty preamble.
+# A plugin root whose preamble file (orchestrator/phase-4-panel-preamble.md) lost its markers must refuse rather than render an empty preamble.
 FAKE_ROOT="$TEMP_PROJECT/fake-root"
-mkdir -p "$FAKE_ROOT/scripts" "$FAKE_ROOT/commands"
+mkdir -p "$FAKE_ROOT/scripts" "$FAKE_ROOT/orchestrator"
 cp "$PLUGIN_ROOT/scripts/panel-lenses.json" "$FAKE_ROOT/scripts/"
-printf '# no markers here\n' > "$FAKE_ROOT/commands/pipeline.md"
+printf '# no markers here\n' > "$FAKE_ROOT/orchestrator/phase-4-panel-preamble.md"
 render --status "$STATUS" --worktree "$WT" --plugin-root "$FAKE_ROOT"
 assert_eq "a command file without the PHASE4-PREAMBLE markers exits non-zero" "$RC" "2"
 assert_contains "the failure names the markers" "$ERR" "PHASE4-PREAMBLE"

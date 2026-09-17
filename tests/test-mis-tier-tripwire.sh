@@ -41,7 +41,9 @@ require_node
 make_temp_project || exit 90
 
 PLUGIN_DIR="$PLUGIN_ROOT"
-PIPELINE_MD="$PLUGIN_DIR/commands/pipeline.md"
+# The orchestrator prose is a core plus per-phase files; pins read all of it (harness.sh).
+pipeline_md_concat "$PLUGIN_DIR" || exit 90
+PIPELINE_MD="$PIPELINE_MD_CONCAT"
 
 # ---- module discovery (same contract as test-data-layer-surface.sh) ----------
 DL_MODULE=""
@@ -326,7 +328,7 @@ LIT_INFRA='(^\.github/|^infra/|^deploy)'
 
 md_hits() { # <literal>
   local n
-  n=$( { grep -Fl -- "$1" "$PLUGIN_DIR"/commands/*.md "$PLUGIN_DIR"/agents/*.md 2>/dev/null || true; } | wc -l )
+  n=$( { grep -Fl -- "$1" "$PLUGIN_DIR"/commands/*.md "$PLUGIN_DIR"/orchestrator/*.md "$PLUGIN_DIR"/agents/*.md "$PLUGIN_DIR"/shared/*.md 2>/dev/null || true; } | wc -l )
   printf '%s' "$(printf '%s' "$n" | tr -d ' ')"
 }
 

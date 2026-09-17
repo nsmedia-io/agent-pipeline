@@ -568,7 +568,7 @@ export function archiveIssue({ root, issue, from }) {
     if (!process.env[ALLOW_STALE_ENV]) {
       throw new Error(
         `archive refused: the canonical artifacts are STALE against the Phase 3 worktree.\n  ${detail}\n` +
-        `  Re-run the artifact sync from commands/pipeline.md ("Sync Phase 3 artifacts to the ` +
+        `  Re-run the artifact sync from orchestrator/phase-4-verdict.md ("Sync Phase 3 artifacts to the ` +
         `orchestrator pipeline directory") and archive again. To archive the canonical copies ` +
         `anyway, set ${ALLOW_STALE_ENV}=1 -- and say in the run record that you did.`,
       );

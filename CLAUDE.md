@@ -20,6 +20,12 @@ file reads as a one-off SyntaxError (see `tests/run.sh` header).
 
 - `plugins/pipeline/commands/` the `/pipeline` orchestrator, `/phase`, `/warmup`. Prose the
   model executes; the deterministic parts live in `scripts/` and the prose calls them.
+  `pipeline.md` is the always-loaded core; the core's loading map says when to read each phase.
+- `plugins/pipeline/orchestrator/` one file per `/pipeline` phase, gate and handoff, read when
+  that phase starts. Kept out of `commands/` on purpose: markdown in a subdirectory there can be
+  exposed as a namespaced slash command.
+- `plugins/pipeline/shared/` blocks the agent contracts read by reference (evidence discipline,
+  tracked-write isolation). `docs/rationale.md` holds incident histories no prompt loads.
 - `plugins/pipeline/agents/` nine role contracts (frontmatter sets model, effort, maxTurns).
 - `plugins/pipeline/scripts/` gates, surface predicates, dispatch routing, the merge, telemetry.
 - `plugins/pipeline/hooks/` SessionStart, Stop, SubagentStop, PreToolUse. All fail open.
@@ -32,11 +38,12 @@ file reads as a one-off SyntaxError (see `tests/run.sh` header).
 
 ## Conventions that bite
 
-- **Tests pin prose.** Many suites grep `commands/pipeline.md` and `agents/*.md` for exact
-  strings, extract bash blocks and RUN them. Editing prose can redden a test; that is the test
+- **Tests pin prose.** Many suites grep the orchestrator prose and `agents/*.md` for exact
+  strings, extract bash blocks and RUN them. They read the core plus every phase file through
+  `pipeline_md_concat` in `tests/harness.sh`; a new phase file goes in its `PIPELINE_MD_PARTS`. Editing prose can redden a test; that is the test
   working. Read the failing assertion's label before changing either side.
 - **The replicated block.** `## The property, not the fix` is byte-identical in the nine agent
-  files plus `pipeline.md`, with a sha1 digest on the line after the span. Edit all ten
+  files plus `orchestrator/phase-4-panel-preamble.md`, with a sha1 digest on the line after the span. Edit all ten
   together and update the digest line in all ten.
 - **Config keys are a closed set.** A new `pipeline.config.json` key needs a row in
   `scripts/config-doctor.mjs`, the README table, and `pipeline.config.example.json`.

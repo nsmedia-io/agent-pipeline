@@ -20,6 +20,8 @@ Then run `/pipeline <your ask>` in any project. Full usage, agents, tiers, gates
 plugins/pipeline/
   .claude-plugin/plugin.json         # plugin manifest
   commands/                          # /pipeline, /phase, /warmup
+  orchestrator/                      # the /pipeline phase files, read when each phase starts
+  shared/                            # blocks the agent contracts read by reference
   agents/                            # ba, dba, devops, secops, dev, qa, design, art-director, librarian
   hooks/                             # session-start, stop, subagent-stop, pre-tool-use (all fail-open, opt-in)
   scripts/                           # gates, surface predicates, dispatch routing, telemetry, config doctor, artifact validator, knowledge store

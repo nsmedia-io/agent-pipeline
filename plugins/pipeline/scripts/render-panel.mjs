@@ -9,12 +9,15 @@
 // values COMPUTED:
 //
 //   - the reviewed sha is `git rev-parse HEAD` of the worktree, never typed;
-//   - the preamble is sliced out of commands/pipeline.md between two HTML-comment markers, so
-//     the prose the agents read is the prose the command file documents, with no second copy;
+//   - the preamble is sliced out of orchestrator/phase-4-panel-preamble.md between two HTML-comment
+//     markers, so the prose the agents read is the prose the plugin ships, with no second copy. It
+//     lives outside commands/pipeline.md so the orchestrator does not load ~25 KB it never acts on;
 //   - the lens per role comes from scripts/panel-lenses.json, the one lens table;
 //   - model and effort come from dispatch-model.mjs / dispatch-effort.mjs for (role, tier, 4,
 //     panel-lens, workflow), exactly as the dispatch sites are told to resolve them;
-//   - every string is emitted through JSON.stringify, so no quoting class can break the script.
+//   - every string is emitted through JSON.stringify, so no quoting class can break the script;
+//   - each prompt is static text first and run data last, so a prompt cache can reuse the static
+//     part (see CACHE-FRIENDLY ASSEMBLY below).
 //
 // Usage:
 //   node render-panel.mjs --status <status.json> --worktree <path> [--plugin-root <dir>]
@@ -46,9 +49,17 @@ import { isMain as isMainScript } from "./lib.mjs";
 import { resolve as resolveModel } from "./dispatch-model.mjs";
 import { resolve as resolveEffort } from "./dispatch-effort.mjs";
 import { openBlockers as listOpenBlockers } from "./materiality.mjs";
+import { encode as toon } from "./toon.mjs";
 
 export const PREAMBLE_BEGIN = "<!-- BEGIN PHASE4-PREAMBLE -->";
 export const PREAMBLE_END = "<!-- END PHASE4-PREAMBLE -->";
+/** Where the marked block lives, relative to the plugin root. */
+export const PREAMBLE_FILE = path.join("orchestrator", "phase-4-panel-preamble.md");
+
+/** The markdown file carrying the preamble markers, read from a plugin root. */
+export function readPreambleMarkdown(pluginRoot) {
+  return readFileSync(path.join(pluginRoot, PREAMBLE_FILE), "utf8");
+}
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_PLUGIN_ROOT = path.resolve(HERE, "..");
@@ -75,12 +86,12 @@ export function parseArgs(argv) {
   return args;
 }
 
-/** Slice the preamble out of commands/pipeline.md: between the markers, fences stripped. */
+/** Slice the preamble out of orchestrator/phase-4-panel-preamble.md: between the markers, fences stripped. */
 export function extractPreamble(markdown) {
   const b = markdown.indexOf(PREAMBLE_BEGIN);
   const e = markdown.indexOf(PREAMBLE_END);
   if (b === -1 || e === -1 || e < b) {
-    throw new Error(`commands/pipeline.md carries no ${PREAMBLE_BEGIN} ... ${PREAMBLE_END} block`);
+    throw new Error(`orchestrator/phase-4-panel-preamble.md carries no ${PREAMBLE_BEGIN} ... ${PREAMBLE_END} block`);
   }
   const inner = markdown.slice(b + PREAMBLE_BEGIN.length, e);
   const lines = inner.split("\n");
@@ -107,15 +118,24 @@ export function loadLenses(pluginRoot) {
   return j.roles;
 }
 
-/** Substitute the placeholders the command file uses into the preamble text. */
-export function substitute(text, { issue, worktree, head, artifactDir, pluginRoot }) {
-  return text
-    .split("<issue>").join(String(issue))
-    .split("<WORKTREE_PATH>").join(worktree)
-    .split("<HEAD_SHA>").join(head)
-    .split("<ARTIFACT_DIR>").join(artifactDir)
-    .split("${CLAUDE_PLUGIN_ROOT}").join(pluginRoot);
-}
+// CACHE-FRIENDLY ASSEMBLY (C2). Every dispatched prompt is STATIC TEXT FIRST and RUN DATA LAST:
+//
+//   [delta paragraph] preamble run-data-note | lens     | RUN DATA (issue, paths, sha, blockers)
+//   shared by every role of the panel        | per role | per dispatch
+//
+// The placeholders the command file and the lens table use (<issue>, <WORKTREE_PATH>, <HEAD_SHA>,
+// <REVIEWED_SHA>, <ARTIFACT_DIR>, <FIRST_ROUND_HEAD>, ${CLAUDE_PLUGIN_ROOT}) are NOT substituted
+// into the static text; they are bound once, in the RUN DATA block at the end. The static part
+// therefore carries no issue number, sha, worktree or plugin path, so it is byte-identical across
+// the roles of one panel, across rounds, and across issues on the same plugin version, which is
+// what lets a prompt cache reuse it. test-render-panel.sh pins that property. Substituting a value
+// back into the static text (or prepending anything per-run) breaks the cache silently: the panel
+// still works, it just pays for the whole preamble on every dispatch.
+
+export const RUN_DATA_NOTE =
+  "Placeholders. The issue placeholder, the plugin-root variable and every capitalised name in angle brackets, above and in your lens, stand for the value of the same name in the RUN DATA block at the very end of this prompt; substitute it before you run, read or write anything. A value written in double quotes there is a quoted string: the quotes are not part of the value (a Windows path, for one, renders quoted). The role placeholder is the role your lens names. " +
+  "Tables below are TOON: header lists the fields, one row per item (`name[N]{a,b}:` then N rows of a,b; `name[N]: x,y` is an inline list; a quoted cell is a JSON string). " +
+  "Every file RUN DATA names is the full JSON artifact; Read it when a table is not enough.";
 
 // The delta stance (review convergence). The old paragraph told every delta reviewer to "assume the
 // remediation introduced a defect until evidence says otherwise", on top of a preamble telling it to
@@ -125,20 +145,18 @@ export function substitute(text, { issue, worktree, head, artifactDir, pluginRoo
 export const DELTA_STANCE =
   "Rule only on your open blockers listed below. A new finding blocks only if the fix commits introduced it and it has a merge_class; everything else is a note.";
 
-export function deltaParagraph(roles, firstRoundHead, head) {
-  return (
-    `DELTA RE-REVIEW. This is NOT a fresh full panel. The first round reviewed ${firstRoundHead}; ` +
-    `the reviewed commit is now ${head}, and the fix diff is git diff ${firstRoundHead}...HEAD. ` +
-    `Only these roles are re-dispatched: ${roles.join(", ")}; every other role's standing verdict holds ` +
-    `and is merged additively. ${DELTA_STANCE} The fix-round budget is counted by scripts/round-budget.mjs, ` +
-    `and a round past it goes to the owner, not to another panel.\n`
-  );
-}
+/** Static: the shas and the role list are placeholders bound in RUN DATA. */
+export const DELTA_PARAGRAPH =
+  "DELTA RE-REVIEW. This is NOT a fresh full panel. The first round reviewed <FIRST_ROUND_HEAD>; " +
+  "the reviewed commit is now <HEAD_SHA>, and the fix diff is git diff <FIRST_ROUND_HEAD>...HEAD. " +
+  "Only the roles in delta.roles in RUN DATA are re-dispatched; every other role's standing verdict holds " +
+  `and is merged additively. ${DELTA_STANCE} The fix-round budget is counted by scripts/round-budget.mjs, ` +
+  "and a round past it goes to the owner, not to another panel.\n";
 
 /** The per-role sentence naming the open blocker ids a delta reviewer rules on. */
 export function openBlockerLine(role, openBlockers) {
   if (openBlockers === null || openBlockers === undefined) {
-    return " Your open blockers: none recorded (no peer-review.json was given to the renderer); rule on the blocking concerns you raised last round.";
+    return "Your open blockers: none recorded (no peer-review.json was given to the renderer); rule on the blocking concerns you raised last round.";
   }
   const entry = openBlockers[role];
   const rec = Array.isArray(entry) ? { open: entry, demoted: [], unnamed: false } : entry || { open: [], demoted: [], unnamed: false };
@@ -146,12 +164,12 @@ export function openBlockerLine(role, openBlockers) {
     ? ` Demoted past the cap last round, and still yours to rule on: ${rec.demoted.join(", ")}.`
     : "";
   if (rec.open.length > 0) {
-    return ` Your open blockers: ${rec.open.join(", ")}. For each, say closed or still open, with evidence.${demoted}`;
+    return `Your open blockers: ${rec.open.join(", ")}. For each, say closed or still open, with evidence.${demoted}`;
   }
   if (rec.unnamed) {
-    return " Your open blockers: not named (a legacy record marks your block as refusing the merge without ids); rule on every blocking concern you raised last round, with evidence.";
+    return "Your open blockers: not named (a legacy record marks your block as refusing the merge without ids); rule on every blocking concern you raised last round, with evidence.";
   }
-  return " Your open blockers: none. You were seated because the fix commits touched your surface; only a new merge_class finding the fix introduced can block.";
+  return "Your open blockers: none. You were seated because the fix commits touched your surface; only a new merge_class finding the fix introduced can block.";
 }
 
 /** { role: { open: [ids], demoted: [ids], unnamed } } from a merged peer-review.json. */
@@ -165,11 +183,63 @@ export function openBlockerMap(peerReview) {
   return out;
 }
 
+/** The fields a delta lens gets per open blocker; the prose (description, must_satisfy) stays in the file. */
+export const BLOCKER_FIELDS = ["id", "severity", "likelihood", "harm", "merge_class", "location"];
+
+function cell(v) {
+  if (v === undefined) return null;
+  return v !== null && typeof v === "object" ? JSON.stringify(v) : v;
+}
+
 /**
- * Render the Workflow script. Pure given its inputs, so the test can drive it with a fixture
- * status record and a scratch worktree.
+ * One uniform row per open or demoted blocker this role holds, read from the merged
+ * peer-review.json's concerns. A legacy concern with no id is matched by its positional name
+ * (<role>-<1-based index>), the same naming scripts/materiality.mjs uses.
  */
-export function render({ status, worktree, head, pluginRoot, lenses, preambleMarkdown, delta = null, firstRoundHead = null, openBlockers = null, cfg }) {
+export function openBlockerRows(role, peerReview, openBlockers) {
+  const rec = openBlockers?.[role];
+  const ids = rec ? [...(rec.open || []), ...(rec.demoted || [])] : [];
+  const concerns = Array.isArray(peerReview?.[role]?.concerns) ? peerReview[role].concerns : [];
+  const rows = [];
+  concerns.forEach((c, i) => {
+    if (!c || typeof c !== "object") return;
+    const id = typeof c.id === "string" && c.id ? c.id : `${role}-${i + 1}`;
+    if (!ids.includes(id)) return;
+    rows.push(Object.fromEntries(BLOCKER_FIELDS.map((f) => [f, f === "id" ? id : cell(c[f])])));
+  });
+  return rows;
+}
+
+/** The per-run values of one dispatch, as data (prompt-weight.mjs encodes them both ways). */
+export function runDataValues({ issue, worktree, head, artifactDir, pluginRoot, tier, costClass, deltaRoles, firstRoundHead, peerReviewPath, role, openBlockers, peerReview }) {
+  // Forward slashes on every platform: a Windows backslash would be escaped (doubled) inside a
+  // quoted TOON cell, and node, git and Git Bash all accept the forward-slash form.
+  const slash = (p) => String(p).replace(/\\/g, "/");
+  const data = { issue, WORKTREE_PATH: slash(worktree), HEAD_SHA: head, REVIEWED_SHA: head, ARTIFACT_DIR: artifactDir, CLAUDE_PLUGIN_ROOT: slash(pluginRoot), risk_tier: tier };
+  if (costClass !== undefined) data.cost_class = costClass;
+  if (deltaRoles) {
+    data.FIRST_ROUND_HEAD = firstRoundHead;
+    data.delta = { roles: deltaRoles, fix_diff: `git diff ${firstRoundHead}...HEAD` };
+    if (peerReviewPath) data.delta.peer_review = peerReviewPath;
+    const rows = openBlockerRows(role, peerReview, openBlockers);
+    if (rows.length > 0) data.delta.open_blockers = rows;
+  }
+  return data;
+}
+
+/** The RUN DATA block for one dispatch: the per-run values, TOON-encoded, then the delta sentence. */
+export function runDataBlock(input) {
+  let text = `RUN DATA\n${toon(runDataValues(input))}\n`;
+  if (input.deltaRoles) text += `${openBlockerLine(input.role, input.openBlockers)}\n`;
+  return text;
+}
+
+/**
+ * Assemble every dispatch of one panel. Pure given its inputs. Returns the shared static preamble
+ * and, per role, the static lens text and the run data, so a caller (the renderer, the test,
+ * prompt-weight.mjs) can see where the cacheable prefix ends.
+ */
+export function assemble({ status, worktree, head, pluginRoot, lenses, preambleMarkdown, delta = null, firstRoundHead = null, openBlockers = null, peerReview = null, peerReviewPath = null, cfg }) {
   const issue = status.issue_number ?? status.experiment_id;
   if (issue === undefined || issue === null) throw new Error("status.json carries no issue_number");
   const tier = status.risk_tier;
@@ -188,12 +258,9 @@ export function render({ status, worktree, head, pluginRoot, lenses, preambleMar
     if (!lenses[r]) throw new Error(`role "${r}" has no entry in scripts/panel-lenses.json`);
   }
   const artifactDir = path.posix.join(worktree.replace(/\\/g, "/"), ".pipeline", String(issue));
-  let preamble = substitute(extractPreamble(preambleMarkdown), { issue, worktree, head, artifactDir, pluginRoot });
-  if (delta) preamble = deltaParagraph(roles, firstRoundHead, head) + preamble;
-  preamble += "\n";
+  const preamble = (delta ? DELTA_PARAGRAPH : "") + extractPreamble(preambleMarkdown) + "\n\n" + RUN_DATA_NOTE + "\n\n";
 
-  const calls = [];
-  for (const role of roles) {
+  const dispatches = roles.map((role) => {
     const lens = lenses[role];
     const opts = { agentType: lens.agentType };
     const m = resolveModel({ role, tier, phase: "4", site: "panel-lens", cfg });
@@ -202,20 +269,34 @@ export function render({ status, worktree, head, pluginRoot, lenses, preambleMar
     if (e.error) throw new Error(`effort resolver refused ${role}: ${e.error}`);
     if (typeof e.effort === "string" && e.effort) opts.effort = e.effort;
     opts.label = lens.label;
-    let lensText = substitute(lens.lens, { issue, worktree, head, artifactDir, pluginRoot });
-    if (delta) lensText += openBlockerLine(role, openBlockers);
-    calls.push(`  () => agent(PREAMBLE + ${JSON.stringify(lensText)}, ${JSON.stringify(opts)}),`);
-  }
+    const lensText = `${lens.lens}\n\n`;
+    const runInput = {
+      issue, worktree, head, artifactDir, pluginRoot, tier, costClass,
+      deltaRoles: delta ? roles : null, firstRoundHead, peerReviewPath, role, openBlockers, peerReview,
+    };
+    const runData = runDataBlock(runInput);
+    return { role, opts, lensText, runData, runValues: runDataValues(runInput), prompt: preamble + lensText + runData };
+  });
+  return { issue, tier, roles, preamble, dispatches };
+}
 
-  const name = delta ? `phase4-delta-${issue}` : `phase4-panel-${issue}`;
-  const desc = delta
+/**
+ * Render the Workflow script. Pure given its inputs, so the test can drive it with a fixture
+ * status record and a scratch worktree.
+ */
+export function render(input) {
+  const { issue, tier, roles, preamble, dispatches } = assemble(input);
+  const calls = dispatches.map((d) => `  () => agent(PREAMBLE + ${JSON.stringify(d.lensText + d.runData)}, ${JSON.stringify(d.opts)}),`);
+  const name = input.delta ? `phase4-delta-${issue}` : `phase4-panel-${issue}`;
+  const desc = input.delta
     ? `Phase 4 delta re-review for #${issue} (${roles.join(", ")})`
     : `Phase 4 peer review panel for #${issue} (${tier} tier: ${roles.join(", ")})`;
-  const phaseTitle = delta ? "Delta" : "Panel";
+  const phaseTitle = input.delta ? "Delta" : "Panel";
   return [
     `export const meta = { name: ${JSON.stringify(name)}, description: ${JSON.stringify(desc)}, phases: [{ title: ${JSON.stringify(phaseTitle)} }] }`,
     `phase(${JSON.stringify(phaseTitle)})`,
-    `// Rendered by render-panel.mjs from status.json; reviewed HEAD ${head}. Do not edit by hand.`,
+    `// Rendered by render-panel.mjs from status.json; reviewed HEAD ${input.head}. Do not edit by hand.`,
+    `// PREAMBLE and each lens are static; each prompt ends with its RUN DATA, so the cache reuses the rest.`,
     `const PREAMBLE = ${JSON.stringify(preamble)}`,
     `const results = await parallel([`,
     ...calls,
@@ -257,7 +338,8 @@ function main(argv) {
     const status = JSON.parse(readFileSync(args.status, "utf8"));
     const head = readHead(args.worktree);
     const lenses = loadLenses(args.pluginRoot);
-    const md = readFileSync(path.join(args.pluginRoot, "commands", "pipeline.md"), "utf8");
+    const md = readPreambleMarkdown(args.pluginRoot);
+    const peerReview = args.peerReview ? JSON.parse(readFileSync(args.peerReview, "utf8")) : null;
     const script = render({
       status,
       worktree: path.resolve(args.worktree),
@@ -267,7 +349,9 @@ function main(argv) {
       preambleMarkdown: md,
       delta: args.delta,
       firstRoundHead: args.firstRoundHead,
-      openBlockers: args.peerReview ? openBlockerMap(JSON.parse(readFileSync(args.peerReview, "utf8"))) : null,
+      openBlockers: peerReview ? openBlockerMap(peerReview) : null,
+      peerReview,
+      peerReviewPath: args.peerReview ? path.resolve(args.peerReview).replace(/\\/g, "/") : null,
     });
     if (args.check) {
       const c = checkScript(script);

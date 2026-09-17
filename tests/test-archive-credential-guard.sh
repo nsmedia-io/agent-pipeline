@@ -61,7 +61,9 @@ STORE="$SCRIPTS_DIR/knowledge-store.mjs"
 TESTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$PLUGIN_ROOT/../.." && pwd)"
 SCHEMA_DIR="$PLUGIN_ROOT/schemas"
-PIPELINE_MD="$PLUGIN_ROOT/commands/pipeline.md"
+# The orchestrator prose is a core plus per-phase files; pins read all of it (harness.sh).
+pipeline_md_concat "$PLUGIN_ROOT" || exit 90
+PIPELINE_MD="$PIPELINE_MD_CONCAT"
 STATUS_SUITE="$TESTS_DIR/test-status-schema-contract.sh"
 
 make_temp_project || exit 90

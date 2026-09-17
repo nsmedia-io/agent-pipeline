@@ -11,7 +11,9 @@
 require_node
 
 RB="$SCRIPTS_DIR/round-budget.mjs"
-PIPELINE_MD="$PLUGIN_ROOT/commands/pipeline.md"
+# The orchestrator prose is a core plus per-phase files; pins read all of it (harness.sh).
+pipeline_md_concat "$PLUGIN_ROOT" || exit 90
+PIPELINE_MD="$PIPELINE_MD_CONCAT"
 PHASE_MD="$PLUGIN_ROOT/commands/phase.md"
 
 make_temp_project || exit 90

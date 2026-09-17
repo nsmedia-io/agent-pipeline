@@ -30,7 +30,9 @@ make_temp_project || exit 90
 
 PLUGIN_DIR="$PLUGIN_ROOT"
 SCHEMA="$PLUGIN_DIR/schemas/status.schema.json"
-PIPELINE_MD="$PLUGIN_DIR/commands/pipeline.md"
+# The orchestrator prose is a core plus per-phase files; pins read all of it (harness.sh).
+pipeline_md_concat "$PLUGIN_DIR" || exit 90
+PIPELINE_MD="$PIPELINE_MD_CONCAT"
 GUARD="$SCRIPTS_DIR/gate-phase-entry.mjs"
 VALIDATOR="$SCRIPTS_DIR/validate-pipeline-artifact.mjs"
 VOICE_LINT="$SCRIPTS_DIR/voice-lint.mjs"

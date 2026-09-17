@@ -24,7 +24,9 @@ require_node
 
 make_temp_project || exit 90
 
-PIPELINE_MD="$PLUGIN_ROOT/commands/pipeline.md"
+# The orchestrator prose is a core plus per-phase files; pins read all of it (harness.sh).
+pipeline_md_concat "$PLUGIN_ROOT" || exit 90
+PIPELINE_MD="$PIPELINE_MD_CONCAT"
 
 # ---- extraction -------------------------------------------------------------
 PANEL_COMPOSE="$TEMP_PROJECT/panel-compose.sh"
@@ -127,7 +129,7 @@ phase_md_drift() {  # <phase.md> <pipeline.md> <delta block> -> "" when the two 
   case "$sec" in *INDETERMINATE*) ;; *) out="$out|does not name the INDETERMINATE outcome" ;; esac
   case "$sec" in *PANEL-NOTE*) ;; *) out="$out|does not carry the PANEL-NOTE record of a seat-on-indeterminate" ;; esac
   case "$sec" in *surface_probe*) ;; *) out="$out|does not name surface_probe, the shared definition" ;; esac
-  case "$sec" in *commands/pipeline.md*) ;; *) out="$out|does not point at the file that holds the one definition" ;; esac
+  case "$sec" in *orchestrator/phase-4-delta.md*) ;; *) out="$out|does not point at the file that holds the one definition" ;; esac
   while IFS= read -r pred; do
     [[ -n "$pred" ]] || continue
     case "$sec" in *"$pred"*) ;; *) out="$out|never names $pred, which the delta block probes" ;; esac
