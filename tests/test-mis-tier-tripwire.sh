@@ -438,6 +438,9 @@ for cand in $(grep -oE 'scripts/[a-zA-Z0-9_-]+\.mjs' "$PIPELINE_MD" | sort -u); 
     # checkpoint and the verdict step. Both take --status and a subcommand or --peer-review, never a
     # (role, tier, phase) triple, and resolve no model. Excluded by NAME, like the rest.
     checkpoint.mjs|record-verdict.mjs) continue ;;
+    # #164: the owner-facing moment, the issue-body render and the coverage skeleton; resolve no
+    # model. See the twin in test-dispatch-model-resolver.sh.
+    voice-moment.mjs|render-issue-body.mjs|scaffold-requirement-checks.mjs) continue ;;
   esac
   CANDIDATES_REL+=("$cand")
 done
