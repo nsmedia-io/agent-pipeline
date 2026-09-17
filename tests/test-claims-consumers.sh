@@ -24,7 +24,9 @@ TESTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 GATE_SUITE="$TESTS_DIR/test-gate-pre-phase4.sh"
 TELEM_SUITE="$TESTS_DIR/test-pipeline-telemetry.sh"
 R17_SUITE="$TESTS_DIR/test-issue17-integration.sh"
-PIPELINE_MD="$PLUGIN_DIR/commands/pipeline.md"
+# The orchestrator prose is a core plus per-phase files; pins read all of it (harness.sh).
+pipeline_md_concat "$PLUGIN_DIR" || exit 90
+PIPELINE_MD="$PIPELINE_MD_CONCAT"
 README="$PLUGIN_DIR/README.md"
 REPO_ROOT="$(cd "$PLUGIN_DIR/../.." && pwd)"
 

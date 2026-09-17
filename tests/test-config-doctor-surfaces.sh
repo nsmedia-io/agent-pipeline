@@ -144,7 +144,7 @@ suite "AC12: every config key the docs name in backticks resolves to a registere
 # backticked token that is a config key must exist in ALL_KEYS. The semantic half (whether the
 # prose describes the key's PURPOSE accurately) is not mechanically checkable and is recorded
 # as such in the spec rather than given a check that implies coverage it does not have.
-DOC_KEYS=$(grep -oE '`[a-z][a-zA-Z]+`' "$PLUGIN_DIR/README.md" "$PLUGIN_DIR/commands/pipeline.md" 2>/dev/null | sed 's/.*`\(.*\)`/\1/' | sort -u)
+DOC_KEYS=$(grep -oE '`[a-z][a-zA-Z]+`' "$PLUGIN_DIR/README.md" "$PLUGIN_DIR/commands/pipeline.md" "$PLUGIN_DIR"/commands/pipeline/*.md 2>/dev/null | sed 's/.*`\(.*\)`/\1/' | sort -u)
 REGISTERED=$(DOC="$DOCTOR" node -e 'import(process.env.DOC).then(m=>console.log(Object.keys(m.ALL_KEYS).join(" ")))')
 UNRESOLVED=""
 for k in $DOC_KEYS; do

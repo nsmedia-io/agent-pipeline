@@ -28,7 +28,9 @@ GATE_TESTS_DIR="$(cd "$GATE_FIXTURES_DIR/.." && pwd)"
 GATE_PLUGIN_DIR="$(cd "$GATE_TESTS_DIR/../plugins/pipeline" && pwd)"
 GATE_REPO_ROOT="$(cd "$GATE_PLUGIN_DIR/../.." && pwd)"
 GATE_HOOKS_JSON="$GATE_PLUGIN_DIR/hooks/hooks.json"
-GATE_PIPELINE_MD="$GATE_PLUGIN_DIR/commands/pipeline.md"
+# The orchestrator prose is a core plus per-phase files; pins read all of it (harness.sh).
+pipeline_md_concat "$GATE_PLUGIN_DIR" || exit 90
+GATE_PIPELINE_MD="$PIPELINE_MD_CONCAT"
 
 PAYLOAD_MJS="$GATE_FIXTURES_DIR/pretooluse-payload.mjs"
 STATUS_MJS="$GATE_FIXTURES_DIR/pretooluse-status.mjs"

@@ -357,6 +357,42 @@ new_tmpdir() {
   return 0
 }
 
+# ---- the /pipeline orchestrator prose: a core plus per-phase files ------------------------------
+#
+# commands/pipeline.md is the always-loaded core, and every phase, gate and handoff lives in its own
+# file under commands/pipeline/, which the core tells the orchestrator to Read when that phase
+# starts. A suite that pins orchestrator prose, or extracts and RUNS a bash block from it, reads ALL
+# of that prose, concatenated in the FIXED order below: the core first, then the phase files in the
+# order the single file carried them before the split. So a pin follows a rule when the rule moves
+# between files, and a rule moved out of every file still reddens the pin. test-pipeline-split.sh
+# holds this list equal to the directory, so a new phase file cannot be left out of every pin.
+PIPELINE_MD_PARTS="phase-0-setup.md status-record.md phase-0.5-map.md phase-1-ba.md phase-2-lite.md phase-2-review.md phase-2.5-design.md phase-3-impl.md phase-3-architectural.md phase-3-4-gate.md live-verification.md phase-4-panel.md art-director-contract.md dispatch-routing.md phase-4-delta.md phase-4-verdict.md phase-5-archive.md loop-backs.md owner-handoff.md"
+
+# pipeline_md_concat [<plugin dir>] -> PIPELINE_MD_CONCAT=<registered tmpdir>/commands/pipeline.md
+# A global rather than an echo, for new_tmpdir's reason. The copy keeps the `commands/pipeline.md`
+# suffix so a suite that dispatches on that path (a `case` on the file name) still recognises it.
+# Returns non-zero, naming the file, when the core or any listed part is missing: a concatenation
+# that silently skipped a part would pass every absence assertion over the part it dropped.
+pipeline_md_concat() {
+  local plugin="${1:-$PLUGIN_ROOT}" part
+  new_tmpdir || return 90
+  mkdir -p "$NEW_TMPDIR/commands" || return 90
+  PIPELINE_MD_CONCAT="$NEW_TMPDIR/commands/pipeline.md"
+  if [[ ! -f "$plugin/commands/pipeline.md" ]]; then
+    printf 'FATAL: pipeline_md_concat: %s is missing\n' "$plugin/commands/pipeline.md" >&2
+    return 90
+  fi
+  cat "$plugin/commands/pipeline.md" > "$PIPELINE_MD_CONCAT" || return 90
+  for part in $PIPELINE_MD_PARTS; do
+    if [[ ! -f "$plugin/commands/pipeline/$part" ]]; then
+      printf 'FATAL: pipeline_md_concat: %s is missing\n' "$plugin/commands/pipeline/$part" >&2
+      return 90
+    fi
+    cat "$plugin/commands/pipeline/$part" >> "$PIPELINE_MD_CONCAT" || return 90
+  done
+  return 0
+}
+
 # make_temp_project [<issue>] -> TEMP_PROJECT (registered temp dir usable as a project root)
 #                               TEMP_ISSUE_DIR (<TEMP_PROJECT>/.pipeline/<issue>)
 # Everything a node-backed case reads or writes lives under TEMP_PROJECT: pass it as
