@@ -31,7 +31,7 @@ np() {
   OUT="$(node "$NP" --status "$D/status.json" --spec "$D/spec.json" "$@" 2>&1)"
   RC=$?
 }
-run_of() { printf '%s' "$OUT" | sed -n 's/^RUN: //p'; }
+run_of() { printf '%s' "$OUT" | sed -n 's/^RUN: //p' | cut -d' ' -f1; }
 then_of() { printf '%s' "$OUT" | sed -n 's/^THEN: //p'; }
 
 suite "next-phase: a run with no record starts at setup"
@@ -102,7 +102,8 @@ np
 assert_contains "trivial skips the deep map" "$OUT" "MAP: skip"
 put '{"current_phase":"0.5-map"}' ""
 np
-assert_contains "with no tier yet the map is folded into BA" "$OUT" "MAP: folded"
+assert_eq "before BA has written a spec, the map phase routes without a tier" "$RC" "0"
+assert_contains "and says the depth waits for BA, rather than defaulting to folded" "$OUT" "MAP: pending"
 
 suite "next-phase: resume states"
 
@@ -110,7 +111,7 @@ put '{"current_phase":"3-impl","risk_tier":"architectural"}' ""
 np
 assert_eq "an entry marker re-runs its own phase" "$(run_of)" "3-impl"
 assert_contains "architectural adds the QA-first file" "$OUT" "READ: phase-3-architectural.md"
-assert_contains "and the gate file for when Phase 3 returns" "$OUT" "READ: phase-3-4-gate.md"
+assert_not_contains "and not the gate file, which the 3-impl-complete step reads" "$OUT" "phase-3-4-gate.md"
 put '{"current_phase":"3-impl","risk_tier":"standard"}' ""
 np
 assert_not_contains "standard does not read the QA-first file" "$OUT" "phase-3-architectural.md"
@@ -135,6 +136,52 @@ put '{nope' ""
 np
 assert_eq "a status.json that will not parse exits 1" "$RC" "1"
 
+suite "next-phase: 3-impl-complete runs the fail-closed pre-Phase-4 gate before the panel, at every tier"
+
+# phase-3-impl.md writes 3-impl-complete BEFORE phase3-exit.mjs runs, so routing that state straight
+# to 4-review would skip the tripwire and both pre-Phase-4 gates.
+for tier in trivial standard architectural; do
+  put "{\"current_phase\":\"3-impl-complete\",\"risk_tier\":\"$tier\"}" ""
+  np
+  assert_eq "$tier: 3-impl-complete runs the gate step, not the panel" "$(run_of)" "3-4-gate"
+  assert_contains "$tier: and reads the gate file" "$OUT" "READ: phase-3-4-gate.md"
+  assert_contains "$tier: and names the gate command" "$OUT" "scripts/phase3-exit.mjs"
+  assert_not_contains "$tier: and loads no panel file yet" "$OUT" "phase-4-panel.md"
+  assert_eq "$tier: the panel comes after the gate" "$(then_of)" "4-review"
+done
+
+suite "next-phase: a tripwire loops back to BA; a refused gate loops back to Phase 3"
+
+for state in 3-impl-tripwire 3-impl-tripwire-indeterminate; do
+  put "{\"current_phase\":\"$state\",\"risk_tier\":\"standard\"}" ""
+  np
+  assert_eq "$state goes back to BA to re-tier" "$(run_of)" "1-ba"
+  assert_not_contains "$state is not resumed inside Phase 3" "$OUT" "RUN: 3-impl"
+  assert_contains "$state reads the loop-back file" "$OUT" "READ: loop-backs.md"
+done
+put '{"current_phase":"3-impl-gate-failed","risk_tier":"standard"}' ""
+np
+assert_eq "a refused gate goes back to Phase 3" "$(run_of)" "3-impl"
+assert_contains "and reads the loop-back file" "$OUT" "READ: loop-backs.md"
+
+suite "next-phase: no tier recorded anywhere is exit 2 wherever the phase depends on it"
+
+# Each of these would otherwise silently take the standard shape: a folded map, no 2.5-design, no
+# phase-3-architectural.md.
+for state in 0.5-map 2-review-complete 3-impl 3-impl-complete 4-review; do
+  put "{\"current_phase\":\"$state\"}" '{"title":"no tier"}'
+  np
+  assert_eq "$state with a spec but no tier anywhere exits 2" "$RC" "2"
+  assert_contains "$state: and says the tier is missing" "$OUT" "no risk_tier"
+  assert_not_contains "$state: and routes nothing" "$OUT" "RUN:"
+done
+put '{"current_phase":"0.5-map"}' '{"title":"no tier"}'
+np
+assert_not_contains "no MAP: folded is printed without a tier" "$OUT" "MAP: folded"
+put '{"current_phase":"0.5-map","risk_tier":"architectural"}' '{"title":"no tier in spec"}'
+np
+assert_eq "CONTROL: the tier recorded in status.json is enough" "$RC" "0"
+
 suite "next-phase: conditional files"
 
 put '{"current_phase":"1-ba-complete"}' '{"risk_tier":"standard","impacted_domains":["api","frontend"]}'
@@ -143,17 +190,17 @@ assert_contains "a frontend-scoped spec reads the art director contract at routi
 put '{"current_phase":"1-ba-complete"}' '{"risk_tier":"standard","impacted_domains":["api"]}'
 np
 assert_not_contains "a spec with no frontend domain does not" "$OUT" "art-director-contract.md"
-put '{"current_phase":"3-impl-complete","risk_tier":"standard"}' ""
+put '{"current_phase":"4-review","risk_tier":"standard"}' ""
 printf '{}' > "$D/visual-contract.json"
 np
 assert_contains "a visual contract on disk reads it at Phase 4" "$OUT" "READ: art-director-contract.md (visual-contract.json exists)"
-put '{"current_phase":"3-impl-complete","risk_tier":"standard","review_rounds":1}' ""
+put '{"current_phase":"4-review","risk_tier":"standard","review_rounds":2}' ""
 np
 assert_contains "a second panel round reads the delta file" "$OUT" "READ: phase-4-delta.md"
 put '{"current_phase":"4-review","risk_tier":"standard","review_rounds":1}' ""
 np
 assert_not_contains "the first round, already counted at its own checkpoint, does not" "$OUT" "phase-4-delta.md"
-put '{"current_phase":"3-impl-complete","risk_tier":"standard","review_rounds":0}' ""
+put '{"current_phase":"3-impl","risk_tier":"standard","review_rounds":0}' ""
 np
 assert_not_contains "and neither does a run with no panel yet" "$OUT" "phase-4-delta.md"
 

@@ -52,7 +52,8 @@ This file is the core: operating model, argument, non-negotiables, this map, tie
 | `2-constraints` (standard) | `phase-2-lite.md` |
 | `2-review` (architectural) | `phase-2-review.md` |
 | `2.5-design` (architectural) | `phase-2.5-design.md`; `dispatch-routing.md` |
-| `3-impl` | `phase-3-impl.md`; `phase-3-architectural.md` (architectural, before any dispatch); `phase-3-4-gate.md` (Phase 3 returned); `live-verification.md` (the gate says so) |
+| `3-impl` | `phase-3-impl.md`; `phase-3-architectural.md` (architectural, before any dispatch) |
+| `3-4-gate`: `3-impl-complete`, panel not dispatched (run `phase3-exit.mjs`) | `phase-3-4-gate.md`; `live-verification.md` (the gate says so) |
 | `4-review` | `phase-4-panel.md`; `phase-4-verdict.md` (after the merge) |
 | `5-archive` | `phase-5-archive.md` |
 | Frontend-scoped spec at routing, or `visual-contract.json` at Phase 4 | `art-director-contract.md` |
