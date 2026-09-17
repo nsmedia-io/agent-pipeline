@@ -54,16 +54,23 @@ assert_eq "the delta re-review block is non-empty" \
   "$([[ -s "$DELTA_BLOCK" ]] && echo yes || echo no)" "yes"
 assert_eq "the panel path carries all THREE surface probes once the two fences are joined" \
   "$(grep -c '^surface_probe [a-z-]*\.mjs diffTouches' "$PANEL_BLOCK" | tr -d ' ')" "3"
-assert_eq "and the delta block carries FIVE: the same three plus the security-surface and test-surface probes that seat SecOps and QA (0.40.0)" \
-  "$(grep -c '^surface_probe [a-z-]*\.mjs diffTouches' "$DELTA_BLOCK" | tr -d ' ')" "5"
+# FOUR since review convergence: the delta round reseats a role by surface only where that
+# surface is a MERGE-CLASS surface (data layer, security path, test file, infra), and the
+# frontend surface is not one, so design_review re-sits only while it holds an open blocker id.
+assert_eq "and the delta block carries FOUR: data-layer and infra plus the security-surface and test-surface probes, and no frontend probe (review convergence)" \
+  "$(grep -c '^surface_probe [a-z-]*\.mjs diffTouches' "$DELTA_BLOCK" | tr -d ' ')" "4"
 # Each surface is named EXPLICITLY. Counting to three passes on three copies of one probe,
 # which is the shape a careless de-duplication produces.
 for pred in diffTouchesDataLayer diffTouchesInfra diffTouchesFrontend; do
   assert_eq "the panel path probes $pred exactly once" \
     "$(grep -c "^surface_probe [a-z-]*\.mjs $pred " "$PANEL_BLOCK" | tr -d ' ')" "1"
+done
+for pred in diffTouchesDataLayer diffTouchesInfra diffTouchesSecuritySurface diffTouchesTests; do
   assert_eq "and the delta block probes $pred exactly once" \
     "$(grep -c "^surface_probe [a-z-]*\.mjs $pred " "$DELTA_BLOCK" | tr -d ' ')" "1"
 done
+assert_eq "and the delta block does NOT probe diffTouchesFrontend (no merge-class surface)" \
+  "$(grep -c "^surface_probe [a-z-]*\.mjs diffTouchesFrontend " "$DELTA_BLOCK" | tr -d ' ')" "0"
 
 suite "the two probe definitions are byte-identical, so a delta round cannot drift from round 1"
 
@@ -134,8 +141,8 @@ assert_eq "phase.md exists and has a peer-review section to check" \
   "$([[ -n "$(phase_peer_review_section "$PHASE_MD")" ]] && echo present || echo "ABSENT")" "present"
 assert_eq "the reserved no-match code is READ from pipeline.md's probe, not remembered here" \
   "$(probe_sentinel "$PIPELINE_MD")" "20"
-assert_eq "and the delta block names five predicates for the check to walk" \
-  "$(delta_predicates "$DELTA_BLOCK" | grep -c . | tr -d ' ')" "5"
+assert_eq "and the delta block names four predicates for the check to walk" \
+  "$(delta_predicates "$DELTA_BLOCK" | grep -c . | tr -d ' ')" "4"
 
 assert_eq "phase.md's manual peer-review carries the same three-outcome contract as pipeline.md" \
   "$(phase_md_drift "$PHASE_MD" "$PIPELINE_MD" "$DELTA_BLOCK")" ""
@@ -207,7 +214,7 @@ assert_eq "CONTROL: that same grep DOES find the shape when it is present" \
   "$(grep -c 'process.exit(.*?0:1)' "$TWO_OUTCOME_PROBE" | tr -d ' ')" "1"
 # ...and the blocks are non-empty, or the zero above is a statement about two empty files.
 assert_eq "and those blocks carry executable probe lines for that zero to be about" \
-  "$(cat "$PANEL_BLOCK" "$DELTA_BLOCK" | grep -c '^surface_probe ' | tr -d ' ')" "8"
+  "$(cat "$PANEL_BLOCK" "$DELTA_BLOCK" | grep -c '^surface_probe ' | tr -d ' ')" "7"
 
 # ---- fixtures ---------------------------------------------------------------
 #
@@ -446,10 +453,10 @@ assert_contains "a data-layer fix commit seats secops beside dba" "$(run_delta "
 BROKEN_DELTA="$(run_delta "$CLEAN_REPO" "$BROKEN_ROOT")"
 assert_contains "an unevaluable delta probe adds dba" "$BROKEN_DELTA" "dba"
 assert_contains "and devops" "$BROKEN_DELTA" "devops"
-assert_contains "and design_review, the third surface" "$BROKEN_DELTA" "design_review"
+assert_contains "and secops, on the security-surface probe" "$BROKEN_DELTA" "secops"
+assert_contains "and qa, on the test-surface probe" "$BROKEN_DELTA" "qa"
 assert_contains "and emits the note" "$BROKEN_DELTA" "PANEL-NOTE: dba SEATED on an INDETERMINATE"
-assert_contains "and one for the frontend probe too" "$BROKEN_DELTA" \
-  "PANEL-NOTE: design_review SEATED on an INDETERMINATE frontend probe"
+assert_not_contains "but NOT design_review: the delta round no longer probes the frontend surface" "$BROKEN_DELTA" "design_review"
 
 # =============================================================================
 # THE SECOND ESCAPE: SHELL crossed with PATH COUNT.
@@ -598,10 +605,10 @@ for runner in "${RUNNERS[@]}"; do
     "$(run_delta "$DL_MULTI" "$GOOD_ROOT" "$runner")" "dba"
   assert_contains "[$runner] a MULTI-path infra fix commit adds devops" \
     "$(run_delta "$INFRA_MULTI" "$GOOD_ROOT" "$runner")" "devops"
-  assert_contains "[$runner] a one-path frontend fix commit adds design_review" \
-    "$(run_delta "$FE_REPO" "$GOOD_ROOT" "$runner")" "design_review"
-  assert_contains "[$runner] a MULTI-path frontend fix commit adds design_review" \
-    "$(run_delta "$FE_MULTI" "$GOOD_ROOT" "$runner")" "design_review"
+  assert_eq "[$runner] a one-path frontend fix commit reseats nobody (frontend is no merge-class surface)" \
+    "$(run_delta "$FE_REPO" "$GOOD_ROOT" "$runner")" "DELTA="
+  assert_eq "[$runner] a MULTI-path frontend fix commit reseats nobody either" \
+    "$(run_delta "$FE_MULTI" "$GOOD_ROOT" "$runner")" "DELTA="
   assert_eq "[$runner] CONTROL: a MULTI-path fix commit touching no surface seats nobody (the seed is empty; QA and SecOps are surface-conditional on a delta round)" \
     "$(run_delta "$CLEAN_MULTI" "$GOOD_ROOT" "$runner")" "DELTA="
   assert_not_contains "[$runner] CONTROL: a MULTI-path data-layer commit does NOT add design_review" \

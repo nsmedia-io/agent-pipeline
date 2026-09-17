@@ -145,6 +145,8 @@ The orchestrator scales how DEEP it runs by the `risk_tier` BA sets in `spec.jso
 - **standard**: a normal feature or bugfix with no schema/migration change, no cross-cutting contract change, no compliance dimension, and none of the concrete security triggers in `agents/ba.md` duty 6 (a new auth flow or authorization check, crypto, webhook verification, a new external data intake, a new retained data type); those auto-promote at intake. Reading or writing user data under EXISTING auth is standard: the security lens still sits on the panel, at the depth the tier buys. Runs a LIGHT Phase 0.5 map that is catalog-seeded verification FOLDED INTO the BA Phase 1 dispatch (no separate map subagent dispatch), **Phase 2-lite** (the orchestrator extracts the DBA/DevOps/SecOps constraint checklists into `constraints.md`; no reviewer subagents dispatched), a **single-thread Phase 3** (one Dev context writes code AND tests together against spec + map + constraints), and a **trimmed Phase 4 panel** (BA, Dev, QA, SecOps always; DBA and DevOps added when the diff touches their surfaces). This is the A/B-validated shape: the win was moving the multi-agent boundary from before-code-exists to after-a-diff-exists.
 - **architectural**: a schema/migration change, a cross-cutting contract change, a compliance dimension, or one of the concrete security triggers above. Runs the DEEP Phase 0.5 map, the full Phase 2 reviewer fan-out, the Phase 2.5 design bake-off, the QA-first Phase 3 (3a test contract, then 3b Dev), the full six-agent Phase 4 panel, the live-verification gate, and the higher-effort agents.
 
+**Cost class is a second axis, and it decides what may BLOCK.** BA also sets `cost_class` in `spec.json` (`product-money | product | tooling`, `agents/ba.md` duty 6), and the orchestrator copies it into `status.json`. The tier says how DEEP the pipeline runs; the cost class says what a defect in the change would COST, which is what a finding may block the merge on (`scripts/materiality.mjs`), how many Phase 4 fix rounds the issue gets (`scripts/round-budget.mjs`: tooling 1, product 2, product-money 2), and, at `tooling`, the panel shape: `qa secops` plus ONE surface specialist, one round, SecOps at `medium` effort. A `tooling` change is the repository's own build, test, CI, hook, gate or developer tooling, reached by no product user. Measured on one consumer before this axis existed: a single tooling issue ran 21 spec revisions and 8 Phase 4 panel rounds with six reviewers, and produced 79 acceptance criteria, a 676-assertion prover and 35 follow-up issues. The tier alone could not tell that change from a payments migration.
+
 The property-not-the-fix rule binds every role at every tier as a contract, but its MACHINE-REQUIRED half reaches only three AGENT TYPES - `dba`, `devops`, `secops` - refused on a `concerns[]` row with no property, or a SecOps `vulnerabilities[]` row with no remediation, in EITHER of the two artifacts their rules name: their own `review.<role>.json` shard AND the merged `review.json` at `/<role>`. Read that second one carefully, because it is keyed to the STOP and not to the phase: a merged Phase 2 record is re-checked at every later stop of the same type while it is under 30 minutes old, so a Phase 4 panellist of one of those three types can be blocked on a Phase 2 block it does not own. When that happens the run does not need a backfilled property in someone else's record - let the file age out or re-run the reviewer that owns the block - and both review schemas' `must_satisfy` descriptions carry the measurement and the operator note. No other agent's Phase 2 artifact is reached by any rule, so for every other role the contract is a norm. The standard tier's `constraints.md` injection writes no reviewer artifact at all, and those DBA/DevOps/SecOps constraint blocks are imperative mechanism BY DESIGN: the rule does not bind them, and each of the three contracts says so beside its own block.
 
 **A/B and review economics (when to build twice).** The default is build ONCE, the single-writer Phase 3, then spend the multi-agent budget on independent ADVERSARIAL review of that one artifact (Phase 4). Building an artifact TWICE is the `ab_build` escalation only: when BA sets `spec.ab_build: true` (architectural, and only when two or more materially different approaches are genuinely viable and a wrong one is expensive), Phase 3 runs as TWO independent implementations of the SAME fixed surface, each worktree-isolated, judged BLIND by a heterogeneous panel, then the winner is materialized with best-of-both grafts. That path costs roughly an order of magnitude more, so it is rare and deliberate; run a full dual-build A/B at most as a periodic calibration, not per task. Two free, always-on rules carry most of what a full A/B would otherwise re-discover, the grounding gate and the gate-bites proof, so each A/B you do run banks rules and retires.
@@ -197,7 +199,7 @@ Your job:
 1. Research the ask (read code, grep, check logs, read the knowledge store).
 2. Search existing tracker issues for duplicates.
 3. Challenge the ask. Where it is genuinely ambiguous, record the ambiguity in spec.open_questions with your recommendation rather than inventing an answer to keep the artifact valid. blocking: true requires BOTH tests in your agent definition: two different acceptance criteria following from two different answers, AND a difference only the owner can settle (cost, timeline, reversibility, product direction). Otherwise recommend a default, set blocking: false, and proceed. Do not stall the run on a preference or on an engineering call.
-4. Triage severity. Set trivial: true only for typos, one-line logic fixes, no data/infra/security impact.
+4. Triage severity. Set trivial: true only for typos, one-line logic fixes, no data/infra/security impact. Set cost_class (product-money | product | tooling) per duty 6 of your agent definition; a tooling spec over 12 acceptance criteria needs size_justification or it is refused.
 5. Create the tracker issue (skip this if Experiment mode is true; use a local exp-<slug> placeholder instead).
 6. Write the full spec to <PIPELINE_BASE>/<issue-or-placeholder>/spec.json per the contract in your agent definition.
 7. Return a short summary with the issue number, domains, trivial flag, and any concerns.
@@ -211,6 +213,7 @@ After BA returns:
 - Read `$PIPELINE_BASE/<issue>/spec.json` (the absolute path BA wrote to; your own checkout, so a cwd-relative `.pipeline/<issue>/spec.json` resolves to the same file, but read it absolutely to avoid the exact divergence this hardening fixes).
 - Validate required fields present: `issue_number`, `title`, `problem`, `requirements`, `acceptance_criteria`, `impacted_domains`, `trivial`.
 - If validation fails: report to the owner and halt.
+- **Record the cost class and refuse an oversized tooling spec.** Copy `spec.cost_class` into `status.json` (absent reads as `product`, and say so in `flags`), and on the first write of a run also set `schema_version: 2`, `fix_rounds: 0` and `spec_revisions: 0`. Then run `node "${CLAUDE_PLUGIN_ROOT}/scripts/round-budget.mjs" spec-size --spec "$PIPELINE_BASE/<issue>/spec.json" --status "$PIPELINE_BASE/<issue>/status.json"`. Exit 2 is a REFUSAL, not a warning: a `tooling` spec with more than 12 acceptance criteria and no `size_justification` goes back to BA to split, cut, or justify, and does not proceed.
 - **Run the open-questions gate (below) before anything else.** It comes before tier routing, because a blocking question can change the tier.
 - Update `status.json` with `current_phase: "1-ba-complete"`, `issue_number: <n>`, append event.
 
@@ -379,6 +382,8 @@ fi
 A Design `REQUEST_CHANGES` is gated exactly like DBA/DevOps (case 2 below); a Design `VETO` is impossible (only SecOps holds the veto), so the `design_review` verdict only ever reads as APPROVE, APPROVE_WITH_NOTES, or REQUEST_CHANGES.
 
 Then validate `review.json` against `${CLAUDE_PLUGIN_ROOT}/schemas/review.schema.json` via `${CLAUDE_PLUGIN_ROOT}/scripts/validate-pipeline-artifact.mjs`. The merged shape (keys `dba`, `devops`, `secops`) is identical to the old sequential output, so every downstream reader is unaffected. A merged block that comes out `null` (a reviewer that never wrote, or wrote unrecoverable garbage) is a halt condition, not a pass: a `null` verdict matches neither `APPROVE` nor `APPROVE_WITH_NOTES`, so the gate below will not advance on it.
+
+**Every loop back to BA after Phase 2 has returned is a spec revision, and it is counted before BA is dispatched.** That covers a Phase 2 `VETO` or `REQUEST_CHANGES` below, a scope ruling that changes requirements, and a Phase 4 `VETO` sent back to BA. Run `node "${CLAUDE_PLUGIN_ROOT}/scripts/round-budget.mjs" enter spec-revision --status "$PIPELINE_BASE/<issue>/status.json"` first. Exit 0 records the revision in `spec_revisions`; commit the checkpoint and loop back. Exit 2 means this would be revision 3 or later with no `owner_overrides` entry covering it: do NOT dispatch BA. Bring the owner the decision block the command printed (ship with deferrals, split, or stop), in full voice mode, and only if the owner chooses to keep going record their answer as an `owner_overrides` entry (`{"kind": "spec-revision", "up_to": <n>, "at": "<iso>", "reason": "<their reason>"}`) and run the command again.
 
 Apply the verdict gate, most-blocking first:
 
@@ -693,6 +698,7 @@ The panel reviews the finished diff, each agent through a distinct lens, while r
 
 - **architectural**: the six standing roles. `PANEL_ROLES="ba dba devops secops dev qa"`.
 - **trivial**: `PANEL_ROLES="qa secops"` (QA's binding test verdict plus SecOps, which is never trimmed at any tier). A trivial change is a typo or one-line fix, so DBA/DevOps/BA/Dev add no independent lens worth a context spin-up; two different tripwires still catch a diff that turns out to be bigger than the tier: the MECHANICAL path tripwire above, which is a data-layer PATH predicate and covers migrations, declarative schema and SQL data-access policy sources but NOT auth and NOT authorization code, and Dev's self-reported CONSTRAINT tripwire in the agents' STANDARD-TIER CONSTRAINTS blocks, which is what covers a new auth surface, crypto or webhook verification. Either one re-tiers, at which point the full gates apply. Add the surface-conditional Design lens exactly as below when the diff touches a frontend surface.
+- **cost_class `tooling`, at any tier**: `qa secops` plus ONE surface specialist (the first of `devops`, `dba`, `design_review` the probes below seat, else `dev`), for one round. The block after the Design probe applies it; SecOps keeps its seat, as it does on every full round.
 - **standard**: four always, `ba dev qa secops` (SecOps is never trimmed; it holds the veto and security drift is exactly what a pre-code triage can miss). Add the surface-conditional specialists from the diff, mechanically:
 
 ```bash
@@ -788,6 +794,19 @@ fi
 
 # Art Director sits only when it authored a contract for this issue (Duty A above).
 [ -f "$ARTIFACT_DIR/visual-contract.json" ] && PANEL_ROLES="$PANEL_ROLES art_director"
+
+# cost_class tooling, at ANY tier: qa + secops + ONE surface specialist, one round. SecOps keeps
+# its seat (a full round always seats it). The specialist is the first role the probes above
+# seated, in the order devops, dba, design_review; when none was seated it is dev.
+COST_CLASS="${COST_CLASS-$(jq -r '.cost_class // empty' "$PIPELINE_BASE/<issue>/status.json" 2>/dev/null)}"
+if [ "$COST_CLASS" = "tooling" ]; then
+  SPECIALIST="dev"
+  for r in devops dba design_review; do
+    case " $PANEL_ROLES " in *" $r "*) SPECIALIST="$r"; break ;; esac
+  done
+  PANEL_ROLES="qa secops $SPECIALIST"
+  echo "PANEL-NOTE: cost_class tooling panel: qa secops $SPECIALIST (one round)."
+fi
 rm -f "$CHANGED_PATHS"
 ```
 
@@ -820,9 +839,9 @@ Artifact directory (absolute): <ARTIFACT_DIR>. Read and write artifacts only at 
 Prior flags: read <ARTIFACT_DIR>/status.json flags array first; it is a one-line-per-agent digest of what earlier phases raised so you don't re-discover known concerns.
 Constraints (standard tier): if <ARTIFACT_DIR>/constraints.md exists, the diff was implemented against it in place of a Phase 2 review; verify the diff honors every line that touches your lens and flag violations as concerns.
 Blast-radius rule: when the diff changes a SHARED CONTRACT (a data-layer function or view return shape, a status enum or source value, a queue/message schema, an exported type), audit the UNCHANGED CONSUMERS of that symbol too, not just the files in the diff. Grep the whole repo for callers: a regression in an unchanged dependent never appears in git diff origin/main...HEAD. Flag any consumer whose assumption the change silently breaks, with no test covering it. Blast radius is not only parse-safety: also flag any code path that INDEPENDENTLY RE-DERIVES a value the change now owns or alters (e.g. a client recomputing a label the server now composes), because those two computations diverge while both still compile and pass tests (origin: a client recomputed a label the server had begun composing, so one entity showed two different names on one screen while both paths still passed tests). And readers are not only code call sites: a data-layer-resident consumer (a database function or view body) can read a changed table and is invisible to a call-site grep, so grep your migration/schema sources and the data-layer function/view inventory for `FROM`/`JOIN` of the changed table too (origin: a data-layer function read a table directly, was missed by a code-only reader audit, and a change to that table would have silently truncated it). And readers of a FIELD are not the callers of its producer: when the diff writes a value into a field of a shared data object, audit every reader of that field, because the value reaches each of them and none appears in a grep for the producer (origin: a composed note was written into one array read by the email renderer, the summarization prompt builder and the fallback narrative; the map and the design listed the composer's callers, and a settings pointer reached the model prompt labelled as an observed activity pattern).
-Adversarial stance: do not hunt for reasons to approve. Surface the single STRONGEST flaw your lens can find and state it plainly; every concern must cite specific evidence (a file:line, a failing or missing case, a consumer the change breaks). Default to skepticism: if you are unsure a path is covered or correct, raise it rather than wave it through. A clean verdict with no evidence reads as an unfinished review, not an APPROVE.
-Materiality (the rule in ${CLAUDE_PLUGIN_ROOT}/evidence.md; scripts/materiality.mjs applies it to your shard when it is merged): every concern carries likelihood (normal-use | edge-case | adversarial | hypothetical), reversibility (undo-button | some-cleanup | one-way-door) and harm (data-or-security | user-visible | internal | cosmetic). Only a blocker/critical/high concern that is normal-use or edge-case, or adversarial with a one-way-door or data-or-security harm, BLOCKS. A hypothetical never blocks. An unrated blocking-severity concern is treated as blocking and reported as unrated, so rate every one. Return REQUEST_CHANGES only when you hold a blocking concern, and carry at most TWO, ranked by user harm. Everything else is a note under APPROVE_WITH_NOTES: notes ship, and a note with a suggested_patch (a unified diff or an exact replacement for a local, obviously-correct fix) is applied by the orchestrator in the same turn without a Dev dispatch. The test before you write a finding down: would you stop a colleague's merge for this, today, on this project? If not, it is a note, and its rating says so. A BLOCKING concern carries its DECIDING TEST as `suggested_patch` whenever that test is local (one test file, about forty lines or fewer): the fix round then starts from a red test that encodes `must_satisfy`, not from a property Dev re-derives, and the delta re-review has one fewer thing to argue about (origin: on one issue the fix rounds that converged in a single pass were exactly the ones where the objector had supplied the failing test; the rounds that cost a second pass were the ones where it had not).
-Evidence discipline (read ${CLAUDE_PLUGIN_ROOT}/evidence.md before you conclude anything, and ${CLAUDE_PLUGIN_ROOT}/evidence-controls.md as well when the tier is architectural or the diff touches a control surface: auth, session, crypto, secrets, webhooks, a data-access policy, a migration, CI or deploy config, or this pipeline's own hooks and gates. These four are the compressed form; the third belongs to the controls file and binds only on a control surface):
+Stance: Report the most serious real defect your lens finds, with evidence. If nothing reaches a merge_class, APPROVE with at most three notes. Do not manufacture findings; an evidenced APPROVE is a complete review. Evidence is still owed either way: every concern cites specific evidence (a file:line, a failing or missing case, a consumer the change breaks), and an APPROVE names what you checked, file:line for what you read and, for every "none found", the grep you ran plus a control showing that grep can match (a zero from a pattern that could never match is vacuous, not clean).
+Materiality (the rule in ${CLAUDE_PLUGIN_ROOT}/evidence.md; scripts/materiality.mjs applies it to your shard when it is merged, under the cost_class in <ARTIFACT_DIR>/status.json): every concern carries severity, likelihood (normal-use | edge-case | adversarial | hypothetical), harm (data-or-security | money | user-visible | internal | cosmetic) and merge_class (wrong-pass: a gate or test reports green on a real failure | money | data-loss | security-exposure | none); reversibility (undo-button | some-cleanup | one-way-door) is optional. A concern BLOCKS only when its severity is blocker/critical/high AND its merge_class is not none AND its likelihood is normal-use (cost_class product-money: edge-case too; merge_class security-exposure: adversarial too); at cost_class tooling only wrong-pass and security-exposure block. A hypothetical never blocks. A concern missing a rating is read as an UNRATED NOTE, so a finding that should block must be rated. Return REQUEST_CHANGES only when you hold a blocking concern; at most TWO stay blockers, ranked by harm, and the merge demotes the rest to notes. A VETO and a REQUEST_REFACTOR obey the same test: with no blocking concern they read as notes and send nothing back. Everything else is a note under APPROVE_WITH_NOTES: notes ship, a note with a suggested_patch (a unified diff or an exact replacement for a local, obviously-correct fix) is applied by the orchestrator in the same turn without a Dev dispatch, and the rest go onto the issue's one deferral checklist. The test before you write a finding down: would you stop a colleague's merge for this, today, on this project? If not, it is a note, and its merge_class is none. A BLOCKING concern carries its DECIDING TEST as `suggested_patch` whenever that test is local (one test file, about forty lines or fewer): the fix round then starts from a red test that encodes `must_satisfy`, not from a property Dev re-derives, and the delta re-review has one fewer thing to argue about (origin: on one issue the fix rounds that converged in a single pass were exactly the ones where the objector had supplied the failing test; the rounds that cost a second pass were the ones where it had not).
+Evidence discipline (read ${CLAUDE_PLUGIN_ROOT}/evidence.md before you conclude anything, and ${CLAUDE_PLUGIN_ROOT}/evidence-controls.md as well when the tier is architectural or the diff touches a control surface: auth, session, crypto, secrets, webhooks, a data-access policy, a migration, CI or deploy config, or this pipeline's own hooks and gates. At cost_class tooling the controls file binds only on a gate's own pass/fail logic, or when the diff touches auth, secrets or this pipeline's own hooks; any other tooling diff, CI config and test scripts included, is reviewed under evidence.md alone and owes no mutation battery. These four are the compressed form; the third belongs to the controls file and binds only on a control surface):
 - A skip is not a pass. Every continue / early return / thrown setup in a verification path is where "checked and fine" and "never checked" produce the same output. A suite reporting N skipped and exiting 0 is this defect in a test runner's clothes.
 - A zero needs a non-zero control. Do not report "no problems" until you have watched that same check report a problem. Read the whole output line before believing a number in it; a `?` or `undefined` beside a clean `0` means the harness, not the code. `Cached: N cached` is a replay, not a run.
 - Mutate the assertion, not just the code. Plant the defect the test claims to catch and watch it go red, and run a control you expect to red so you know the harness is alive. Mutate each entry of a rule table separately; a two-entry table hides a dead entry from a whole-function mutation. A mutation that survives once is where the next one hides.
@@ -848,7 +867,7 @@ This block is replicated verbatim in ten files. THE HASHED SPAN is this passage 
 
 The span's sha1 on an undrifted tree is `2d3be9ef10b818d2afc569cf2dd41048e40b3626`, one hash for all ten files; this line sits OUTSIDE the span, because a digest cannot cover itself. THREE READINGS PRINT SOMETHING THAT LOOKS LIKE DRIFT AND IS NOT. Ten distinct hashes means your terminator never matched and you read to end of file. A handful of groups means you stopped at the next `## ` heading. And ten AGREEING hashes that are not this one means you trimmed the terminator line's trailing newline - the one false alarm that survives a "do all ten agree?" check, which is why the digest and not the group count is what you compare. Check your bounds against that digest before reporting drift; and if the ten copies agree with each other but not with it, the block was edited and this line was not.
 
-Deferring is an action: an item you route to a follow-up issue must be WRITTEN in that issue, or in the deferral directory when `deferralTracker` is `directory`, with its evidence and reasoning, before this change merges. Write it with `node "${CLAUDE_PLUGIN_ROOT}/scripts/deferral.mjs" record`, which routes to whichever of those the project configured, and keep the ref it prints. "Routed to #N" claimed in an artifact and never written has happened across three consecutive rounds on one PR.
+Deferring is an action: an item you route to a follow-up issue must be WRITTEN in that issue, or in the deferral directory when `deferralTracker` is `directory`, with its evidence and reasoning, before this change merges. A Phase 4 NOTE is not its own issue: the orchestrator writes every note onto ONE deferral checklist for this issue (`deferral.mjs checklist`), and only a note whose merge_class is not none, or one the owner marks, becomes its own tracker issue. Write it with `node "${CLAUDE_PLUGIN_ROOT}/scripts/deferral.mjs" record`, which routes to whichever of those the project configured, and keep the ref it prints. "Routed to #N" claimed in an artifact and never written has happened across three consecutive rounds on one PR.
 
 - Run the command, do not read it: execute every command in the artifact you review, in a shell as close to the operator's as you can get. Four non-running commands surfaced in one session, one exiting with the script's own "the platform is down" code because it lacked a credential wrapper, and one whose guarding test matched the BROKEN output and passed on the bug. Re-derive commands from the repo at the reviewed commit; never copy them from another agent's artifact.
 - A turn budget is a deadline: update your shard as you go, and when you run out, NAME what you did not reach. A partial matrix presented as complete is worse than an honest one — the next reader treats unrun mutations as passed.
@@ -858,7 +877,7 @@ Deferring is an action: an item you route to a follow-up issue must be WRITTEN i
 
 A before/after `git status` pair does not settle whether a measurement taken in a shared tree was contaminated: a contamination that opens and closes inside that window is invisible to both endpoints. That is a limitation of the boundary check, not a substitute for isolation. Where isolation is declined and a shared-tree measurement is taken anyway, sample continuously at a cadence under the observed contamination cycle and record the samples, not a conclusion.
 
-WRITE YOUR SHARD FIRST, BEFORE you compose your reply text. Write your verdict as a BARE block (verdict at the top level, no "<role>" wrapper key, no stray sibling keys) to <ARTIFACT_DIR>/peer-review.<role>.json, then write your summary. Do NOT write peer-review.json; the orchestrator merges shards. Agents routinely finish the analysis, announce "now writing my shard", and stop before doing it, which costs a full round trip and can strand a binding verdict; writing the file first makes that failure impossible. Before you return, PARSE-CHECK the shard: `node -e 'JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"))' <ARTIFACT_DIR>/peer-review.<role>.json` must exit 0, and every concern's `likelihood`, `reversibility` and `harm` must be one of the enum tokens above, never a sentence (origin: one shard carried a stray closing bracket and another carried prose where the enum belongs; the merge refused both, correctly, and the orchestrator hand-repaired them, which is a repair no shard should need).
+WRITE YOUR SHARD FIRST, BEFORE you compose your reply text. Write your verdict as a BARE block (verdict at the top level, no "<role>" wrapper key, no stray sibling keys) to <ARTIFACT_DIR>/peer-review.<role>.json, then write your summary. Do NOT write peer-review.json; the orchestrator merges shards. Agents routinely finish the analysis, announce "now writing my shard", and stop before doing it, which costs a full round trip and can strand a binding verdict; writing the file first makes that failure impossible. Before you return, PARSE-CHECK the shard: `node -e 'JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"))' <ARTIFACT_DIR>/peer-review.<role>.json` must exit 0, and every concern's `severity`, `likelihood`, `harm` and `merge_class` (and `reversibility` when you give one) must be one of the enum tokens above, never a sentence (origin: one shard carried a stray closing bracket and another carried prose where the enum belongs; the merge refused both, correctly, and the orchestrator hand-repaired them, which is a repair no shard should need).
 ```
 <!-- END PHASE4-PREAMBLE -->
 
@@ -944,7 +963,7 @@ for role in $ROLES_TO_MERGE; do
   if [ ! -f "$SHARD" ]; then echo "MISSING SHARD: $role" >&2; fi   # missing shard = halt (script exits 2)
   ARGS+=("$role=$SHARD")
 done
-node "${CLAUDE_PLUGIN_ROOT}/scripts/merge-peer-review.mjs" "$ARTIFACT_DIR/peer-review.json" "${ARGS[@]}"
+node "${CLAUDE_PLUGIN_ROOT}/scripts/merge-peer-review.mjs" --status "$PIPELINE_BASE/<issue>/status.json" "$ARTIFACT_DIR/peer-review.json" "${ARGS[@]}"
 for role in $ROLES_TO_MERGE; do rm -f "$ARTIFACT_DIR/peer-review.$role.json"; done
 ```
 
@@ -952,11 +971,11 @@ Recoverability is bought by making the fallback a path the merge actually READS,
 
 ### Delta re-review (a REQUEST_CHANGES / REQUEST_REFACTOR re-run, not a fresh panel)
 
-**Assume the remediation introduced a new defect, and say so in EVERY panel prompt, the first one included.** This used to live only in the delta section, which quietly assumed the first panel is not reviewing a fix. It is: the first panel reviews the fix for the REPORTED BUG, and the introduced-defect class is exactly what that framing surfaces -- on the run this rule came from, four independent lenses found introduced defects in the round they were told to look for them. Telling only the delta reviewers means the class is hunted from round two onward, so a defect the first panel could have caught costs a whole remediation cycle to find. Put the sentence in the round-one prompts too.
+**The delta stance: rule on your open blockers; a fix round is not a fresh hunt.** Every delta reviewer is told: "Rule only on your open blockers listed below. A new finding blocks only if the fix commits introduced it and it has a merge_class; everything else is a note." `render-panel.mjs --delta` prepends that sentence to the preamble and appends each role's open blocker ids to its lens, read from `materiality.open_blocker_ids` in the merged `peer-review.json` passed as `--peer-review`.
 
-**In the delta prompts specifically.** This is the empirical default, not pessimism: on one three-round remediation, EVERY round introduced a fresh defect while correctly closing the previous one. Round 1 bound a summary to its payload and thereby leaked internal identifiers into a customer-facing document; round 2 stripped them with a rule a live input could defeat; round 3 fixed the rule's cause. Each round's fix was correct and each round's fix was incomplete. Instruct every delta reviewer to rule on its own prior findings AND to look for what the fix brought with it, and tell it explicitly that prior rounds have introduced defects, so "the thing I asked for is done" is not the end of its review.
+This replaced two instructions that could not converge together: a preamble telling every reviewer to surface the single strongest flaw it could find, and a delta paragraph telling it to assume the remediation introduced a defect until evidence said otherwise. A reviewer instructed to find a defect finds one, every round. Measured on one consumer: one tooling issue ran 8 Phase 4 panel rounds and 21 spec revisions under those two instructions. What they were protecting is kept where it has a cost attached: a defect the fix commits INTRODUCED still blocks when it has a merge_class (a fix that makes a gate report green on a real failure, or that exposes data, is exactly that), and a fix that opens a merge_class hole is still the first thing a delta reviewer checks.
 
-When a fix is proposed for a defect the panel found, the reviewer's question is not "does this close it" but "**what does this open**". And when a residual is argued down to a note, apply the ship-or-block line from `evidence.md`: a control a LIVE INPUT can defeat is a gap; a control only a FUTURE EDIT can defeat is a ratchet. Do not grade the identical defect two ways one round apart because the second time it arrived with a mitigation attached.
+When a residual is argued down to a note, apply the ship-or-block line from `evidence.md`: a control a LIVE INPUT can defeat is a gap; a control only a FUTURE EDIT can defeat is a ratchet. Do not grade the identical defect two ways one round apart because the second time it arrived with a mitigation attached.
 
 When Phase 4 loops back on a `REQUEST_CHANGES` (or a `REQUEST_REFACTOR`) and Dev has pushed fix commits, do NOT re-run the whole panel. Re-dispatch only the roles whose judgment the fix could have changed, and let the standing approvals of the untouched roles hold. Resolve `ROLES_TO_MERGE` for the delta round mechanically:
 
@@ -966,13 +985,23 @@ When Phase 4 loops back on a `REQUEST_CHANGES` (or a `REQUEST_REFACTOR`) and Dev
 # recompute or shrink panel_roles on a delta round.
 FULL_PANEL="$(jq -r '.panel_roles | join(" ")' "$PIPELINE_BASE/<issue>/status.json")"
 
-# Re-dispatch: SEED with every role that OBJECTED last round, THEN add any role whose
-# SURFACE the fix commits touched, through the same three-outcome probes the first round
-# used so detection never drifts. SecOps and QA are surface-conditional here like every
-# other role: SecOps re-reviews when the fix touched a security surface or the data layer,
-# QA when it touched a test file; otherwise a standing round-1 APPROVE holds. This replaced
-# an unconditional "qa secops" seed that bought two fresh high-effort passes over an
-# already-approved diff on every fix round, which is where the archive's Phase 4 time went.
+# cost_class decides which surfaces reseat a role (tooling: see below). Absent reads as product.
+COST_CLASS="${COST_CLASS-$(jq -r '.cost_class // empty' "$PIPELINE_BASE/<issue>/status.json" 2>/dev/null)}"
+
+# Re-dispatch: SEED with every role that still HOLDS AN OPEN BLOCKER ID in the merged
+# peer-review.json (materiality.open_blocker_ids), THEN add a role by surface ONLY where the fix
+# commits touched that role's MERGE-CLASS surface, through the same three-outcome probes the
+# first round used so detection never drifts: dba on the data layer (data-loss), secops on a
+# security path (security-exposure) and on the data layer except at cost_class tooling, qa on a
+# test file (wrong-pass), devops on infra except at cost_class tooling, where CI and hook config
+# IS the change. Design has no merge-class surface of its own and re-sits only while it holds an
+# open blocker. Otherwise a standing verdict holds. SecOps seating on a FULL round is unchanged.
+if [ -z "${OBJECTING_ROLES+set}" ]; then
+  if ! OBJECTING_ROLES="$(node -e 'import(process.env.CLAUDE_PLUGIN_ROOT+"/scripts/materiality.mjs").then(m=>{const j=JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8"));console.log(m.openBlockerRoles(j).join(" "))}).catch(e=>{console.error("SEED-INDETERMINATE: "+(e&&e.message));process.exit(1)})' "$ARTIFACT_DIR/peer-review.json")"; then
+    OBJECTING_ROLES="$FULL_PANEL"
+    echo "PANEL-NOTE: open blocker ids UNREADABLE from peer-review.json; the delta seeds the FULL panel ($FULL_PANEL)."
+  fi
+fi
 DELTA=""
 for role in $OBJECTING_ROLES; do case " $DELTA " in *" $role "*) ;; *) DELTA="$DELTA $role";; esac; done
 FIX_CHANGED_PATHS="$(mktemp)"
@@ -1007,11 +1036,16 @@ surface_probe() {  # $1 = module basename under scripts/, $2 = predicate export;
 surface_probe data-layer-surface.mjs diffTouchesDataLayer < "$FIX_CHANGED_PATHS"; RC=$?
 if [ "$RC" -ne 20 ]; then
   case " $DELTA " in *" dba "*) ;; *) DELTA="$DELTA dba";; esac
-  # A data-layer fix is a security surface too (access policies, retained data), so it seats SecOps.
-  case " $DELTA " in *" secops "*) ;; *) DELTA="$DELTA secops";; esac
   if [ "$RC" -ne 0 ]; then
     echo "PANEL-NOTE: dba SEATED on an INDETERMINATE data-layer probe (exit $RC; see SURFACE-INDETERMINATE on stderr), not on a match."
-    echo "PANEL-NOTE: secops SEATED on an INDETERMINATE data-layer probe (exit $RC; see SURFACE-INDETERMINATE on stderr), not on a match."
+  fi
+  # A data-layer fix is a security surface too (access policies, retained data), so it seats
+  # SecOps; at cost_class tooling SecOps reseats only on a security path, probed next.
+  if [ "$COST_CLASS" != "tooling" ]; then
+    case " $DELTA " in *" secops "*) ;; *) DELTA="$DELTA secops";; esac
+    if [ "$RC" -ne 0 ]; then
+      echo "PANEL-NOTE: secops SEATED on an INDETERMINATE data-layer probe (exit $RC; see SURFACE-INDETERMINATE on stderr), not on a match."
+    fi
   fi
 fi
 # SecOps and QA are seated by their OWN surfaces (scripts/security-surface.mjs), on the same
@@ -1031,24 +1065,17 @@ if [ "$RC" -ne 20 ]; then
   fi
 fi
 surface_probe data-layer-surface.mjs diffTouchesInfra < "$FIX_CHANGED_PATHS"; RC=$?
-if [ "$RC" -ne 20 ]; then
+if [ "$RC" -ne 20 ] && [ "$COST_CLASS" != "tooling" ]; then
   case " $DELTA " in *" devops "*) ;; *) DELTA="$DELTA devops";; esac
   if [ "$RC" -ne 0 ]; then
     echo "PANEL-NOTE: devops SEATED on an INDETERMINATE infra probe (exit $RC; see SURFACE-INDETERMINATE on stderr), not on a match."
-  fi
-fi
-surface_probe frontend-surface.mjs diffTouchesFrontend < "$FIX_CHANGED_PATHS"; RC=$?
-if [ "$RC" -ne 20 ]; then
-  case " $DELTA " in *" design_review "*) ;; *) DELTA="$DELTA design_review";; esac
-  if [ "$RC" -ne 0 ]; then
-    echo "PANEL-NOTE: design_review SEATED on an INDETERMINATE frontend probe (exit $RC; see SURFACE-INDETERMINATE on stderr), not on a match."
   fi
 fi
 rm -f "$FIX_CHANGED_PATHS"
 ROLES_TO_MERGE="$DELTA"
 ```
 
-SecOps and QA are seated on a delta round by the same rule as every other role: they objected, or the fix commits touched their surface (security or data-layer paths for SecOps, test files for QA). Otherwise the round-1 verdict stands. SecOps is still never trimmed from a FULL round; what changed is that a fix to a layout file no longer buys a fresh xhigh security pass. (A SecOps `VETO` on a delta round, on a named `veto_ground`, halts to BA as always.) Dispatch ONLY `$ROLES_TO_MERGE`, rendered the same way as the first round with the delta form (`node "${CLAUDE_PLUGIN_ROOT}/scripts/render-panel.mjs" --status ... --worktree ... --delta "$ROLES_TO_MERGE" --first-round-head "$FIRST_ROUND_HEAD" --check --out "$ARTIFACT_DIR/panel.delta.workflow.mjs"`; the delta paragraph it prepends names the first-round head, the fix diff and the introduced-defect stance), then run the merge block above but WITHOUT the `rm -f "$ARTIFACT_DIR/peer-review.json"` line, so `merge-peer-review.mjs` folds the delta shards INTO the existing file and the standing approvals of the NON-delta roles survive. After the delta merge:
+Every role is seated on a delta round by the same rule: it holds an open blocker id, or the fix commits touched its MERGE-CLASS surface (the table in the block's comment). An unevaluable probe still seats, under the three-outcome rule. Otherwise the standing verdict holds. **SecOps seating on a FULL round stays mandatory at every tier and every cost class**; this rule trims delta rounds only, so a fix to a layout file, or a tooling fix that touches CI config, no longer buys a fresh security pass. (A SecOps `VETO` on a delta round stands only on a valid `veto_ground` carrying a blocking concern, and then halts to BA as always.) Dispatch ONLY `$ROLES_TO_MERGE`, rendered the same way as the first round with the delta form (`node "${CLAUDE_PLUGIN_ROOT}/scripts/render-panel.mjs" --status ... --worktree ... --delta "$ROLES_TO_MERGE" --first-round-head "$FIRST_ROUND_HEAD" --peer-review "$ARTIFACT_DIR/peer-review.json" --check --out "$ARTIFACT_DIR/panel.delta.workflow.mjs"`; the delta paragraph it prepends names the first-round head, the fix diff and the delta stance, and each lens lists that role's open blocker ids), then run the merge block above but WITHOUT the `rm -f "$ARTIFACT_DIR/peer-review.json"` line, so `merge-peer-review.mjs` folds the delta shards INTO the existing file and the standing approvals of the NON-delta roles survive. After the delta merge:
 
 - `peer-review.json` carries a verdict for the FULL panel: the objecting and surface-touched roles are freshly re-reviewed, and every other role's standing verdict is preserved.
 - Compute `peer_review_verdict_counts` over the FULL `$FULL_PANEL` (not the delta subset), via a `node -e` one-liner against the `countVerdicts` export of `${CLAUDE_PLUGIN_ROOT}/scripts/merge-peer-review.mjs` or by reading the merged file, so the tally reflects the whole panel.
@@ -1062,13 +1089,15 @@ Then:
 
 ### Final verdict rubric (strict precedence, first match wins)
 
-1. **`SECOPS_VETO`**: any agent returned `VETO` (only SecOps uses this verdict). Pipeline halts. The PR must not merge. Update `status.json` with `current_phase: "4-veto-rework-required"`, `veto_reason`. Return to the owner in **full voice mode** (see "Human-facing responses"); the line below is the factual spine, not the whole message:
+**The rubric reads `materiality.blocks_merge`, not the verdict word.** A role's block refuses the merge exactly when its `blocks_merge` is `true`, which is exactly when its `open_blocker_ids` is non-empty; the recorded verdict only says which loop a refusal takes. `finalVerdict(peerReview, panelRoles)` in `${CLAUDE_PLUGIN_ROOT}/scripts/materiality.mjs` is the code form of the five rows below, and a hand reading that disagrees with it is the defect.
+
+1. **`SECOPS_VETO`**: a block whose verdict is `VETO` has `blocks_merge: true`. After the merge that can only be SecOps, on a valid `veto_ground`, carrying at least one blocking concern; any other `VETO` was already recorded as `REQUEST_CHANGES` (or `APPROVE_WITH_NOTES` when nothing blocks) with `verdict_as_returned` beside it, and does not return the spec to BA. Sending the spec back to BA is a spec revision: run `round-budget.mjs enter spec-revision` first (see Phase 2's gate). Pipeline halts. The PR must not merge. Update `status.json` with `current_phase: "4-veto-rework-required"`, `veto_reason`. Return to the owner in **full voice mode** (see "Human-facing responses"); the line below is the factual spine, not the whole message:
    ```
    **[Orchestrator]:** PEER REVIEW VETO. SecOps blocked merge: <one-line reason>. Spec returns to BA for redesign. Resume with /pipeline --resume <issue>.
    ```
-2. **`REQUEST_REFACTOR`**: QA returned `REQUEST_REFACTOR` (testability blocked by code structure). Pipeline returns to the Dev implementation step (3b at the architectural tier, the single Dev thread otherwise); the existing behavioral test contract stands (QA-authored at architectural, Dev-authored at standard), so this re-runs Dev only and then re-runs Phase 4 as a **delta re-review** (QA, which objected, plus any role whose surface the refactor touched; see "Delta re-review" above), not a fresh full panel. `final_verdict: "REQUEST_REFACTOR"`. Do NOT merge.
-3. **`REQUEST_CHANGES`**: any agent's NORMALIZED verdict is `REQUEST_CHANGES`, which after `merge-peer-review.mjs` means it carries at least one BLOCKING concern under the materiality rule in `${CLAUDE_PLUGIN_ROOT}/evidence.md`. (A returned `REQUEST_CHANGES` with no blocking concern was recorded as `APPROVE_WITH_NOTES` with `verdict_as_returned` beside it; say so in the summary, because the reviewer's finding is still real, it just ships as a note.) `final_verdict: "REQUEST_CHANGES"`. Collect the blocking concerns into the owner-facing summary. Do NOT merge. Dev addresses them in ONE fix round; on the re-run, dispatch a **delta re-review** (the objecting role(s), plus any role whose surface the fix commits touched, per "Delta re-review" above) via `/phase peer-review --issue <n>`, additively merged so the standing approvals hold. If that delta round returns `REQUEST_CHANGES` again, do not dispatch another by default: bring the owner the fix-round decision from the convergence budget. A second fix round happens because the owner chose it.
-4. **`APPROVE_WITH_NOTES`**: any agent returned `APPROVE_WITH_NOTES` (or the legacy alias `APPROVE_WITH_NITS`), no blockers above. `final_verdict: "APPROVE_WITH_NOTES"`. Notes SHIP. In this same turn, yourself, with no Dev dispatch and no panel re-run: apply every concern that carries a `suggested_patch` (explicit-path staging, one commit `chore: apply Phase 4 panel notes for #<issue>`, then run the check command and confirm it is green), and file every note WITHOUT one in the deferral ledger, carrying its evidence: `node "${CLAUDE_PLUGIN_ROOT}/scripts/deferral.mjs" record --issue <issue> --title "<note>" --body-file <path> --evidence "<file:line>" --reason "<why it is a note>"`, which routes by `deferralTracker` (`gh issue create`, `glab issue create`, or a committed file under `deferralDir`) and prints the ref. Record that ref in `status.json` `flags`. If the configured CLI is missing the script REFUSES rather than inventing a destination; set `"deferralTracker": "directory"` and re-run, so the note lands in the repository instead of nowhere. Neither path delays the merge. A note that turns out not to be local or obviously correct when you try to apply it is filed, not forced.
+2. **`REQUEST_REFACTOR`**: a block whose verdict is `REQUEST_REFACTOR` has `blocks_merge: true` (QA, testability blocked by code structure, carrying a blocking concern; a REQUEST_REFACTOR with none was recorded as `APPROVE_WITH_NOTES`). It is a fix round, counted exactly like row 3: run `round-budget.mjs enter fix-round` before dispatching Dev, and on exit 2 bring the owner the decision instead. Pipeline returns to the Dev implementation step (3b at the architectural tier, the single Dev thread otherwise); the existing behavioral test contract stands (QA-authored at architectural, Dev-authored at standard), so this re-runs Dev only and then re-runs Phase 4 as a **delta re-review** (QA, which objected, plus any role whose surface the refactor touched; see "Delta re-review" above), not a fresh full panel. `final_verdict: "REQUEST_REFACTOR"`. Do NOT merge.
+3. **`REQUEST_CHANGES`**: any block has `blocks_merge: true` (after `merge-peer-review.mjs` its verdict is `REQUEST_CHANGES` and it carries at least one BLOCKING concern under the materiality rule in `${CLAUDE_PLUGIN_ROOT}/evidence.md`, at most two, listed in `open_blocker_ids`). (A returned `REQUEST_CHANGES` with no blocking concern was recorded as `APPROVE_WITH_NOTES` with `verdict_as_returned` beside it; say so in the summary, because the reviewer's finding is still real, it just ships as a note.) `final_verdict: "REQUEST_CHANGES"`. Collect the blocking concerns into the owner-facing summary. Do NOT merge. **Before dispatching Dev, count the round:** `node "${CLAUDE_PLUGIN_ROOT}/scripts/round-budget.mjs" enter fix-round --status "$PIPELINE_BASE/<issue>/status.json"`. Exit 0 records it in `fix_rounds` (budget: tooling 1, product 2, product-money 2); dispatch Dev, then a **delta re-review** (the roles holding open blocker ids, plus any role whose merge-class surface the fix commits touched, per "Delta re-review" above) via `/phase peer-review --issue <n>`, additively merged so the standing approvals hold. Exit 2 means the next round is past the budget and no `owner_overrides` entry covers it: do NOT dispatch Dev. Bring the owner the decision block the command printed (ship with deferrals, split, or stop) in full voice mode; only when the owner chooses to keep going, record `{"kind": "fix-round", "up_to": <n>, "at": "<iso>", "reason": "<their reason>"}` in `owner_overrides` and run the command again.
+4. **`APPROVE_WITH_NOTES`**: any agent returned `APPROVE_WITH_NOTES` (or the legacy alias `APPROVE_WITH_NITS`), no blockers above. `final_verdict: "APPROVE_WITH_NOTES"`. Notes SHIP. In this same turn, yourself, with no Dev dispatch and no panel re-run: apply every concern that carries a `suggested_patch` (explicit-path staging, one commit `chore: apply Phase 4 panel notes for #<issue>`, then run the check command and confirm it is green), and write every other note onto ONE deferral checklist for the issue: `node "${CLAUDE_PLUGIN_ROOT}/scripts/deferral.mjs" checklist --issue <issue> --peer-review "$ARTIFACT_DIR/peer-review.json" [--own <id>,<id>] [--unapplied <id>,<id>]`. It records one checklist entry holding every note with its role, id, ratings and location, and a SEPARATE entry only for a note whose `merge_class` is not `none` or whose id the owner named in `--own`; notes that carry a `suggested_patch` are left out as applied unless you name them in `--unapplied` because the patch did not apply. It routes by `deferralTracker` (`gh issue create`, `glab issue create`, or a committed file under `deferralDir`) and prints each ref. Record the refs in `status.json` `flags`. Before this, every note without a patch became its own tracker issue; measured on one consumer, one tooling issue produced 35 of them. If the configured CLI is missing the script REFUSES rather than inventing a destination; set `"deferralTracker": "directory"` and re-run, so the note lands in the repository instead of nowhere. Neither path delays the merge. A note that turns out not to be local or obviously correct when you try to apply it is filed, not forced.
 5. **`APPROVE`**: every dispatched panel role's verdict is `APPROVE`. `final_verdict: "APPROVE"`. Ready for human merge to the integration branch.
 
 **Rows 2 and 3 loop back for remediation, and the write that DOES the looping back clears the verdict (#110).** When you set `current_phase` to the Dev implementation step for a `REQUEST_REFACTOR` or `REQUEST_CHANGES` fix round, clear `final_verdict` and `peer_review_verdict_counts` to `null` in that same update. This is the EARLIER of the two clearing points and it is the one that covers the whole remediation window; the Phase 4 checkpoint rule above then re-clears idempotently on the delta round. Both are needed, and the loopback one is not optional: it was added because the checked-out `knowledge/issue-archive/43.json` is a run archived at `current_phase: "3-impl"`, `final_verdict: "REQUEST_CHANGES"`, `review_rounds: 4` -- a record that sat in the stale-verdict state at a GUARDED phase for a four-round remediation and never reached the `4-review` re-entry that the other rule keys on. The cost is measured, in this repo, at `plugins/pipeline/scripts/gate-phase-entry.mjs:697`: a refusing record at `3-impl` given a `final_verdict` goes rc 2 to rc 0, and every later phase of that run is not-applicable thereafter. So the stale verdict does not merely blind a control for a window; it disarms the phase-entry guard for the REST OF THE RUN.
@@ -1198,37 +1227,35 @@ working. Measured on one issue: three Phase 2 rounds, four spec revisions, an 86
 reasoning, and zero lines of code. Every blocker in every round was real. That is the point — real
 findings are not evidence that continuing is correct.
 
-Two budgets, both cheap, both fail-loud:
+Two budgets, both COUNTED IN CODE, both fail-loud. They were prose for several releases and nothing
+counted: measured on one consumer, a single tooling issue then ran 21 spec revisions and 8 Phase 4
+panel rounds. `scripts/round-budget.mjs` reads the counters in `status.json`, refuses (exit 2) a
+round past the budget, and prints a plain-language owner decision block. Its `checkRoundBudget`
+function is exported so a phase-entry gate can call it too.
 
-**1. Round budget.** After the SECOND Phase 2 round returns any `REQUEST_CHANGES`, do NOT loop back
-by default. Stop and present the owner a decision: **split** the spec, **defer** the unresolved half
-to a follow-up issue, or **proceed** to Phase 2.5 carrying the findings as constraints. Say which you
-recommend and why. A third round happens because the owner chose it, not because the loop-back table
-said to.
+**1. Spec-revision budget.** Every loop back to BA after Phase 2 has returned is a spec revision
+(Phase 2's gate says where it is counted). Two are allowed at every cost class. The third needs
+the owner: `round-budget.mjs enter spec-revision` refuses it and prints **ship with deferrals /
+split / stop**. The same evidence that justifies each revision justifies the split: if revision
+two's findings are in a different part of the spec from revision one's, the spec is too big to
+review as a unit.
 
-The same evidence that justifies each round justifies the split: if round two's findings are in a
-different part of the spec from round one's, the spec is too big to review as a unit.
+**2. Fix-round budget (the one that binds where the cost actually is).** Every Phase 4
+`REQUEST_CHANGES` or `REQUEST_REFACTOR` that loops back to Dev is a fix round, counted in
+`fix_rounds` by `round-budget.mjs enter fix-round` before Dev is dispatched. Budget: `tooling` 1,
+`product` 2, `product-money` 2. Measured on this repo's own records, phase 4 is the largest single
+consumer of active pipeline time -- 29% across seven runs, against 24% for implementation -- and
+every one of those rounds was individually justified by a real finding.
 
-**2. Fix-round budget (the one that binds where the cost actually is).** The round budget above
-covers Phase 2 only. **Post-panel remediation is uncounted, and that is where the budget goes.**
-Measured on this repo's own records, phase 4 is the largest single consumer of active pipeline
-time -- 29% across seven runs, against 24% for implementation -- and every one of those rounds
-was individually justified by a real finding, which is precisely the trap the section above
-describes.
-
-After the FIRST fix round on one issue (a delta re-review that again returns `REQUEST_CHANGES`),
-do NOT dispatch a second by default. Stop and present the owner: **re-open the design** (see the
-veto/second-round re-decision below), **defer** the unresolved finding to a follow-up issue, or
-**proceed** with a second round. Say which you recommend and why. The budget moved from two rounds
-to one when the materiality rule landed: a `REQUEST_CHANGES` now means a blocking concern, so a
-fix round that still cannot close one is the design signal, not the reviewer being thorough.
+**Past either budget, the pipeline stops and asks; it does not decide.** Bring the owner the
+decision block the command printed, in full voice mode, with your recommendation filled in. The
+owner's "keep going" is recorded as an `owner_overrides` entry (`kind`, `up_to`, `at`, `reason`),
+and only that entry lets the command say yes to the round it covers. Never write one on your own
+judgement.
 
 **Count introduced defects, not rounds, wherever you can.** A round that closes its target
-cleanly is the gate working. A round whose fix CREATES a new user-visible defect, a regression,
-or a race is evidence that the design shape is wrong rather than the code -- and three
-consecutive such rounds, each individually justified, is the signal this budget exists to catch.
-When the delta shards let you tell those apart, trip on the introduced-defect count; when they do
-not, the round count is the honest fallback.
+cleanly is the gate working. A round whose fix CREATES a new merge_class defect is evidence that
+the design shape is wrong rather than the code, and it is the fact to put in the owner's decision.
 
 **Read `review_rounds_observed`, never `review_rounds` alone.** The hand-maintained counter
 disagreed with the events on 5 of 7 committed records, in both directions, and was reliable only
@@ -1237,7 +1264,10 @@ count and a signed `review_rounds_recorded_delta`; a non-zero delta means the co
 and the budget would bind on a number nobody measured.
 
 **3. Spec size tripwire.** When a spec crosses **10 requirements or 12 acceptance criteria**, BA must
-either justify the size in `spec.json`'s **`size_justification`** field or propose a split. These are
+either justify the size in `spec.json`'s **`size_justification`** field or propose a split. **At
+cost_class `tooling` this is a refusal, not a warning:** `round-budget.mjs spec-size` exits 2 on a
+tooling spec over 12 acceptance criteria with no `size_justification`, and the orchestrator returns
+it to BA (Phase 1 above). The rest of this item describes the other cost classes. These are
 not hard limits; they are the point at which "is this one issue?" stops being rhetorical. On the run
 above, BA recommended a three-way split the first time it was asked directly, and was right, but
 nothing had asked. **Something asks now:** `scripts/validate-pipeline-artifact.mjs` prints a WARNING
@@ -1276,17 +1306,17 @@ The flow is adaptive: a later phase can invalidate an earlier decision. When one
 
 | Trigger | Surfaced in | Loop back to | Then |
 |---|---|---|---|
-| SecOps `VETO` | Phase 2 or Phase 4 | BA (spec redesign) | Re-run Phase 2 (architectural) or Phase 2-lite (standard), then forward |
-| Any `REQUEST_CHANGES` | Phase 2 | BA (spec rework) | Re-run Phase 2 |
+| SecOps `VETO` (valid `veto_ground` AND a blocking concern) | Phase 2 or Phase 4 | BA (spec redesign), after `round-budget.mjs enter spec-revision` exits 0 | Re-run Phase 2 (architectural) or Phase 2-lite (standard), then forward; on exit 2, the owner decides |
+| Any `REQUEST_CHANGES` | Phase 2 | BA (spec rework), after `round-budget.mjs enter spec-revision` exits 0 | Re-run Phase 2; on exit 2, the owner decides |
 | Mis-tier tripwire: the MECHANICAL data-layer path predicate (migration, declarative schema, SQL data-access policy source) at the gate, or Dev's self-reported constraint tripwire (auth, crypto, webhook verification, a shared contract's shape) in Phase 3 | Phase 3 (Dev self-halt) or the Phase 3 to 4 gate | BA (re-tier to architectural) | Run the skipped phases (Phase 2 fan-out, Phase 2.5 if design-shaped) against the existing worktree, then re-enter the gate |
 | Owner answers a blocking open question | Phase 1 (gate) | Phase 1 (BA only) | Re-dispatch BA to fold every `resolution` into requirements, acceptance criteria, out-of-scope, and the tier. The orchestrator never edits the spec itself; `open_questions` and its resolutions stay in the artifact as the record |
-| SecOps `VETO` (on a named `veto_ground`), or a second fix round the owner chose | Phase 4 | Phase 2.5 (judge only) | Re-open the design decision: re-dispatch the JUDGE with the veto or the accumulated fix-round findings and have it rule on whether the chosen approach still wins over the runner-up in `rejected_alternatives`. Keep the grafts that still apply; the sketches stand and are NOT re-run. Runs BEFORE the next implementation attempt is authorised |
+| SecOps `VETO` (on a valid `veto_ground` carrying a blocking concern), or a fix round past the budget the owner chose | Phase 4 | Phase 2.5 (judge only) | Re-open the design decision: re-dispatch the JUDGE with the veto or the accumulated fix-round findings and have it rule on whether the chosen approach still wins over the runner-up in `rejected_alternatives`. Keep the grafts that still apply; the sketches stand and are NOT re-run. Runs BEFORE the next implementation attempt is authorised |
 | Owner picks the runner-up (or a variant) at design-lock | Phase 2.5 (owner answer) | Phase 2.5 (judge only) | Re-dispatch the JUDGE to re-materialize `design.json` around the chosen approach, keeping the grafts that still apply; the sketches stand and are NOT re-run. Record `owner_decision.resolution`, then forward to Phase 3 |
 | Scope drift / wrong spec assumption | Phase 3 | BA (ruling) | If requirements/acceptance criteria change materially: architectural re-runs affected Phase 2 reviewer(s) then Phase 3 from 3a (QA re-authors tests); standard re-extracts constraints then re-dispatches the single Dev thread |
 | Live-verification suite skipped, not recorded (data-migration / security-sensitive change) | Phase 3 to 4 gate | Phase 3 (Dev/QA) | Produce a recorded local pass against a real backing service, then re-run the gate |
-| `REQUEST_REFACTOR` (testability) | Phase 4 (QA) | Dev implementation step (3b at architectural; the single thread at standard) | The existing test contract stands; Dev refactors to keep it green. Re-run Phase 4 as a delta re-review (QA, which objected, plus surface-touched roles) |
-| Any `REQUEST_CHANGES` (a BLOCKING concern under materiality) | Phase 4 | Dev implementation step, ONE round by default | Delta re-review: the objecting role(s) plus any role whose surface the fix touched (SecOps on security or data-layer paths, QA on test files); additively merge so standing approvals hold; `panel_roles` unchanged. A second fix round is the owner's call |
-| `APPROVE_WITH_NOTES` (notes) | Phase 4 | Orchestrator, same turn | Apply the `suggested_patch` notes, file the rest as follow-up issues, merge |
+| `REQUEST_REFACTOR` with `blocks_merge` (testability) | Phase 4 (QA) | Dev implementation step (3b at architectural; the single thread at standard), after `round-budget.mjs enter fix-round` exits 0 | The existing test contract stands; Dev refactors to keep it green. Re-run Phase 4 as a delta re-review (roles holding open blocker ids, plus merge-class-surface-touched roles). On exit 2, the owner decides |
+| Any `REQUEST_CHANGES` with `blocks_merge` (a BLOCKING concern under materiality) | Phase 4 | Dev implementation step, after `round-budget.mjs enter fix-round` exits 0 (budget: tooling 1, product 2, product-money 2) | Delta re-review: the roles holding open blocker ids plus any role whose merge-class surface the fix touched (SecOps on security paths, and on data-layer paths except at tooling; QA on test files); additively merge so standing approvals hold; `panel_roles` unchanged. On exit 2, the owner decides |
+| `APPROVE_WITH_NOTES` (notes) | Phase 4 | Orchestrator, same turn | Apply the `suggested_patch` notes, write the rest onto the issue's one deferral checklist (`deferral.mjs checklist`), merge |
 
 A loop-back is not a failure; it is the gate doing its job. Record each one as an event in `status.json` so the audit trail shows where the assumption broke. The compliance and safety gates (SecOps veto, DBA migration review, access-control rationale) are never bypassed to "save" a loop.
 

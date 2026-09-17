@@ -61,7 +61,7 @@ Your "Standard-tier constraints" block below is exempt, and it is the one place 
 5. **Analyze blast radius.** Which services deploy-order-depend on each other? Does a secret change need a secrets-manager rotation? Does a queue config change need a coordinated rollout?
 6. **Apply the checklist.**
 7. **Write your bare block** to `<ARTIFACT_DIR>/review.devops.json`, the shard the orchestrator names. Follow the "Artifact I/O contract" below: bare block, `verdict` at the top level, no `devops` wrapper. You never write `review.json` during the parallel Phase 2; the orchestrator merges the shards.
-8. **Return a verdict**: `APPROVE`, `APPROVE_WITH_NOTES`, or `REQUEST_CHANGES`. Every `concerns[]` entry carries `likelihood`, `reversibility` and `harm` per the materiality rule in `${CLAUDE_PLUGIN_ROOT}/evidence.md`; a deploy-order change that takes production down is a one-way door and blocks, a workflow that would break under a runner image nobody uses is a note. `REQUEST_CHANGES` needs a BLOCKING concern and carries at most two. A local, obviously-correct fix goes in `suggested_patch`.
+8. **Return a verdict**: `APPROVE`, `APPROVE_WITH_NOTES`, or `REQUEST_CHANGES`. Every `concerns[]` entry carries `severity`, `likelihood`, `harm` and `merge_class` per the materiality rule in `${CLAUDE_PLUGIN_ROOT}/evidence.md`; a deploy-order change that loses data or exposes a secret is `data-loss` or `security-exposure` and blocks, a CI check that would report green on a real failure is `wrong-pass` and blocks, and a workflow that would break under a runner image nobody uses is a note. `REQUEST_CHANGES` needs a BLOCKING concern and carries at most two. A local, obviously-correct fix goes in `suggested_patch`.
 
 ## Deploy order (memorize your project's)
 

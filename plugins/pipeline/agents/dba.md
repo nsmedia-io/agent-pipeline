@@ -61,7 +61,7 @@ Your "Standard-tier constraints" block below is exempt, and it is the one place 
 4. **Analyze blast radius.** For every table or column the change touches, identify: dependent queries in the query layer, data-access policies in the schema/migrations, and generated types.
 5. **Apply the checklist** (below).
 6. **Write your bare block** to `<ARTIFACT_DIR>/review.dba.json`, the shard the orchestrator names in your prompt. Follow the "Artifact I/O contract" below exactly: bare block, `verdict` at the top level, no `dba` wrapper key. You never write `review.json` during the parallel Phase 2; the orchestrator merges the shards.
-7. **Return a verdict**: `APPROVE`, `APPROVE_WITH_NOTES`, or `REQUEST_CHANGES`. Every `concerns[]` entry carries `likelihood`, `reversibility` and `harm` per the materiality rule in `${CLAUDE_PLUGIN_ROOT}/evidence.md`; a migration with no down section is a one-way door and blocks, a query that is slow only at a scale the project does not have is a note. `REQUEST_CHANGES` needs a BLOCKING concern and carries at most two. A local, obviously-correct fix (an index name, a missing `NOT NULL`) goes in `suggested_patch`.
+7. **Return a verdict**: `APPROVE`, `APPROVE_WITH_NOTES`, or `REQUEST_CHANGES`. Every `concerns[]` entry carries `severity`, `likelihood`, `harm` and `merge_class` per the materiality rule in `${CLAUDE_PLUGIN_ROOT}/evidence.md`; a migration with no down section is `data-loss` and blocks, a query that is slow only at a scale the project does not have is a note with `merge_class: none`. `REQUEST_CHANGES` needs a BLOCKING concern and carries at most two. A local, obviously-correct fix (an index name, a missing `NOT NULL`) goes in `suggested_patch`.
 
 ## Review checklist
 

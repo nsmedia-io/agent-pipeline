@@ -18,11 +18,13 @@
 //
 // Usage:
 //   node render-panel.mjs --status <status.json> --worktree <path> [--plugin-root <dir>]
-//                         [--delta "<roles>" --first-round-head <sha>] [--out <file>] [--check]
+//                         [--delta "<roles>" --first-round-head <sha> [--peer-review <file>]]
+//                         [--out <file>] [--check]
 //
 //   --delta        space-separated roles to re-dispatch on a delta round; the preamble then
 //                  carries the delta paragraph and only those roles are rendered. Requires
-//                  --first-round-head, the HEAD the FIRST round's panel reviewed.
+//                  --first-round-head, the HEAD the FIRST round's panel reviewed. --peer-review names
+//                  the merged peer-review.json whose open_blocker_ids each delta lens lists.
 //   --check        after rendering, write the script to a temp .mjs and run `node --check` on
 //                  it; exit non-zero if it does not parse. The test suite uses this; the
 //                  orchestrator should too.
@@ -43,6 +45,7 @@ import { fileURLToPath } from "node:url";
 import { isMain as isMainScript } from "./lib.mjs";
 import { resolve as resolveModel } from "./dispatch-model.mjs";
 import { resolve as resolveEffort } from "./dispatch-effort.mjs";
+import { openBlockers as listOpenBlockers } from "./materiality.mjs";
 
 export const PREAMBLE_BEGIN = "<!-- BEGIN PHASE4-PREAMBLE -->";
 export const PREAMBLE_END = "<!-- END PHASE4-PREAMBLE -->";
@@ -51,7 +54,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_PLUGIN_ROOT = path.resolve(HERE, "..");
 
 export function parseArgs(argv) {
-  const args = { delta: null, firstRoundHead: null, out: null, check: false, pluginRoot: DEFAULT_PLUGIN_ROOT };
+  const args = { delta: null, firstRoundHead: null, peerReview: null, out: null, check: false, pluginRoot: DEFAULT_PLUGIN_ROOT };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--status") args.status = argv[++i];
@@ -59,6 +62,7 @@ export function parseArgs(argv) {
     else if (a === "--plugin-root") args.pluginRoot = argv[++i];
     else if (a === "--delta") args.delta = argv[++i];
     else if (a === "--first-round-head") args.firstRoundHead = argv[++i];
+    else if (a === "--peer-review") args.peerReview = argv[++i];
     else if (a === "--out") args.out = argv[++i];
     else if (a === "--check") args.check = true;
     else throw new Error(`unknown argument: ${a}`);
@@ -113,28 +117,56 @@ export function substitute(text, { issue, worktree, head, artifactDir, pluginRoo
     .split("${CLAUDE_PLUGIN_ROOT}").join(pluginRoot);
 }
 
+// The delta stance (review convergence). The old paragraph told every delta reviewer to "assume the
+// remediation introduced a defect until evidence says otherwise", on top of a preamble telling it to
+// surface the strongest flaw it could find. Together those never converge: a reviewer instructed to
+// find a defect finds one. A delta reviewer now rules on its own open blockers, and a NEW finding
+// blocks only when the fix commits introduced it AND it has a merge_class.
+export const DELTA_STANCE =
+  "Rule only on your open blockers listed below. A new finding blocks only if the fix commits introduced it and it has a merge_class; everything else is a note.";
+
 export function deltaParagraph(roles, firstRoundHead, head) {
   return (
     `DELTA RE-REVIEW. This is NOT a fresh full panel. The first round reviewed ${firstRoundHead}; ` +
     `the reviewed commit is now ${head}, and the fix diff is git diff ${firstRoundHead}...HEAD. ` +
     `Only these roles are re-dispatched: ${roles.join(", ")}; every other role's standing verdict holds ` +
-    `and is merged additively. Rule on your own prior findings AND look for what the fix brought with it: ` +
-    `assume the remediation introduced a defect until evidence says otherwise. A second REQUEST_CHANGES ` +
-    `on this issue triggers the fix-round budget and goes to the owner, so hold one only for an evidenced ` +
-    `blocking property.\n`
+    `and is merged additively. ${DELTA_STANCE} The fix-round budget is counted by scripts/round-budget.mjs, ` +
+    `and a round past it goes to the owner, not to another panel.\n`
   );
+}
+
+/** The per-role sentence naming the open blocker ids a delta reviewer rules on. */
+export function openBlockerLine(role, openBlockers) {
+  if (openBlockers === null || openBlockers === undefined) {
+    return " Your open blockers: none recorded (no peer-review.json was given to the renderer); rule on the blocking concerns you raised last round.";
+  }
+  const ids = Array.isArray(openBlockers[role]) ? openBlockers[role] : [];
+  return ids.length > 0
+    ? ` Your open blockers: ${ids.join(", ")}. For each, say closed or still open, with evidence.`
+    : " Your open blockers: none. You were seated because the fix commits touched your surface; only a new merge_class finding the fix introduced can block.";
+}
+
+/** { role: [open blocker ids] } from a merged peer-review.json. */
+export function openBlockerMap(peerReview) {
+  const out = {};
+  for (const { role, id } of listOpenBlockers(peerReview)) (out[role] ||= []).push(id);
+  return out;
 }
 
 /**
  * Render the Workflow script. Pure given its inputs, so the test can drive it with a fixture
  * status record and a scratch worktree.
  */
-export function render({ status, worktree, head, pluginRoot, lenses, preambleMarkdown, delta = null, firstRoundHead = null, cfg }) {
+export function render({ status, worktree, head, pluginRoot, lenses, preambleMarkdown, delta = null, firstRoundHead = null, openBlockers = null, cfg }) {
   const issue = status.issue_number ?? status.experiment_id;
   if (issue === undefined || issue === null) throw new Error("status.json carries no issue_number");
   const tier = status.risk_tier;
   if (!["trivial", "standard", "architectural"].includes(tier)) {
     throw new Error(`status.json risk_tier is ${JSON.stringify(tier)}; the panel cannot be routed without a determined tier`);
+  }
+  const costClass = status.cost_class;
+  if (costClass !== undefined && !["product-money", "product", "tooling"].includes(costClass)) {
+    throw new Error(`status.json cost_class is ${JSON.stringify(costClass)}; expected product-money, product or tooling`);
   }
   const panel = Array.isArray(status.panel_roles) ? status.panel_roles : null;
   if (!panel || panel.length === 0) throw new Error("status.json panel_roles is absent or empty; resolve the panel first");
@@ -154,11 +186,12 @@ export function render({ status, worktree, head, pluginRoot, lenses, preambleMar
     const opts = { agentType: lens.agentType };
     const m = resolveModel({ role, tier, phase: "4", site: "panel-lens", cfg });
     if (!m.error && typeof m.model === "string" && /^[a-z]+$/.test(m.model)) opts.model = m.model;
-    const e = resolveEffort({ role, tier, phase: "4", site: "panel-lens", surface: "workflow", cfg });
+    const e = resolveEffort({ role, tier, phase: "4", site: "panel-lens", surface: "workflow", cfg, costClass });
     if (e.error) throw new Error(`effort resolver refused ${role}: ${e.error}`);
     if (typeof e.effort === "string" && e.effort) opts.effort = e.effort;
     opts.label = lens.label;
-    const lensText = substitute(lens.lens, { issue, worktree, head, artifactDir, pluginRoot });
+    let lensText = substitute(lens.lens, { issue, worktree, head, artifactDir, pluginRoot });
+    if (delta) lensText += openBlockerLine(role, openBlockers);
     calls.push(`  () => agent(PREAMBLE + ${JSON.stringify(lensText)}, ${JSON.stringify(opts)}),`);
   }
 
@@ -222,6 +255,7 @@ function main(argv) {
       preambleMarkdown: md,
       delta: args.delta,
       firstRoundHead: args.firstRoundHead,
+      openBlockers: args.peerReview ? openBlockerMap(JSON.parse(readFileSync(args.peerReview, "utf8"))) : null,
     });
     if (args.check) {
       const c = checkScript(script);

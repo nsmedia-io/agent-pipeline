@@ -24,51 +24,70 @@ tokenizer in a security hook and wrong for a layout change.
 
 ## Materiality: what blocks, and what ships as a note
 
-A review finding has TWO axes, and the second one used to be missing. Severity says how bad it
-would be. Materiality says whether it happens, and what it costs to undo if it does. A finding
-that is severe and hypothetical is a note. A finding that is severe and reachable in normal use
-is a block. The rule is the one a careful colleague applies before refusing a merge, written
-down so six reviewers apply it the same way.
+A review finding has THREE axes. Severity says how bad it would be. Likelihood says whether it
+happens. Merge class says what merging it would actually COST. A finding that is severe, real
+and reachable, and that costs nobody money, data, security or a truthful check, is a note. The
+rule is the one a careful colleague applies before refusing a merge, written down so six
+reviewers apply it the same way.
 
-**Every concern carries three ratings, and a blocking-severity concern without them is treated
-as blocking and reported as unrated, so an omission never buys a pass.**
+**Every concern carries four ratings: `severity`, `likelihood`, `harm` and `merge_class`.** The
+peer-review schema requires them. A concern missing one (every shard written before this rule)
+is read as an UNRATED NOTE and listed in `materiality.unrated_ids`, never as a blocker: a finding
+that should block must be rated.
 
 - `likelihood`: `normal-use` (a user following the documented flow hits it), `edge-case`
   (unusual but legitimate input or timing), `adversarial` (needs an attacker or deliberately
   crafted input), `hypothetical` (needs a future edit, a config nobody has, or an environment
   the project does not run in).
-- `reversibility`: `undo-button` (a revert), `some-cleanup` (a revert plus a data fix or a
-  redeploy), `one-way-door` (a customer saw it, data is gone, a secret left the building).
-- `harm`: `data-or-security`, `user-visible`, `internal`, `cosmetic`.
+- `harm`: `data-or-security`, `money`, `user-visible`, `internal`, `cosmetic`. It ranks blockers
+  past the cap.
+- `merge_class`: `wrong-pass` (a gate, check or test reports green on a real failure), `money`
+  (a charge, payout, fee, refund or ledger entry comes out wrong), `data-loss` (stored data is
+  destroyed, corrupted or silently not written), `security-exposure` (an attacker, or a user
+  outside their permission, reaches data, a secret or an action), or `none`.
+- `reversibility` (optional): `undo-button`, `some-cleanup`, `one-way-door`. Recorded for the
+  owner; it no longer decides anything.
 
-**What blocks.** Severity `blocker`, `critical` or `high`, AND one of: likelihood `normal-use`
-or `edge-case`; or likelihood `adversarial` with reversibility `one-way-door` or harm
-`data-or-security`. Nothing `hypothetical` blocks. Nothing at `major`, `medium`, `low`, `nit` or
-`info` blocks. `scripts/materiality.mjs` is the code form and `merge-peer-review.mjs` applies it
-to every shard, so a `REQUEST_CHANGES` with no blocking concern is recorded as
-`APPROVE_WITH_NOTES` with the returned verdict kept beside it, and an `APPROVE` carrying a
-blocking concern is recorded as `REQUEST_CHANGES`.
+**What blocks.** ALL of: severity `blocker`, `critical` or `high`; `merge_class` not `none`;
+likelihood `normal-use`. The run's `cost_class` (set by BA, in `status.json`) widens or narrows
+that: at `product-money` an `edge-case` blocks too; at `tooling` only `wrong-pass` and
+`security-exposure` can block, because a change no product user reaches cannot lose them money or
+data. A `security-exposure` also blocks at `adversarial` likelihood, since an exposure is by
+definition reached by someone acting outside the documented flow. Nothing `hypothetical` blocks.
+Nothing at `major`, `medium`, `low`, `nit` or `info` blocks. `scripts/materiality.mjs` is the code
+form and `merge-peer-review.mjs` applies it to every shard, so a `REQUEST_CHANGES` with no
+blocking concern is recorded as `APPROVE_WITH_NOTES` with the returned verdict kept beside it,
+and an `APPROVE` carrying a blocking concern is recorded as `REQUEST_CHANGES`. The final-verdict
+rubric reads `materiality.blocks_merge` and `materiality.open_blocker_ids`, not the verdict word.
 
-**At most two blocking concerns per reviewer.** Rank by user harm and keep the top two; the rest
-are notes. A reviewer that returns five blockers has not ranked, and the run cannot fix five
-things in one round anyway.
+**At most two blocking concerns per reviewer, enforced.** The merge ranks a reviewer's blocking
+concerns by harm (then severity) and keeps the top two as blockers; the rest are DEMOTED to notes
+and listed in `materiality.demoted_ids`. A reviewer that returns five blockers has not ranked, and
+the run cannot fix five things in one round anyway.
 
 **Notes ship.** A note with a `suggested_patch` (a unified diff or an exact replacement for a
 local, obviously-correct fix) is applied by the orchestrator in the same turn, explicit-path
-staged, one commit, no Dev dispatch and no panel re-run. A note without one is filed as a
-follow-up issue with its evidence, before merge, so it is never silently dropped. Neither
-delays the merge.
+staged, one commit, no Dev dispatch and no panel re-run. Every other note goes onto ONE deferral
+checklist for the issue (`scripts/deferral.mjs checklist`), with its evidence, before merge, so it
+is never silently dropped. Only a note whose `merge_class` is not `none`, or one the owner marks,
+becomes its own tracker issue. Neither path delays the merge.
 
-**The veto is narrow.** A SecOps `VETO` sends the spec back to BA for redesign, which is the
-most expensive loop in the pipeline, so it stands only on a named `veto_ground` from the
-enumerated surfaces (`auth`, `authorization`, `session`, `crypto`, `secrets`, `injection`,
-`webhook-verification`, `data-access-policy`, `migration`, `pii-exposure`, `compliance`). A
-`VETO` without one is a `REQUEST_CHANGES`: it still refuses the merge, it does not reopen the
-design.
+**The veto and the refactor request obey the same test.** A SecOps `VETO` sends the spec back to
+BA for redesign, the most expensive loop in the pipeline, so it stands only from SecOps, on a
+named `veto_ground` from the enumerated surfaces (`auth`, `authorization`, `session`, `crypto`,
+`secrets`, `injection`, `webhook-verification`, `data-access-policy`, `migration`,
+`pii-exposure`, `compliance`), AND carrying at least one blocking concern. Any other `VETO` is a
+`REQUEST_CHANGES`, which does not reopen the design, and a note when nothing blocks. A QA
+`REQUEST_REFACTOR` with no blocking concern is a note too.
 
 **The test for a finding before you write it down:** would you stop a colleague's merge for
 this, today, on this project? If the honest answer is "no, but I would mention it", it is a
-note, and the honest rating says so.
+note, and its merge class is `none`.
+
+(Why the merge class exists: measured on one consumer, a single tooling issue ran 21 spec
+revisions and 8 Phase 4 panel rounds with six reviewers, and produced 79 acceptance criteria, a
+676-assertion prover and 35 follow-up issues, under the previous rule, which blocked any severe
+`normal-use` or `edge-case` finding whatever it cost.)
 
 (Origin: the archive of this repo. First-pass approval on 4 of 11 runs; Phase 4 the largest
 single consumer of run time; a fix to a shell tokenizer in a dev-only hook that ran 7.6 hours
@@ -290,7 +309,11 @@ recorded only in a test comment or a pull request body is buried on merge. **A p
 tracker CLI is not exempt, it is configured:** set `deferralTracker` to `directory` and
 `scripts/deferral.mjs record` writes the same item as a committed markdown file under
 `deferralDir`, which is a worse tracker than a tracker and a far better one than a sentence in a
-review artifact nobody opens again. If the reason it was
+review artifact nobody opens again. **A Phase 4 note is not its own issue.** Notes from one review
+go onto ONE checklist entry per issue, written by `scripts/deferral.mjs checklist` from the merged
+`peer-review.json`; a note becomes a separate tracker issue only when its `merge_class` is not
+`none` or the owner marks it. One issue per note turned a single tooling change into 35 follow-up
+issues on one consumer, which is a backlog nobody reads rather than a deferral anybody honours. If the reason it was
 deferred is interesting, that reasoning is the most valuable part; record it, because the next person
 will otherwise re-derive it and reach the other conclusion.
 

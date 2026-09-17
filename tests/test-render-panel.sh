@@ -65,9 +65,29 @@ suite "render-panel: an architectural six-role panel"
 
 write_status architectural '["ba","dba","devops","secops","dev","qa"]'
 render --status "$STATUS" --worktree "$WT" --plugin-root "$PLUGIN_ROOT" --check
+render --status "$STATUS" --worktree "$WT" --plugin-root "$PLUGIN_ROOT" --check
 assert_eq "renders and passes --check" "$RC" "0"
 assert_eq "exactly six agent() calls" "$(count_agents "$OUT")" "6"
 assert_contains "secops effort is xhigh at architectural" "$OUT" '"agentType":"pipeline:secops","effort":"xhigh"'
+
+suite "render-panel: cost_class tooling routes SecOps effort to medium at any tier"
+
+cat > "$STATUS" <<EOF
+{"issue_number": 77, "current_phase": "4-review", "risk_tier": "architectural", "cost_class": "tooling", "panel_roles": ["qa","secops","devops"],
+ "started_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-01T00:00:00Z", "events": [], "flags": []}
+EOF
+render --status "$STATUS" --worktree "$WT" --plugin-root "$PLUGIN_ROOT" --check
+assert_eq "a tooling panel renders" "$RC" "0"
+assert_contains "secops effort is medium at cost_class tooling, even at architectural" "$OUT" '"agentType":"pipeline:secops","effort":"medium"'
+assert_eq "exactly three agent() calls for the tooling panel" "$(count_agents "$OUT")" "3"
+cat > "$STATUS" <<EOF
+{"issue_number": 77, "current_phase": "4-review", "risk_tier": "architectural", "cost_class": "cheap", "panel_roles": ["qa","secops"],
+ "started_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-01T00:00:00Z", "events": [], "flags": []}
+EOF
+render --status "$STATUS" --worktree "$WT" --plugin-root "$PLUGIN_ROOT"
+assert_eq "an off-enum cost_class exits non-zero rather than routing on a guess" "$RC" "2"
+write_status architectural '["ba","dba","devops","secops","dev","qa"]'
+render --status "$STATUS" --worktree "$WT" --plugin-root "$PLUGIN_ROOT" --check
 assert_contains "dba is dispatched as pipeline:dba" "$OUT" '"agentType":"pipeline:dba"'
 
 suite "render-panel: a delta round renders only the delta roles and names the first-round head"
@@ -78,7 +98,17 @@ assert_eq "delta render passes --check" "$RC" "0"
 assert_eq "exactly two agent() calls for two delta roles" "$(count_agents "$OUT")" "2"
 assert_contains "the delta paragraph names the first-round head" "$OUT" "The first round reviewed $FIRST"
 assert_contains "the delta paragraph names the fix diff" "$OUT" "git diff $FIRST...HEAD"
-assert_contains "the delta paragraph carries the introduced-defect stance" "$OUT" "assume the remediation introduced a defect"
+# Review convergence: the delta stance rules on open blockers; the old "assume the remediation
+# introduced a defect" instruction is gone, because a reviewer told to find a defect finds one.
+assert_contains "the delta paragraph carries the open-blocker stance" "$OUT" "Rule only on your open blockers listed below. A new finding blocks only if the fix commits introduced it and it has a merge_class; everything else is a note."
+assert_not_contains "and no longer tells the reviewer to assume the remediation introduced a defect" "$OUT" "assume the remediation introduced a defect"
+assert_contains "with no --peer-review, each delta lens says no blocker ids were given" "$OUT" "Your open blockers: none recorded"
+PR_FILE="$TEMP_PROJECT/peer-review.json"
+printf '%s' '{"qa":{"verdict":"REQUEST_CHANGES","materiality":{"open_blocker_ids":["qa-2","qa-7"],"blocks_merge":true}},"dba":{"verdict":"APPROVE","materiality":{"open_blocker_ids":[],"blocks_merge":false}}}' > "$PR_FILE"
+render --status "$STATUS" --worktree "$WT" --plugin-root "$PLUGIN_ROOT" --delta "qa dba" --first-round-head "$FIRST" --peer-review "$PR_FILE" --check
+assert_eq "a delta render with --peer-review passes --check" "$RC" "0"
+assert_contains "the qa lens lists qa's open blocker ids" "$OUT" "Your open blockers: qa-2, qa-7."
+assert_contains "a role holding none is told it was seated by surface" "$OUT" "Your open blockers: none. You were seated because the fix commits touched your surface"
 assert_contains "meta names the delta" "$OUT" 'name: "phase4-delta-77"'
 assert_not_contains "ba is NOT rendered on a qa+dba delta" "$OUT" '"agentType":"pipeline:ba"'
 
