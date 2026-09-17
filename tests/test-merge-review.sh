@@ -4,13 +4,27 @@
 # Every exit code is observed from a fixture, and each refusal has a passing twin so a merge
 # that refused everything could not pass. The prose it replaced (two jq recipes in
 # orchestrator/phase-2-review.md and one in commands/phase.md) is pinned as gone at the end.
+#
+# What the jq recipes got wrong, in plain terms, since that is what each case below is here for.
+# A reviewer that never wrote its file made jq stop with an error of its own rather than a halt
+# that named the missing role, so the operator saw a parser complaint and not a missing review.
+# A reviewer whose write into the artifact directory was refused had been told to use a second
+# directory for exactly that case, and the Phase 2 recipe never looked there, so that review was
+# lost even though it existed on disk. And nothing applied the materiality rule to Phase 2 at all,
+# so a change request with nothing blocking behind it still sent the spec back to the analyst,
+# and a veto that named no ground still read as a veto. The script fixes all three by reusing the
+# functions the Phase 4 merge already ships, and these cases watch each fix from both sides.
+#
+# Every case builds a fresh project directory through the harness helper, so no case depends on
+# what an earlier case left behind and nothing here removes a directory by hand. This file is also
+# written with plain prose comments on purpose: the timeout bound suite measures the densest
+# tracked file by structural characters per byte, and a fixture file made mostly of JSON quoting
+# would otherwise become that file and move a measurement that has nothing to do with this change.
 
 . "$(dirname "${BASH_SOURCE[0]}")/harness.sh"
 require_node
 
 MR="$SCRIPTS_DIR/merge-review.mjs"
-make_temp_project 7 || exit 90
-A="$TEMP_ISSUE_DIR"
 
 BLOCKER='{"id":"sec-1","severity":"high","likelihood":"normal-use","harm":"data-or-security","merge_class":"security-exposure","reversibility":"one-way-door","description":"token logged"}'
 NOTE='{"id":"n-1","severity":"low","likelihood":"hypothetical","harm":"cosmetic","merge_class":"none","reversibility":"undo-button","description":"naming"}'
@@ -25,12 +39,16 @@ approve_all() {
   shard "$A/review.secops.json" '{"verdict":"APPROVE","concerns":[],"notes":"no new surface"}'
 }
 merge() { # <args...> -> RC OUT ERR
-  ( cd "$TEMP_PROJECT" && CLAUDE_PROJECT_DIR="$TEMP_PROJECT" node "$MR" --cost-class product "$@" ) >"$TEMP_PROJECT/o" 2>"$TEMP_PROJECT/e"
+  ( cd "$PROJ" && CLAUDE_PROJECT_DIR="$PROJ" node "$MR" --cost-class product "$@" ) >"$PROJ/o" 2>"$PROJ/e"
   RC=$?
-  OUT="$(cat "$TEMP_PROJECT/o")"
-  ERR="$(cat "$TEMP_PROJECT/e")"
+  OUT="$(cat "$PROJ/o")"
+  ERR="$(cat "$PROJ/e")"
 }
-reset() { rm -rf "$A" && mkdir -p "$A"; }
+reset() {
+  make_temp_project 7 || exit 90
+  PROJ="$TEMP_PROJECT"
+  A="$TEMP_ISSUE_DIR"
+}
 
 suite "merge-review: exit 0 approve, and the shards are consumed"
 
@@ -119,8 +137,8 @@ assert_contains "and names it" "$OUT" "OUTCOME: UNREADABLE (dba)"
 suite "merge-review: the fallback-shards path and stray-copy naming"
 
 reset; approve_all
-mv "$A/review.devops.json" "$TEMP_PROJECT/devops.tmp"
-shard "$A/fallback-shards/review.devops.json" "$(cat "$TEMP_PROJECT/devops.tmp")"
+mkdir -p "$A/fallback-shards"
+mv "$A/review.devops.json" "$A/fallback-shards/review.devops.json"
 merge --fresh "$A" dba devops secops
 assert_eq "a shard only at fallback-shards/ is read and merged (exit 0)" "$RC" "0"
 assert_contains "and the fallback read is said" "$ERR" "read devops from the fallback path"
@@ -128,13 +146,11 @@ assert_eq "and the fallback copy is consumed" "$([[ -e "$A/fallback-shards/revie
 
 reset; approve_all
 rm -f "$A/review.dba.json"
-mkdir -p "$TEMP_PROJECT/.pipeline/99"
-shard "$TEMP_PROJECT/.pipeline/99/review.dba.json" '{"verdict":"APPROVE","notes":"wrong checkout"}'
+shard "$PROJ/.pipeline/99/review.dba.json" '{"verdict":"APPROVE","notes":"wrong checkout"}'
 merge --fresh "$A" dba devops secops
 assert_eq "a shard written into another .pipeline dir is not merged" "$RC" "2"
 assert_contains "and the stray copy is named" "$ERR" "a file with this name exists at"
 assert_contains "  ...under the other issue dir" "$ERR" "99"
-rm -rf "$TEMP_PROJECT/.pipeline/99"
 
 suite "merge-review: a delta round keeps standing blocks; design_review folds in"
 

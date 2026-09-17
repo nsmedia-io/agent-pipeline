@@ -3,7 +3,7 @@
 Before dispatching the panel, run the Phase 3 exit. It is the deterministic counterpart to the (deliberately fail-OPEN) SubagentStop validator, and it is wired ONLY here: do NOT add it to your CI or deploy workflows; it gates the pipeline panel, not deploys. One call runs, in order:
 
 - **The mis-tier tripwire** (trivial and standard tier; it prints `SKIP` at architectural). A data-layer path in the diff (`tripwireReport` in `data-layer-surface.mjs`, whose set config can only widen: # CUSTOMIZE with `extraMigrationGlobs`) or a path matching an architectural path trigger (`pipeline.config.json` plus `architecturalTriggers.paths`, through `tier-floor.mjs`; #76) means the tier call was wrong and the pre-code gates were bypassed.
-- **`gate-pre-phase4.mjs`**: `impl-report.json` against its schema, every `acceptance_criteria` entry covered, and an up and a down section in any added migration (structural reversibility only; migration syntax stays your CI's job).
+- **`gate-pre-phase4.mjs`**: `impl-report.json` against its schema, every `acceptance_criteria` entry covered, and an up and a down section in any added migration (structural reversibility only; migration syntax stays your CI's job). It refuses on an absent or unparseable artifact, schema violation, an acceptance criterion with no covering `requirement_check`, a migration missing its down section, an empty down region with no rollback note under the marker, a down region that contains executable SQL, or a down region it cannot classify because of an unterminated block comment.
 - **`gate-pre-phase4-frontend.mjs`**: self-SKIPS on a diff with no frontend surface; otherwise refuses when the `design_review` verdict, token-lint pass or axe pass is not recorded.
 
 ```bash
@@ -12,7 +12,7 @@ EXIT_RC=$?
 case "$EXIT_RC" in 0|2|3|4) ;; *) echo "INDETERMINATE: 3-impl-tripwire-indeterminate: phase3-exit.mjs did not reach a verdict (exit $EXIT_RC); check \${CLAUDE_PLUGIN_ROOT}" ;; esac
 ```
 
-It prints `HIT:`, `NOTE:`, `SKIP:`, `INDETERMINATE:`, `PASS:` and `FAIL:` lines, then `RESULT:`, and on a halt it writes the state below into `status.json` itself (`current_phase` plus a `flags` entry); commit that write as a checkpoint. Never pipe this call: the exit status is the verdict. The shell history behind that rule is in `${CLAUDE_PLUGIN_ROOT}/docs/rationale.md` ("Mis-tier tripwire").
+It prints `HIT:`, `NOTE:`, `SKIP:`, `INDETERMINATE:`, `PASS:` and `FAIL:` lines, then `RESULT:`, and on a halt it writes the state below into `status.json` itself, with a `flags` entry; commit that write as a checkpoint. Never pipe this call: the exit status is the verdict. The shell history behind that rule is in `${CLAUDE_PLUGIN_ROOT}/docs/rationale.md` ("Mis-tier tripwire").
 
 | Exit | Written | Do |
 |---|---|---|
