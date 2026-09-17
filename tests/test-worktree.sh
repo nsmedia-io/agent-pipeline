@@ -156,6 +156,41 @@ assert_eq "two local branches matching the rule are AMBIGUOUS (2)" "$RC" "2"
 assert_contains "and both are named" "$ERR" "refs/heads/chore/6-two"
 assert_eq "and nothing was created" "$(ls "$REPO/.claude/worktrees" 2>/dev/null | grep -c '^6-')" "0"
 
+suite "worktree: a registered worktree whose directory is gone is STALE, never recreated"
+
+# The review's reproduction: a worktree under the root checkout's .claude/worktrees is deleted by
+# hand, so git still lists it (prunable). Resolving it used to exit 0, and recreating its artifact
+# dir made a plain folder INSIDE the root checkout, where every git command ran against the root.
+GONE="$REPO/.claude/worktrees/11-gone"
+gitq -C "$REPO" worktree add -q -b feat/11-gone "$GONE" main
+rm -r "$GONE"
+wt resolve --issue 11 --seed-from "$SEED"
+assert_eq "a prunable registration matching the rule is STALE (2)" "$RC" "2"
+assert_contains "  and says STALE on stdout" "$OUT" "STALE"
+assert_contains "  naming the remedy" "$ERR" "git worktree prune"
+assert_contains "  and the entry" "$ERR" "feat/11-gone"
+assert_eq "  and the directory is NOT recreated" "$([[ -e "$GONE" ]] && echo recreated || echo absent)" "absent"
+printf '{"worktree_path":"%s"}' "$(native "$GONE")" > "$REPO/.pipeline/11-tasks.json"
+mkdir -p "$REPO/.pipeline/11" && mv "$REPO/.pipeline/11-tasks.json" "$REPO/.pipeline/11/tasks.json"
+wt resolve --issue 11
+assert_eq "tasks.json naming the deleted tree does not rescue it (2)" "$RC" "2"
+assert_contains "  and tasks.json's entry is reported as stale" "$ERR" "registered but STALE"
+wt create --issue 11 --type feat --slug again
+assert_eq "create refuses a stale registration too, rather than adding beside it (2)" "$RC" "2"
+assert_eq "  and creates nothing" "$([[ -e "$GONE" ]] && echo recreated || echo absent)" "absent"
+
+# The folder recreated as a PLAIN directory (the defect's own end state): it exists, git no longer
+# calls it prunable, and git inside it answers for the root checkout. It is still not a worktree root.
+mkdir -p "$GONE"
+wt resolve --issue 11
+assert_eq "a plain folder at a registered worktree path is not a worktree root: STALE (2)" "$RC" "2"
+assert_eq "  and no artifact dir is written into it" "$([[ -e "$GONE/.pipeline" ]] && echo written || echo absent)" "absent"
+rmdir "$GONE"
+gitq -C "$REPO" worktree prune
+rm -r "$REPO/.pipeline/11"
+wt resolve --issue 11
+assert_eq "after git worktree prune the stale entry is gone and the answer is NONE (2)" "$OUT" "NONE"
+
 suite "worktree: usage"
 
 wt resolve

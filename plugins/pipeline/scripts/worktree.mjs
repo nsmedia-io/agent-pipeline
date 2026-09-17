@@ -13,11 +13,16 @@
  * the ambiguous case ("if multiple match, halt") was stated in one of the four.
  *
  * RESOLVE, in order:
- *   1. `<pipeline-base>/<n>/tasks.json` worktree_path, when it names a registered, non-root worktree;
- *      a path that is gone or unregistered is reported as stale and the lookup falls through;
+ *   1. `<pipeline-base>/<n>/tasks.json` worktree_path, when it names a registered, non-root worktree
+ *      that is LIVE; any other path is reported and the lookup falls through;
  *   2. `git worktree list --porcelain`, the non-root worktrees whose branch matches the naming rule
  *      `refs/heads/(fix|feat|chore)/<n>-*`. Exactly one is the answer; two or more are AMBIGUOUS.
  *   The root checkout never qualifies: a branch checked out there is named and refused.
+ *   LIVE means git does not mark the entry prunable AND `git -C <path> rev-parse --show-toplevel` is
+ *   that path. A matching registration whose directory was deleted is STALE: exit 2, naming the
+ *   entry and `git worktree prune`. Before this a deleted tree resolved, and recreating its artifact
+ *   dir made a plain folder under the root checkout, so every git command there ran against the
+ *   root. Nothing here creates a worktree path except `git worktree add`.
  *
  * CREATE resolves first and reuses what it finds. Otherwise it adds
  * `<root>/.claude/worktrees/<n>-phase3-<YYYYmmdd-HHMMSS>`: on the one existing local branch that
@@ -34,8 +39,8 @@
  * (tasks.json | worktree-list | created | created-on-existing-branch), then one SEEDED=/KEPT=/
  * MISSING= line each when seeding ran. Notes (a stale tasks.json path, a missing seed) go to stderr.
  *
- * EXIT CODES. 0 resolved or created. 2 NONE (resolve found nothing) or AMBIGUOUS (the candidates are
- * listed); nothing was created. 1 usage, not a git repository, or a git command failed.
+ * EXIT CODES. 0 resolved or created. 2 NONE (resolve found nothing), AMBIGUOUS (the candidates are
+ * listed) or STALE (a matching registration is prunable or not a worktree root); nothing was created. 1 usage, not a git repository, or a git command failed.
  */
 
 import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, statSync } from "node:fs";
@@ -77,11 +82,12 @@ export function parseWorktreeList(text) {
   let cur = null;
   for (const line of String(text).split(/\r?\n/)) {
     if (line.startsWith("worktree ")) {
-      cur = { path: line.slice(9), branch: null, head: null, bare: false };
+      cur = { path: line.slice(9), branch: null, head: null, bare: false, prunable: false };
       out.push(cur);
     } else if (cur && line.startsWith("branch ")) cur.branch = line.slice(7);
     else if (cur && line.startsWith("HEAD ")) cur.head = line.slice(5);
     else if (cur && line === "bare") cur.bare = true;
+    else if (cur && (line === "prunable" || line.startsWith("prunable "))) cur.prunable = true;
   }
   return out.map((w, i) => ({ ...w, main: i === 0 }));
 }
@@ -103,6 +109,14 @@ function readJson(file) {
   }
 }
 
+/** True when <p> exists and git reports it as its own worktree top level. */
+export function isWorktreeRoot(p) {
+  const abs = path.resolve(nativePath(p));
+  if (!existsSync(abs)) return false;
+  const r = spawnSync("git", ["-C", abs, "rev-parse", "--show-toplevel"], { encoding: "utf8" });
+  return !r.error && r.status === 0 && pathKey(r.stdout.trim()) === pathKey(abs);
+}
+
 function listWorktrees(repo) {
   const r = git(["worktree", "list", "--porcelain"], repo);
   if (r.status !== 0) throw new WorktreeError(`not a git repository, or git worktree list failed: ${r.stderr.trim()}`);
@@ -113,18 +127,26 @@ function listWorktrees(repo) {
  * Pure over its inputs. Returns {code, worktree?, source?, candidates, notes}.
  * code 0 found, 2 none or ambiguous.
  */
-export function resolveFrom({ issue, worktrees, tasksWorktreePath = null, rootOf = (p) => p }) {
+export function resolveFrom({ issue, worktrees, tasksWorktreePath = null, rootOf = (p) => p, isRoot = isWorktreeRoot }) {
   const notes = [];
   const byKey = new Map(worktrees.map((w) => [pathKey(w.path), w]));
+  const live = (w) => !w.prunable && isRoot(w.path);
   if (tasksWorktreePath) {
     const w = byKey.get(pathKey(rootOf(tasksWorktreePath)));
-    if (w && !w.main) return { code: 0, worktree: w, source: "tasks.json", candidates: [w], notes };
+    if (w && !w.main && live(w)) return { code: 0, worktree: w, source: "tasks.json", candidates: [w], notes };
     if (w && w.main) notes.push(`tasks.json worktree_path names the root checkout (${w.path}), which never qualifies`);
+    else if (w) notes.push(`tasks.json worktree_path ${w.path} is registered but STALE (prunable, or not a worktree root); falling back to the branch rule`);
     else notes.push(`tasks.json worktree_path ${tasksWorktreePath} is not a registered worktree (stale); falling back to the branch rule`);
   }
   const matching = worktrees.filter((w) => branchMatches(w.branch, issue));
   for (const w of matching.filter((x) => x.main)) {
     notes.push(`${w.branch.replace("refs/heads/", "")} is checked out in the root checkout ${w.path}, which never qualifies`);
+  }
+  const stale = matching.filter((w) => !w.main && !live(w));
+  if (stale.length) {
+    const names = stale.map((w) => `${w.path} [${w.branch}]`).join(", ");
+    notes.push(`STALE: ${names} is registered but its directory is gone or is not a worktree root; run \`git worktree prune\` (or restore the directory), then run this again`);
+    return { code: 2, candidates: stale, notes, stale: true };
   }
   const candidates = matching.filter((w) => !w.main);
   if (candidates.length === 1) return { code: 0, worktree: candidates[0], source: "worktree-list", candidates, notes };
@@ -204,9 +226,9 @@ export function main(argv, io = { out: (s) => process.stdout.write(s), err: (s) 
     let source = r.source;
     let branch = wt && wt.branch ? wt.branch.replace(/^refs\/heads\//, "") : null;
 
-    if (r.code !== 0 && (cmd === "resolve" || r.ambiguous)) {
+    if (r.code !== 0 && (cmd === "resolve" || r.ambiguous || r.stale)) {
       for (const n of r.notes) io.err(`worktree: ${n}\n`);
-      io.out(`${r.ambiguous ? "AMBIGUOUS" : "NONE"}\n`);
+      io.out(`${r.stale ? "STALE" : r.ambiguous ? "AMBIGUOUS" : "NONE"}\n`);
       return 2;
     }
     if (r.code !== 0) {
@@ -249,6 +271,13 @@ export function main(argv, io = { out: (s) => process.stdout.write(s), err: (s) 
     }
 
     const abs = path.resolve(nativePath(wt.path));
+    // Never write under a path that is not a live worktree root: creating it would put a plain
+    // folder in the root checkout and send every later git command there.
+    if (!isWorktreeRoot(abs)) {
+      io.err(`worktree: STALE: ${abs} is not a worktree root; run \`git worktree prune\`, then run this again. Nothing was written\n`);
+      io.out("STALE\n");
+      return 2;
+    }
     const artifactDir = path.join(abs, ".pipeline", issue);
     const lines = [`WORKTREE_PATH=${abs}`, `ARTIFACT_DIR=${artifactDir}`, `BRANCH=${branch || "(detached)"}`, `SOURCE=${source}`];
     if (o["seed-from"]) {
