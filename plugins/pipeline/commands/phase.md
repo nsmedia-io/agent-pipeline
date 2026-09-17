@@ -51,19 +51,10 @@ Invoke with either:
 Targeted Phase 2 re-review. Prompt includes:
 - "Re-review after <change reason>. Read `<ARTIFACT_DIR>/spec.json` and any existing `<ARTIFACT_DIR>/review.json`. Write your fresh BARE block to `<ARTIFACT_DIR>/review.<agent>.json` (top-level `verdict`, no role wrapper), exactly as in the parallel fan-out. Return a fresh verdict."
 
-The agent contract is identical in every case: agents always emit a bare shard. A single re-run is not concurrent, so the orchestrator (not the agent) merges that one new shard into `review.json` under its key, with the same defensive unwrap `/pipeline` uses so a wrapped shard cannot null the verdict:
+The agent contract is identical in every case: agents always emit a bare shard. Merge that one shard into `review.json` (its fallback path, the unwrap, the materiality rule and the halts are the script's), and act on the exit code exactly as `orchestrator/phase-2-review.md` does:
 
 ```bash
-ISSUE=<issue>; AGENT=<dba|devops|secops>
-FILE="$ARTIFACT_DIR/review.json"; SHARD="$ARTIFACT_DIR/review.$AGENT.json"
-[ -f "$FILE" ] || echo '{}' > "$FILE"
-tmp=$(mktemp) && jq \
-  --slurpfile s "$SHARD" --arg k "$AGENT" '
-  def unwrap($k): if type=="object" and has("verdict") then .
-                  elif type=="object" then (.[$k] // .)
-                  else . end;
-  .[$k] = ($s[0] | unwrap($k))' "$FILE" > "$tmp" && mv "$tmp" "$FILE"
-rm -f "$SHARD"
+node "${CLAUDE_PLUGIN_ROOT}/scripts/merge-review.mjs" --status "$PIPELINE_BASE/<issue>/status.json" "$ARTIFACT_DIR" <dba|devops|secops>
 ```
 
 ### design-review
@@ -71,7 +62,7 @@ rm -f "$SHARD"
 Targeted re-run of the Design reviewer (the frontend/UX lens), for re-reviewing after a token or accessibility change, or for re-recording the `design_review` evidence the frontend gate checks. Invoke the `design` subagent. Prompt includes:
 - "Re-review the frontend surface after <change reason>. Read `<ARTIFACT_DIR>/spec.json` and the diff. Per your agent definition, run the token-conformance, accessibility (axe + the human-residual caveat), and advisory critique/copy lenses. Write your fresh BARE block to `<ARTIFACT_DIR>/review.design_review.json` for a Phase 2 re-run, or `<ARTIFACT_DIR>/peer-review.design_review.json` for a Phase 4 re-run (top-level `verdict`, no role wrapper). A REQUEST_CHANGES is valid ONLY when a concerns[] blocker/critical/high concern with a merge_class other than none cites a token_lint or axe failure; a major is a note, and you hold no veto. Return a fresh verdict."
 
-Merge the single new shard under the `design_review` key with the same defensive `unwrap` as the dba/devops/secops re-run above (set `AGENT=design_review` and point `FILE` at `review.json` or `peer-review.json` to match the phase being re-run).
+Merge the single new shard with `merge-review.mjs ... "$ARTIFACT_DIR" design_review` for a Phase 2 re-run, or with `merge-peer-review.mjs` for a Phase 4 re-run.
 
 ### dev
 
