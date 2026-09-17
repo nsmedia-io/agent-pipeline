@@ -27,7 +27,7 @@ plugins/pipeline/
   knowledge/                         # empty template for the file-based knowledge store
   pipeline.config.example.json       # the CUSTOMIZE knobs
   README.md                          # start here
-  tests/                             # the suite; run.sh locally, run-linux.sh in a container
+tests/                               # the suite, outside the published plugin path; run.sh locally, run-linux.sh in a container
 ```
 
 ## Customize

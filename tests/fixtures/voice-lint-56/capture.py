@@ -153,7 +153,7 @@ doc = {
         "needs a machine with Claude Code history; the script writes beside itself, in whatever",
         "checkout it is run from, and reads ~/.claude/projects unless CLAUDE_PROJECTS_DIR says",
         "otherwise):",
-        "  python3 plugins/pipeline/tests/fixtures/voice-lint-56/capture.py",
+        "  python3 tests/fixtures/voice-lint-56/capture.py",
         "",
         "STALENESS: every field these fixtures are pinned on is asserted as a present-tense fact",
         "by test-voice-lint.sh (see the PINNED FACTS suite). If the vendor changes a record shape,",

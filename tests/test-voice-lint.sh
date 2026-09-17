@@ -240,7 +240,7 @@ suite "voice-lint: the table cannot drift from pipeline.md (config-derived)"
 #      negative cell below (declared in a comment, absent from the table -> RED) possible at all.
 #
 # THE WIDE FORM is the ONE extraction this suite performs; re-derive both copies with
-# `git grep -n "THE WIDE FORM" -- plugins/pipeline/tests`.
+# `git grep -n "THE WIDE FORM" -- tests`.
 PIPELINE_MD="$PLUGIN_ROOT/commands/pipeline.md"
 LINT_SRC="$SCRIPTS_DIR/voice-lint.mjs"
 

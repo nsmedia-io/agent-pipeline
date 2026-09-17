@@ -23,6 +23,7 @@ gate_cache_declaration
 AGENTS_DIR="$GATE_PLUGIN_DIR/agents"
 PIPELINE_MD="$GATE_PIPELINE_MD"
 PLUGIN_README="$GATE_PLUGIN_DIR/README.md"
+PLUGIN_CHANGELOG="$GATE_PLUGIN_DIR/CHANGELOG.md"
 ROOT_README="$GATE_REPO_ROOT/README.md"
 RETIRED="nothing mechanically enforces it either"
 
@@ -47,7 +48,7 @@ suite "AC29: the retirement, the ten-file landing, and the nine-file byte-identi
 # shipped surface -- agents/, commands/, hooks/, scripts/, schemas/, README.md -- and only the
 # suite that has to quote the string is out.
 RETIRED_HITS="$(grep -rl "$RETIRED" "$GATE_PLUGIN_DIR" 2>/dev/null \
-  | grep -v "^$GATE_PLUGIN_DIR/tests/" | LC_ALL=C sort | sed "s|^$GATE_REPO_ROOT/||" | tr '\n' ' ' | sed 's/ *$//')"
+  | grep -v "^$GATE_TESTS_DIR/" | LC_ALL=C sort | sed "s|^$GATE_REPO_ROOT/||" | tr '\n' ' ' | sed 's/ *$//')"
 record "files under plugins/pipeline/ still carrying the retired sentence: ${RETIRED_HITS:-<none>}"
 assert_eq "AC29: '$RETIRED' appears in ZERO files under plugins/pipeline/" "$RETIRED_HITS" ""
 # NON-ZERO CONTROL for the grep: it must be able to find the sentence when the sentence is there.
@@ -57,7 +58,7 @@ assert_eq "NON-ZERO CONTROL: the same grep DOES find a planted copy (a zero resu
 # ...and the EXCLUSION is doing work rather than hiding a hole: tests/ genuinely still carries the
 # string, so "zero hits outside tests/" is a narrower claim than "zero hits", stated as such.
 assert_eq "EXCLUSION CONTROL: tests/ really does still carry the string (the exclusion is narrow and named, not a blanket)" \
-  "$([[ "$(grep -rl "$RETIRED" "$GATE_PLUGIN_DIR/tests" 2>/dev/null | grep -c . | tr -d ' ')" -ge 1 ]] && echo carries || echo "tests/ carries none, so the exclusion above hides nothing and can be deleted")" "carries"
+  "$([[ "$(grep -rl "$RETIRED" "$GATE_TESTS_DIR" 2>/dev/null | grep -c . | tr -d ' ')" -ge 1 ]] && echo carries || echo "tests/ carries none, so the exclusion above hides nothing and can be deleted")" "carries"
 
 # The commit-hygiene paragraph is extracted from each of the nine and compared BYTE FOR BYTE.
 hygiene_para() {  # <file> -> the "**Commit hygiene.**" paragraph, verbatim
@@ -264,7 +265,7 @@ for (const f of files) {
 process.stdout.write(JSON.stringify({ total, bad }));
 MJS
 
-SHIPPED=("${TEN_FILES[@]}" "$PLUGIN_README" "$ROOT_README")
+SHIPPED=("${TEN_FILES[@]}" "$PLUGIN_README" "$PLUGIN_CHANGELOG" "$ROOT_README")
 GATE_FILE="$(gate_resolved_command "$GATE_PLUGIN_DIR" | awk '{print $1}')"
 [[ -n "$GATE_FILE" && -f "$GATE_FILE" ]] && SHIPPED+=("$GATE_FILE")
 CITE_JSON="$("$GATE_REAL_NODE" "$CITE_MJS" "$GATE_REPO_ROOT" "${SHIPPED[@]}" 2>/dev/null)"

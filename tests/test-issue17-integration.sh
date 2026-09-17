@@ -101,14 +101,14 @@ assert_contains "run.sh prints the suite name it is about to run" \
 # 0.40.2: .github/workflows/tests.yml is gone (its Actions minutes were the owner's subscription,
 # ~40 min per push with the nested fresh-checkout run). The property it carried is kept here on
 # its replacement, tests/run-linux.sh: the suite is evaluated on a Linux host, in strict-capability
-# mode, with zsh installed, through the SAME `bash plugins/pipeline/tests/run.sh` command, with no
+# mode, with zsh installed, through the SAME `bash tests/run.sh` command, with no
 # dependency install. Run by hand instead of on every push; the assertions below are what a
 # rename, a dropped flag, or a floating image tag cannot slip past.
 suite "AC41: tests/run-linux.sh runs run.sh on a pinned Linux image in strict-capability mode"
 
 LINUX_RUNNER="$TESTS_DIR/run-linux.sh"
 assert_eq "the Linux runner exists (a rename cannot silently drop it)" \
-  "$([[ -f "$LINUX_RUNNER" ]] && echo yes || echo "no: plugins/pipeline/tests/run-linux.sh is missing")" "yes"
+  "$([[ -f "$LINUX_RUNNER" ]] && echo yes || echo "no: tests/run-linux.sh is missing")" "yes"
 assert_eq "and it parses as bash" "$(bash -n "$LINUX_RUNNER" 2>&1 && echo parses || echo "SYNTAX ERROR")" "parses"
 assert_eq "and no OTHER file under tests/ also claims to be a runner, so the reads below are about one file" \
   "$(ls "$TESTS_DIR"/run-*.sh | grep -c . | tr -d ' ')" "1"
@@ -118,7 +118,7 @@ assert_eq "and no OTHER file under tests/ also claims to be a runner, so the rea
 RUNNER_CODE="$(grep -vE '^[[:space:]]*#' "$LINUX_RUNNER")"
 assert_eq "CONTROL: the non-comment lines were actually extracted (an empty read refuses nothing)" \
   "$([[ -n "$RUNNER_CODE" ]] && echo ok || echo "nothing extracted")" "ok"
-assert_contains "the container runs the exact suite command" "$RUNNER_CODE" "bash plugins/pipeline/tests/run.sh"
+assert_contains "the container runs the exact suite command" "$RUNNER_CODE" "bash tests/run.sh"
 assert_contains "it installs zsh, so the [zsh] columns run on the Linux answer (the #17 veto's regression test)" \
   "$RUNNER_CODE" "install -y -qq zsh"
 assert_contains "and it runs the suite in strict-capability mode, so a future absent tool is a FAILURE" \
@@ -386,7 +386,7 @@ else
   git -C "$FRESH" fetch -q --no-tags "file://$REPO_ROOT" \
     '+refs/remotes/origin/main:refs/remotes/origin/main' >/dev/null 2>&1
   assert_eq "the fresh checkout was created (without this, every assertion below measures nothing)" \
-    "$([[ -f "$FRESH/plugins/pipeline/tests/run.sh" ]] && echo cloned || echo "clone FAILED")" "cloned"
+    "$([[ -f "$FRESH/tests/run.sh" ]] && echo cloned || echo "clone FAILED")" "cloned"
   assert_eq "and it is a DIFFERENT tree from the one under test, with no untracked files carried over" \
     "$(cd "$FRESH" && git status --porcelain | wc -l | tr -d ' ')" "0"
   # It must also carry the commit series, because that is the other half of what CI lacked.
@@ -395,14 +395,14 @@ else
   assert_eq "and origin/main resolves in it, which is what the diff-based blocks need" \
     "$(git -C "$FRESH" rev-parse --verify origin/main >/dev/null 2>&1 && echo resolves || echo MISSING)" "resolves"
 
-  FRESH_OUT="$(PIPELINE_TESTS_FRESH_CHECKOUT=1 bash "$FRESH/plugins/pipeline/tests/run.sh" </dev/null 2>&1)"
+  FRESH_OUT="$(PIPELINE_TESTS_FRESH_CHECKOUT=1 bash "$FRESH/tests/run.sh" </dev/null 2>&1)"
   FRESH_RC="$?"
   assert_eq "run.sh exits 0 in the fresh checkout" "$FRESH_RC" "0"
   assert_contains "and says so" "$FRESH_OUT" "All test suites passed."
   # NON-ZERO CONTROL for that exit code: a run that produced nothing also exits 0 on some
   # shapes, so the transcript is checked against the population it should have covered. Every
   # test-*.sh in the fresh tree must have reported a result line.
-  FRESH_SUITES="$(cd "$FRESH/plugins/pipeline/tests" && ls test-*.sh | wc -l | tr -d ' ')"
+  FRESH_SUITES="$(cd "$FRESH/tests" && ls test-*.sh | wc -l | tr -d ' ')"
   assert_eq "every suite in the fresh tree reported a result (a silent run is not a passing run)" \
     "$(printf '%s' "$FRESH_OUT" | grep -c '^passed=' | tr -d ' ')" "$FRESH_SUITES"
   # The inner failure is NAMED, and its assertions are echoed. Counting "23 of 24 reported
@@ -901,22 +901,21 @@ assert_contains "CONTROL: and the telemetry-fix revert names its own" \
 suite "AC6: the shipped gate suite still passes, and its assertions are untouched"
 
 GATE_OUT="$(bash "$TESTS_DIR/test-gate-pre-phase4.sh" 2>&1)"
-assert_contains "test-gate-pre-phase4.sh passes in full" "$GATE_OUT" "passed=127 failed=0"
-# The count is pinned as well as the verdict: a suite that passes with FEWER assertions than
-# it shipped with has had a case deleted, which is exactly how a fail-closed gate loses its
-# deletion-exemption coverage quietly.
-#
-# 56 -> 95 for #31 and #48, 95 -> 99 for the multi-repo commits-shape cases, then 99 -> 125 for
-# 125 -> 127 for 0.42.0's #156 (a .test.ts under migrations/ no longer fires the migration rule;
-# two rows: the rc and the absent down-section message).
-# 0.41.0's deferral-ledger and acceptance_criteria_met coverage cases, and the two
-# literals below are NOT the same number wearing two
-# hats. This one tracks the LIVE suite and moves whenever it legitimately grows; the CONTROL
-# further down counts assertion lines in the historical commit that authored the suite, and 56
-# is a fact about that commit forever. Raising both together is the mistake this note exists to
-# prevent -- it would retire the only non-zero control the pattern above has.
-assert_eq "and it still carries all 127 assertions (a green with fewer is a deleted case)" \
-  "$(printf '%s' "$GATE_OUT" | grep -c '^  ok' | tr -d ' ')" "127"
+GATE_TALLY="$(printf '%s\n' "$GATE_OUT" | sed 's/\x1b\[[0-9;]*m//g' | grep -E '^passed=[0-9]+ failed=[0-9]+$' | tail -1)"
+GATE_PASSED="$(printf '%s' "$GATE_TALLY" | sed -n 's/^passed=\([0-9]*\) .*/\1/p')"
+assert_eq "test-gate-pre-phase4.sh passes in full" \
+  "$(printf '%s' "$GATE_TALLY" | sed -n 's/^passed=[0-9]* failed=\([0-9]*\)$/\1/p')" "0"
+# A FLOOR, NOT AN EXACT COUNT. A suite that passes with FEWER assertions than it shipped with has
+# had a case deleted, which is exactly how a fail-closed gate loses its deletion-exemption coverage
+# quietly, so the count may not fall below the 127 it carried at 0.42.0 (#156). It used to be
+# pinned EXACTLY, here and in the tally row above, and every legitimate addition to that suite
+# (56 -> 95 -> 99 -> 125 -> 127) needed a hand re-baseline in this file. Deletion BY NAME is
+# already pinned where it is cheap to maintain: test-claims-consumers.sh's AC19 label set for this
+# same suite reddens on a vanished label and prints it. The CONTROL further down counts assertion
+# lines in the historical commit that authored the suite, and 56 is a fact about that commit
+# forever, so it stays exact.
+assert_eq "and it still carries at least the 127 assertions it had at 0.42.0 (a green with fewer is a deleted case)" \
+  "$(n="$(printf '%s' "$GATE_OUT" | grep -c '^  ok' | tr -d ' ')"; [[ "$n" -ge 127 && "${GATE_PASSED:-0}" -ge 127 ]] && echo at-least-127 || echo "ONLY $n ok rows (passed=${GATE_PASSED:-?})")" "at-least-127"
 # Measured across the SERIES WINDOW, for the same reason the round lookups are: `origin/main...HEAD`
 # is an empty diff on main, so after the merge this line was green because it compared a commit
 # with itself. A vacuous pass is the worse half of the same defect -- the round assertions at
@@ -1020,6 +1019,9 @@ suite "AC42: the upgrade note exists AND names all three behaviour changes"
 
 README="$PLUGIN_DIR/README.md"
 assert_eq "there is an Upgrading section" "$(grep -c '^### Upgrading' "$README" | tr -d ' ')" "1"
+# The upgrade bullets moved from the README's Upgrading section into CHANGELOG.md; the README
+# keeps the section as a pointer. The rows below read the changelog, where the prose now lives.
+README="$PLUGIN_DIR/CHANGELOG.md"
 # Each of the three is asserted SEPARATELY: a single "the section exists" check passes a stub.
 assert_contains "(1) the widened preset defaults and the un-narrowable tripwire" "$(cat "$README")" \
   "the mis-tier tripwire can no longer be narrowed by config"

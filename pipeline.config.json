@@ -3,7 +3,7 @@
 
   "integrationBranch": "main",
 
-  "checkCommand": "bash plugins/pipeline/tests/run.sh",
+  "checkCommand": "bash tests/run.sh",
 
   "architecturalTriggers": {
     "_comment": "What forces the deep tier when the pipeline runs against its own source. The gates, the hooks, and the agent contracts are this repo's equivalent of a schema: a wrong edit there degrades every downstream project silently.",

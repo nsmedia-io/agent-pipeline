@@ -4,6 +4,8 @@ node_modules/
 .DS_Store
 .env
 scratch/
+# Claude Code session worktrees created inside this checkout.
+.claude/worktrees/
 
 # Note for ADOPTING projects (not this repo): add `.pipeline/` to your project's
 # .gitignore. That is per-run pipeline state. If you want `/pipeline --resume` to

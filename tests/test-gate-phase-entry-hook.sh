@@ -373,103 +373,20 @@ assert_eq "  CONTROL: add one refusing record to that same repo and the hook exi
 # ---------------------------------------------------------------------------
 suite "AC27: the two suites that already own this hook are UNCHANGED consumers"
 # ---------------------------------------------------------------------------
-# Recorded at f6ba1c4, BEFORE this contract was authored. Exact counts, not just failed=0: a
-# suite that silently stopped running half its cases also reports failed=0.
+# FLOORS, NOT EXACT COUNTS. Each of the two suites that already own this hook must still pass in
+# full (`with none failing`) and must still run AT LEAST the assertions it carried when this cell
+# was last re-derived: 18 for test-stop-hook.sh at f6ba1c4, 288 for test-voice-lint.sh at #80. A
+# suite that silently stopped running half its cases also reports failed=0, and the floor is what
+# catches that.
 #
-# RE-BASELINED TWICE, each time deliberately, and each reason is recorded because a number
-# bumped without one turns this assertion into a rubber stamp.
-#
-# 41 -> 48 (#27): voice-lint.mjs got the validator's exported ISSUE_DIR_RE, closing the gap
-# where an `exp-<slug>` experiment run resolved to no active issue and was therefore never
-# voice-checked at all. The +7 is one new suite block ("exp-<slug> runs are LINTED, not
-# exempt"): 4 behavioural cases and 3 controls. Nothing existing was removed or renumbered,
-# which is the property this cell is actually guarding -- verify that by diffing the suite, not
-# by trusting this note.
-#
-# 48 -> 71 (#53): the same property VERIFIED THE SAME WAY, and it does NOT hold in its pure
-# form this time, so it is stated rather than claimed. Diffed by label set (run the suite at
-# 13e40e9 and at this commit, strip the ANSI codes, sort the `ok`/`FAIL` labels, `comm`): 26
-# labels ADDED, 3 REMOVED, net +23. Each of the three is named here with where its substance
-# went, because "removed" and "replaced by something stronger" are the two readings this number
-# cannot tell apart:
-#   - "every phase pipeline.md writes is accounted for in voice-lint.mjs" was RENAMED, not
-#     dropped: it now reads "... in voice-lint.mjs's own tables (SET MEMBERSHIP, never a source
-#     grep)". Same subject, same direction; the instrument moved from `grep -q "\"$phase\""`
-#     over the source -- which a phase named in a COMMENT satisfies -- to membership over the
-#     module's newly exported tables.
-#   - "CONTROL: the phase derivation is non-empty (found 26)" was RETIRED into the pinned
-#     26-label SET assertion plus the tri-partition's "UNCLASSIFIED is EMPTY". A count floor
-#     with the count in its own label is strictly weaker than the set (#33).
-#   - "CONTROL: the drift grep can report a miss" was RETIRED WITH ITS INSTRUMENT. Its
-#     successor is the discrimination pair over the new one: "with `0-setup` removed from the
-#     tables, the accounting names it", the cell asserting the string is still present in the
-#     source while that happens, and the injection control that dropping a phase the tables
-#     never held moves nothing.
-#
-# 71 -> 257 (#56): voice-lint's obligation is scoped to the turn that produced the status
-# record, and the behavioural contract for it was authored BEFORE the implementation. Verified
-# the same way the two re-baselines above were, and this time the property DOES hold in its pure
-# form: diffed by label set (run the suite from the parent commit and from this one, strip the
-# ANSI codes, sort the `ok`/`FAIL` labels, `comm`) -- 186 labels ADDED, 0 REMOVED, 0 RENAMED.
-# Purely additive, so there is no "removed or replaced by something stronger" reading to
-# disambiguate here. Re-derive it rather than trusting this note.
-#
-# THE SISTER ASSERTION BELOW (`with none failing`) IS RED ON PURPOSE AT THE COMMIT THAT ADDS
-# THOSE 186, and that is the point rather than an oversight: they are a FAILING behavioural
-# contract, authored ahead of the code, and 57 of them are red until the implementation lands.
-# This cell is what makes that visible from outside the suite that owns it. If it is still red
-# after #56 ships, the fix is incomplete; if it is green with a passed= other than 260, a cell
-# was added or removed and the label-set diff above is how to find out which.
-#
-# 257 -> 260 (#56 Phase 4): the panel's binding QA verdict was REQUEST_CHANGES on a gap the
-# implementation battery found and reported rather than closed -- voice-lint's assistant-text
-# accept condition (a non-blank JOINED string) had no cell, so paraphrasing it as a non-empty
-# ARRAY of text blocks passed all 257 while going SILENT on a transcript whose last assistant
-# record carries a whitespace-only text block. Three cells added under the label AC5b: a shape
-# PREMISE proving the fixture builds the one input the two conditions disagree on, the
-# discriminating pair, and the graded-message assertion. Test-only; no production file changed,
-# because the shipped condition was already correct. THIS COUNT IS RE-DERIVED FROM A RUN, never
-# incremented by hand -- measured passed=260 failed=0 at the commit that adds it.
-#
-# 260 -> 267 (#56 Phase 4, the DBA's major): a stat failure on voice-lint's mtime-SCAN branch --
-# the branch production actually takes -- drops the candidate, and #56 inverted what dropping
-# costs, so a tooling failure that used to refuse loudly against a foreign record now SILENCES the
-# refusal on the session's own. Declared as residual (ix) rather than fixed (the loud alternative
-# refuses correct work: an unreadable FOREIGN lane's status.json would refuse every message in the
-# session), and pinned the AC16(d) way -- assert the documented silence, plus two one-variable
-# controls and a reported pre-#56 contrast. SEVEN cells, and the label-set diff is what says that:
-# 9 labels added, 2 "removed", and both of those two are the SAME population-report lines carrying
-# their own count in the label (95 -> 101 mtime stamps, 81 -> 84 exit codes), re-baselined by the
-# three extra lint runs. 0 real removals, 0 renames. THIS COUNT IS RE-DERIVED FROM A RUN, never
-# incremented by hand -- measured passed=267 failed=0 at the commit that adds it, and re-derived
-# to passed=272 failed=0 at #91, which added five cells (a premise, the tie, its one-millisecond
-# twin either side, and a reported measurement) and removed none.
-#
-# 272 -> 288 (#80): the ruling that Phase 0 step 1 is DELIBERATELY out of voice-lint's scope, plus
-# the guard that makes that ruling expire loudly. Two blocks, 16 cells: AC1 asserts the three
-# premises the `0-setup` non-voice declaration rests on off commands/pipeline.md itself (the halt
-# is unique, the ruling paragraph is present, no marker in the table is dead), reports the marker
-# hits, and asserts the three criteria; AC2 is the fixture matrix over MUTATED COPIES of
-# pipeline.md -- a reorder, an insertion into the window, the byte-identical insertion OUTSIDE the
-# window as the negative cell, a deletion, and a retired marker. Verified the same way as the four
-# re-baselines above (run the suite from the parent commit and from this one, strip the ANSI codes,
-# sort the `ok`/`FAIL` labels, `comm`): 17 labels ADDED, 1 "REMOVED", and that one is the same
-# population-report line carrying its own LINE NUMBERS in its label -- the tri-partition's
-# `at lines 22,22,67,...` report, shifted by two because this change inserts a paragraph into
-# pipeline.md above them. Its counterpart is in the added list at the same text with the shifted
-# numbers. 0 real removals, 0 renames, net +16. Same class of "removal" as the two already recorded
-# at 260 -> 267. THIS COUNT IS RE-DERIVED FROM A RUN, never incremented by hand -- measured
-# passed=288 failed=0 at the commit that adds it.
-#
-# AND THE IRONY, recorded as a pointer rather than acted on here: this cell is a bare exact-count
-# pin over another suite's whole population, which is the class #33 retired elsewhere in Lane 1.
-# It would be better as a LABEL-SET assertion -- pin the sorted label list, and an addition then
-# forces the editor to paste the label while a REMOVAL or a rename reddens by name instead of
-# arriving as an unexplained delta that a re-baseline can absorb. CLOSURE IS TRACKED, so this is
-# a pointer with a destination rather than a wish: the count-pin re-baseline and the
-# label-set successor are recorded in the deferral ledger posted as a comment on issue #53,
-# which is where a future reader picks this up. #53 itself only re-baselined the number it
-# broke, and deliberately touched nothing else here.
+# These were exact pins, and the exact half had to be re-derived by hand at every legitimate
+# addition to test-voice-lint.sh (41 -> 48 -> 71 -> 257 -> 260 -> 267 -> 272 -> 288, each
+# re-baseline recorded here at length, see this file's git history). That is a maintenance tax on
+# ANOTHER suite's growth with no safety content: growth is not a defect in this hook. What an exact
+# count could add over a floor is noticing a deletion that is offset by an addition in the same
+# change, and a count is the weak instrument for that; the label-set pins in
+# test-claims-consumers.sh (#33) are the strong one, and are where to extend deletion-by-name
+# coverage if these suites need it.
 run_suite_counts() {  # <suite-file> -> SUITE_PASSED, SUITE_FAILED
   local out
   out="$(cd "$TESTS_DIR" && bash "$1" 2>&1 | sed 's/\x1b\[[0-9;]*m//g')"
@@ -477,10 +394,12 @@ run_suite_counts() {  # <suite-file> -> SUITE_PASSED, SUITE_FAILED
   SUITE_FAILED="$(printf '%s\n' "$out" | sed -n 's/^passed=[0-9]* failed=\([0-9]*\).*/\1/p' | tail -1)"
 }
 run_suite_counts test-stop-hook.sh
-assert_eq "test-stop-hook.sh still passes exactly its 18 pre-existing assertions" "${SUITE_PASSED:-<none>}" "18"
+assert_eq "test-stop-hook.sh still passes at least its 18 pre-existing assertions" \
+  "$([[ "${SUITE_PASSED:-}" =~ ^[0-9]+$ && "$SUITE_PASSED" -ge 18 ]] && echo at-least-18 || echo "ONLY ${SUITE_PASSED:-<none>}")" "at-least-18"
 assert_eq "  with none failing" "${SUITE_FAILED:-<none>}" "0"
 run_suite_counts test-voice-lint.sh
-assert_eq "test-voice-lint.sh still passes exactly its 288 assertions (41 pre-existing + 7 from #27 + 26 from #53, less 3 retired by #53, + 186 from #56's authored contract, + 3 from #56's Phase-4 gap closure, + 7 from #56's Phase-4 residual (ix) pin, + 5 from #91's turn-boundary tie block, + 16 from #80's Phase-0 scope ruling and its expiry guard -- see the note above)" "${SUITE_PASSED:-<none>}" "288"
+assert_eq "test-voice-lint.sh still passes at least the 288 assertions it carried at #80" \
+  "$([[ "${SUITE_PASSED:-}" =~ ^[0-9]+$ && "$SUITE_PASSED" -ge 288 ]] && echo at-least-288 || echo "ONLY ${SUITE_PASSED:-<none>}")" "at-least-288"
 assert_eq "  with none failing" "${SUITE_FAILED:-<none>}" "0"
 
 # ---------------------------------------------------------------------------

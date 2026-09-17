@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # The suite on Linux, in a container, on demand.
 #
-#   bash plugins/pipeline/tests/run-linux.sh                 # the whole suite (run.sh)
-#   bash plugins/pipeline/tests/run-linux.sh test-a.sh ...   # named suites only
+#   bash tests/run-linux.sh                 # the whole suite (run.sh)
+#   bash tests/run-linux.sh test-a.sh ...   # named suites only
 #
 # This replaced .github/workflows/tests.yml in 0.40.2. That workflow ran the ~40-minute suite
 # (with its nested fresh-checkout run) on every push and pull request, and the Actions minutes
@@ -32,7 +32,7 @@ set -euo pipefail
 
 IMAGE="${PIPELINE_TESTS_IMAGE:-node:22-bookworm}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-REPO_ROOT="$(cd "$HERE/../../.." && pwd -P)"
+REPO_ROOT="$(cd "$HERE/.." && pwd -P)"
 COMMON_DIR="$(git -C "$REPO_ROOT" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
 
 if ! command -v docker >/dev/null 2>&1; then
@@ -57,12 +57,12 @@ apt-get update -qq >/dev/null 2>&1 && apt-get install -y -qq zsh jq >/dev/null 2
 git config --global --add safe.directory "*"
 echo "run-linux.sh: $(uname -srm) | $(bash --version | head -1) | node $(node -v) | zsh $(zsh --version) | git $(git --version)"
 if [[ $# -eq 0 ]]; then
-  exec bash plugins/pipeline/tests/run.sh
+  exec bash tests/run.sh
 fi
 rc=0
 for t in "$@"; do
   echo "== $t =="
-  bash "plugins/pipeline/tests/$t" || rc=1
+  bash "tests/$t" || rc=1
 done
 exit $rc
 '

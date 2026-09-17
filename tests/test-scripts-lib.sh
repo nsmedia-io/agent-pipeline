@@ -8,7 +8,7 @@
 . "$(dirname "${BASH_SOURCE[0]}")/harness.sh"
 
 require_node
-SCRIPTS_DIR="${SCRIPTS_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../scripts" && pwd)}"
+SCRIPTS_DIR="${SCRIPTS_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../plugins/pipeline/scripts" && pwd)}"
 
 suite "isMain: runs directly, stays quiet on import"
 

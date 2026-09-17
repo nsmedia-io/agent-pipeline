@@ -34,7 +34,7 @@ PIPELINE_MD="$PLUGIN_DIR/commands/pipeline.md"
 GUARD="$SCRIPTS_DIR/gate-phase-entry.mjs"
 VALIDATOR="$SCRIPTS_DIR/validate-pipeline-artifact.mjs"
 VOICE_LINT="$SCRIPTS_DIR/voice-lint.mjs"
-TESTS_DIR="$PLUGIN_DIR/tests"
+TESTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$PLUGIN_DIR/../.." && pwd)"
 
 # The corpus build is NOT reimplemented here. test-pipeline-telemetry.sh owns the one

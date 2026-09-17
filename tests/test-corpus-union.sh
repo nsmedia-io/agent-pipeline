@@ -57,7 +57,7 @@ make_temp_project || exit 90
 
 PLUGIN_DIR="$PLUGIN_ROOT"
 REPO_ROOT="$(cd "$PLUGIN_DIR/../.." && pwd)"
-SUITE="$PLUGIN_DIR/tests/test-pipeline-telemetry.sh"
+SUITE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/test-pipeline-telemetry.sh"
 TELEMETRY="$SCRIPTS_DIR/pipeline-telemetry.mjs"
 
 BEGIN_MARK='# --- BEGIN corpus helper (issue #30 D1) ---'

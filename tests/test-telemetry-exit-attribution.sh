@@ -51,7 +51,7 @@ TELEMETRY="$SCRIPTS_DIR/pipeline-telemetry.mjs"
 DISPATCH="$SCRIPTS_DIR/dispatch-model.mjs"
 REPO_ROOT="$(cd "$PLUGIN_DIR/../.." && pwd)"
 R17="$REPO_ROOT/.pipeline/17/status.json"
-SUITE_UNDER_SCAN="$PLUGIN_DIR/tests/test-pipeline-telemetry.sh"
+SUITE_UNDER_SCAN="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/test-pipeline-telemetry.sh"
 
 # field <key-expression> : telemetry() over $R17, printing one field.
 r17_field() {

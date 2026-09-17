@@ -6,9 +6,9 @@ development pipeline. This repo IS the plugin source; it also runs the pipeline 
 ## Commands
 
 ```
-bash plugins/pipeline/tests/run.sh        # the whole suite; also the Stop-hook checkCommand
-bash plugins/pipeline/tests/test-<name>.sh # one suite
-bash plugins/pipeline/tests/run-linux.sh [test-<name>.sh ...]  # the Linux answer, in a container, on demand
+bash tests/run.sh        # the whole suite; also the Stop-hook checkCommand
+bash tests/test-<name>.sh # one suite
+bash tests/run-linux.sh [test-<name>.sh ...]  # the Linux answer, in a container, on demand
 node scripts/sync-manifests.mjs --check    # marketplace.json matches plugin.json (the one remaining workflow)
 ```
 
