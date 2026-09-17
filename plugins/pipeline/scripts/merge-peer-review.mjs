@@ -11,7 +11,7 @@
 
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { isMain as isMainScript } from "./lib.mjs";
-import { normalizeBlock } from "./materiality.mjs";
+import { normalizeBlock, normCostClass, COST_CLASSES } from "./materiality.mjs";
 
 // unwrap defends against a shard that wrapped its block under its role key
 // ({"dba": {...}}) instead of writing a bare block, so a wrapped verdict is
@@ -146,13 +146,44 @@ export function countVerdicts(merged, roles) {
   return counts;
 }
 
-function main(argv) {
+// The run's cost_class decides what a concern may block on (materiality.mjs). It comes from
+// --cost-class <c>, or from --status <status.json> (the orchestrator passes the canonical record),
+// and a call with neither reads as product. An unreadable --status is a HALT, not a default:
+// guessing product for a product-money run would silently narrow what blocks.
+export function resolveCostClass({ costClass, statusFile }) {
+  if (costClass) {
+    if (!COST_CLASSES.includes(costClass)) throw new Error(`--cost-class ${JSON.stringify(costClass)} is not one of ${COST_CLASSES.join(", ")}`);
+    return costClass;
+  }
+  if (statusFile) {
+    const st = JSON.parse(readFileSync(statusFile, "utf-8"));
+    return normCostClass(st && st.cost_class);
+  }
+  return normCostClass(undefined);
+}
+
+function main(argvIn) {
+  const argv = [];
+  let costClassArg = null;
+  let statusFile = null;
+  for (let i = 0; i < argvIn.length; i++) {
+    if (argvIn[i] === "--cost-class") costClassArg = argvIn[++i];
+    else if (argvIn[i] === "--status") statusFile = argvIn[++i];
+    else argv.push(argvIn[i]);
+  }
   const [target, ...pairs] = argv;
   if (!target || pairs.length === 0) {
     console.error(
-      "usage: merge-peer-review.mjs <peer-review.json> <role>=<shard.json> [<role>=<shard.json> ...]",
+      "usage: merge-peer-review.mjs [--status <status.json> | --cost-class <product-money|product|tooling>] <peer-review.json> <role>=<shard.json> [<role>=<shard.json> ...]",
     );
     process.exit(1);
+  }
+  let costClass;
+  try {
+    costClass = resolveCostClass({ costClass: costClassArg, statusFile });
+  } catch (e) {
+    console.error(`UNRESOLVABLE COST CLASS: ${e.message}; the cost_class decides what blocks, so the merge refuses to guess`);
+    process.exit(2);
   }
   const existing = existsSync(target) ? JSON.parse(readFileSync(target, "utf-8")) : {};
   const shards = {};
@@ -189,22 +220,23 @@ function main(argv) {
       process.exit(2);
     }
   }
-  // MATERIALITY (0.40.0). Every shard folded on THIS invocation is normalized: a
-  // REQUEST_CHANGES with no blocking concern is recorded as APPROVE_WITH_NOTES, a VETO with
-  // no named veto_ground as REQUEST_CHANGES, an APPROVE carrying a blocking concern as
-  // REQUEST_CHANGES. The reviewer's own verdict is kept as verdict_as_returned whenever the
+  // MATERIALITY (0.40.0; the cost_class rule since review convergence). Every shard folded on
+  // THIS invocation is normalized under the run's cost_class: a REQUEST_CHANGES or
+  // REQUEST_REFACTOR with no blocking concern is recorded as APPROVE_WITH_NOTES, a VETO with no
+  // valid veto_ground or no blocking concern as REQUEST_CHANGES, an APPROVE carrying a blocking
+  // concern as REQUEST_CHANGES, and blockers past the cap are demoted to notes. The reviewer's own verdict is kept as verdict_as_returned whenever the
   // two differ, and the change is said on stderr, so the rubric reads the ruling and the
   // archive keeps the finding. Standing blocks from earlier rounds are NOT re-normalized:
   // they were normalized when they were folded, and re-reading them would be a second
   // ruling on the same evidence.
   for (const role of Object.keys(shards)) {
     const before = merged[role];
-    const after = normalizeBlock(before, role);
+    const after = normalizeBlock(before, role, { costClass });
     merged[role] = after;
     if (after && after.verdict_as_returned !== undefined && after.verdict !== before.verdict) {
       console.error(`normalized ${role}: ${before.verdict} -> ${after.verdict} (${(after.materiality?.notes || []).join(" ")})`);
     } else if (after && after.materiality && after.materiality.unrated_concerns > 0) {
-      console.error(`normalized ${role}: verdict unchanged, ${after.materiality.unrated_concerns} unrated blocking-severity concern(s) treated as blocking`);
+      console.error(`normalized ${role}: verdict unchanged, ${after.materiality.unrated_concerns} UNRATED concern(s) read as notes (${(after.materiality.unrated_ids || []).join(", ")})`);
     }
   }
   writeFileSync(target, `${JSON.stringify(merged, null, 2)}\n`);
