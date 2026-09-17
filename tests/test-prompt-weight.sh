@@ -3,6 +3,18 @@
 # runs on a fixture issue, labels its token figures as an estimate, reports the cacheable static
 # prefix the renderer actually produces, compares JSON with TOON on the fixture's uniform arrays,
 # and never writes into the fixture.
+#
+# The fixture is synthetic and small on purpose. It mimics the two things a real consumer run brings
+# that the plugin does not know about: a tier name of its own (money) and a reviewer role with no
+# plugin lens (ledger). Both must be named in the report rather than silently mapped or dropped,
+# because a figure quoted from this script has to say what population it was measured on. The spec
+# carries one uniform array of three acceptance criteria, which is the shape TOON tabulates, so the
+# JSON versus TOON comparison has a table to find; and the QA shard carries one open blocker, so the
+# delta render has a role to seat. The expected static preamble size is recomputed here from the
+# renderer and the command file, never typed, so an edit to the preamble cannot strand a literal.
+#
+# This file is kept low in shell punctuation per byte: the PreToolUse timeout-bound suite builds its
+# worst-case command from the densest tracked file, and a test file should not become that file.
 
 . "$(dirname "${BASH_SOURCE[0]}")/harness.sh"
 require_node
