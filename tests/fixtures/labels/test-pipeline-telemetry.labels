@@ -20,9 +20,9 @@ CONTROL: an unrecognized verdict counts as a marker, keeping the floor a floor
 CONTROL: and PASSES a well-formed repo-relative path, so it is not refusing everything
 CONTROL: and on /var/folders/... at depth, inside an array
 CONTROL: and on the English sentence that was actually written into it
-CONTROL: commands/pipeline.md really does append it (the fact the description now states)
 CONTROL: finish that same write and the leak IS reported
 CONTROL: free text in `attribution` still leaks, so the enum widening is closed
+CONTROL: scripts/panel-roles.mjs really does append it (the fact the description now states)
 CONTROL: the declared label in the SAME fixture is still attributed normally
 CONTROL: the same accounting reports a shortfall on an archive record it cannot read
 CONTROL: the same check reports 4 on an object carrying a note and a path (two keys, two values)

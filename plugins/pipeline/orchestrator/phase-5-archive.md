@@ -1,15 +1,10 @@
 ## Phase 5: Knowledge Persistence (post-merge)
 
-**Checkpoint first:** set `current_phase: "5-archive"` and commit `status.json` BEFORE dispatching the Librarian.
+**Checkpoint first:** `checkpoint.mjs enter 5-archive --exit-verdict <verdict> --commit` (`status-record.md`; it writes `current_phase: "5-archive"`) BEFORE dispatching the Librarian.
 
 Trigger: after the owner confirms the PR merged. The owner can invoke `/pipeline --resume <issue>` to kick Phase 5 off.
 
-Verify merge:
-```
-git fetch origin main && git log origin/main --oneline | grep -q "#<issue>" && echo "merged" || echo "not merged"
-```
-
-If not merged: halt and tell the owner.
+Verify merge: `node "${CLAUDE_PLUGIN_ROOT}/scripts/check-merged.mjs" --issue <issue> --status "$PIPELINE_BASE/<issue>/status.json"`. Any exit but 0: halt and tell the owner what it printed.
 
 **Dispatch the Librarian NON-BLOCKING; do not hold the session on Phase 5.** Post-merge archival can run long while the owner waits on a step whose result is not a gate. `run_in_background` is a Bash-tool primitive and does NOT apply to an Agent dispatch, so the concrete non-blocking mechanism is: **checkpoint `5-archive`, dispatch the Librarian as the LAST action of the run, and return the completion summary to the owner in the SAME turn WITHOUT awaiting or reading the Librarian's result.** The archival is not a merge gate and its outcome does not change the pipeline verdict, so control returns to the owner immediately; the Librarian's knowledge-store and archive work completes out of band. If only the mechanical archival is wanted detached (not the Librarian's knowledge-store judgment), the fallback is to run `${CLAUDE_PLUGIN_ROOT}/scripts/archive-pipeline.mjs --issue <issue>` via a backgrounded Bash call (`run_in_background`) and skip the Agent dispatch. Either way the orchestrator session does not block on Phase 5.
 

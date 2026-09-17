@@ -156,14 +156,14 @@ assert_eq "a spec with no cost_class takes it from status.json" "$RC" "2"
 
 suite "round-budget: the prose calls it at the fix-round and spec-revision points"
 
-assert_contains "pipeline.md counts a fix round before dispatching Dev" "$(cat "$PIPELINE_MD")" \
-  'round-budget.mjs" enter fix-round --status "$PIPELINE_BASE/<issue>/status.json"'
-assert_contains "pipeline.md counts a spec revision before looping back to BA" "$(cat "$PIPELINE_MD")" \
-  'round-budget.mjs" enter spec-revision --status "$PIPELINE_BASE/<issue>/status.json"'
+# #164: the count is spent by the loop-back write itself (checkpoint.mjs enter --loopback calls
+# checkRoundBudget), so the prose names that one command; tests/test-checkpoint.sh runs it.
+assert_contains "pipeline.md counts a fix round or a spec revision in the loop-back write" "$(cat "$PIPELINE_MD")" \
+  'checkpoint.mjs" enter <target> --status "$PIPELINE_BASE/<issue>/status.json" --loopback --commit'
 assert_contains "pipeline.md refuses an oversized tooling spec after BA returns" "$(cat "$PIPELINE_MD")" \
   'round-budget.mjs" spec-size --spec "$PIPELINE_BASE/<issue>/spec.json"'
 assert_contains "phase.md's manual re-review is held to the same fix-round count" "$(cat "$PHASE_MD")" \
-  'round-budget.mjs" enter fix-round --status'
+  'checkpoint.mjs enter 3-impl --loopback'
 assert_eq "the old prose-only 'ONE round by default' row is gone" \
   "$(grep -c 'ONE round by default' "$PIPELINE_MD" | tr -d ' ')" "0"
 assert_eq "checkRoundBudget is exported for a gate to call" \

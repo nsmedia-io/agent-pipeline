@@ -166,16 +166,16 @@ assert_eq "flags[].summary's pre-existing 140 cap is untouched" \
   "$(rfield "$SCHEMA_FACTS" summary_cap)" "140"
 
 # THE WRITER RULE THE DESCRIPTIONS NAME. Both verdict descriptions say the cap "is honored by the
-# writer", and commands/pipeline.md is the only document the writer reads. A rule nobody reads is
-# a comment, so the claim is asserted rather than trusted -- and asserted against the number read
-# out of the SCHEMA, not a literal repeated here, so raising the cap in the schema alone reddens
-# this until the writer's copy follows.
-PIPELINE_VERDICT_RULE="$(sed -n '/^Rules for `verdict`/,/^$/p' "$PIPELINE_MD")"
-assert_contains "R6: commands/pipeline.md restates the verdict cap to the WRITER, beside the 140 summary rule" \
-  "$PIPELINE_VERDICT_RULE" "$(rfield "$SCHEMA_FACTS" events_cap)-char cap"
-assert_contains "R6: ...and says what the field is for, so the cap is not read as a truncation budget" \
-  "$PIPELINE_VERDICT_RULE" "TOKEN, not prose"
-assert_eq "CONTROL: the extraction is SCOPED -- the range stops at the blank line and does not run on into the next section" \
+# writer". Since #164 the writer honors it by running scripts/checkpoint.mjs for every write, and
+# that script reads the cap out of THIS schema (capsFromSchema) rather than holding a copy. So what
+# is asserted is that the writer's recipe states the refusal, and that the command refusing it is
+# the one reading the schema -- raising the cap in the schema alone moves the command with it.
+PIPELINE_VERDICT_RULE="$(sed -n '/^### Durable checkpoint convention/,/^When dispatching Phase 4/p' "$PIPELINE_MD" | sed '$d')"
+assert_contains "R6: the writer's checkpoint recipe states that an over-cap verdict is refused, beside the summary cap" \
+  "$PIPELINE_VERDICT_RULE" "a verdict is over the schema cap"
+assert_contains "R6: ...and the refusing command reads the cap from this schema and says what the field is for" \
+  "$(grep -c 'capsFromSchema(doc)' "$SCRIPTS_DIR/checkpoint.mjs" | tr -d ' ')/$(grep -o 'A verdict is a TOKEN' "$SCRIPTS_DIR/checkpoint.mjs" | head -1)" "1/A verdict is a TOKEN"
+assert_eq "CONTROL: the extraction is SCOPED -- the range stops before the Phase 4 dispatch line and does not run on into it" \
   "$(printf '%s' "$PIPELINE_VERDICT_RULE" | grep -c 'When dispatching Phase 4' | tr -d ' ')" "0"
 
 # ---------------------------------------------------------------------------

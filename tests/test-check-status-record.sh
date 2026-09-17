@@ -364,35 +364,34 @@ assert_eq "run from an unrelated cwd, CLAUDE_PROJECT_DIR still locates the recor
 assert_contains "...and finds the same bad one" "$CPD_OUT" ".pipeline/118/status.json"
 
 # ---------------------------------------------------------------------------
-suite "the writer reads commands/pipeline.md, so the command is stated THERE"
+suite "the writer reads the orchestrator prose, so the command that runs this check is stated THERE"
 # ---------------------------------------------------------------------------
 # A rule with no runnable check beside it is what #117 is about; a runnable check named nowhere
-# the writer looks is the same defect wearing the other hat.
-VERDICT_RULE="$(sed -n '/^Rules for `verdict`/,/^$/p' "$PIPELINE_MD")"
-assert_eq "VACUITY: the verdict rule block was extracted non-empty" \
-  "$([[ -n "$VERDICT_RULE" ]] && echo present || echo "ABSENT from $PIPELINE_MD")" "present"
-assert_contains "the verdict rule names the checker by path" "$VERDICT_RULE" "check-status-record.mjs"
+# the writer looks is the same defect wearing the other hat. Since #164 the writer does not run
+# this script by hand: every checkpoint goes through scripts/checkpoint.mjs, which runs THIS
+# module's checkRecords over the whole record before it writes. So the recipe is pinned to name
+# that command, and the command is RUN on the same bad record the bare invocation found above.
 CHECKPOINT_BLOCK="$(sed -n '/^### Durable checkpoint convention/,/^### /p' "$PIPELINE_MD")"
 assert_eq "VACUITY: the checkpoint convention block was extracted non-empty" \
   "$([[ -n "$CHECKPOINT_BLOCK" ]] && echo present || echo ABSENT)" "present"
-assert_contains "and the checkpoint commit recipe -- the place the writer actually acts -- runs it" \
-  "$CHECKPOINT_BLOCK" "check-status-record.mjs"
-assert_contains "...before the commit, not after it" \
-  "$(printf '%s' "$CHECKPOINT_BLOCK" | grep -A2 'check-status-record.mjs' | head -3)" "git commit"
-# The command in the doc is the command that runs. Extracted and EXECUTED rather than read:
-# evidence.md's run-it-do-not-read-it rule, and this repo has shipped four non-running commands
-# in one session.
-DOC_CMD="$(printf '%s' "$CHECKPOINT_BLOCK" | grep 'check-status-record.mjs' | grep '^node ' | head -1)"
-assert_eq "VACUITY: a runnable node invocation was extracted from the doc" \
+DOC_CMD="$(printf '%s' "$CHECKPOINT_BLOCK" | grep '^node .*checkpoint.mjs" enter' | head -1)"
+assert_eq "VACUITY: a runnable checkpoint.mjs enter invocation was extracted from the recipe" \
   "$([[ -n "$DOC_CMD" ]] && echo extracted || echo "NO node line found in the recipe")" "extracted"
-DOC_CMD_RESOLVED="${DOC_CMD/\"\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/check-status-record.mjs\"/$CHECKER}"
+assert_contains "the checkpoint module reads this checker's walk, so the two cannot disagree" \
+  "$(cat "$SCRIPTS_DIR/checkpoint.mjs")" 'import { capsFromSchema, phasePatternFromSchema, checkRecords } from "./check-status-record.mjs"'
+DOC_CMD_RESOLVED="${DOC_CMD//\"\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/checkpoint.mjs\"/\"$SCRIPTS_DIR/checkpoint.mjs\"}"
+DOC_CMD_RESOLVED="${DOC_CMD_RESOLVED//\$PIPELINE_BASE\/<issue>/$MULTI_ROOT/.pipeline/118}"
+DOC_CMD_RESOLVED="${DOC_CMD_RESOLVED//<phase>/5-archive}"
+DOC_CMD_RESOLVED="${DOC_CMD_RESOLVED//<verdict token of the phase closing>/GATE_PASSED}"
+DOC_CMD_RESOLVED="${DOC_CMD_RESOLVED// --commit/}"
+status_body "$OVER_CAP" "" > "$MULTI_ROOT/.pipeline/118/status.json"
 DOC_RUN="$( cd "$MULTI_ROOT" && eval "$DOC_CMD_RESOLVED" 2>&1; printf '|%s' "$?" )"
-assert_eq "THE DOCUMENTED COMMAND ACTUALLY RUNS, and refuses the bad record" "${DOC_RUN##*|}" "1"
-assert_contains "...naming it" "$DOC_RUN" ".pipeline/118/status.json"
+assert_eq "THE DOCUMENTED COMMAND ACTUALLY RUNS, and refuses the record carrying an over-cap verdict" "${DOC_RUN##*|}" "2"
+assert_contains "...naming the value" "$DOC_RUN" "\"$OVER_CAP\""
 status_body "$AT_CAP" "" > "$MULTI_ROOT/.pipeline/118/status.json"
 DOC_RUN_CLEAN="$( cd "$MULTI_ROOT" && eval "$DOC_CMD_RESOLVED" 2>&1; printf '|%s' "$?" )"
 assert_eq "GATE BITES, the other half: the same documented command exits 0 on the fixed record" \
-  "$DOC_RUN_CLEAN" "|0"
+  "${DOC_RUN_CLEAN##*|}" "0"
 
 # ---------------------------------------------------------------------------
 suite "the default scan is scoped to LIVE records (0.41.0)"

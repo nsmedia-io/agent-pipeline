@@ -31,23 +31,196 @@
 #       nested run reports the PRE-implementation pass/fail tally while your outer run reports
 #       the post-implementation one, and the two disagree for a reason that has nothing to do
 #       with the change. COMMIT FIRST, then re-run, before treating that disagreement as a bug.
+#
+# MODES, JOBS AND SERIAL SUITES (#162).
+#
+#   bash tests/run.sh                        # routine: suites in parallel, release-only cells off
+#   PIPELINE_TESTS_FULL=1 bash tests/run.sh  # full: every cell, including the release-only ones
+#   PIPELINE_TESTS_JOBS=1 bash tests/run.sh  # one suite at a time (default 4)
+#
+#   - FULL MODE is what a release is cut on (CLAUDE.md, Versioning). A cell guarded by
+#     harness.sh's full_mode_only (the nested fresh-checkout run, oversized timeout and sweep
+#     cells) is RECORDED as not run in routine mode, never skipped in silence.
+#   - A suite carrying the line `# pipeline-tests: serial` runs AFTER the parallel pool drains,
+#     alone. That is for suites that measure wall time against a budget (a loaded host is a false
+#     red there) or that act on the shared checkout (git worktree add, the nested run).
+#   - A parallel suite's output is buffered to a file and printed whole when it finishes, so two
+#     suites never interleave; the `== name ==` banner still precedes each suite's lines, which
+#     is what the fresh-checkout cell's transcript reader keys on. A serial suite streams.
 set -u
 
 cd "$(dirname "${BASH_SOURCE[0]}")" || exit 1
+
+# WALL TIME PER SUITE (#162). A suite's elapsed time is printed after it runs, and every suite's
+# time is printed again, slowest first, before the verdict. Without it the split between the
+# nested fresh-checkout run, timeout-bound cells and per-assertion process starts was unmeasured.
+# Tenths of a second from EPOCHREALTIME where bash has it (5.0+); whole seconds from `date +%s`
+# on bash 3.2, which is what macOS ships.
+_now_ds() {
+  if [[ -n "${EPOCHREALTIME:-}" ]]; then
+    local r="${EPOCHREALTIME/,/.}"
+    printf '%s' "$(( ${r%%.*} * 10 + 10#${r#*.} / 100000 ))"
+  else
+    printf '%s' "$(( $(date +%s) * 10 ))"
+  fi
+}
+_fmt_ds() { printf '%d.%d' "$(( $1 / 10 ))" "$(( $1 % 10 ))"; }
+
+JOBS="${PIPELINE_TESTS_JOBS:-4}"
+case "$JOBS" in
+  ''|*[!0-9]*|0) printf 'run.sh: PIPELINE_TESTS_JOBS must be a positive integer, got [%s]\n' "$JOBS" >&2; exit 2 ;;
+esac
+MODE=routine
+[[ "${PIPELINE_TESTS_FULL:-0}" == "1" ]] && MODE=full
+
+# Per-suite output and result files. Removed on exit; the removal refuses anything but the dir
+# this run created.
+OUTDIR="$(mktemp -d "${TMPDIR:-/tmp}/pipeline-run.XXXXXX" 2>/dev/null)" || OUTDIR=""
+if [[ -z "$OUTDIR" || ! -d "$OUTDIR" ]]; then
+  printf 'run.sh: mktemp -d failed; nothing was run\n' >&2
+  exit 1
+fi
+_cleanup_outdir() {
+  case "$OUTDIR" in
+    */pipeline-run.*) [[ -d "$OUTDIR" ]] && rm -rf "$OUTDIR" ;;
+  esac
+  return 0
+}
+# On INT/TERM the suites still running are stopped BEFORE their output dir goes: a background suite
+# left running would keep writing into a removed dir and outlive the run that started it. A running
+# suite's pid is in <t>.pid (the suite) and <t>.jpid (a parallel job's subshell) until <t>.res lands.
+_kill_running() {
+  local f
+  for f in "$OUTDIR"/*.pid "$OUTDIR"/*.jpid; do
+    [[ -f "$f" ]] || continue
+    [[ -f "${f%.*}.res" ]] && continue
+    kill "$(cat "$f" 2>/dev/null)" 2>/dev/null
+  done
+  return 0
+}
+trap '_cleanup_outdir' EXIT
+trap '_kill_running; _cleanup_outdir; exit 130' INT
+trap '_kill_running; _cleanup_outdir; exit 143' TERM
 
 FAILED=0
 # A newline-delimited STRING and not an array, matching harness.sh's TMP_REGISTRY for the same
 # reason: bash 3.2 is what macOS ships and what this script runs under, and `"${arr[@]}"` on an
 # empty array is an unbound-variable error there under `set -u`.
 FAILED_SUITES=""
+TIMES=""
+PARALLEL=""
+SERIAL=""
+RUNNING=""
+N_RUNNING=0   # kept in step with RUNNING, so the poll spawns no process
+N_SUITES=0
+
+# _run_suite <t> -> the banner, the suite's output, its elapsed line; <t>.res holds "<rc> <ds>".
+# Written to .res.tmp and renamed, so the poller never reads a half-written result.
+_run_suite() {
+  local t="$1" t0 rc dt
+  printf '\n\033[1m== %s ==\033[0m\n' "$t"
+  t0="$(_now_ds)"
+  # In the background and waited on, so an INT/TERM trap in this shell fires while it runs.
+  bash "$t" </dev/null &
+  printf '%s\n' "$!" > "$OUTDIR/$t.pid"
+  wait "$!"
+  rc=$?
+  dt=$(( $(_now_ds) - t0 ))
+  printf 'elapsed %s s  %s\n' "$(_fmt_ds "$dt")" "$t"
+  printf '%s %s\n' "$rc" "$dt" > "$OUTDIR/$t.res.tmp" && mv "$OUTDIR/$t.res.tmp" "$OUTDIR/$t.res"
+}
+
+# _read_res <t> -> RES_RC and RES_DT. A result file that is missing, unreadable or malformed is a
+# FAILED suite (rc 1), never the previous suite's code.
+_read_res() {
+  RES_RC=1; RES_DT=0
+  local rc="" dt=""
+  if [[ -f "$OUTDIR/$1.res" ]] && read -r rc dt < "$OUTDIR/$1.res"; then
+    case "$rc" in ''|*[!0-9]*) ;; *) RES_RC="$rc" ;; esac
+    case "$dt" in ''|*[!0-9]*) ;; *) RES_DT="$dt" ;; esac
+  else
+    printf 'run.sh: %s left no result file; counted as FAILED\n' "$1"
+  fi
+}
+
+_tally() {  # <t> <rc> <ds>
+  if [[ "$2" -ne 0 ]]; then
+    FAILED=$((FAILED + 1))
+    FAILED_SUITES="${FAILED_SUITES}  ${1}
+"
+  fi
+  TIMES="${TIMES}${3} ${1}
+"
+}
+
+# _reap: print and tally every running suite that has finished; leaves the rest in RUNNING. A job
+# whose subshell has EXITED without writing a result (killed, or the write failed) is reaped as a
+# failure instead of being waited on forever. _read_res looks at the result again after the
+# liveness probe, so a job that finished between the two checks is read, not failed.
+_reap() {
+  local t still="" n=0 jpid
+  while IFS= read -r t; do
+    [[ -n "$t" ]] || continue
+    jpid="$(cat "$OUTDIR/$t.jpid" 2>/dev/null)"
+    if [[ -f "$OUTDIR/$t.res" ]] || ! kill -0 "${jpid:-0}" 2>/dev/null; then
+      cat "$OUTDIR/$t.out" 2>/dev/null
+      _read_res "$t"
+      _tally "$t" "$RES_RC" "$RES_DT"
+    else
+      still="${still}${t}
+"
+      n=$((n + 1))
+    fi
+  done <<< "$RUNNING"
+  RUNNING="$still"
+  N_RUNNING=$n
+}
+
 for t in test-*.sh; do
   [[ -f "$t" ]] || continue
-  printf '\n\033[1m== %s ==\033[0m\n' "$t"
-  bash "$t" || {
-    FAILED=$((FAILED + 1))
-    FAILED_SUITES="${FAILED_SUITES}  ${t}
+  N_SUITES=$((N_SUITES + 1))
+  if grep -q '^# pipeline-tests: serial$' "$t"; then
+    SERIAL="${SERIAL}${t}
 "
-  }
+  else
+    PARALLEL="${PARALLEL}${t}
+"
+  fi
+done
+
+printf 'run.sh: %s suites, mode=%s (PIPELINE_TESTS_FULL=1 runs the release-only cells), jobs=%s, serial=%s\n' \
+  "$N_SUITES" "$MODE" "$JOBS" "$(printf '%s' "$SERIAL" | grep -c . | tr -d ' ')"
+
+RUN_START="$(_now_ds)"
+while IFS= read -r t; do
+  [[ -n "$t" ]] || continue
+  while [[ "$N_RUNNING" -ge "$JOBS" ]]; do
+    sleep 0.2
+    _reap
+  done
+  _run_suite "$t" > "$OUTDIR/$t.out" 2>&1 &
+  printf '%s\n' "$!" > "$OUTDIR/$t.jpid"
+  RUNNING="${RUNNING}${t}
+"
+  N_RUNNING=$((N_RUNNING + 1))
+done <<< "$PARALLEL"
+while [[ "$N_RUNNING" -gt 0 ]]; do
+  sleep 0.2
+  _reap
+done
+wait
+
+while IFS= read -r t; do
+  [[ -n "$t" ]] || continue
+  _run_suite "$t"
+  _read_res "$t"
+  _tally "$t" "$RES_RC" "$RES_DT"
+done <<< "$SERIAL"
+
+printf '\nSuite wall time, slowest first (run total %s s, mode=%s, jobs=%s):\n' \
+  "$(_fmt_ds $(( $(_now_ds) - RUN_START )))" "$MODE" "$JOBS"
+printf '%s' "$TIMES" | sort -rn | while read -r dt t; do
+  [[ -n "$t" ]] && printf '  %8s s  %s\n' "$(_fmt_ds "$dt")" "$t"
 done
 
 printf '\n'

@@ -149,8 +149,8 @@ assert_eq "the 'tracked via its own shard' claim is gone" \
   "$(grep -c 'design_review lens is tracked via its own shard' "$SCHEMA" | tr -d ' ')" "0"
 assert_eq "and the description says design_review is APPENDED to this array" \
   "$(grep -c 'design_review is APPENDED TO THIS ARRAY' "$SCHEMA" | tr -d ' ')" "1"
-assert_eq "CONTROL: commands/pipeline.md really does append it (the fact the description now states)" \
-  "$(grep -c 'PANEL_ROLES="$PANEL_ROLES design_review"' "$PIPELINE_MD" | tr -d ' ')" "1"
+assert_eq "CONTROL: scripts/panel-roles.mjs really does append it (the fact the description now states)" \
+  "$(grep -c 'roles.push("design_review")' "$SCRIPTS_DIR/panel-roles.mjs" | tr -d ' ')" "1"
 
 # =============================================================================
 # AC16 -- the telemetry computation, against known timestamps.

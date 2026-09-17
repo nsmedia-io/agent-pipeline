@@ -960,20 +960,20 @@ suite "AC3: the orchestrator's own checkpoint, on the REAL command shapes"
 # documents the checkpoint as TWO commands and PreToolUse fires once per Bash call, so all three
 # forms are asserted separately. Deliberately redundant with AC8 on the command term, and labelled
 # so: the subject here is the real-world shape, not a predicate term.
-CKPT_BLOCK="$(awk '/^# Run BEFORE entering each phase/{f=1} f&&/^```$/{exit} f' "$GATE_PIPELINE_MD")"
-CKPT_ADD="$(printf '%s\n' "$CKPT_BLOCK" | grep -m1 '^git add ' | sed 's|<issue>|106|g')"
-CKPT_COMMIT="$(printf '%s\n' "$CKPT_BLOCK" | grep -m1 '^git commit ' | sed 's|<issue>|106|g; s|<n>|4-review|g')"
-record "CHECKPOINT CONVENTION, read from commands/pipeline.md at this commit: [$CKPT_ADD] and [$CKPT_COMMIT]"
-assert_eq "VACUITY: both checkpoint commands were actually extracted (an empty fixture asserts nothing)" \
-  "$([[ -n "$CKPT_ADD" && -n "$CKPT_COMMIT" ]] && echo extracted || echo "MISSING add=[$CKPT_ADD] commit=[$CKPT_COMMIT]")" "extracted"
-assert_eq "VACUITY: the extracted add stages exactly one status.json, not a blanket pathspec" \
-  "$([[ "$CKPT_ADD" == *"status.json" ]] && echo scoped || echo "WIDENED: $CKPT_ADD")" "scoped"
+# #164: the checkpoint is now ONE Bash call, `node .../checkpoint.mjs enter ... --commit`, and the
+# git add/commit it performs run inside that process, where they stage only the named status.json
+# (tests/test-checkpoint.sh pins the staged set). So the real-world shape PreToolUse sees is the
+# node invocation, read from the recipe rather than transcribed.
+CKPT_CMD="$(sed -n '/^### Durable checkpoint convention/,/^### /p' "$GATE_PIPELINE_MD" | grep -m1 '^node .*checkpoint.mjs" enter' \
+  | sed 's|<issue>|106|g; s|<phase>|4-review|g; s|<verdict token of the phase closing>|GATE_PASSED|g')"
+record "CHECKPOINT CONVENTION, read from the orchestrator prose at this commit: [$CKPT_CMD]"
+assert_eq "VACUITY: the checkpoint command was actually extracted (an empty fixture asserts nothing)" \
+  "$([[ -n "$CKPT_CMD" ]] && echo extracted || echo "MISSING")" "extracted"
+assert_eq "VACUITY: the extracted command names exactly one status.json, not a blanket pathspec" \
+  "$([[ "$CKPT_CMD" == *'--status "$PIPELINE_BASE/106/status.json"'* && "$CKPT_CMD" != *"git add"* ]] && echo scoped || echo "WIDENED: $CKPT_CMD")" "scoped"
 
 for who in "agent_id=__ABSENT__" "agent_id=sub-orchestrator-impersonator"; do
-  assert_eq "AC3 ALLOW ($who): $CKPT_ADD" "$(verdict "$P4" "$CKPT_ADD" "$who")" "none"
-  assert_eq "AC3 ALLOW ($who): $CKPT_COMMIT" "$(verdict "$P4" "$CKPT_COMMIT" "$who")" "none"
-  assert_eq "AC3 ALLOW ($who): the &&-joined form" \
-    "$(verdict "$P4" "$CKPT_ADD && $CKPT_COMMIT" "$who")" "none"
+  assert_eq "AC3 ALLOW ($who): $CKPT_CMD" "$(verdict "$P4" "$CKPT_CMD" "$who")" "none"
 done
 
 # ===============================================================================================
@@ -1702,14 +1702,22 @@ hd13_cmd() {  # <n pad bytes> -> the full command string for that pad length
 # reason -- stopping the body early rather than genuinely reaching the real terminator) without
 # necessarily reddening the sweep above, which is why (i) and (ii) are both asserted rather than
 # either alone.
+# ROUTINE RUNS A REPRESENTATIVE SUBSET (#162): every 11th pad length, 100 of the 1100, which still
+# spans both window periods at a step coprime to 512. The whole sweep is release-only (about 90 s
+# on Linux) and runs under PIPELINE_TESTS_FULL=1; the routine run records that it did not.
+HD13_NS="$(seq 0 1099)"
+if ! full_mode_only "#140 AC13 the other 1000 pad lengths of the refill-boundary sweep (routine drives every 11th, 0..1089)"; then
+  HD13_NS="$(seq 0 11 1099)"
+fi
 HD13_FAIL=""
-for n in $(seq 0 1099); do
+for n in $HD13_NS; do
   v="$(sub_verdict "$P4" "$(hd13_cmd "$n")")"
   [[ "$v" == "deny" ]] || HD13_FAIL="$HD13_FAIL $n"
   assert_eq "#140 AC13: refill-boundary sweep, pad=${n} bytes (cat <<-EOF / 6 prose lines / ${n} pad bytes / TAB-EOF / git add -A) -> deny" \
     "$v" "deny"
 done
-record "#140 AC13: swept 1100 consecutive pad lengths (0..1099, spanning >1024 bytes = >2 internal 512-byte scanner-window periods). Lengths returning the wrong verdict (none instead of deny) at the reviewed commit:${HD13_FAIL:- none}"
+[[ "$PIPELINE_TESTS_FULL_MODE" == "1" ]] && record "#140 AC13: swept 1100 consecutive pad lengths (0..1099, spanning >1024 bytes = >2 internal 512-byte scanner-window periods). Lengths returning the wrong verdict (none instead of deny) at the reviewed commit:${HD13_FAIL:- none}"
+[[ "$PIPELINE_TESTS_FULL_MODE" == "1" ]] || record "#140 AC13 ROUTINE SUBSET: swept 100 pad lengths (0..1089, step 11). Lengths returning the wrong verdict (none instead of deny) at the reviewed commit:${HD13_FAIL:- none}"
 
 # THE REAL-SHELL-ORACLE NON-ZERO CONTROL, reusing this file's own real_argv() idiom (defined above,
 # THE ORACLE section) rather than a second implementation of the same shim. Sampled at pad=457,
@@ -1881,3 +1889,6 @@ assert_eq "#140/#145 PIN (d): same body, with NO trailing git command at all aft
 record "#140/#145 PIN: the discrimination twin for this block (quoted-delimiter <<'EOF' + backtick -> none) is already asserted above as AC12(d)/2 and is cited rather than duplicated"
 
 finish
+
+# run.sh runs this suite alone, after the parallel pool (#162): it measures wall time against a budget.
+# pipeline-tests: serial

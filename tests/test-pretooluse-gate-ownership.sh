@@ -1050,3 +1050,7 @@ else
 fi
 
 finish
+
+# run.sh runs this suite alone, after the parallel pool (#162): it runs `git worktree add` on the
+# shared checkout.
+# pipeline-tests: serial

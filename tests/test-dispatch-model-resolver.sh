@@ -111,6 +111,18 @@ for cand in $(grep -oE 'scripts/[a-zA-Z0-9_-]+\.mjs' "$PIPELINE_MD" | sort -u); 
     # It counts rounds in status.json and takes a subcommand plus --status, never a (role, tier,
     # phase) triple, and resolves no model. Excluded by NAME, like the rest.
     round-budget.mjs) continue ;;
+    # #164: the Phase 4 roster (full panel and delta set); seats roles, resolves no model.
+    panel-roles.mjs) continue ;;
+    # #164: deterministic gates moved out of prose. Each takes artifact paths or an issue, never a
+    # (role, tier, phase) triple, and resolves no model. Excluded by NAME, like the rest.
+    check-merged.mjs|extract-constraints.mjs|owner-gate.mjs|sync-artifacts.mjs|artifact-ownership.mjs|merge-ready.mjs) continue ;;
+    # #164: the Phase 2 merge, the Phase 3 exit and the tier floor. None resolves a model or
+    # takes a (role, tier, phase) triple. Excluded by NAME, like the rest.
+    merge-review.mjs|phase3-exit.mjs|tier-floor.mjs) continue ;;
+    # #164: the checkpoint writer and the Phase 4 verdict recorder, referenced from every phase
+    # checkpoint and the verdict step. Both take --status and a subcommand or --peer-review, never a
+    # (role, tier, phase) triple, and resolve no model. Excluded by NAME, like the rest.
+    checkpoint.mjs|record-verdict.mjs) continue ;;
   esac
   # The data-layer surface module is referenced from the same file by R3; it is not this.
   grep -q 'migrationGlobsForTripwire' "$PLUGIN_DIR/$cand" 2>/dev/null && continue

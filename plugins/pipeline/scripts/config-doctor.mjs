@@ -107,6 +107,13 @@ const CODE_KEYS = {
     degrades:
       "per-role effort overrides are ignored and every dispatch runs the built-in tiered assignment (SecOps xhigh/high/medium and QA high/medium/medium by tier on the Phase 4 panel). Every role is reachable, in both directions, allowlisted. NOTE this key only reaches the Workflow dispatch surface (the Phase 4 panel): the Agent tool carries no effort parameter, so on Agent-tool dispatches agents/<role>.md frontmatter governs whatever this says.",
   },
+  usageTelemetry: {
+    type: "object",
+    reader: "scripts/dispatch-log.mjs (through hooks/dispatch-log.sh) and scripts/usage-report.mjs",
+    fallback: "off: no dispatch log is written",
+    degrades:
+      'nothing breaks: this is off by default. When it is absent or not an object, no dispatch line is written, so scripts/usage-report.mjs can report tokens per model but cannot attribute them to an issue, phase or role. Set { "enabled": true } to log, and optionally "dir" (absolute, or relative to the project root) for where the log goes; the default is <git common dir>/agent-pipeline-telemetry. CLAUDE_PIPELINE_USAGE_TELEMETRY=1 or 0 overrides this key for one session.',
+  },
   securitySurfaceGlobs: {
     type: "string[]",
     reader: "scripts/security-surface.mjs (diffTouchesSecuritySurface)",
@@ -126,6 +133,21 @@ const CODE_KEYS = {
     degrades:
       'the deferral ledger routes to `gh issue create` whatever your project uses. Legal values are "github", "gitlab" and "directory"; anything else is IGNORED and github applies, so a project on neither tracker records deferrals into a command it does not have and the pre-Phase-4 gate refuses every tracker_ref it writes. Set "directory" to keep the ledger in the repository instead.',
   },
+  ciRequiredForMerge: {
+    type: "boolean",
+    reader: "scripts/merge-ready.mjs",
+    fallback: "true",
+    degrades:
+      "a PR with no CI checks reported on its head is NOT ready to merge, because CI that has not registered yet looks the same as no CI. Set false only for a project with no remote CI; a failing or pending check refuses either way.",
+  },
+  architecturalTriggers: {
+    type: "object",
+    reader:
+      "scripts/tier-floor.mjs (paths and domains UNION the built-in floor; keywords printed as ADVISORY lines, never a trigger), and scripts/phase3-exit.mjs (paths against the Phase 3 diff)",
+    fallback: "the built-in floor: pipeline.config.json and the compliance domain",
+    degrades:
+      "nothing below the built-in floor: the key can only ADD triggers. A non-object value, a non-array sub-key or a non-string element is ignored, so a trigger you meant to add does not promote the tier.",
+  },
   deferralDir: {
     type: "string",
     reader: "scripts/deferral.mjs (directory mode only)",
@@ -135,14 +157,11 @@ const CODE_KEYS = {
   },
 };
 
-/** Keys consumed by AGENT JUDGMENT rather than by code. Valid, but no script enforces them. */
-const PROSE_KEYS = {
-  architecturalTriggers: {
-    type: "object",
-    reader:
-      "prose: agents/ba.md Phase 1 duty 6 (floor + config union) and commands/pipeline.md ### Risk-tiered orchestration depth (post-BA validation clause). ADVISORY: no script reads it; architecturalTriggers.keywords in particular is read only by the BA agent's judgment, so a keyword never forces a tier mechanically",
-  },
-};
+/**
+ * Keys consumed by AGENT JUDGMENT rather than by code. Empty since #164 moved architecturalTriggers
+ * into scripts/tier-floor.mjs; kept so a future judgment-only key has a table that says so.
+ */
+const PROSE_KEYS = {};
 
 /**
  * THE CONSUMER-OWNED NAMESPACE. A project that keeps its own settings in pipeline.config.json

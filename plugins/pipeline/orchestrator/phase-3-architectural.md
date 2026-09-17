@@ -32,9 +32,8 @@ Return a short summary with the test commit SHA, the test files authored, and th
 ```
 
 After QA returns:
-- Record QA's test commit SHA in `status.json` (e.g. `"phase3_qa_test_commit": "<sha>"`), and append a `flags` entry. Confirm the commit exists (`git -C <WORKTREE_PATH> show --stat <sha>`).
-- If no commit was made or the tests do not fail, halt and re-run QA. Do NOT proceed to Dev.
-- **Read `<ARTIFACT_DIR>/tasks.json` `satisfiability_proof` (#158).** QA's contract must be known SATISFIABLE, not only red: `reference_impl_run` true with the criteria it took green listed in `criteria_proven`, or a non-empty `criteria_unproven` naming each criterion QA could not prove and why, plus `configs_run` naming every test config or pool the committed files land in. A record with neither list, or absent entirely, means QA skipped test-discipline rule 12; halt and re-dispatch QA with that rule quoted. The SubagentStop validator refuses the QA stop in that state too (`groundSatisfiability`), so this line is the orchestrator's half of the same control. Origin: 129 cases handed to Dev with no satisfiability proof; three were unsatisfiable by any implementation and Dev spent its turn cap repairing them.
+- Record QA's contract: `node "${CLAUDE_PLUGIN_ROOT}/scripts/checkpoint.mjs" qa-contract --sha <sha> --tasks "<ARTIFACT_DIR>/tasks.json" --status "$PIPELINE_BASE/<issue>/status.json" --worktree <WORKTREE_PATH> --commit`. It confirms the sha names a commit, checks `tasks.json` `satisfiability_proof` with the SubagentStop validator's own `groundSatisfiability` (#158: QA's contract must be known SATISFIABLE, not only red), and only then records `phase3_qa_test_commit` with a `flags` entry. Exit 2: halt and re-dispatch QA with the printed reason (test-discipline rule 12 quoted); do NOT dispatch Dev. Origin: 129 cases handed to Dev with no satisfiability proof; three were unsatisfiable by any implementation and Dev spent its turn cap repairing them.
+- If QA reports no commit, or tests that do not fail for the right reason, halt and re-run QA. Do NOT proceed to Dev.
 
 ### Phase 3b (architectural tier): Dev implements to green (dispatch SECOND, only after the SHA is recorded)
 
@@ -56,10 +55,9 @@ Keep <ARTIFACT_DIR>/tasks.json updated as you go. Run `<your checks>` (# CUSTOMI
 
 Write <ARTIFACT_DIR>/impl-report.json at completion, including the requirement_checks array AND the qa_signoff block (coverage record of QA-authored tests plus any internal-unit tests you added: test files, edge cases covered, acceptance mapping, verdict APPROVE). Record anything you observed and did not fix in deferred[], with a tracker_ref obtained from `node "${CLAUDE_PLUGIN_ROOT}/scripts/deferral.mjs" record ...` (it routes by deferralTracker); the gate refuses a deferral with no resolvable ref. Open a PR against the integration branch with Closes #<issue>.
 
-Before you return: run BOTH pre-Phase-4 gates against your own artifacts and PASTE their output in your reply.
-  node "${CLAUDE_PLUGIN_ROOT}/scripts/gate-pre-phase4.mjs" --issue <issue> --impl-report "<ARTIFACT_DIR>/impl-report.json" --spec "<ARTIFACT_DIR>/spec.json"
-  node "${CLAUDE_PLUGIN_ROOT}/scripts/gate-pre-phase4-frontend.mjs" --issue <issue> --impl-report "<ARTIFACT_DIR>/impl-report.json"
-A gate that refuses is YOURS to fix before you hand off; I run both again at the transition and a refusal discovered there costs a full round trip. SKIP from the frontend gate is a pass.
+Before you return, run the Phase 3 exit against your own artifacts (no --status: the record is mine) and PASTE its output in your reply:
+  node "${CLAUDE_PLUGIN_ROOT}/scripts/phase3-exit.mjs" --issue <issue> --worktree "<WORKTREE_PATH>" --artifact-dir "<ARTIFACT_DIR>"
+Exit 2 is YOURS to fix before you hand off, exit 3 is a tripwire to report, and exit 4 or any other exit is not yours to fix: stop and report it to me. I run it again at the transition.
 
 Return a short summary with branch name, commit count, check status, acceptance mapping status, PR URL.
   """

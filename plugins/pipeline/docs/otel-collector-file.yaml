@@ -1,0 +1,53 @@
+# OpenTelemetry Collector config for agent-pipeline usage telemetry (#163): a LOCAL sink only.
+#
+# Receives OTLP from Claude Code on 127.0.0.1 and writes append-only JSON lines (one OTLP export
+# request per line) that scripts/usage-report.mjs reads with --otel, or with no flags when the files
+# sit in the telemetry directory beside dispatch.jsonl.
+#
+# Needs a collector build that includes the file exporter (otelcol-contrib does). Run it yourself;
+# the plugin never starts, installs or probes one:
+#
+#   export AGENT_PIPELINE_TELEMETRY_DIR="$(dirname "$(node "$CLAUDE_PLUGIN_ROOT/scripts/dispatch-log.mjs" path)")"
+#   otelcol-contrib --config "$CLAUDE_PLUGIN_ROOT/docs/otel-collector-file.yaml"
+#
+# Point Claude Code at it with the environment block in the README section "Usage telemetry"
+# (CLAUDE_CODE_ENABLE_TELEMETRY=1, OTLP exporters for metrics and logs, grpc to 127.0.0.1:4317,
+# delta temporality). Prompt and tool-detail logging stay off unless you set them, and this config
+# adds nothing that turns them on.
+#
+# `append: true` keeps every line across collector restarts; the file exporter does not rotate a
+# file it appends to, so trim or archive the files yourself.
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 127.0.0.1:4317
+      http:
+        endpoint: 127.0.0.1:4318
+
+processors:
+  batch: {}
+
+exporters:
+  file/metrics:
+    path: ${env:AGENT_PIPELINE_TELEMETRY_DIR}/claude-code-metrics.jsonl
+    format: json
+    append: true
+    create_directory: true
+  file/logs:
+    path: ${env:AGENT_PIPELINE_TELEMETRY_DIR}/claude-code-logs.jsonl
+    format: json
+    append: true
+    create_directory: true
+
+service:
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [file/metrics]
+    logs:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [file/logs]

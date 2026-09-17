@@ -1,6 +1,6 @@
 ## Phase 0.5: Understand & Map (before the spec locks)
 
-**Checkpoint first:** set `current_phase: "0.5-map"` and commit `status.json` (per the durable-checkpoint convention above) BEFORE dispatching the mapping pass.
+**Checkpoint first:** `checkpoint.mjs enter 0.5-map --exit-verdict <verdict> --commit` (`status-record.md`; it writes `current_phase: "0.5-map"`) BEFORE dispatching the mapping pass.
 
 Phase 0.5 runs BEFORE the Phase 1 spec locks. It produces a `map.json` artifact at `ARTIFACT_DIR` (or, before the issue number exists, at `$PIPELINE_BASE/<placeholder>`) that enumerates the contracts, tables, and types the ask will touch and, for each, its READERS / CONSUMERS across three layers:
 
