@@ -50,8 +50,7 @@ function phase4Literals() {
     const core = path.join(PLUGIN_ROOT, "commands", "pipeline.md");
     const dir = path.join(PLUGIN_ROOT, "commands", "pipeline");
     const parts = readdirSync(dir).filter((f) => f.endsWith(".md")).sort();
-    src = [core, ...parts.map((f) => path.join(dir, f))].map((f) => readFileSync(f, "utf8")).join("
-");
+    src = [core, ...parts.map((f) => path.join(dir, f))].map((f) => readFileSync(f, "utf8")).join("\n");
   } catch {
     return null;
   }

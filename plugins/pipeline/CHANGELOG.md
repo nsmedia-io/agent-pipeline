@@ -4,6 +4,45 @@ Behaviour changes that reach an existing project at its next plugin update, newe
 
 Entries keep the numbers they carried in the README's old Upgrading list, so a cross-reference such as "item 29 below" still resolves. Measured figures in an entry describe the commit that entry shipped with and are not re-taken afterwards.
 
+## Unreleased
+
+### What changes for you
+
+- **`/pipeline` loads its instructions phase by phase.** `commands/pipeline.md` is now a core (operating model, argument, non-negotiables, a loading map, tiering, error handling, and the Phase 4 preamble `scripts/render-panel.mjs` slices out of it). Every phase, gate and handoff moved verbatim to its own file under `commands/pipeline/`, which the core tells the orchestrator to Read when that phase starts. `voice.md` is read at the owner boundary, `evidence.md` only when the orchestrator grades a finding itself, and `evidence-controls.md` only when it verifies a control on an architectural or control-surface change. No rule was dropped; incident histories and measurements that sat inline moved to `docs/rationale.md` (loaded by no prompt), with a one-line pointer where each was.
+- **Agent contracts read two shared blocks by reference.** The evidence discipline section (a 12.4 KB copy in six contracts, a near-identical copy in two more) and the Phase 4 tracked-write isolation section (9.8 KB, byte-identical in all nine) now live once each in `shared/evidence-discipline.md` and `shared/tracked-write-isolation.md`. Each contract keeps its heading, a pointer saying when to read the file, and its own additions. The replicated `## The property, not the fix` block and its sha1 digest are unchanged.
+- Nothing to do on update. A project that copied `commands/pipeline.md` into its own tree needs `commands/pipeline/` and `shared/` beside it.
+
+### Measured (bytes, `wc -c`, at 6a835a5 before and at this branch's head after)
+
+| What the orchestrator loads | Before | After |
+|---|---|---|
+| `commands/pipeline.md` alone | 208,012 | 42,694 (of which 24,820 is the Phase 4 preamble, kept in the core because `render-panel.mjs` reads only that file) |
+| Before: `pipeline.md` plus the three files it told the orchestrator to read (`voice.md` 12,288, `evidence.md` 33,356, `evidence-controls.md` 34,433) | 288,089 | |
+| Typical standard-tier run: fresh ask, clean tree, no open questions, no frontend, one panel round ending APPROVE_WITH_NOTES, through Phase 5 (core, phase-0-setup, status-record, phase-0.5-map, phase-1-ba, phase-2-lite, phase-3-impl, phase-3-4-gate, phase-4-panel, phase-4-verdict, phase-5-archive, owner-handoff, `voice.md`) | 288,089 | 155,965 (54.1%) |
+| Architectural run, one panel round, frontend-scoped, with a migration (adds phase-2-review, phase-2.5-design, art-director-contract, phase-3-architectural, live-verification, dispatch-routing, `evidence-controls.md`; no delta round, no loop back) | 288,089 | 229,956 (79.8%) |
+| Worst case: core, every phase file (delta round and loop-backs included) and all three shared rule files | 288,089 | 288,665 (100.2%: the loading map and pointers, about 600 bytes, are the only addition) |
+
+The typical run falls short of half by about 12 KB; the preamble is the one block left in the core that the orchestrator never acts on, and moving it into a phase file needs `render-panel.mjs` to read it from there.
+
+| Agent contract | Before | After |
+|---|---|---|
+| art-director.md | 43,472 | 22,604 |
+| ba.md | 65,867 | 44,740 |
+| dba.md | 47,555 | 26,428 |
+| design.md | 49,469 | 28,342 |
+| dev.md | 65,487 | 44,360 |
+| devops.md | 45,975 | 24,848 |
+| librarian.md | 47,817 | 26,949 |
+| qa.md | 65,129 | 55,970 |
+| secops.md | 53,987 | 32,860 |
+| shared/evidence-discipline.md (read by eight) | | 12,795 |
+| shared/tracked-write-isolation.md (read by nine, on Phase 4 and fix-commit dispatches) | | 9,921 |
+
+### For maintainers
+
+- Suites that pin orchestrator prose read the core plus every phase file through `pipeline_md_concat` in `tests/harness.sh`, in a fixed order (the order the single file ran in). `tests/test-pipeline-split.sh` holds that order list equal to `commands/pipeline/`, checks the core names every phase file, and checks no prompt tells the model to read `docs/rationale.md`.
+- The PreToolUse resolver (`hooks/pre-tool-use-resolve.mjs`) reads the Phase 4 phase vocabulary from the core and every phase file.
+
 ## 0.43.0 (2026-09-17)
 
 ### What changes for you

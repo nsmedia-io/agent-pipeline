@@ -84,3 +84,5 @@ Do NOT merge. The owner merges to the integration branch. Presenting a PR as rea
 
 **Verify, do not relay.** An agent's report that a gate passed is a claim; that gate's output on your own run is evidence. Before merging, re-run the project's full check set yourself with the cache forced off, and confirm the counts match what the agents reported. Two failure modes this catches, both observed: a reported pass from a task-runner invocation that silently ran nothing (an unknown task name errors out and executes zero work while looking like a gate ran), and a reported pass replayed from a warm cache. Report `Cached:` counts alongside pass counts so the difference is visible. When the panel's central finding is a defect a specific control now catches, plant that defect yourself once and watch the control fire before you merge on it.
 
+---
+

@@ -64,7 +64,7 @@ assert_eq "NON-ZERO CONTROL: the naming check sees a file name removed from the 
 assert_eq "the renderer's preamble markers stay in the core, the one file scripts/render-panel.mjs reads" \
   "$(grep -c '^<!-- BEGIN PHASE4-PREAMBLE -->$\|^<!-- END PHASE4-PREAMBLE -->$' "$CORE" | tr -d ' ')" "2"
 assert_eq "and appear in no phase file (a second copy would be a preamble the renderer never renders)" \
-  "$(cat "$PARTS_DIR"/*.md | grep -c 'PHASE4-PREAMBLE' | tr -d ' ')" "0"
+  "$(cat "$PARTS_DIR"/*.md | grep -cE '^<!-- (BEGIN|END) PHASE4-PREAMBLE -->$' | tr -d ' ')" "0"
 
 suite "a phase file is not a command, and the rationale file is loaded by no prompt"
 
@@ -75,12 +75,12 @@ done
 assert_eq "no phase file carries command frontmatter" "$WITH_FRONTMATTER" ""
 assert_eq "docs/rationale.md exists to hold what moved out of the prompt" \
   "$([[ -s "$PLUGIN_ROOT/docs/rationale.md" ]] && echo present || echo ABSENT)" "present"
-READERS="$(grep -rniE '(read|load)[^.|]*docs/rationale\.md' "$PLUGIN_ROOT/commands" "$PLUGIN_ROOT/agents" "$SHARED_DIR" "$PLUGIN_ROOT/voice.md" "$PLUGIN_ROOT/evidence.md" "$PLUGIN_ROOT/evidence-controls.md" 2>/dev/null | cut -c1-160)"
+READERS="$(grep -rniE '\b(read|load)\b[^.|]*docs/rationale\.md' "$PLUGIN_ROOT/commands" "$PLUGIN_ROOT/agents" "$SHARED_DIR" "$PLUGIN_ROOT/voice.md" "$PLUGIN_ROOT/evidence.md" "$PLUGIN_ROOT/evidence-controls.md" 2>/dev/null | cut -c1-160)"
 assert_eq "no command, agent or shared rule file tells the model to read docs/rationale.md" "$READERS" ""
 # NON-ZERO CONTROL: the same pattern finds a planted instruction.
 printf 'Before Phase 4, read `${CLAUDE_PLUGIN_ROOT}/docs/rationale.md` now.\n' > "$NEW_TMPDIR/plant.md"
 assert_eq "NON-ZERO CONTROL: the reader pattern matches a planted read instruction" \
-  "$(grep -ciE '(read|load)[^.|]*docs/rationale\.md' "$NEW_TMPDIR/plant.md" | tr -d ' ')" "1"
+  "$(grep -ciE '\b(read|load)\b[^.|]*docs/rationale\.md' "$NEW_TMPDIR/plant.md" | tr -d ' ')" "1"
 
 suite "the agent contracts read their shared blocks by reference, and keep no copy of their own"
 
@@ -103,6 +103,6 @@ assert_eq "and none keeps its own copy of the compressed rules" "$EVIDENCE_COPIE
 assert_eq "the shared evidence file carries the compressed rules (so the pointer leads somewhere)" \
   "$(grep -cF -- '- **A skip is not a pass.**' "$SHARED_DIR/evidence-discipline.md" | tr -d ' ')" "1"
 assert_eq "and still sends its reader to evidence.md and evidence-controls.md" \
-  "$(grep -c 'evidence\.md\|evidence-controls\.md' "$SHARED_DIR/evidence-discipline.md" | awk '{print ($1 >= 2) ? "both" : "MISSING"}')" "both"
+  "$( { grep -qF '${CLAUDE_PLUGIN_ROOT}/evidence.md' "$SHARED_DIR/evidence-discipline.md" && grep -qF '${CLAUDE_PLUGIN_ROOT}/evidence-controls.md' "$SHARED_DIR/evidence-discipline.md"; } && echo both || echo MISSING)" "both"
 
 finish

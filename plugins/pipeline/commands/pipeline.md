@@ -54,7 +54,7 @@ This file is the core: operating model, argument, non-negotiables, this map, tie
 | Routing says architectural | `phase-2-review.md`, then `phase-2.5-design.md` |
 | Spec is frontend-scoped (at routing), or `visual-contract.json` exists at Phase 4 | `art-director-contract.md` |
 | Phase 3 | `phase-3-impl.md`; at architectural ALSO `phase-3-architectural.md` before any dispatch |
-| Phase 3 returned, panel not dispatched | `phase-3-4-gate.md` |
+| Phase 3 returned, panel not dispatched | `phase-3-4-gate.md`; then `live-verification.md` when the gate file says it applies |
 | A dispatch whose model you resolve (architectural 0.5 map, 2.5 sketches and judge), or any model/effort routing question | `dispatch-routing.md` |
 | Phase 4 | `phase-4-panel.md`, then `phase-4-verdict.md` after the merge |
 | A Phase 4 fix round, and every delta re-review | `phase-4-delta.md` |

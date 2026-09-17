@@ -1,5 +1,3 @@
----
-
 ## Phase 5: Knowledge Persistence (post-merge)
 
 **Checkpoint first:** set `current_phase: "5-archive"` and commit `status.json` BEFORE dispatching the Librarian.
