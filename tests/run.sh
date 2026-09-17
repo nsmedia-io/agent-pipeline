@@ -35,19 +35,46 @@ set -u
 
 cd "$(dirname "${BASH_SOURCE[0]}")" || exit 1
 
+# WALL TIME PER SUITE (#162). A suite's elapsed time is printed after it runs, and every suite's
+# time is printed again, slowest first, before the verdict. Without it the split between the
+# nested fresh-checkout run, timeout-bound cells and per-assertion process starts was unmeasured.
+# Tenths of a second from EPOCHREALTIME where bash has it (5.0+); whole seconds from `date +%s`
+# on bash 3.2, which is what macOS ships.
+_now_ds() {
+  if [[ -n "${EPOCHREALTIME:-}" ]]; then
+    local r="${EPOCHREALTIME/,/.}"
+    printf '%s' "$(( ${r%%.*} * 10 + 10#${r#*.} / 100000 ))"
+  else
+    printf '%s' "$(( $(date +%s) * 10 ))"
+  fi
+}
+_fmt_ds() { printf '%d.%d' "$(( $1 / 10 ))" "$(( $1 % 10 ))"; }
+
 FAILED=0
 # A newline-delimited STRING and not an array, matching harness.sh's TMP_REGISTRY for the same
 # reason: bash 3.2 is what macOS ships and what this script runs under, and `"${arr[@]}"` on an
 # empty array is an unbound-variable error there under `set -u`.
 FAILED_SUITES=""
+TIMES=""
+RUN_START="$(_now_ds)"
 for t in test-*.sh; do
   [[ -f "$t" ]] || continue
   printf '\n\033[1m== %s ==\033[0m\n' "$t"
+  t0="$(_now_ds)"
   bash "$t" || {
     FAILED=$((FAILED + 1))
     FAILED_SUITES="${FAILED_SUITES}  ${t}
 "
   }
+  dt=$(( $(_now_ds) - t0 ))
+  printf 'elapsed %s s  %s\n' "$(_fmt_ds "$dt")" "$t"
+  TIMES="${TIMES}${dt} ${t}
+"
+done
+
+printf '\nSuite wall time, slowest first (total %s s):\n' "$(_fmt_ds $(( $(_now_ds) - RUN_START )))"
+printf '%s' "$TIMES" | sort -rn | while read -r dt t; do
+  [[ -n "$t" ]] && printf '  %8s s  %s\n' "$(_fmt_ds "$dt")" "$t"
 done
 
 printf '\n'
