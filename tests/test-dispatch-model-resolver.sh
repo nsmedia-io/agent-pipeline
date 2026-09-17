@@ -126,6 +126,9 @@ for cand in $(grep -oE 'scripts/[a-zA-Z0-9_-]+\.mjs' "$PIPELINE_MD" | sort -u); 
     # #164: the owner-facing moment, the issue-body render and the coverage skeleton. None takes a
     # (role, tier, phase) triple or resolves a model. Excluded by NAME, like the rest.
     voice-moment.mjs|render-issue-body.mjs|scaffold-requirement-checks.mjs) continue ;;
+    # #164 row 20: the phase router, referenced from the core's loading section and phase-1-ba.md.
+    # It takes --status/--spec, never a (role, tier, phase) triple, and resolves no model.
+    next-phase.mjs) continue ;;
   esac
   # The data-layer surface module is referenced from the same file by R3; it is not this.
   grep -q 'migrationGlobsForTripwire' "$PLUGIN_DIR/$cand" 2>/dev/null && continue

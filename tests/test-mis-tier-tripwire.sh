@@ -441,6 +441,8 @@ for cand in $(grep -oE 'scripts/[a-zA-Z0-9_-]+\.mjs' "$PIPELINE_MD" | sort -u); 
     # #164: the owner-facing moment, the issue-body render and the coverage skeleton; resolve no
     # model. See the twin in test-dispatch-model-resolver.sh.
     voice-moment.mjs|render-issue-body.mjs|scaffold-requirement-checks.mjs) continue ;;
+    # #164 row 20: the phase router; takes --status/--spec, resolves no model.
+    next-phase.mjs) continue ;;
   esac
   CANDIDATES_REL+=("$cand")
 done

@@ -237,4 +237,22 @@ printf '%s\n' 'Agent({subagent_type: "ba", effort: "high", description: "x"})' >
 assert_eq "CONTROL: the same grep DOES find a byte-identical inline effort key" \
   "$(grep -c 'Agent({.*effort:' "$EFFORT_PROBE" | tr -d ' ')" "1"
 
+# ---- --table (#164 row 25): the levels the prose no longer restates ------------
+# The routing prose used to list each role's effort by tier. It now points here, so the table
+# must carry what the prose said: both surfaces, the tier rows, the cost-class row, and config.
+suite "#164: dispatch-effort.mjs --table"
+
+TABLE="$(e_stdout "$R_NONE" --table)"
+assert_eq "--table exits 0" "$(e_rc "$R_NONE" --table)" "0"
+row() { printf '%s\n' "$TABLE" | grep -E "$1"; }
+assert_contains "the agent surface lists SecOps at its frontmatter level" "$(row '^secops +[a-z]+$')" "xhigh"
+assert_contains "SecOps at architectural on the workflow surface" "$(row '^secops +4 +architectural')" "xhigh"
+assert_contains "SecOps at trivial" "$(row '^secops +4 +trivial')" "medium"
+assert_contains "the tooling cost class row" "$(row '^secops +4 +any +tooling')" "medium"
+assert_contains "QA at architectural falls to its frontmatter on the workflow surface" "$(row '^qa +4 +architectural')" "no-row:frontmatter"
+R_TBL="$(new_root table-cfg '{"dispatchEfforts":{"librarian":"high"}}')"
+assert_contains "config reaches the table" "$(e_stdout "$R_TBL" --table | grep -E '^librarian +any')" "config:dispatchEfforts.librarian"
+assert_eq "the routing prose carries no per-tier effort level" \
+  "$(grep -cE 'runs .xhigh. at architectural|resolve to .medium. on this surface' "$PLUGIN_DIR/orchestrator/dispatch-routing.md" | tr -d ' ')" "0"
+
 finish

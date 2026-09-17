@@ -2,11 +2,14 @@
 /**
  * The dispatch model routing table, and the ONE resolver every dispatch site calls.
  *
- *   node dispatch-model.mjs <role> <risk_tier> <phase> [--site <label>]
+ *   node dispatch-model.mjs <role> <risk_tier> <phase> [--site <label>] [--emit]
+ *   node dispatch-model.mjs --table
  *
  * Prints AT MOST one allowlisted token on stdout. The dispatch site emits `model:` ONLY IF
  * this exited 0 AND printed exactly one token; anything else means OMIT the key entirely and
- * let the agent's own frontmatter govern.
+ * let the agent's own frontmatter govern. `--emit` applies that rule here: it prints
+ * `model: <token>` or nothing and always exits 0, so a dispatch site pastes its stdout.
+ * `--table` prints the table as it resolves under this project's config.
  *
  * IT FAILS OPEN TO FRONTMATTER, which is the OPPOSITE of the mis-tier tripwire's direction,
  * and both are deliberate. An unevaluable tripwire cannot know the diff was clean, so it
@@ -35,6 +38,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 /**
  * The allowlist is over the RESOLVED value, not a rank table over three spellings: the
@@ -241,13 +245,66 @@ export function resolve({ role: rawRole, tier, phase, site, cfg }) {
   return { model: row ? row.model : null, reports, error: null, rule: rowRule(row) };
 }
 
+/** A role's frontmatter `model:`, read from the shipped agents/ file, or "?" when unreadable. */
+export function frontmatterModel(role) {
+  const file = { design_review: "design.md", art_director: "art-director.md" }[role] || `${role}.md`;
+  try {
+    const text = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "agents", file), "utf8");
+    const m = /^model:\s*(\S+)\s*$/m.exec(text.split(/^---\s*$/m)[1] || "");
+    return m ? m[1] : "?";
+  } catch {
+    return "?";
+  }
+}
+
+/**
+ * The routing table as it RESOLVES for this project (#164 row 25): every table row, config
+ * applied, then one line per role for every phase no row names. Prose cites this instead of
+ * restating a model, so no copy of a model assignment exists outside this file.
+ */
+export function renderTable(cfg) {
+  const lines = [["role", "phase", "tier", "site", "emits", "frontmatter", "rule"]];
+  const emits = (r) => (r.error ? "error" : r.model || "(no key)");
+  for (const row of DEFAULT_TABLE) {
+    const tiers = row.tier ? [row.tier] : KNOWN_TIERS;
+    const results = tiers.map((tier) => resolve({ role: row.role, tier, phase: row.phase, site: row.site, cfg }));
+    const same = results.every((r) => emits(r) === emits(results[0]) && r.rule === results[0].rule);
+    const shown = same ? [[row.tier || "any", results[0]]] : tiers.map((t, i) => [t, results[i]]);
+    for (const [tier, r] of shown) {
+      lines.push([row.role, row.phase, tier, row.site, emits(r), frontmatterModel(row.role), r.rule]);
+    }
+    // A (role, phase) carried only by tiered rows falls to frontmatter at every other tier.
+    const peers = DEFAULT_TABLE.filter((r) => r.role === row.role && r.phase === row.phase);
+    if (row === peers[peers.length - 1] && peers.every((r) => r.tier)) {
+      for (const tier of KNOWN_TIERS.filter((t) => !peers.some((r) => r.tier === t))) {
+        const r = resolve({ role: row.role, tier, phase: row.phase, cfg });
+        lines.push([row.role, row.phase, tier, "-", emits(r), frontmatterModel(row.role), r.rule]);
+      }
+    }
+  }
+  for (const role of KNOWN_ROLES) {
+    const rowed = new Set(DEFAULT_TABLE.filter((r) => r.role === role).map((r) => r.phase));
+    const phase = KNOWN_PHASES.find((p) => !rowed.has(p));
+    const r = resolve({ role, tier: "standard", phase, cfg });
+    lines.push([role, rowed.size ? "other" : "any", "any", "-", emits(r), frontmatterModel(role), r.rule]);
+  }
+  const widths = lines[0].map((_, i) => Math.max(...lines.map((l) => l[i].length)));
+  return lines.map((l) => l.map((c, i) => c.padEnd(widths[i])).join("  ").trimEnd()).join("\n") + "\n";
+}
+
 function main(argv) {
   const positional = [];
   let site = null;
+  let emit = false;
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--site") {
       site = argv[i + 1];
       i++;
+    } else if (argv[i] === "--emit") {
+      emit = true;
+    } else if (argv[i] === "--table") {
+      process.stdout.write(renderTable(readConfig()));
+      return 0;
     } else {
       positional.push(argv[i]);
     }
@@ -259,7 +316,14 @@ function main(argv) {
     process.stderr.write(
       `dispatch-model: ${error}. This is a DISPATCH-SITE bug, not a project-config problem: no model key is emitted, and the row is NEVER silently resolved against a different one.\n`,
     );
-    return 2;
+    // --emit (#164 row 28) ALWAYS exits 0: its stdout is the whole contract, a `model: X` line
+    // or nothing, so a dispatch site pastes what it prints and never evaluates an exit status.
+    return emit ? 0 : 2;
+  }
+  if (emit) {
+    if (model) process.stdout.write(`model: ${model}\n`);
+    else process.stderr.write("dispatch-model: no override for this dispatch; frontmatter governs\n");
+    return 0;
   }
   if (model) process.stdout.write(`${model}\n`);
   else process.stderr.write("dispatch-model: no override for this dispatch; frontmatter governs\n");
