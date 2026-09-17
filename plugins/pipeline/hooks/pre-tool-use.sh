@@ -392,11 +392,25 @@ _inv_words() { # <closed word>...
           *)
             _verb=$_f
             case $_verb in
-              add | stage | commit) _ist=arg ;;
-              *) _idead=1 ;; # checkout, restore, stash, clean, diff, log, status: not staging
+              add | stage | commit)
+                # The destructive-only second pass (see (5) below) must not re-derive a blanket
+                # verdict the first pass already reached, so staging verbs are inert there.
+                if [ "$_DG_ONLY" = 1 ]; then _idead=1; else _ist=arg; fi
+                ;;
+              stash | reset | checkout | restore | clean)
+                # Not staging, but able to DISCARD uncommitted work (0.42.x, B2). Read by
+                # _dg_word/_dg_finish; the state is initialised here rather than in _inv_reset so
+                # the per-separator reset (paid per heredoc line) costs nothing extra.
+                _ist=dgit _dgsep=0 _dgops=0 _dgst=0 _dgwt=0
+                ;;
+              *) _idead=1 ;; # diff, log, status, and everything else: neither staging nor discarding
             esac
             ;;
         esac
+        continue
+        ;;
+      dgit)
+        _dg_word "$_f"
         continue
         ;;
     esac
@@ -564,9 +578,115 @@ _inv_words() { # <closed word>...
   return 0
 }
 
+# ---- destructive git, subagent-only (0.42.x, B2) ------------------------------------------------
+#
+# A subagent's working tree is shared: with the orchestrator that dispatched it, and in a Phase 4
+# fix round or a shared dispatch worktree with other agents too. `git stash`, `git reset --hard`,
+# `git checkout -- <paths>` / `git checkout .`, `git restore` of worktree paths and `git clean`
+# all DISCARD uncommitted work, and what they discard there may not be the calling agent's own.
+# Nothing recovers it. So these are refused for a subagent at any phase, with no run-ownership
+# question and no node process: the decision is made from the command text alone, in this stage.
+#
+# The same word machinery as the staging scan reads the words, so quoting, comments, heredocs and
+# separators are handled exactly once. Forms deliberately NOT refused: `git stash list` and
+# `git stash show` (read-only), `git reset` without --hard, `git restore --staged <path>` alone
+# (index only), and `git checkout <branch>` without `--` or `.` (git refuses to overwrite local
+# changes there). `git checkout <path>` with no `--` is a residual: it is textually a branch
+# switch, and this scanner cannot tell a branch name from a path.
+_dg_hit() { # <form>
+  _DESTRUCT=1
+  _DFORM=$1
+  _idead=1
+}
+
+_dg_word() { # <one word after a discarding verb>
+  if [ "$_valnext" = 1 ]; then
+    _valnext=0
+    return 0
+  fi
+  case $_verb in
+    stash)
+      case $1 in
+        -*) ;; # `git stash -u` is still a push; decided at the subcommand or at the end
+        list | show) _idead=1 ;;
+        *) _dg_hit "git stash" ;;
+      esac
+      ;;
+    reset)
+      case $1 in
+        --hard) _dg_hit "git reset --hard" ;;
+      esac
+      ;;
+    checkout)
+      if [ "$_dgsep" = 1 ]; then
+        _dg_hit "git checkout -- <paths>"
+        return 0
+      fi
+      case $1 in
+        --) _dgsep=1 ;;
+        . | ./ | :/) _dg_hit "git checkout ." ;;
+        -b | -B | --orphan) _valnext=1 ;;
+      esac
+      ;;
+    restore)
+      if [ "$_dgsep" = 1 ]; then
+        _dgops=1
+        return 0
+      fi
+      case $1 in
+        --) _dgsep=1 ;;
+        --staged) _dgst=1 ;;
+        --worktree) _dgwt=1 ;;
+        --source | --pathspec-from-file) _valnext=1 ;;
+        --pathspec-from-file=*) _dgops=1 ;;
+        --*) ;;
+        -*)
+          _dgcl=${1#-}
+          while [ -n "$_dgcl" ]; do
+            case $_dgcl in
+              S*) _dgst=1 ;;
+              W*) _dgwt=1 ;;
+              s*)
+                # -s takes a value: the rest of the cluster, or the next word
+                [ "$_dgcl" = s ] && _valnext=1
+                _dgcl=''
+                continue
+                ;;
+            esac
+            _dgcl=${_dgcl#?}
+          done
+          ;;
+        *) _dgops=1 ;;
+      esac
+      ;;
+    clean) _dg_hit "git clean" ;;
+  esac
+  return 0
+}
+
+_dg_finish() { # a discarding verb's invocation ended without a hit on any single word
+  case $_verb in
+    stash) _dg_hit "git stash" ;; # a bare `git stash` (or options only) is a push
+    clean) _dg_hit "git clean" ;;
+    restore)
+      if [ "$_dgops" = 1 ]; then
+        # --staged alone restores the index only; --worktree, or neither flag, rewrites files.
+        if [ "$_dgwt" = 1 ] || [ "$_dgst" = 0 ]; then
+          _dg_hit "git restore <worktree paths>"
+        fi
+      fi
+      ;;
+  esac
+  return 0
+}
+
 _inv_finish() { # the invocation has ended: read the verdict off the state it left
   [ "$_idead" = 0 ] || return 0
   [ -n "$_verb" ] || return 0
+  if [ "$_ist" = dgit ]; then
+    _dg_finish
+    return 0
+  fi
   if [ "$_blanketspec" = 1 ]; then
     _VERDICT=blanket
   elif [ "$_blanket" = 1 ]; then
@@ -1570,15 +1690,42 @@ _js_get tool_name "$_REST" || exit 0
 _js_get agent_id "$_REST" || exit 0
 [ -n "$_JS_VAL" ] || exit 0
 
-# (5) the forbidden class.
+# (5) the forbidden classes. Blanket staging (a Phase 4 run must own the record store for it to be
+# refused, decided by the resolver below) and destructive git (refused for any subagent, decided
+# here). The scan stops at the FIRST blanket stage it meets, so a destructive command later in the
+# same call would go unseen; when that happens a second pass runs with the staging verbs inert and
+# looks only for the discarding ones. That second pass costs a scan only on a call that is already
+# a blanket stage, which is the rare path.
+_DESTRUCT=0
+_DFORM=''
+_DG_ONLY=0
 _scan "$_COMMAND"
-[ "$_VERDICT" = blanket ] || exit 0
+if [ "$_VERDICT" = blanket ] && [ "$_DESTRUCT" = 0 ]; then
+  _DG_ONLY=1
+  _scan "$_COMMAND"
+  _DG_ONLY=0
+  _VERDICT=blanket
+fi
+[ "$_VERDICT" = blanket ] || [ "$_DESTRUCT" = 1 ] || exit 0
 
 # (6) the disarm, read from the environment and from nowhere else. Its own name never reaches
 # stdout or stderr: telling a denied agent which variable turns the gate off would hand it the
 # set-step this scoping exists to keep out of its reach.
 if [ -n "${CLAUDE_HOOK_PRETOOLUSE_SKIP:-}" ]; then
   _note 'disarmed for this session by an operator-set environment variable'
+  exit 0
+fi
+
+# (6b) destructive git, refused for every subagent at every phase. No resolver, no node: the class
+# was decided from the command, and whose run it is does not change what the command destroys.
+# _DFORM is fixed vocabulary from _dg_word and never command text, so it needs no JSON escaping.
+if [ "$_DESTRUCT" = 1 ]; then
+  printf 'agent-pipeline PreToolUse: refused destructive git for a subagent (%s).\n' "$_DFORM" >&2
+  # THE REASON TEXT IS SINGLE-QUOTED AND MUST STAY SO. It names git commands in backquotes, and
+  # inside double quotes a backquote is command substitution: an earlier draft of this line RAN
+  # `git stash` in the caller's tree while printing the refusal of `git stash`. Only the form is
+  # interpolated, through printf's own %s.
+  printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Destructive git is refused for subagents: `%s` discards uncommitted work, and your working tree is shared with the orchestrator (and often with other agents), so what it throws away may not be yours and cannot be recovered. Instead: commit your own changes by explicit path (`git add <path>` then `git commit`); to put back ONE file you changed yourself (a planted mutation, say), use `git show HEAD:<path> > <path>`; inspect with `git status`, `git diff`, `git stash list` or `git stash show`. If the tree genuinely needs resetting, stop and say so in your report: that decision belongs to the orchestrator."}}' "$_DFORM"
   exit 0
 fi
 
