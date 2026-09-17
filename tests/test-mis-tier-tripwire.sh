@@ -412,6 +412,9 @@ for cand in $(grep -oE 'scripts/[a-zA-Z0-9_-]+\.mjs' "$PIPELINE_MD" | sort -u); 
     # Review convergence: the round budget; counts rounds, resolves no model. See the twin in
     # test-dispatch-model-resolver.sh.
     round-budget.mjs) continue ;;
+    # #164: deterministic gates moved out of prose; resolve no model. See the twin in
+    # test-dispatch-model-resolver.sh.
+    check-merged.mjs) continue ;;
   esac
   CANDIDATES_REL+=("$cand")
 done
