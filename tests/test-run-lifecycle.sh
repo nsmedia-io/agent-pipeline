@@ -19,7 +19,7 @@
 . "$(dirname "${BASH_SOURCE[0]}")/harness.sh"
 require_node
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PIPELINE_MD="$PLUGIN_ROOT/commands/pipeline.md"
 PHASE_MD="$PLUGIN_ROOT/commands/phase.md"
 GUARD="$SCRIPTS_DIR/gate-phase-entry.mjs"

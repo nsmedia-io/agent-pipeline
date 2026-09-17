@@ -32,7 +32,7 @@
 
 TB_FIXTURES_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TB_TESTS_DIR="$(cd "$TB_FIXTURES_DIR/.." && pwd)"
-TB_PLUGIN_DIR="$(cd "$TB_TESTS_DIR/.." && pwd)"
+TB_PLUGIN_DIR="$(cd "$TB_TESTS_DIR/../plugins/pipeline" && pwd)"
 TB_REPO_ROOT="$(cd "$TB_PLUGIN_DIR/../.." && pwd)"
 
 TB_REAL_NODE="$(command -v node 2>/dev/null || true)"

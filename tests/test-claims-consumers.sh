@@ -20,7 +20,7 @@
 require_node
 
 PLUGIN_DIR="$PLUGIN_ROOT"
-TESTS_DIR="$PLUGIN_DIR/tests"
+TESTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 GATE_SUITE="$TESTS_DIR/test-gate-pre-phase4.sh"
 TELEM_SUITE="$TESTS_DIR/test-pipeline-telemetry.sh"
 R17_SUITE="$TESTS_DIR/test-issue17-integration.sh"

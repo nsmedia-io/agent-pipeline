@@ -41,7 +41,7 @@
  *     than judge a run the session does not own. It lands on the fail-open tooling branch R11
  *     already declares ("no resolvable active issue"), so the fail-direction split is unchanged.
  *     Pinned in tests/test-gate-phase-entry.sh with a tie-breaking control (re-derive with
- *     `git grep -n 'an mtime tie is DETERMINISTIC' plugins/pipeline/tests/`, one hit). Cited by
+ *     `git grep -n 'an mtime tie is DETERMINISTIC' tests/`, one hit). Cited by
  *     the cell's own text, not by an AC number: this said "AC14 cell (c)" and no cell of that
  *     letter exists anywhere in the AC12-AC14 range, so the label named nothing.
  *
@@ -94,7 +94,7 @@ import { inFlightObservations } from "./run-candidates.mjs";
  * `also.also` would be both invisible to `satisfyingTokens` and inert on the decision path -- a
  * written requirement silently not enforced, the guard claiming more than it knows -- so the
  * table's key sets are asserted as a shape (re-derive with `git grep -n 'rowShapes'
- * plugins/pipeline/tests/test-gate-phase-entry.sh`). An `also` on a `byTier` cell is legal and
+ * tests/test-gate-phase-entry.sh`). An `also` on a `byTier` cell is legal and
  * fully live on both paths; measured, not assumed. Nothing needs one today.
  */
 const PREREQUISITES = {
@@ -302,12 +302,12 @@ export const IN_FLIGHT_MS = 24 * 60 * 60 * 1000;
  * obligation is enforced at all -- the count of abstaining rows is unchanged, what changed is
  * what the abstention costs. The set is asserted on the OUTCOME rather than on this sentence
  * (re-derive with `git grep -n 'exactly ONE guarded row abstains'
- * plugins/pipeline/tests/test-gate-phase-entry.sh`), because an inventory is prose and prose
+ * tests/test-gate-phase-entry.sh`), because an inventory is prose and prose
  * cannot fail.
  *
  * Split, because the conjunction claimed the wrong thing: (3) is the only one that names itself
  * in its own OUTPUT. (2) is silent, but it IS pinned, with a tie-breaking control (re-derive
- * with `git grep -n 'an mtime tie is DETERMINISTIC' plugins/pipeline/tests/`). (1) is neither.
+ * with `git grep -n 'an mtime tie is DETERMINISTIC' tests/`). (1) is neither.
  * And "its own output" means stdout, which is not the operator's experience: hooks/stop.sh runs
  * this guard with stdout discarded and branches only on rc 2, so NO not-applicable route --
  * including (3) -- is visible through the Stop hook (re-derive with

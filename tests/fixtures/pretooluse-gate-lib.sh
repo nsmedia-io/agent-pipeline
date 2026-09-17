@@ -25,7 +25,7 @@
 
 GATE_FIXTURES_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 GATE_TESTS_DIR="$(cd "$GATE_FIXTURES_DIR/.." && pwd)"
-GATE_PLUGIN_DIR="$(cd "$GATE_TESTS_DIR/.." && pwd)"
+GATE_PLUGIN_DIR="$(cd "$GATE_TESTS_DIR/../plugins/pipeline" && pwd)"
 GATE_REPO_ROOT="$(cd "$GATE_PLUGIN_DIR/../.." && pwd)"
 GATE_HOOKS_JSON="$GATE_PLUGIN_DIR/hooks/hooks.json"
 GATE_PIPELINE_MD="$GATE_PLUGIN_DIR/commands/pipeline.md"

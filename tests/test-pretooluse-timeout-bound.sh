@@ -48,8 +48,8 @@ gate_cache_declaration
 
 HOOKS_REL="plugins/pipeline/hooks/hooks.json"
 HOOK_REL="plugins/pipeline/hooks/pre-tool-use.sh"
-VERDICTS_REL="plugins/pipeline/tests/test-pretooluse-gate-verdicts.sh"
-DECLSUITE_REL="plugins/pipeline/tests/test-pretooluse-gate-declaration.sh"
+VERDICTS_REL="tests/test-pretooluse-gate-verdicts.sh"
+DECLSUITE_REL="tests/test-pretooluse-gate-declaration.sh"
 README_REL="plugins/pipeline/README.md"
 FLOOR_REL="knowledge/issue-archive/106.json"
 
@@ -667,13 +667,13 @@ assert_eq "AC7: the four timing probes report a BYPASS (the gate emits nothing a
   "both"
 
 # AC6: the bound is EVALUATED on a Linux host (0.40.2: tests/run-linux.sh runs
-# `bash plugins/pipeline/tests/run.sh` in a pinned Debian container, on demand, replacing the
+# `bash tests/run.sh` in a pinned Debian container, on demand, replacing the
 # ubuntu-latest workflow that ran it on every PR) and was DERIVED on darwin. A figure re-taken on
 # the evaluating host must sit beside the bound, in the same form measured_state records the
 # darwin figures. A bound padded to cover an unmeasured host fails AC6 explicitly. The recorded
 # ubuntu-latest figures below stay what they are: measurements taken on that runner, still the
 # closest Linux figures this repo holds until run-linux.sh's are recorded beside them.
-CI_RUNS_SUITE="$(grep -cE 'bookworm|ubuntu' "$MAT/plugins/pipeline/tests/run-linux.sh" 2>/dev/null | tr -d ' \n')"
+CI_RUNS_SUITE="$(grep -cE 'bookworm|ubuntu' "$MAT/tests/run-linux.sh" 2>/dev/null | tr -d ' \n')"
 assert_eq "PREMISE for AC6: tests/run-linux.sh still runs this suite on a Linux image (if this is 0 the criterion's evaluating host changed and the row below needs a new subject)" \
   "$([[ "$CI_RUNS_SUITE" -ge 1 ]] && echo runs || echo "NOT FOUND")" "runs"
 UBUNTU_FIGS="$(grep -n 'ubuntu-latest' "$VERDICTS_SRC" 2>/dev/null | head -1 | cut -d: -f1)"
@@ -720,7 +720,7 @@ new_tmpdir || exit 90
 RB_ROOT="$NEW_TMPDIR/regbudget"
 cp -R "$MAT" "$RB_ROOT" 2>/dev/null
 RB_SRC="$RB_ROOT/$VERDICTS_REL"
-RB_EXTRACT_REL="plugins/pipeline/tests/rb-length-axis.sh"
+RB_EXTRACT_REL="tests/rb-length-axis.sh"
 RB_SETUP_LINE="$(grep -n '^sub_verdict() ' "$RB_SRC" 2>/dev/null | head -1 | cut -d: -f1)"
 RB_START="$(grep -n '^suite "AC7 LENGTH AXIS' "$RB_SRC" 2>/dev/null | head -1 | cut -d: -f1)"
 RB_END="$(grep -n '^record "LENGTH AXIS worst observed' "$RB_SRC" 2>/dev/null | head -1 | cut -d: -f1)"
@@ -818,19 +818,25 @@ suite "AC10: a change to the declared timeout fails an in-tree assertion, printi
 # paired-capture rows, and the knowledge-store rows are known-red until the Phase 5 Librarian pass.
 # A tally comparison would be unfalsifiable in exactly those states; a set difference is not.
 
+# The suite's path inside a tree: tests/ at the repo root, or plugins/pipeline/tests/ in a base
+# commit from before the tests left the published plugin path.
+decl_suite_rel() {  # <root>
+  if [[ -f "$1/tests/test-pretooluse-gate-declaration.sh" ]]; then printf 'tests/test-pretooluse-gate-declaration.sh'
+  else printf 'plugins/pipeline/tests/test-pretooluse-gate-declaration.sh'; fi
+}
 decl_fail_rows() {  # <root> -> the FAIL row names, sorted, one per line
   ( cd "$1" 2>/dev/null || exit 0
-    bash plugins/pipeline/tests/test-pretooluse-gate-declaration.sh 2>/dev/null ) |
+    bash "$(decl_suite_rel "$1")" 2>/dev/null ) |
     awk '/^  FAIL /{sub(/^  FAIL  /,""); print}' | sort
 }
 decl_fail_text() {  # <root> -> the FAIL blocks with their expected/actual lines
   ( cd "$1" 2>/dev/null || exit 0
-    bash plugins/pipeline/tests/test-pretooluse-gate-declaration.sh 2>/dev/null ) |
+    bash "$(decl_suite_rel "$1")" 2>/dev/null ) |
     awk '/^  FAIL /{p=1} /^  ok /{p=0} p'
 }
 decl_ok_count() {  # <root>
   ( cd "$1" 2>/dev/null || exit 0
-    bash plugins/pipeline/tests/test-pretooluse-gate-declaration.sh 2>/dev/null ) |
+    bash "$(decl_suite_rel "$1")" 2>/dev/null ) |
     grep -c '^  ok  ' | tr -d ' \n'
 }
 
@@ -920,8 +926,8 @@ if [[ -n "$BASE_REF" ]]; then
   git -C "$GATE_REPO_ROOT" archive "$BASE_REF" 2>/dev/null | ( cd "$BASE_TREE" && tar xf - ) || true
 fi
 BASE_OK="$([[ -n "$BASE_REF" ]] && decl_ok_count "$BASE_TREE" || printf 'NO-BASE')"
-BASE_ROWS_BEFORE="$([[ -n "$BASE_REF" ]] && ( cd "$BASE_TREE" && bash plugins/pipeline/tests/test-pretooluse-gate-declaration.sh 2>/dev/null ) | awk '/^  (ok|FAIL) /{sub(/^  (ok|FAIL)  /,""); gsub(/-?[0-9]+(\.[0-9]+)?/,"#"); print}' | sort || printf '')"
-ROWS_AFTER="$( ( cd "$MAT" && bash plugins/pipeline/tests/test-pretooluse-gate-declaration.sh 2>/dev/null ) | awk '/^  (ok|FAIL) /{sub(/^  (ok|FAIL)  /,""); gsub(/-?[0-9]+(\.[0-9]+)?/,"#"); print}' | sort )"
+BASE_ROWS_BEFORE="$([[ -n "$BASE_REF" ]] && ( cd "$BASE_TREE" && bash "$(decl_suite_rel "$BASE_TREE")" 2>/dev/null ) | awk '/^  (ok|FAIL) /{sub(/^  (ok|FAIL)  /,""); gsub(/-?[0-9]+(\.[0-9]+)?/,"#"); print}' | sort || printf '')"
+ROWS_AFTER="$( ( cd "$MAT" && bash tests/test-pretooluse-gate-declaration.sh 2>/dev/null ) | awk '/^  (ok|FAIL) /{sub(/^  (ok|FAIL)  /,""); gsub(/-?[0-9]+(\.[0-9]+)?/,"#"); print}' | sort )"
 record "AC15 BASE: $BASE_REF -> $BASE_OK ok rows, $(printf '%s' "$BASE_ROWS_BEFORE" | grep -c . | tr -d ' ') total rows; HEAD -> $(printf '%s' "$ROWS_AFTER" | grep -c . | tr -d ' ') total rows"
 assert_eq "AC15 VACUITY: the base commit's declaration suite ran and produced rows (an unreachable origin/main makes the comparison below empty and unfalsifiable)" \
   "$([[ "$(printf '%s' "$BASE_ROWS_BEFORE" | grep -c . | tr -d ' ')" -ge 20 ]] && echo ran || echo "BASE REF [$BASE_REF] PRODUCED $(printf '%s' "$BASE_ROWS_BEFORE" | grep -c . | tr -d ' ') ROWS")" "ran"

@@ -55,7 +55,7 @@ derive() {
     // below is what holds it to that -- every occurrence of the bare word `current_phase` is
     // forced into a named bucket, so no future assignment spelling can leave the population in
     // silence. The sibling copy in the voice-lint suite pins the SAME label set; re-derive both
-    // with `git grep -n "THE WIDE FORM" -- plugins/pipeline/tests`. No line range is cited into
+    // with `git grep -n "THE WIDE FORM" -- tests`. No line range is cited into
     // another shipped file: a coordinate pin rots the moment its subject is edited (#68).
     const literals = [...new Set([...md.matchAll(/"?current_phase"?: *"([^"]*)"/g)].map((m) => m[1]))]
       .filter((p) => p !== "<phase>-error");
@@ -612,6 +612,6 @@ CTRL_COORD="tests/test-voice-lint""$(printf '%s' .sh:225-239)"
 assert_eq "  NON-ZERO CONTROL on that instrument: the same pattern finds a coordinate when one is there, so the zero above is a measurement and not a pattern that never matches" \
   "$(printf '%s\n' "$CTRL_COORD" | grep -o 'test-voice-lint\.sh:[0-9]' | wc -l | tr -d ' ')" "1"
 assert_contains "  and the comment now in force states the rule, and cites a re-derivation command" \
-  "$(cat "${BASH_SOURCE[0]}")" 'git grep -n "THE WIDE FORM" -- plugins/pipeline/tests'
+  "$(cat "${BASH_SOURCE[0]}")" 'git grep -n "THE WIDE FORM" -- tests'
 
 finish

@@ -4,11 +4,11 @@
 
 set -u
 
-HOOKS_DIR="${HOOKS_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../hooks" && pwd)}"
-PLUGIN_ROOT="${PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+HOOKS_DIR="${HOOKS_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../plugins/pipeline/hooks" && pwd)}"
+PLUGIN_ROOT="${PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../plugins/pipeline" && pwd)}"
 # The .mjs scripts under test. This is a READ path into the checkout (the scripts live here);
 # every root/output/cwd a test BINDS still resolves inside a per-case temp dir.
-SCRIPTS_DIR="${SCRIPTS_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../scripts" && pwd)}"
+SCRIPTS_DIR="${SCRIPTS_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../plugins/pipeline/scripts" && pwd)}"
 
 TESTS_PASSED=0
 TESTS_FAILED=0

@@ -72,7 +72,7 @@ STALE_ISO="$(iso_hours_ago 25)"    # past the in-flight window; #63-P2 asserts t
 # DRIFT IMMUNITY, AND WHAT A REWRITTEN RUN IS EXPECTED TO LOOK LIKE. harness.sh:11 is
 # `SCRIPTS_DIR="${SCRIPTS_DIR:-...}"`, so
 #     SCRIPTS_DIR=<tmpdir copy of the WHOLE scripts dir, constant rewritten> \
-#       /bin/bash plugins/pipeline/tests/test-gate-phase-entry.sh
+#       /bin/bash tests/test-gate-phase-entry.sh
 # drives a different ceiling with the checkout untouched. At 24h and at 2h THIS suite is fully
 # green -- so the declaration below DISCRIMINATES rather than merely permits. At 48h EXACTLY TWO
 # cells in THIS suite are expected red, and both fail for the same correct reason, that STALE_ISO

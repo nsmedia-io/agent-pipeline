@@ -101,14 +101,14 @@ assert_contains "run.sh prints the suite name it is about to run" \
 # 0.40.2: .github/workflows/tests.yml is gone (its Actions minutes were the owner's subscription,
 # ~40 min per push with the nested fresh-checkout run). The property it carried is kept here on
 # its replacement, tests/run-linux.sh: the suite is evaluated on a Linux host, in strict-capability
-# mode, with zsh installed, through the SAME `bash plugins/pipeline/tests/run.sh` command, with no
+# mode, with zsh installed, through the SAME `bash tests/run.sh` command, with no
 # dependency install. Run by hand instead of on every push; the assertions below are what a
 # rename, a dropped flag, or a floating image tag cannot slip past.
 suite "AC41: tests/run-linux.sh runs run.sh on a pinned Linux image in strict-capability mode"
 
 LINUX_RUNNER="$TESTS_DIR/run-linux.sh"
 assert_eq "the Linux runner exists (a rename cannot silently drop it)" \
-  "$([[ -f "$LINUX_RUNNER" ]] && echo yes || echo "no: plugins/pipeline/tests/run-linux.sh is missing")" "yes"
+  "$([[ -f "$LINUX_RUNNER" ]] && echo yes || echo "no: tests/run-linux.sh is missing")" "yes"
 assert_eq "and it parses as bash" "$(bash -n "$LINUX_RUNNER" 2>&1 && echo parses || echo "SYNTAX ERROR")" "parses"
 assert_eq "and no OTHER file under tests/ also claims to be a runner, so the reads below are about one file" \
   "$(ls "$TESTS_DIR"/run-*.sh | grep -c . | tr -d ' ')" "1"
@@ -118,7 +118,7 @@ assert_eq "and no OTHER file under tests/ also claims to be a runner, so the rea
 RUNNER_CODE="$(grep -vE '^[[:space:]]*#' "$LINUX_RUNNER")"
 assert_eq "CONTROL: the non-comment lines were actually extracted (an empty read refuses nothing)" \
   "$([[ -n "$RUNNER_CODE" ]] && echo ok || echo "nothing extracted")" "ok"
-assert_contains "the container runs the exact suite command" "$RUNNER_CODE" "bash plugins/pipeline/tests/run.sh"
+assert_contains "the container runs the exact suite command" "$RUNNER_CODE" "bash tests/run.sh"
 assert_contains "it installs zsh, so the [zsh] columns run on the Linux answer (the #17 veto's regression test)" \
   "$RUNNER_CODE" "install -y -qq zsh"
 assert_contains "and it runs the suite in strict-capability mode, so a future absent tool is a FAILURE" \
@@ -386,7 +386,7 @@ else
   git -C "$FRESH" fetch -q --no-tags "file://$REPO_ROOT" \
     '+refs/remotes/origin/main:refs/remotes/origin/main' >/dev/null 2>&1
   assert_eq "the fresh checkout was created (without this, every assertion below measures nothing)" \
-    "$([[ -f "$FRESH/plugins/pipeline/tests/run.sh" ]] && echo cloned || echo "clone FAILED")" "cloned"
+    "$([[ -f "$FRESH/tests/run.sh" ]] && echo cloned || echo "clone FAILED")" "cloned"
   assert_eq "and it is a DIFFERENT tree from the one under test, with no untracked files carried over" \
     "$(cd "$FRESH" && git status --porcelain | wc -l | tr -d ' ')" "0"
   # It must also carry the commit series, because that is the other half of what CI lacked.
@@ -395,14 +395,14 @@ else
   assert_eq "and origin/main resolves in it, which is what the diff-based blocks need" \
     "$(git -C "$FRESH" rev-parse --verify origin/main >/dev/null 2>&1 && echo resolves || echo MISSING)" "resolves"
 
-  FRESH_OUT="$(PIPELINE_TESTS_FRESH_CHECKOUT=1 bash "$FRESH/plugins/pipeline/tests/run.sh" </dev/null 2>&1)"
+  FRESH_OUT="$(PIPELINE_TESTS_FRESH_CHECKOUT=1 bash "$FRESH/tests/run.sh" </dev/null 2>&1)"
   FRESH_RC="$?"
   assert_eq "run.sh exits 0 in the fresh checkout" "$FRESH_RC" "0"
   assert_contains "and says so" "$FRESH_OUT" "All test suites passed."
   # NON-ZERO CONTROL for that exit code: a run that produced nothing also exits 0 on some
   # shapes, so the transcript is checked against the population it should have covered. Every
   # test-*.sh in the fresh tree must have reported a result line.
-  FRESH_SUITES="$(cd "$FRESH/plugins/pipeline/tests" && ls test-*.sh | wc -l | tr -d ' ')"
+  FRESH_SUITES="$(cd "$FRESH/tests" && ls test-*.sh | wc -l | tr -d ' ')"
   assert_eq "every suite in the fresh tree reported a result (a silent run is not a passing run)" \
     "$(printf '%s' "$FRESH_OUT" | grep -c '^passed=' | tr -d ' ')" "$FRESH_SUITES"
   # The inner failure is NAMED, and its assertions are echoed. Counting "23 of 24 reported

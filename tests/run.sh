@@ -3,7 +3,7 @@
 # the harness itself. Exit 0 only when all pass.
 #
 # Wire this as your checkCommand to gate the plugin's own development:
-#   { "checkCommand": "bash plugins/pipeline/tests/run.sh" }
+#   { "checkCommand": "bash tests/run.sh" }
 #
 # THE SUMMARY NAMES THE SUITES, not only how many there were (#91). A count alone is an
 # observability defect with a measured cost: this summary reported "1 suite(s) FAILED" against a
@@ -15,7 +15,7 @@
 # #56's review). Read these before concluding that a one-off red is a real regression.
 #
 #   (a) DO NOT RUN THIS CONCURRENTLY WITH AN IN-FLIGHT EDIT TO ../scripts/*.mjs. Every test-*.sh
-#       here shells out to the LIVE checkout path (harness.sh's SCRIPTS_DIR is `../scripts`, a
+#       here shells out to the LIVE checkout path (harness.sh's SCRIPTS_DIR is `../plugins/pipeline/scripts`, a
 #       read path into the working tree) rather than to a snapshot taken at the start of the run.
 #       An editor or tool save that is mid-write when a suite reads the file yields a partial
 #       file, so node reports a transient SyntaxError in exactly one invocation and the same
