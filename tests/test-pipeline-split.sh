@@ -121,4 +121,77 @@ assert_eq "the shared evidence file carries the compressed rules (so the pointer
 assert_eq "and still sends its reader to evidence.md and evidence-controls.md" \
   "$( { grep -qF '${CLAUDE_PLUGIN_ROOT}/evidence.md' "$SHARED_DIR/evidence-discipline.md" && grep -qF '${CLAUDE_PLUGIN_ROOT}/evidence-controls.md' "$SHARED_DIR/evidence-discipline.md"; } && echo both || echo MISSING)" "both"
 
+suite "the property-not-the-fix block has one copy, in shared/, and every reader points at it (#164 row 4)"
+
+# Until #164 row 4 this block sat byte-identical in the nine agent contracts and the Phase 4 panel
+# preamble, ten copies held together by a sha1 digest line the model was told to maintain by hand
+# and that no test read. It now lives in shared/the-property-not-the-fix.md. What can still drift is
+# a prose file that KEEPS or REGROWS a copy of any paragraph of it (a partial copy drifts as surely
+# as a whole one), or a reader that stops pointing at the shared file, or a digest line that comes
+# back. property_block_drift reports all three for a plugin root, one line per finding, so the same
+# function runs over the shipped tree and over the planted controls below.
+#
+# The fingerprint of a paragraph is its first 80 characters, taken from the shared file itself, so
+# a rewrite of the shared text moves the fingerprints with it and no expected string lives here.
+# The scan covers every agent, command and orchestrator file; the preamble is scanned like the rest,
+# because it reaches the block only through its INCLUDE line and a pasted copy there would render
+# the block twice.
+PROPERTY_SHARED_REL="shared/the-property-not-the-fix.md"
+property_block_drift() {  # <plugin root> -> COPY / NOPOINTER / NOINCLUDE / DIGEST lines, or nothing
+  ROOT="$1" REL="$PROPERTY_SHARED_REL" node --input-type=module -e '
+import { readFileSync, readdirSync, existsSync } from "node:fs";
+import path from "node:path";
+const root = process.env.ROOT, rel = process.env.REL;
+const out = [];
+const shared = path.join(root, rel);
+if (!existsSync(shared)) { console.log("NOSHARED " + rel); process.exit(0); }
+const src = readFileSync(shared, "utf8");
+const body = src.slice(src.search(/^## /m));
+const prints = body.split(/\n\s*\n/).map((p) => p.trim()).filter((p) => p.length >= 80 && !p.startsWith("## ")).map((p) => p.slice(0, 80));
+console.log("PRINTS " + prints.length);
+const list = (d) => existsSync(path.join(root, d)) ? readdirSync(path.join(root, d)).filter((f) => f.endsWith(".md")).map((f) => d + "/" + f) : [];
+const files = [...list("agents"), ...list("commands"), ...list("orchestrator")];
+for (const f of files) {
+  const t = readFileSync(path.join(root, f), "utf8");
+  prints.forEach((p, i) => { if (t.includes(p)) out.push("COPY " + f + " paragraph " + (i + 1)); });
+  if (/HASHED SPAN|span.s sha1/.test(t)) out.push("DIGEST " + f);
+  if (f.startsWith("agents/") && !t.includes("${CLAUDE_PLUGIN_ROOT}/" + rel)) out.push("NOPOINTER " + f);
+}
+const pre = path.join(root, "orchestrator/phase-4-panel-preamble.md");
+const includes = existsSync(pre) ? readFileSync(pre, "utf8").split("\n").filter((l) => l === "<!-- INCLUDE " + rel + " -->").length : 0;
+if (includes !== 1) out.push("NOINCLUDE orchestrator/phase-4-panel-preamble.md carries " + includes);
+console.log(out.join("\n"));
+'
+}
+DRIFT="$(property_block_drift "$PLUGIN_ROOT")"
+record "property block scan over the shipped tree: $(printf '%s\n' "$DRIFT" | head -1)"
+assert_eq "VACUITY: the shared file yields paragraph fingerprints (a scan with none finds no copy anywhere)" \
+  "$(printf '%s\n' "$DRIFT" | awk '/^PRINTS /{print ($2 >= 5 ? "enough" : "ONLY " $2)}')" "enough"
+assert_eq "no agent, command or orchestrator file carries its own copy of any paragraph, or a digest line; all nine agents point at the shared file; the preamble includes it once" \
+  "$(printf '%s\n' "$DRIFT" | grep -v '^PRINTS ' | grep . | tr '\n' ';')" ""
+assert_eq "the nine agents keep the section heading, so the pointer sits where the rule applies" \
+  "$(grep -l '^## The property, not the fix' "$PLUGIN_ROOT"/agents/*.md | wc -l | tr -d ' ')" "9"
+
+# NON-ZERO CONTROLS over a copy of the prose tree: each planted drift is reported by name.
+new_tmpdir || exit 90
+PLANT="$NEW_TMPDIR/plugin"
+mkdir -p "$PLANT"
+cp -R "$PLUGIN_ROOT/agents" "$PLUGIN_ROOT/commands" "$PLUGIN_ROOT/orchestrator" "$PLUGIN_ROOT/shared" "$PLANT/"
+assert_eq "CONTROL premise: the unmodified copy scans clean" \
+  "$(property_block_drift "$PLANT" | grep -v '^PRINTS ' | grep . | tr '\n' ';')" ""
+# a paragraph pasted back into one agent contract
+grep -m1 '^\*\*Measurability\.\*\*' "$PLANT/$PROPERTY_SHARED_REL" >> "$PLANT/agents/qa.md"
+# the digest convention coming back in an orchestrator file
+printf "\nThe span's sha1 on an undrifted tree is \`0000\`.\n" >> "$PLANT/orchestrator/phase-4-delta.md"
+# a contract that stops pointing at the shared file
+sed 's#shared/the-property-not-the-fix\.md#shared/elsewhere.md#g' "$PLUGIN_ROOT/agents/dev.md" > "$PLANT/agents/dev.md"
+# the preamble losing its INCLUDE line
+grep -v '^<!-- INCLUDE shared/the-property-not-the-fix.md -->$' "$PLUGIN_ROOT/orchestrator/phase-4-panel-preamble.md" > "$PLANT/orchestrator/phase-4-panel-preamble.md"
+PLANTED="$(property_block_drift "$PLANT")"
+assert_contains "NON-ZERO CONTROL: a pasted paragraph is reported as a copy, naming the file" "$PLANTED" "COPY agents/qa.md paragraph 2"
+assert_contains "NON-ZERO CONTROL: a returning digest line is reported" "$PLANTED" "DIGEST orchestrator/phase-4-delta.md"
+assert_contains "NON-ZERO CONTROL: an agent without the pointer is reported" "$PLANTED" "NOPOINTER agents/dev.md"
+assert_contains "NON-ZERO CONTROL: a preamble without the INCLUDE line is reported" "$PLANTED" "NOINCLUDE orchestrator/phase-4-panel-preamble.md carries 0"
+assert_not_contains "and the scan names only what was planted (secops.md was not touched)" "$PLANTED" "agents/secops.md"
+
 finish
