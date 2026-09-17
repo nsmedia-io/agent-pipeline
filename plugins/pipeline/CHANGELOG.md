@@ -30,7 +30,7 @@ node "$CLAUDE_PLUGIN_ROOT/scripts/migrate-records.mjs" --root . --check   # exit
 - **0.29.0 to 0.34.0 (2026-08-29 to 2026-08-31):** no numbered upgrade entry. The release commit subjects name what changed (the frontend gate's "nothing changed" answer, spec states, the panel's turn handling); read them if you depend on those.
 - **0.35.0 (2026-09-02):** items 26 and 27. Archival refuses credential-shaped material; the PreToolUse hook refuses a blanket stage from a subagent during Phase 4.
 - **0.36.0 (2026-09-03):** items 28 and 29. The SubagentStop validator scopes by the run in flight; archival warns on blank required text.
-- **0.37.0 (2026-09-03):** item 30. The PreToolUse timeout is 30 s.
+- **0.37.0 (2026-09-03):** item 30. The PreToolUse declared timeout went from 5 s to 30 s.
 - **0.38.0 (2026-09-04):** item 31. The Stop hook timeout is 120 s.
 - **0.39.0 (2026-09-04):** item 32. Heredoc bodies are opaque to the blanket-staging scanner.
 - **0.40.0 (2026-09-04):** item 33. Records: concerns carry `likelihood`, `reversibility` and `harm`, and an unrated blocking concern is treated as blocking; `migrate-records.mjs` names every unrated concern. 0.40.1 and 0.40.2 (same day) changed the suite only.
