@@ -89,7 +89,8 @@ export function trackerFromConfig(cfg) {
 /**
  * The configured ledger directory as a repo-relative path, or the default.
  *
- * Refuses an absolute path and any `..` segment: this value names a directory the pipeline
+ * Refuses an absolute path (a leading `/`, or a Windows drive path such as `C:/` or `C:\`, which
+ * read as relative while only `/` was checked) and any `..` segment: this value names a directory the pipeline
  * WRITES committed files into, so a config edit must not be able to place them outside the
  * repository. The refusal is a fall back to the default, not a throw, so a bad value cannot
  * wedge a run; config-doctor.mjs reports the key.
@@ -98,7 +99,7 @@ export function deferralDirFromConfig(cfg) {
   const d = cfg && cfg.deferralDir;
   if (typeof d !== "string" || d.trim() === "") return DEFAULT_DEFERRAL_DIR;
   const norm = d.replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/+$/, "");
-  if (norm === "" || norm.startsWith("/") || norm.split("/").includes("..")) {
+  if (norm === "" || norm.startsWith("/") || /^[A-Za-z]:(\/|$)/.test(norm) || norm.split("/").includes("..")) {
     return DEFAULT_DEFERRAL_DIR;
   }
   return norm;
