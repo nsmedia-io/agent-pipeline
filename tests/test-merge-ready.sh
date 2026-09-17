@@ -58,6 +58,13 @@ ARGS=(--issue 88 --worktree "$PROJ/wt" --impl-report "$REPORT" --peer-review "$P
 GREEN="[{\"__typename\":\"CheckRun\",\"name\":\"tests\",\"status\":\"COMPLETED\",\"conclusion\":\"SUCCESS\"},{\"__typename\":\"StatusContext\",\"context\":\"lint\",\"state\":\"SUCCESS\"},{\"__typename\":\"CheckRun\",\"name\":\"optional\",\"status\":\"COMPLETED\",\"conclusion\":\"SKIPPED\"}]"
 pr() { printf '{"headRefOid":"%s","statusCheckRollup":%s}' "$1" "$2"; }
 
+# THE FIXTURE, READ ONCE HERE SO EACH CELL BELOW CAN STAY SHORT. The worktree holds five commits:
+# the first panel round, the commit the panel reviewed, the orchestrator notes commit on top of it,
+# a later commit nobody reviewed, and a side branch forked from the first round. The panel record
+# is a delta round: QA recorded the reviewed commit and SecOps still stands on the first round, so
+# the script has to pick the newest recorded commit rather than the first one it reads. The ledger
+# is a real directory-mode ledger with one entry, and only the PR state is injected, because that
+# is the one input that lives on a remote. Every cell is one call and one or two assertions.
 suite "merge-ready: ready"
 
 report '"deferred":[{"what":"w","reason":"r","tracker_ref":"ledger/88-one.md"}]'
@@ -65,6 +72,11 @@ mr "$(pr "$SHA" "$GREEN")" "${ARGS[@]}"
 assert_eq "reviewed head, green CI, a verifying deferral ref: exit 0" "$RC" "0"
 assert_contains "and it says READY" "$OUT" "READY: #88"
 
+# THE HEAD RULE. Ready means the PR head is the commit the panel reviewed, or that commit plus only
+# the orchestrator notes commits. A head past it, behind it, on another line of history, or with
+# no recorded commit at all is not ready, and the failure direction is always toward not ready:
+# a record the script cannot read never falls back to the worktree HEAD, which is the shape the
+# review found, since the worktree HEAD moves with every commit made after the panel ran.
 suite "merge-ready: the PR head against the commit the panel recorded"
 
 mr "$(pr 0123456789abcdef0123456789abcdef01234567 "$GREEN")" "${ARGS[@]}"
@@ -100,6 +112,10 @@ mr FAIL "${ARGS[@]}"
 assert_eq "gh unable to read the PR: exit 2, never ready by default" "$RC" "2"
 assert_contains "and carries gh's words" "$OUT" "HTTP 401"
 
+# THE CI RULE. Every check on the PR head must have finished green. Skipped counts as green, a
+# running check does not, and no checks at all is refused by default because a CI that has not
+# registered yet looks exactly like no CI. Only the config key lifts that one refusal, only as a
+# real boolean, and never for a failing check.
 suite "merge-ready: CI on the head"
 
 mr "$(pr "$SHA" '[{"__typename":"CheckRun","name":"tests","status":"COMPLETED","conclusion":"FAILURE"},{"__typename":"StatusContext","context":"lint","state":"SUCCESS"}]')" "${ARGS[@]}"
@@ -125,6 +141,10 @@ mr "$(pr "$SHA" '[]')" "${ARGS[@]}"
 assert_eq "only the boolean false lifts it; the string \"false\" does not: exit 2" "$RC" "2"
 printf '{"deferralTracker":"directory","deferralDir":"ledger"}' > "$PROJ/pipeline.config.json"
 
+# THE LEDGER RULE. Every deferral the run recorded must resolve in the ledger: the report entries,
+# the older observations shape, each ref passed on the command line, and each ref a panel shard
+# carries. The last cell of this block asks for three failures at once and requires all three to
+# be printed, so an owner fixes them in one pass instead of one per run.
 suite "merge-ready: every deferral ref verifies"
 
 report '"deferred":[{"what":"w","reason":"r","tracker_ref":"ledger/88-missing.md"}]'
@@ -155,6 +175,8 @@ assert_contains "every failure is reported, not just the first (head)" "$OUT" "i
 assert_contains "every failure is reported, not just the first (CI)" "$OUT" "no CI checks"
 assert_contains "every failure is reported, not just the first (ledger)" "$OUT" "--ref[0]"
 
+# USAGE. A missing input or a report for another issue is exit 1, which the prose treats as a halt
+# and never as not ready, so a typo cannot be read as a merge decision either way.
 suite "merge-ready: usage"
 
 mr "$(pr "$SHA" "$GREEN")" --issue 88 --worktree "$PROJ/wt" --peer-review "$PEER"
@@ -168,6 +190,9 @@ assert_eq "an impl-report for a different issue: exit 1" "$RC" "1"
 ( cd "$PROJ" && node "$MR" --issue 88 ) >/dev/null 2>&1
 assert_eq "the CLI entrypoint runs and refuses a partial invocation (1)" "$?" "1"
 
+# THE PROSE. The orchestrator only runs what the verdict file tells it to run, so the call, its exit
+# handling and the deferral rule are pinned there, and the hand-run instructions it replaced are
+# pinned absent so the two cannot drift back into disagreeing.
 suite "the prose calls the script, and the removed prose stays removed"
 
 V="$(cat "$VERDICT")"

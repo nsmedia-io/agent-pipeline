@@ -32,6 +32,10 @@ Q_NB='{"id":"q1","question":"q1?","why_it_matters":"w","ba_recommendation":"rec1
 Q_B2='{"id":"q2","question":"q2?","why_it_matters":"w","ba_recommendation":"rec2","blocking":true}'
 Q_B3='{"id":"q3","question":"q3?","why_it_matters":"w","ba_recommendation":"rec3","blocking":true}'
 
+# THE FIXTURES. A spec carrying every required field, and three questions: one the gate may
+# default because it is not blocking and carries a recommendation, and two blocking ones the owner
+# has to answer in order. The status record names the same issue, which the wrong-run cells below
+# rely on. Each cell rewrites the spec whole, so no cell depends on what an earlier one left behind.
 suite "open-questions: proceed"
 
 spec ''
@@ -53,6 +57,9 @@ AFTER1="$(cat "$SPEC")"
 og open-questions --spec "$SPEC" --status "$ST"
 assert_eq "a second run leaves a resolved spec byte-identical" "$(cat "$SPEC")" "$AFTER1"
 
+# ONE QUESTION AT A TIME. The gate prints only the first unresolved blocking question and the count
+# that remain, never the whole batch, because an early answer often dissolves a later question. It
+# still defaults the non-blocking ones on the way, and it never writes an answer for the owner.
 suite "open-questions: ask the owner, one question at a time"
 
 spec "\"open_questions\":[$Q_NB,$Q_B2,$Q_B3]"
@@ -73,6 +80,9 @@ og open-questions --spec "$SPEC" --status "$ST"
 assert_eq "with every blocking question answered: exit 0" "$RC" "0"
 assert_eq "and the owner's answer is kept, not overwritten by a default" "$(jget "$SPEC" open_questions.1.resolution.answered_by)" '"owner"'
 
+# EXPERIMENTS. An unattended run cannot answer a question, so every question resolves to the BA
+# recommendation, by the flag or by an exp issue id. The control keeps the carve-out from widening
+# into every run.
 suite "open-questions: experiment runs never block"
 
 spec "\"open_questions\":[$Q_B2]"
@@ -87,6 +97,9 @@ spec "\"open_questions\":[$Q_B2]"
 og open-questions --spec "$SPEC" --status "$ST"
 assert_eq "CONTROL: the same blocking question without the flag, on a numbered issue, still blocks" "$RC" "2"
 
+# INVALID. A spec missing a required field, or a question the gate cannot default, is exit 2 with
+# every gap named, so BA fixes the spec in one pass. The falsy control keeps a present false from
+# reading as missing.
 suite "open-questions: invalid spec"
 
 printf '{"issue_number":4243,"title":"t","problem":"p","requirements":["r"],"impacted_domains":["api"],"trivial":false}' > "$SPEC"
@@ -103,6 +116,9 @@ og open-questions --spec "$SPEC" --status "$ST"
 assert_eq "a non-blocking question with no recommendation cannot be defaulted: exit 2" "$RC" "2"
 assert_contains "and it names the question" "$OUT" "open_questions[q9].ba_recommendation"
 
+# A COMPLETE RESOLUTION. The review found the gate standing on an empty resolution object. An
+# answer, who answered, and when are all required, and who answered is owner or ba_default. A
+# blocking flag that is not a real boolean is refused rather than defaulted, in both directions.
 suite "open-questions: a resolution the gate may stand on"
 
 for R in '{}' '{"answered_by":"ba_default"}' '{"answer":"  ","answered_by":"owner","at":"2026-01-01T00:00:00Z"}' '{"answer":"a","answered_by":"owner"}' '{"answer":"a","answered_by":"someone","at":"2026-01-01T00:00:00Z"}'; do
@@ -149,6 +165,10 @@ assert_eq "an unreadable spec: exit 1" "$RC" "1"
 og bogus
 assert_eq "an unknown subcommand: exit 1" "$RC" "1"
 
+# DESIGN LOCK. Exit 3 sends the judge back when its decision block is absent or incomplete, exit 2
+# asks the owner when the block is complete and unresolved, and exit 0 proceeds. A resolution counts
+# only with a choice from the allowed set and the reasoning the owner gave, since the reasoning is
+# what the next person reads when they wonder why the other option lost.
 suite "design-lock"
 
 design() { printf '{"issue_number":4243,"chosen_approach":{"summary":"s"}%s}' "${1:+,$1}" > "$DESIGN"; }
@@ -196,6 +216,9 @@ assert_eq "a status naming a different issue: exit 1" "$RC" "1"
 og design-lock --design "$DESIGN"
 assert_eq "no --status: exit 1" "$RC" "1"
 
+# THE PROSE. Both phase files call the script and keep the halt phase writes and the voice-mode
+# question, which stay with the orchestrator. The decision rules the script now owns are pinned
+# absent, so a later edit cannot restore a second copy that disagrees with the code.
 suite "the prose calls the gates, and the removed decision prose stays removed"
 
 M1="$(cat "$P1")"

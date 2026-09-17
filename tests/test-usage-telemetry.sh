@@ -54,6 +54,11 @@ field() { # <json line> <field>
   node -e 'const o = JSON.parse(process.argv[1]); const v = o[process.argv[2]]; process.stdout.write(v === null ? "null" : String(v));' "$1" "$2"
 }
 
+# OFF BY DEFAULT. Telemetry writes to the git common dir of a consumer project, so the default has
+# to be nothing at all: no file, no output, and an exit 0 that lets the dispatch run. The env var
+# wins over the config key in both directions, so one session can opt out of a project that opted
+# in. The absent log file is the observation, not the exit code, because a hook that wrote a line
+# and exited 0 would pass an exit-code check.
 suite "#163 dispatch log: off by default"
 
 STDOUT="$(run_hook "$AGENT_PAYLOAD" 2>/dev/null)"
@@ -70,6 +75,11 @@ printf '%s' '{"usageTelemetry":{"enabled":true}}' > "$PROJ/pipeline.config.json"
 run_hook "$AGENT_PAYLOAD" CLAUDE_PIPELINE_USAGE_TELEMETRY=0 >/dev/null 2>&1
 assert_eq "env var 0 wins over an enabling config: no log file" "$([[ -e "$LOG" ]] && echo exists || echo absent)" "absent"
 
+# ONE LINE PER DISPATCH. The field list is compared with the exported allowlist as a whole, so a new
+# field fails here before it reaches a log. The prompt and description are planted as marker words
+# that must not appear. Issue, phase, tier and cost class come from the in-flight status record, the
+# model from the call or the agent frontmatter, and the effort from the frontmatter, because the
+# Agent tool carries none. A Bash call is the control that the matcher, not luck, keeps it quiet.
 suite "#163 dispatch log: one Agent dispatch, one line"
 
 STDOUT="$(run_hook "$AGENT_PAYLOAD" 2>/dev/null)"
@@ -112,6 +122,9 @@ assert_eq "and its subagent_type is kept" "$(field "$LINE" subagent_type)" "gene
 run_hook '{"session_id":"s-1","tool_name":"Bash","tool_input":{"command":"ls"}}' >/dev/null 2>&1
 assert_eq "a non-dispatch tool writes nothing" "$(grep -c . "$LOG" | tr -d ' ')" "3"
 
+# WORKFLOW. The panel is rendered by the real renderer rather than written by hand, so a change to
+# the renderer output shape reddens this block instead of leaving the writer reading a script that
+# no longer exists.
 suite "#163 dispatch log: a rendered Workflow panel logs one line per agent"
 
 node "$SCRIPTS_DIR/render-panel.mjs" --status "$PROJ/.pipeline/42/status.json" --worktree "$PROJ" --out "$OUT/panel.mjs" 2>/dev/null
@@ -133,6 +146,10 @@ assert_eq "the Workflow call's issue comes from the rendered meta name" "$(field
 assert_not_contains "no lens or preamble text in the log" "$(cat "$LOG")" "Your role"
 assert_eq "a well-formed line rejects nothing" "$(field "$SEC" rejected_fields)" "0"
 
+# CRAFTED INPUT. Every value is held to a shape before it is written: a number or exp id for the
+# issue, an alias or model id for the model, one of five effort levels, and short tokens for ids.
+# The crafted values below carry a secret-shaped token and free words, and each must be written as
+# null and counted, while a well-formed agent in the same script keeps its values.
 suite "#163 dispatch log: a crafted script or payload cannot write free text into the log"
 
 SECRET_SCRIPT="$(printf '%s\n' \
@@ -158,6 +175,9 @@ assert_eq "the well-formed agent in the same script keeps its values, issue stil
 assert_eq "a crafted Agent payload: session, subagent_type, model and session effort are null" \
   "$(field "$AG" session_id)/$(field "$AG" subagent_type)/$(field "$AG" model)/$(field "$AG" session_effort)/$(field "$AG" rejected_fields)" "null/null/null/null/4"
 
+# DISARM, NEVER BLOCK. When the line cannot be written, the dispatch still runs, and the hook says
+# so on the systemMessage channel and in the disarm log, which is the rule every hook here follows
+# since 0.43.0. The cells cover an unwritable log, a missing script and a payload that is not JSON.
 suite "#163 dispatch log: enabled but not writable is a visible disarm, never a block"
 
 printf 'a file, not a directory' > "$OUT/blocker"
@@ -193,6 +213,10 @@ DECL="$(node -e '
   process.stdout.write(["Agent", "Task", "Workflow"].map((t) => t + "=" + re.test(t)).join(" ") + " Bash=" + re.test("Bash"));' "$HOOKS_DIR/hooks.json")"
 assert_eq "the dispatch-log PreToolUse matcher admits Agent, Task and Workflow and not Bash" "$DECL" "Agent=true Task=true Workflow=true Bash=false"
 
+# THE REPORT OVER TRANSCRIPTS. The fixtures are small transcripts in the shape Claude Code writes,
+# with a subagent file carrying the tool use id of its dispatch. The join is checked method by
+# method, most exact first, and a streamed message repeating its id is counted once. Transcripts
+# carry no cost, so a cost appears only when a price table is passed.
 suite "#163 report: transcripts joined to the dispatch log"
 
 new_tmpdir || exit 90
@@ -274,6 +298,9 @@ JSON="$(CLAUDE_PROJECT_DIR="$FX" node "$REPORT" --dispatch-log "$FX/dispatch.jso
 assert_eq "--prices costs a transcript row per MTok (dev: 2000 in, 200 out on opus)" \
   "$(node -e 'const r = JSON.parse(process.argv[1]); process.stdout.write(r.tables.role.find((x) => x.key === "dev").cost.toFixed(4));' "$JSON")" "0.0240"
 
+# THE REPORT OVER OPENTELEMETRY. Metric points and api request events as the file exporter writes
+# them. Cumulative cost is differenced between points rather than summed, and a request with no
+# dispatch in its session is reported as unattributed instead of being guessed onto a role.
 suite "#163 report: OpenTelemetry file-exporter lines"
 
 node - "$FX" <<'EOF'
@@ -333,6 +360,9 @@ assert_eq "effort comes from the OTel attribute when present" "$(q 'row("effort"
 assert_eq "cost_usd is summed as reported" "$(node -e 'const r = JSON.parse(process.argv[1]); process.stdout.write(r.tables.role.find((x) => x.key === "qa").cost.toFixed(2));' "$JSON")" "0.50"
 assert_eq "cumulative cost is differenced, not summed" "$(node -e 'const r = JSON.parse(process.argv[1]); process.stdout.write(r.tables.role.find((x) => x.key === "(unattributed)").cost.toFixed(2));' "$JSON")" "1.60"
 
+# ONE SOURCE PER SESSION. A session present in both sources is counted once, from OpenTelemetry,
+# and every message dropped for that reason or for an unreadable timestamp is printed as a note, so
+# the total can be reconciled by hand.
 suite "#163 report: one usage source per session when both are given"
 
 mkdir -p "$FX/t3"
