@@ -60,13 +60,25 @@ assert_eq "CONTROL: versions compare numerically (0.10.0 is newer than 0.9.0, no
 suite "version-check: an older cached copy runs while a newer one is cached"
 
 new_tmpdir || exit 90; P="$NEW_TMPDIR/plugins"
-fake_plugins "$P" 0.24.0 0.24.0 0.42.0
+fake_plugins "$P" 0.42.0 0.24.0 0.42.0
 run_check "$P/cache/agent-pipeline/pipeline/0.24.0" "$P"
-assert_contains "warns when a newer version sits beside the running one in the cache" "$OUT" "0.42.0 is already in the plugin cache"
+assert_contains "when the marketplace is ahead, a newer copy already in the cache is named too" "$OUT" "0.42.0 is already in the plugin cache"
 assert_contains "and names both versions" "$OUT" "runs pipeline 0.24.0"
 
 run_check "$P/cache/agent-pipeline/pipeline/0.42.0" "$P"
 assert_eq "CONTROL: running the NEWEST cached copy of that same cache is silent" "$OUT" ""
+
+# An ORPHANED newer cache directory (no newer marketplace entry: a rolled-back install, a local
+# build) must not warn: the update command cannot change it, so the line would repeat every session.
+new_tmpdir || exit 90; P="$NEW_TMPDIR/plugins"
+fake_plugins "$P" 0.24.0 0.24.0 0.42.0
+run_check "$P/cache/agent-pipeline/pipeline/0.24.0" "$P"
+assert_eq "an orphaned newer cached version with the marketplace at the running version is silent" "$OUT" ""
+new_tmpdir || exit 90; P="$NEW_TMPDIR/plugins"
+fake_plugins "$P" 0.30.0 0.24.0 0.42.0
+run_check "$P/cache/agent-pipeline/pipeline/0.24.0" "$P"
+assert_contains "CONTROL: the same orphan with the marketplace ahead of the running copy warns" "$OUT" "PLUGIN OUT OF DATE"
+assert_contains "  ...and the update target is the marketplace version, not the orphan" "$OUT" "Update to 0.30.0"
 
 # ---------------------------------------------------------------------------
 suite "version-check: what it must not claim"

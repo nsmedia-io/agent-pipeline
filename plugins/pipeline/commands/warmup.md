@@ -21,7 +21,7 @@ A lightweight version of steps 1 to 3 also runs automatically via the `SessionSt
 node "${CLAUDE_PLUGIN_ROOT}/scripts/version-check.mjs" --plugin-root "${CLAUDE_PLUGIN_ROOT}"
 ```
 
-It prints nothing when no newer copy is on this disk, and one line naming both versions and the update command when there is. If it prints, put that line at the top of the Step 5 risk summary. Silence means nothing newer is cached locally, not that the install is current: the marketplace clone is only as fresh as its last update.
+It prints nothing when the marketplace clone advertises no newer version (a newer copy in the cache alone does not warn, because the update command cannot change an orphaned cache directory), and one line naming both versions and the update command when there is. If it prints, put that line at the top of the Step 5 risk summary. Silence means nothing newer is cached locally, not that the install is current: the marketplace clone is only as fresh as its last update.
 
 `# CUSTOMIZE:` the integration branch defaults to `main`. Set `integrationBranch` in `pipeline.config.json` if yours differs; substitute it wherever `main` appears below.
 

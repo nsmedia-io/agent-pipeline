@@ -13,8 +13,12 @@
  *       read from its marketplace.json entry and from the plugin.json that entry points at;
  *   (b) every other version directory under <plugins>/cache/<marketplace>/<plugin>/, which is
  *       how a machine can hold 0.42.0 and still run 0.24.0.
- * The newest version found wins. The clone is only as fresh as its last marketplace update,
- * so a silent result means "nothing newer is on this disk", never "you are current".
+ * ONLY (a) DECIDES WHETHER IT WARNS. A newer cached directory with no newer marketplace entry is
+ * an orphan (a rolled-back install, a local test build), and a warning keyed on it would repeat
+ * every session with nothing the update command could change. The cache is named in the line
+ * only when the marketplace already says the copy is behind. The clone is only as fresh as its
+ * last marketplace update, so a silent result means "nothing newer is advertised on this disk",
+ * never "you are current".
  *
  * OUTPUT. At most ONE plain line, and only when the running copy is behind. Otherwise nothing.
  * It never exits non-zero and never writes: it runs inside the SessionStart hook's budget and a
@@ -136,12 +140,12 @@ export function checkVersion({ pluginRoot, pluginsDir }) {
   }
 
   const behindMarket = result.marketplaceVersion && compareVersions(running, result.marketplaceVersion) < 0;
+  if (!behindMarket) return result;
   const behindCache = result.newestCached && compareVersions(running, result.newestCached) < 0;
-  if (!behindMarket && !behindCache) return result;
 
-  const target = newest([behindMarket ? result.marketplaceVersion : null, behindCache ? result.newestCached : null].filter(Boolean));
+  const target = result.marketplaceVersion;
   const where = [
-    behindMarket ? `the ${marketplace} marketplace clone has ${result.marketplaceVersion}` : null,
+    `the ${marketplace} marketplace clone has ${result.marketplaceVersion}`,
     behindCache ? `${result.newestCached} is already in the plugin cache` : null,
   ]
     .filter(Boolean)
