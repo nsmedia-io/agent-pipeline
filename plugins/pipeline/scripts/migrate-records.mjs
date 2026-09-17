@@ -69,7 +69,9 @@ const SHARD_RE = /^(peer-)?review(\.[a-z0-9_-]+)?\.json$/;
 
 function readJson(file) {
   try {
-    return { value: JSON.parse(readFileSync(file, "utf8")) };
+    const raw = readFileSync(file, "utf8");
+    // A UTF-8 BOM is not JSON, so JSON.parse refuses it; strip it to parse, and the write puts it back.
+    return { value: JSON.parse(raw.charCodeAt(0) === 0xfeff ? raw.slice(1) : raw), raw };
   } catch (e) {
     return { error: e.code === "ENOENT" ? "absent" : e.message };
   }
@@ -247,9 +249,36 @@ function runDirs(root) {
     .sort();
 }
 
-function writeJsonAtomic(file, value) {
+/**
+ * How a JSON file is laid out, so a write keeps it: a UTF-8 BOM, CRLF or LF line endings, the
+ * indentation of its first indented line (or none, for a one-line compact file), and whether it
+ * ends in a newline. Detected from the raw text; a file the detector cannot place reads as the
+ * 2-space LF shape this script always wrote before.
+ */
+export function detectJsonFormat(raw) {
+  const bom = raw.charCodeAt(0) === 0xfeff;
+  const text = bom ? raw.slice(1) : raw;
+  const eol = text.includes("\r\n") ? "\r\n" : "\n";
+  const body = text.replace(/\s+$/, "");
+  const compact = !body.includes("\n");
+  const m = /\n([ \t]+)\S/.exec(body);
+  const indent = compact ? "" : m ? m[1] : "  ";
+  const finalNewline = /\r?\n$/.test(text);
+  return { bom, eol, indent, compact, finalNewline };
+}
+
+/** Serialise `value` in `fmt` (from detectJsonFormat). */
+export function formatJson(value, fmt) {
+  const f = fmt || { bom: false, eol: "\n", indent: "  ", compact: false, finalNewline: true };
+  let out = f.compact ? JSON.stringify(value) : JSON.stringify(value, null, f.indent || "  ");
+  if (f.eol !== "\n") out = out.split("\n").join(f.eol);
+  if (f.finalNewline) out += f.eol;
+  return (f.bom ? "\uFEFF" : "") + out;
+}
+
+function writeJsonAtomic(file, value, fmt) {
   const tmp = `${file}.migrate-${process.pid}.tmp`;
-  writeFileSync(tmp, `${JSON.stringify(value, null, 2)}\n`);
+  writeFileSync(tmp, formatJson(value, fmt));
   renameSync(tmp, file);
 }
 
@@ -321,7 +350,16 @@ export function migrate({ root, write = false, mapLegacyCounters = false }) {
             }
           }
           entry.problems.unshift(...statusProblems(next, schemas));
-          if (write && entry.changes.length > 0) writeJsonAtomic(file, next);
+          if (entry.changes.length > 0) {
+            const fmt = detectJsonFormat(read.raw);
+            // Line endings, BOM and indentation are kept; what JSON.stringify cannot reproduce (a
+            // space after a colon in a compact file, aligned values, mixed indentation) is not, and
+            // the dry run says so before anyone writes.
+            if (formatJson(status, fmt) !== read.raw) {
+              entry.format = "a write also re-serialises the rest of this file (line endings, BOM and indentation are kept; other whitespace is not)";
+            }
+            if (write) writeJsonAtomic(file, next, fmt);
+          }
         } else {
           entry.problems.push(...statusProblems(status, schemas));
         }
@@ -357,6 +395,7 @@ export function formatReport(report) {
   for (const f of needs) {
     out.push(`  ${f.file}`);
     for (const c of f.changes) out.push(`    ${report.write ? "changed" : "would change"}: ${c}`);
+    if (f.format && f.changes.length) out.push(`    format: ${f.format}`);
     for (const p of f.problems) out.push(`    rejected: ${p}`);
     for (const d of f.decisions) out.push(`    owner: ${d}`);
   }

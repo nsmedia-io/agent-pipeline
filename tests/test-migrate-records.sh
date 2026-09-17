@@ -105,6 +105,47 @@ run --write
 assert_eq "CONTROL: a sha on an event whose verdict is not merged is not a merge record" "$(sum "$P/111/status.json")" "$BEFORE"
 
 # ---------------------------------------------------------------------------
+suite "migrate-records: --write keeps the file's line endings, indentation and BOM"
+
+# Each fixture needs exactly one mechanical change (the phase move) and is otherwise in the exact
+# shape JSON.stringify produces for its layout, so byte comparison against an expected file is fair.
+MERGED_EVENT='"events":[{"phase":"4-review","verdict":"merged","commit":"9451894","at":"2026-08-02T00:00:00Z"}]'
+expect_json() { # <file> <layout: crlf4|compact|bom2> <json> -> writes the expected bytes
+  node -e '
+    const [file, layout, json] = process.argv.slice(1);
+    const v = JSON.parse(json);
+    let out;
+    if (layout === "crlf4") out = JSON.stringify(v, null, 4).split("\n").join("\r\n") + "\r\n";
+    else if (layout === "compact") out = JSON.stringify(v) + "\n";
+    else out = "﻿" + JSON.stringify(v, null, 2) + "\n";
+    require("fs").writeFileSync(file, out);' "$1" "$2" "$3"
+}
+FMT_IN="{\"current_phase\":\"phase3_complete_rev21\",$BASE,$MERGED_EVENT}"
+FMT_OUT="{\"current_phase\":\"5-archive\",$BASE,$MERGED_EVENT,\"schema_version\":1}"
+for layout in crlf4 compact bom2; do
+  mkdir -p "$P/4$layout"
+  expect_json "$P/4$layout/status.json" "$layout" "$FMT_IN"
+  expect_json "$TEMP_PROJECT/expected-$layout.json" "$layout" "$FMT_OUT"
+done
+run
+assert_not_contains "a dry run over files already in their own serialised shape promises no reformat" "$OUT" "format: a write also re-serialises"
+run --write
+for layout in crlf4 compact bom2; do
+  assert_eq "--write keeps the $layout layout byte-for-byte (only the changed fields differ)" \
+    "$(sum "$P/4$layout/status.json")" "$(sum "$TEMP_PROJECT/expected-$layout.json")"
+done
+assert_eq "  ...and the BOM file still parses as the moved record once the BOM is stripped" \
+  "$(node -e 'const r=require("fs").readFileSync(process.argv[1],"utf8");console.log(r.charCodeAt(0)===0xfeff?JSON.parse(r.slice(1)).current_phase:"NO BOM")' "$P/4bom2/status.json")" "5-archive"
+
+# A layout JSON.stringify cannot reproduce: the dry run says a write would reformat it.
+mkdir -p "$P/4odd"
+printf '{ "current_phase" : "phase3_complete_rev21", %s, %s }\n' "$BASE" "$MERGED_EVENT" > "$P/4odd/status.json"
+BEFORE=$(sum "$P/4odd/status.json")
+run
+assert_contains "a dry run on a file with hand spacing says a write would re-serialise it" "$OUT" "format: a write also re-serialises the rest of this file"
+assert_eq "  ...and writes nothing" "$(sum "$P/4odd/status.json")" "$BEFORE"
+
+# ---------------------------------------------------------------------------
 suite "migrate-records: review shards are reported and NEVER written"
 
 mkdir -p "$P/201"
