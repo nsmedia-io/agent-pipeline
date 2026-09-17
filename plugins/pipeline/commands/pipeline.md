@@ -18,7 +18,7 @@ The phases are **gates, not a one-way waterfall**. The shape of the work, not th
 
 **Argument:** `$ARGUMENTS`
 
-`scripts/pipeline-init.mjs` parses the argument in Phase 0 (`--resume <issue>`, `--issue <number>`, else a fresh ask; `--dry-run` or `--experiment` anywhere sets `experiment_mode`). `--resume` re-enters `resume_phase` from the top: `current_phase` is an ENTRY marker, so that phase has not completed. `--issue` is an existing tracker issue: start at Phase 2 (BA reads the issue and seeds spec.json). A fresh ask has no issue yet; BA creates one. Pass `experiment_mode` into the BA prompt as `EXPERIMENT_MODE`: BA then opens no tracker issue (a local `exp-<slug>` placeholder), so A/B harnesses and throwaway branches never pollute the production tracker.
+`scripts/pipeline-init.mjs` parses the argument in Phase 0 (`--resume <issue>`, `--issue <number>`, else a fresh ask; `--dry-run` or `--experiment` anywhere sets `experiment_mode`). `--resume` re-enters `resume_phase` from the top: the record names the phase it ENTERED, so that phase has not completed. `--issue` is an existing tracker issue: start at Phase 2 (BA reads the issue and seeds spec.json). A fresh ask has no issue yet; BA creates one. Pass `experiment_mode` into the BA prompt as `EXPERIMENT_MODE`: BA then opens no tracker issue (a local `exp-<slug>` placeholder), so A/B harnesses and throwaway branches never pollute the production tracker.
 
 Non-negotiables (carry through to every subagent prompt you construct):
 - Every agent labels its human-facing text with `**[<role>]:**`.
