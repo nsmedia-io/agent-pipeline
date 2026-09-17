@@ -3,24 +3,32 @@
  * merge-ready.mjs -- may this PR be presented to the owner as ready to merge? (#164 row 15)
  *
  *   node merge-ready.mjs --issue <n> --worktree <path> --impl-report <impl-report.json>
- *                        [--pr-url <url>] [--ref <deferral ref>]... [--no-ci] [--root <project root>]
+ *                        --peer-review <peer-review.json> [--pr-url <url>] [--ref <deferral ref>]...
+ *                        [--root <project root>]
  *
  * Three mechanical preconditions, every failure reported (not just the first):
- *   1. The PR head is the reviewed commit: `gh pr view --json headRefOid` equals
- *      `git -C <worktree> rev-parse HEAD`. A push after the panel means the head was never reviewed.
- *   2. CI on that head is green: every statusCheckRollup entry is a completed CheckRun concluding
+ *   1. The PR head is the commit the PANEL REVIEWED. The reviewed commit is read from what the panel
+ *      recorded (`reviewed_sha` or `reviewed_commit` on each role in peer-review.json), never from
+ *      the worktree HEAD at check time, which a later push moves. On a delta round roles record
+ *      different commits; the reviewed commit is the one every other recorded commit is an ancestor
+ *      of. None recorded, one that does not resolve in the worktree, or recorded commits that do not
+ *      form one line of history: not ready. The only commits allowed between the reviewed commit and
+ *      the PR head are the orchestrator's own "chore: apply Phase 4 panel notes for #<issue>" commits.
+ *   2. CI on the PR head is green: every statusCheckRollup entry is a completed CheckRun concluding
  *      SUCCESS, NEUTRAL or SKIPPED, or a StatusContext in state SUCCESS. Pending is not green. No
- *      checks at all is not green either (CI may not have registered yet); pass --no-ci for a
- *      project with no remote CI.
+ *      checks at all is not green either, unless pipeline.config.json sets ciRequiredForMerge: false
+ *      (a project with no remote CI). There is no per-call override.
  *   3. Every deferral reference verifies, through deferral.mjs's verifyDeferralRef, the function the
  *      pre-Phase-4 gate also calls: impl-report deferred[].tracker_ref, the legacy
- *      scope_drift.observations_reported_not_fixed[].tracker_ref, and each --ref (the checklist and
- *      issue refs recorded in status.json flags).
+ *      scope_drift.observations_reported_not_fixed[].tracker_ref, every `tracker_ref` anywhere in
+ *      peer-review.json (panel shards that deferred a note), and each --ref (the checklist and issue
+ *      refs recorded in status.json flags).
  *
- * The PR is --pr-url, else impl-report pr_url. Tracker routing comes from pipeline.config.json
- * under --root (default: CLAUDE_PROJECT_DIR, else the cwd).
+ * The PR is --pr-url, else impl-report pr_url. Config is read from --root (default:
+ * CLAUDE_PROJECT_DIR, else the cwd).
  *
  * EXIT CODES. 0 ready. 2 not ready, one `- reason` line each. 1 usage or an unreadable input.
+ * Only 0 means ready.
  */
 
 import { readFileSync } from "node:fs";
@@ -30,8 +38,9 @@ import { isMain, nativePath } from "./lib.mjs";
 import { verifyDeferralRef, readPipelineConfig, trackerFromConfig, deferralDirFromConfig } from "./deferral.mjs";
 
 const USAGE =
-  "usage: node merge-ready.mjs --issue <n> --worktree <path> --impl-report <impl-report.json> [--pr-url <url>] [--ref <ref>]... [--no-ci] [--root <dir>]\n";
+  "usage: node merge-ready.mjs --issue <n> --worktree <path> --impl-report <impl-report.json> --peer-review <peer-review.json> [--pr-url <url>] [--ref <ref>]... [--root <dir>]\n";
 const GREEN_CONCLUSIONS = new Set(["SUCCESS", "NEUTRAL", "SKIPPED"]);
+const SHA_KEYS = ["reviewed_sha", "reviewed_commit"];
 
 export function run(cmd, args, cwd) {
   let r;
@@ -42,6 +51,11 @@ export function run(cmd, args, cwd) {
   }
   if (r.error) return { ran: false, status: null, stdout: "", stderr: String(r.error.message) };
   return { ran: true, status: r.status, stdout: r.stdout || "", stderr: r.stderr || "" };
+}
+
+/** ciRequiredForMerge from a parsed config: true unless it is exactly false. */
+export function ciRequiredFromConfig(cfg) {
+  return !(cfg && cfg.ciRequiredForMerge === false);
 }
 
 /** {state: "green"|"pending"|"failing"|"none", names: string[]} over a statusCheckRollup array. */
@@ -66,8 +80,26 @@ export function ciState(rollup) {
   return { state: "green", names: [] };
 }
 
-/** Every deferral ref the report and the caller name, with where each came from. */
-export function deferralRefs(report, extra = []) {
+/** The distinct commits the panel recorded, with the roles that recorded each. */
+export function recordedShas(peerReview) {
+  const map = new Map();
+  if (!peerReview || typeof peerReview !== "object") return map;
+  for (const [role, shard] of Object.entries(peerReview)) {
+    if (!shard || typeof shard !== "object" || Array.isArray(shard)) continue;
+    for (const k of SHA_KEYS) {
+      const v = shard[k];
+      if (typeof v === "string" && /^[0-9a-f]{7,40}$/i.test(v.trim())) {
+        const sha = v.trim().toLowerCase();
+        if (!map.has(sha)) map.set(sha, []);
+        map.get(sha).push(role);
+      }
+    }
+  }
+  return map;
+}
+
+/** Every deferral ref the report, the panel and the caller name, with where each came from. */
+export function deferralRefs(report, peerReview, extra = []) {
   const refs = [];
   const sources = [
     ["deferred", report && report.deferred],
@@ -75,21 +107,46 @@ export function deferralRefs(report, extra = []) {
   ];
   for (const [label, rows] of sources) {
     if (!Array.isArray(rows)) continue;
-    rows.forEach((row, i) => refs.push({ where: `${label}[${i}]`, ref: row && typeof row === "object" ? row.tracker_ref : undefined }));
+    rows.forEach((row, i) => refs.push({ where: `impl-report ${label}[${i}]`, ref: row && typeof row === "object" ? row.tracker_ref : undefined }));
   }
+  (function walk(node, path) {
+    if (Array.isArray(node)) node.forEach((v, i) => walk(v, `${path}[${i}]`));
+    else if (node && typeof node === "object") {
+      for (const [k, v] of Object.entries(node)) {
+        if (k === "tracker_ref") refs.push({ where: `peer-review ${path}.tracker_ref`, ref: v });
+        else walk(v, path ? `${path}.${k}` : k);
+      }
+    }
+  })(peerReview, "");
   extra.forEach((ref, i) => refs.push({ where: `--ref[${i}]`, ref }));
   return refs;
 }
 
 /**
- * @returns {{ready: boolean, reasons: string[], warnings: string[], head: string|null}}
+ * Resolve the reviewed commit from the recorded ones with git in the worktree.
+ * @returns {{sha: string|null, reason: string|null}}
  */
-export function mergeReady({ report, reviewedSha, prUrl, requireCi = true, extraRefs = [], exec, verify }) {
+export function reviewedCommit(recorded, git) {
+  if (recorded.size === 0) return { sha: null, reason: "the panel recorded no reviewed commit (reviewed_sha or reviewed_commit in peer-review.json), so there is nothing to compare the PR head to" };
+  const full = [];
+  for (const [sha, roles] of recorded) {
+    const r = git(["rev-parse", "--verify", "--quiet", `${sha}^{commit}`]);
+    if (!(r.ran && r.status === 0 && r.stdout.trim())) return { sha: null, reason: `the reviewed commit ${sha} recorded by ${roles.join(", ")} does not resolve in the worktree` };
+    full.push(r.stdout.trim());
+  }
+  const uniq = [...new Set(full)];
+  const tip = uniq.find((c) => uniq.every((o) => o === c || (() => { const a = git(["merge-base", "--is-ancestor", o, c]); return a.ran && a.status === 0; })()));
+  if (!tip) return { sha: null, reason: `the panel recorded commits that are not one line of history (${uniq.map((s) => s.slice(0, 12)).join(", ")})` };
+  return { sha: tip, reason: null };
+}
+
+export function mergeReady({ issue, report, peerReview, prUrl, requireCi = true, extraRefs = [], exec, git, verify }) {
   const reasons = [];
   const warnings = [];
-  let head = null;
 
-  if (!reviewedSha) reasons.push("the worktree HEAD could not be read, so there is no reviewed commit to compare");
+  const rc = reviewedCommit(recordedShas(peerReview), git);
+  if (rc.reason) reasons.push(rc.reason);
+
   if (!prUrl) {
     reasons.push("no PR url (pass --pr-url or record pr_url in impl-report.json)");
   } else {
@@ -105,23 +162,38 @@ export function mergeReady({ report, reviewedSha, prUrl, requireCi = true, extra
     if (!pr) {
       reasons.push(`cannot read ${prUrl}: ${(r.stderr || r.stdout || "unparseable gh output").trim().split("\n")[0]}`);
     } else {
-      head = typeof pr.headRefOid === "string" ? pr.headRefOid : null;
-      if (reviewedSha && head !== reviewedSha) {
-        reasons.push(`PR head ${head ? head.slice(0, 12) : "(unknown)"} is not the reviewed commit ${reviewedSha.slice(0, 12)}: push the reviewed head or review what was pushed`);
+      const head = typeof pr.headRefOid === "string" ? pr.headRefOid : "";
+      if (rc.sha && head !== rc.sha) {
+        const between = git(["log", "--format=%H %s", `${rc.sha}..${head}`]);
+        const anc = git(["merge-base", "--is-ancestor", rc.sha, head]);
+        const notesSubject = `chore: apply Phase 4 panel notes for #${issue}`;
+        const lines = between.ran && between.status === 0 ? between.stdout.split("\n").filter(Boolean) : null;
+        const onlyNotes = anc.ran && anc.status === 0 && lines && lines.length > 0 && lines.every((l) => l.slice(41) === notesSubject);
+        if (!onlyNotes) {
+          reasons.push(`PR head ${head ? head.slice(0, 12) : "(unknown)"} is not the reviewed commit ${rc.sha.slice(0, 12)}, and the commits between are not only "${notesSubject}": push the reviewed head or review what was pushed`);
+        }
       }
       const ci = ciState(pr.statusCheckRollup);
       if (ci.state === "failing") reasons.push(`CI is failing on the PR head: ${ci.names.join(", ")}`);
       else if (ci.state === "pending") reasons.push(`CI has not finished on the PR head: ${ci.names.join(", ")}`);
-      else if (ci.state === "none" && requireCi) reasons.push("no CI checks are reported on the PR head (pass --no-ci only for a project with no remote CI)");
+      else if (ci.state === "none" && requireCi) reasons.push("no CI checks are reported on the PR head, and ciRequiredForMerge is not false in pipeline.config.json");
     }
   }
 
-  for (const { where, ref } of deferralRefs(report, extraRefs)) {
+  for (const { where, ref } of deferralRefs(report, peerReview, extraRefs)) {
     const v = verify(ref);
     if (v.warning) warnings.push(`${where}: ${v.warning}`);
     if (!v.ok) reasons.push(`${where} is not in the deferral ledger: ${v.message}`);
   }
-  return { ready: reasons.length === 0, reasons, warnings, head };
+  return { ready: reasons.length === 0, reasons, warnings, reviewed: rc.sha };
+}
+
+function readJson(file, label) {
+  try {
+    return JSON.parse(readFileSync(nativePath(file), "utf8"));
+  } catch (e) {
+    throw new Error(`cannot read --${label} ${file}: ${e.message}`);
+  }
 }
 
 export function main(argv, { exec = run, out = (s) => process.stdout.write(s), err = (s) => process.stderr.write(s), verify } = {}) {
@@ -131,24 +203,26 @@ export function main(argv, { exec = run, out = (s) => process.stdout.write(s), e
     if (k === "--issue") a.issue = argv[++i];
     else if (k === "--worktree") a.worktree = argv[++i];
     else if (k === "--impl-report") a.implReport = argv[++i];
+    else if (k === "--peer-review") a.peerReview = argv[++i];
     else if (k === "--pr-url") a.prUrl = argv[++i];
     else if (k === "--ref") a.refs.push(argv[++i]);
     else if (k === "--root") a.root = argv[++i];
-    else if (k === "--no-ci") a.noCi = true;
     else {
       err(`merge-ready: unknown argument ${k}\n${USAGE}`);
       return 1;
     }
   }
-  if (!a.issue || !a.worktree || !a.implReport) {
+  if (!a.issue || !a.worktree || !a.implReport || !a.peerReview) {
     err(USAGE);
     return 1;
   }
   let report;
+  let peerReview;
   try {
-    report = JSON.parse(readFileSync(nativePath(a.implReport), "utf8"));
+    report = readJson(a.implReport, "impl-report");
+    peerReview = readJson(a.peerReview, "peer-review");
   } catch (e) {
-    err(`merge-ready: cannot read --impl-report ${a.implReport}: ${e.message}\n`);
+    err(`merge-ready: ${e.message}\n`);
     return 1;
   }
   if (report && report.issue_number !== undefined && report.issue_number !== null && String(report.issue_number) !== String(a.issue)) {
@@ -157,26 +231,27 @@ export function main(argv, { exec = run, out = (s) => process.stdout.write(s), e
   }
   const root = resolve(nativePath(a.root || process.env.CLAUDE_PROJECT_DIR || process.cwd()));
   const worktree = nativePath(a.worktree);
-  const h = exec("git", ["-C", worktree, "rev-parse", "HEAD"], root);
-  const reviewedSha = h.ran && h.status === 0 ? h.stdout.trim() : null;
+  const cfg = readPipelineConfig(root);
   let verifyRef = verify;
   if (!verifyRef) {
-    const cfg = readPipelineConfig(root);
     const opts = { tracker: trackerFromConfig(cfg), dir: deferralDirFromConfig(cfg), root };
     verifyRef = (ref) => verifyDeferralRef(ref, opts);
   }
+  const requireCi = ciRequiredFromConfig(cfg);
   const r = mergeReady({
+    issue: a.issue,
     report,
-    reviewedSha,
+    peerReview,
     prUrl: a.prUrl || (typeof report.pr_url === "string" ? report.pr_url : ""),
-    requireCi: !a.noCi,
+    requireCi,
     extraRefs: a.refs,
     exec: (cmd, args) => exec(cmd, args, root),
+    git: (args) => exec("git", ["-C", worktree, ...args], root),
     verify: verifyRef,
   });
   for (const w of r.warnings) err(`merge-ready: WARNING ${w}\n`);
   if (r.ready) {
-    out(`READY: #${a.issue} PR head ${reviewedSha.slice(0, 12)} is the reviewed commit, CI is ${a.noCi ? "not required" : "green"}, every deferral ref verifies\n`);
+    out(`READY: #${a.issue} PR head carries the reviewed commit ${r.reviewed.slice(0, 12)}, CI is ${requireCi ? "green" : "green or absent (ciRequiredForMerge: false)"}, every deferral ref verifies\n`);
     return 0;
   }
   out(`NOT READY: #${a.issue}\n`);

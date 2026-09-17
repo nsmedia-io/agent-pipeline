@@ -26,6 +26,9 @@
 
   "deferralDir": "knowledge/deferred",
 
+  "_ciRequiredForMerge_comment": "true (the default): scripts/merge-ready.mjs refuses a PR whose head reports no CI checks, since CI that has not registered yet looks the same as no CI. Set false only for a project with no remote CI. Failing or pending checks refuse either way.",
+  "ciRequiredForMerge": true,
+
   "_dispatchEfforts_comment": "NOT SET ON PURPOSE. Per-role reasoning effort (low/medium/high/xhigh/max) for the Phase 4 panel, which dispatches through the Workflow tool. The built-in table is TIERED: SecOps xhigh/high/medium and QA high/medium/medium by tier, DBA/DevOps/Design medium on a standard or trivial panel. Every role is reachable, both directions. Example: { \"secops\": \"xhigh\" } to restore the old always-xhigh SecOps.",
 
   "_securitySurfaceGlobs_comment": "NOT SET ON PURPOSE. Additive globs that re-seat SecOps on a Phase 4 DELTA round when a fix commit touches them. The built-in set covers auth, session, crypto, secrets, tokens, webhooks, policies, middleware and .env files; add your own security-bearing paths here. Widen-only: this key can never narrow the set.",

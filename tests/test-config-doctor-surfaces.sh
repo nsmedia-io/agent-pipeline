@@ -105,7 +105,7 @@ key_field() { # <key> <field>
       console.log(k[process.env.FIELD] ? "present" : "MISSING");
     })'
 }
-for k in extraMigrationGlobs dataLayerGlobs infraGlobs dispatchModels deferralTracker deferralDir; do
+for k in extraMigrationGlobs dataLayerGlobs infraGlobs dispatchModels deferralTracker deferralDir ciRequiredForMerge; do
   assert_eq "$k has a reader"   "$(key_field "$k" reader)"   "present"
   assert_eq "$k has a fallback" "$(key_field "$k" fallback)" "present"
   assert_eq "$k has a degrades consequence" "$(key_field "$k" degrades)" "present"
@@ -137,6 +137,11 @@ assert_contains "and that an escaping value is refused rather than honoured" "$D
 assert_eq "the shipped example sets deferralTracker" \
   "$(grep -c '"deferralTracker":' "$EXAMPLE" | tr -d ' ')" "1"
 assert_eq "and deferralDir" "$(grep -c '"deferralDir":' "$EXAMPLE" | tr -d ' ')" "1"
+# #164: merge-ready.mjs reads ciRequiredForMerge instead of a per-call --no-ci.
+assert_eq "the shipped example sets ciRequiredForMerge to true" "$(grep -c '"ciRequiredForMerge": true' "$EXAMPLE" | tr -d ' ')" "1"
+CI_DEGRADES="$(DOC="$DOCTOR" node -e 'import(process.env.DOC).then(m=>console.log(m.ALL_KEYS.ciRequiredForMerge.type + " " + m.ALL_KEYS.ciRequiredForMerge.degrades))')"
+assert_contains "ciRequiredForMerge is a boolean key" "$CI_DEGRADES" "boolean "
+assert_contains "and its consequence says failing checks refuse either way" "$CI_DEGRADES" "refuses either way"
 
 suite "AC12: every config key the docs name in backticks resolves to a registered key"
 
