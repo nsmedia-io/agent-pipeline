@@ -34,6 +34,10 @@ np() {
 run_of() { printf '%s' "$OUT" | sed -n 's/^RUN: //p' | cut -d' ' -f1; }
 then_of() { printf '%s' "$OUT" | sed -n 's/^THEN: //p'; }
 
+# Every cell below follows one shape. put writes a run record and a spec into the temp issue
+# directory, np runs the router against them, and the rows read the RUN, THEN and READ lines it
+# prints. A row that reads RUN checks which phase the orchestrator would enter next, and a row that
+# reads READ checks which orchestrator file it would be told to open before acting on that phase.
 suite "next-phase: a run with no record starts at setup"
 
 put "" ""
@@ -43,6 +47,9 @@ assert_eq "and runs 0-setup" "$(run_of)" "0-setup"
 assert_contains "reading the setup file" "$OUT" "READ: phase-0-setup.md"
 assert_contains "and the status record file" "$OUT" "READ: status-record.md"
 assert_eq "then the map phase" "$(then_of)" "0.5-map"
+
+# A fresh run has no status record at all, and the only correct answer then is Phase 0 with the
+# setup file and the status record file, followed by the map phase.
 
 suite "next-phase: the tier decides what follows BA, as the old Route by tier lines did"
 
@@ -104,6 +111,11 @@ put '{"current_phase":"0.5-map"}' ""
 np
 assert_eq "before BA has written a spec, the map phase routes without a tier" "$RC" "0"
 assert_contains "and says the depth waits for BA, rather than defaulting to folded" "$OUT" "MAP: pending"
+
+# A resumed run carries whatever state the record was left in. An entry marker names a phase that
+# was entered and not finished, so it runs again from the top. A parked state waits for the owner
+# inside its own phase. A veto sends the run back to BA, an error state is exit 3 for the owner to
+# read, and an archived run has nothing left to do.
 
 suite "next-phase: resume states"
 
@@ -182,6 +194,11 @@ put '{"current_phase":"0.5-map","risk_tier":"architectural"}' '{"title":"no tier
 np
 assert_eq "CONTROL: the tier recorded in status.json is enough" "$RC" "0"
 
+# Some files load only when the run earns them. The art director contract loads for a frontend
+# spec at routing or for a visual contract on disk at Phase 4, and the delta file loads only once a
+# second panel round has been counted. Each positive row here has a negative twin beside it, so a
+# router that always printed the file, or never did, would fail one of the pair.
+
 suite "next-phase: conditional files"
 
 put '{"current_phase":"1-ba-complete"}' '{"risk_tier":"standard","impacted_domains":["api","frontend"]}'
@@ -203,6 +220,10 @@ assert_not_contains "the first round, already counted at its own checkpoint, doe
 put '{"current_phase":"3-impl","risk_tier":"standard","review_rounds":0}' ""
 np
 assert_not_contains "and neither does a run with no panel yet" "$OUT" "phase-4-delta.md"
+
+# An issue started from an existing tracker issue may skip BA, but only when its spec carries an
+# approval time. The flag alone is not enough, and an approval alone is not enough either, since a
+# rework re-entry keeps the approved spec and must still run BA.
 
 suite "next-phase: --existing-issue skips BA only when the spec is already approved"
 
