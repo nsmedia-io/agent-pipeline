@@ -291,7 +291,8 @@ cp -R "$GATE_PLUGIN_DIR/." "$MUT_ROOT/" 2>/dev/null
 for mf in "$MUT_ROOT/commands/pipeline.md" "$MUT_ROOT"/commands/pipeline/*.md; do
   sed 's/4-review/4-reviewXQ/g' "$mf" > "$mf.mut" && mv "$mf.mut" "$mf"
 done
-assert_eq "MUTATION CONTROL: no file the gate reads in the mutated tree still writes the unrenamed '4-review'" \n  "$(cat "$MUT_ROOT/commands/pipeline.md" "$MUT_ROOT"/commands/pipeline/*.md > "$SCRATCH_MD_DIR/mutated-all.md"; gate_pipeline_md_phases "$SCRATCH_MD_DIR/mutated-all.md" | grep -cx '4-review' | tr -d ' ')" "0"
+assert_eq "MUTATION CONTROL: no file the gate reads in the mutated tree still writes the unrenamed '4-review'" \
+  "$(cat "$MUT_ROOT/commands/pipeline.md" "$MUT_ROOT"/commands/pipeline/*.md > "$SCRATCH_MD_DIR/mutated-all.md"; gate_pipeline_md_phases "$SCRATCH_MD_DIR/mutated-all.md" | grep -cx '4-review' | tr -d ' ')" "0"
 
 VOCAB_PROJECT="$TEMP_PROJECT/vocab"
 gate_inflight_status "$VOCAB_PROJECT/.pipeline/106/status.json" "4-review"
