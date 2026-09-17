@@ -4,6 +4,22 @@ Behaviour changes that reach an existing project at its next plugin update, newe
 
 Entries keep the numbers they carried in the README's old Upgrading list, so a cross-reference such as "item 29 below" still resolves. Measured figures in an entry describe the commit that entry shipped with and are not re-taken afterwards.
 
+## Unreleased
+
+### What changes for you
+
+- **Phase 4 prompts are cache-friendly.** `render-panel.mjs` no longer substitutes the issue number, worktree, reviewed sha, artifact directory or plugin root into the panel preamble and lenses. Each prompt is the static preamble, then the role's lens, then a `RUN DATA` block that binds those placeholders for that dispatch. The static part is byte-identical for every role of a panel and across issues on one plugin version, so repeated dispatches can reuse the prompt cache. Nothing to do: re-render any panel script you saved before updating, because an old one still works but carries the substituted form.
+- **Data in prompts is TOON; artifacts stay JSON.** `scripts/toon.mjs` encodes JSON as TOON (Token-Oriented Object Notation) for prompt text only. A delta round's open blockers reach the role as one table (`id, severity, likelihood, harm, merge_class, location`), with the path of `peer-review.json` beside it for the full record. Agents still read and write JSON, and no schema changed. The module header lists where the encoder departs from the published spec.
+- **`scripts/prompt-weight.mjs`** reports bytes and estimated tokens (ceil(chars/4), an estimate, not a tokenizer count) for the command files, `pipeline.md` per section, each agent definition, and, with `--fixture <issue dir>`, the rendered panel prompts and every JSON artifact as compact JSON vs TOON.
+
+### Measured
+
+Population: one consumer run, `rome` issue 27 (`.pipeline/27`), copied into a temp fixture and read only: `spec.json` (844,405 B on disk, 79 acceptance criteria), `map.json` and `peer-review.ledger.json`. That run left no `impl-report.json` and no shard for a plugin panel role, so the delta figures below have no open-blocker table in them. Plugin tree: this commit. Tokens are ceil(chars/4) estimates.
+
+- **Uniform arrays of objects** (39 in those files, the shape TOON tabulates; largest `spec.json` `flags`, 114 rows): compact JSON 122,572 B / 30,657 est. tokens, TOON 111,330 B / 27,847 est. tokens, 9.2% fewer bytes. `flags` alone saves 13.4%, `measured_state` (69 rows) 6.6%.
+- **Whole files**: compact JSON 792,519 B / 198,131 est. tokens, TOON 803,028 B / 200,758 est. tokens, so TOON is 1.3% LARGER. The spec is mostly arrays of long prose strings and deeply nested objects, where TOON's indentation costs more than JSON's punctuation. Against the files as stored (pretty JSON, 854,825 B) TOON is 6.1% smaller. This is why only uniform arrays are rendered as TOON in prompts, and whole artifacts stay files an agent Reads.
+- **Panel prompts** (plugin lenses for the run's seated roles ba, qa, secops and devops; rendered at architectural because the run's tier name is the consumer's own): the cacheable static preamble is 25,315 B / 6,329 est. tokens on a full round and 25,913 B / 6,478 on a delta round. Static prefix per role (preamble plus lens) 25,621 to 26,737 B; run data 210 B, so over 99% of each prompt is cacheable. Run data as compact JSON 221 B, as TOON 200 B (9.5%).
+
 ## 0.43.0 (2026-09-17)
 
 ### What changes for you
