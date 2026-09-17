@@ -1,10 +1,19 @@
 # Changelog
 
-Behaviour changes that reach an existing project at its next plugin update, newest release first. Each entry says what changes on its own and what to do, if anything. Records an older release wrote can be checked, and their mechanical part normalised, with `scripts/migrate-records.mjs`; see Unreleased.
+Behaviour changes that reach an existing project at its next plugin update, newest release first. Each entry says what changes on its own and what to do, if anything. Records an older release wrote can be checked, and their mechanical part normalised, with `scripts/migrate-records.mjs`; see 0.43.0.
 
 Entries keep the numbers they carried in the README's old Upgrading list, so a cross-reference such as "item 29 below" still resolves. Measured figures in an entry describe the commit that entry shipped with and are not re-taken afterwards.
 
-## Unreleased
+## 0.43.0 (2026-09-17)
+
+### What changes for you
+
+- **Review loops end sooner.** A panel finding blocks a merge only when merging it could cost something real (a false green, money, lost data, a security exposure); everything else ships as a note on one checklist per issue. Fix rounds and spec revisions are counted against a budget, and going past it is your decision, asked in plain language. Items 43 to 50 and 61.
+- **Checks fail visibly.** A hook or gate that cannot run now tells you and logs it instead of passing in silence, and a mistyped phase or a migration check over zero files is refused rather than skipped. Items 51 to 54, 56 and 57.
+- **Subagents cannot run destructive git** (`git stash`, `git reset --hard`, `git checkout -- <paths>`, `git restore`, `git clean`). Your own commands are unaffected. Item 55.
+- **A stale plugin install is named.** SessionStart and `/warmup` print one line when the marketplace copy on this disk is newer than the plugin you are running. See "Upgrading" below.
+- **Old run records can be checked.** `scripts/migrate-records.mjs` reports which `.pipeline/` records the current schemas reject and, with `--write`, fixes only the mechanical part. See "Upgrading" below.
+- **The suite runs on Windows.** It runs under Git Bash, and checkouts are LF on every platform. Items 60 and 63.
 
 ### Upgrading from an older install, and the records it left behind
 
@@ -37,7 +46,7 @@ node "$CLAUDE_PLUGIN_ROOT/scripts/migrate-records.mjs" --root . --check   # exit
 - **0.41.0 (2026-09-05):** item 34. Deferrals go to a tracker or a committed directory, and the pre-Phase-4 gate checks the ref.
 - **0.41.1 (2026-09-07):** items 35 to 38. Field readers in the blast-radius map, Phase 2 delta re-runs, blocking concerns carry their test, shards are parse-checked.
 - **0.42.0 (2026-09-14):** items 39 to 42. Records: a provisional or empty shard is refused by the merge; QA's `satisfiability_proof` is required in `tasks.json` at the architectural tier. Test files under a migrations directory are not migrations; the Phase 4 script is rendered.
-- **Unreleased:** items 43 to 60. Status records gain an integer `schema_version` and concerns a required `merge_class` (`wrong-pass`, `money`, `data-loss`, `security-exposure`, `none`). Run `migrate-records.mjs` after updating: it stamps what is mechanical and lists the concerns a reviewer has to rate.
+- **0.43.0 (2026-09-17):** items 43 to 63. Status records gain an integer `schema_version` and concerns a required `merge_class` (`wrong-pass`, `money`, `data-loss`, `security-exposure`, `none`). Run `migrate-records.mjs` after updating: it stamps what is mechanical and lists the concerns a reviewer has to rate.
 
 ### In this release
 
@@ -64,6 +73,9 @@ Review convergence. Measured on one consumer before these changes: a single tool
     Measured on one Windows 11 host (Git Bash, MINGW64 3.6.3, node 24.13.1), whole `bash tests/run.sh`: at 36522fc 826 failing rows across 54 suites (36 suites red); after this change 191 failing rows across 58 suites (16 red), 232 minutes wall clock. What is still red there, by cause: scripts print native `C:\...` paths and `\` separators where assertions expect `/tmp/...` and `/`; fixtures pass POSIX paths inside stdin JSON or file content, which Git Bash does not rewrite (voice-lint, archive redaction, render-panel); bash-script CLI stubs such as a fake `gh` that node cannot spawn; the checkout's CRLF line endings under `core.autocrlf=true` (label pins, byte-identity and single-line rewrite checks); POSIX-only semantics (symlinks, chmod, an unwritable directory, hiding node by trimming PATH, a 72 KB argv); and the nested fresh-checkout run, which inherits all of these. On Linux the suite is unchanged: the preload is never loaded there.
     The PreToolUse hook's declared 30 s timeout on that host: the largest real fixture the timeout-bound suite times, `knowledge/issue-archive/106.json` staged as a heredoc (465,635 command bytes), decided in 4,598 ms min-of-3 before this change and 4,300 ms after it (8,618 and 8,059 ms with the suite's 1.42 x 1.32 load factors), so it does not trip. The suite's constructed dense cell (about 5 MB of concatenated `tests/test-materiality.sh`) takes 60 to 66 s and is killed at 30 s, which is that cell's purpose: it demonstrates the fail-open kill, and it was sized to exceed the bound.
 
+61. **A fix round past its budget cannot end the turn.** The Stop hook's phase-entry guard now asks `scripts/round-budget.mjs` the question the orchestrator asks before a fix round. A run at `3-impl`, `3-impl-complete` or `4-review` whose `fix_rounds` is past the budget for its `cost_class`, with no `owner_overrides` entry covering that round, is refused, and the refusal carries the owner decision (ship with deferrals, split, stop, or keep going). A record with no `fix_rounds` is not judged; a `fix_rounds` that is not a non-negative integer is refused. **If a run of yours is refused:** bring the owner the decision, then record a keep-going answer as an `owner_overrides` entry, or correct `fix_rounds` if it is wrong.
+62. **A Windows drive path in `deferralDir` is refused like any absolute path.** `C:/x` and `C:\x` used to be read as a directory inside the repository; they now fall back to `knowledge/deferred`, as `/x` and `../x` already did.
+63. **Checkouts are LF on every platform.** A new `.gitattributes` (`* text=auto eol=lf`) stops `core.autocrlf=true` from checking the tree out with CRLF on Windows, which item 60 lists among the causes of the remaining red rows there. Nothing stored changed: the index was already LF. A fresh clone is LF; files already checked out in an existing clone stay as they are until git writes them again.
 
 ## 0.42.0 (2026-09-14)
 

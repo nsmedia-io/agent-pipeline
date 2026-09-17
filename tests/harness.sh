@@ -17,7 +17,7 @@ SCRIPTS_DIR="${SCRIPTS_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../plugins/pipe
 # argv and the environment) reads as a URL scheme, and `/c/x` or `/tmp/x` interpolated into JS
 # source is not a Windows path at all. fixtures/windows-esm-paths.mjs converts those specifiers
 # to file URLs at the resolver, preloaded here and ONLY on MINGW/MSYS/CYGWIN, so Linux and macOS
-# never load it. Measured on this repo at 36522fc before the change: see CHANGELOG Unreleased.
+# never load it. Measured on this repo at 36522fc before the change: see CHANGELOG 0.43.0, item 60.
 PIPELINE_ON_WINDOWS=0
 case "$(uname -s 2>/dev/null)" in
   MINGW*|MSYS*|CYGWIN*)
