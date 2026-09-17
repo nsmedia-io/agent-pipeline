@@ -22,17 +22,23 @@
  *   - refuses a <phase> that fails status.schema.json's current_phase pattern, and a verdict over
  *     the schema's events[].verdict maxLength, before anything is written;
  *   - with --exit-verdict, appends the EXIT event {phase, verdict, at, note} for the phase being
- *     closed: --exit-phase, else the record's current_phase with any `-complete` suffix removed;
+ *     closed: --exit-phase, else the record's current_phase with any `-complete` suffix removed,
+ *     and none when that record is at `<p>-complete` and its last event already closed <p>;
+ *   - entering the phase the record already holds is a RETRY (after a failed commit): nothing is
+ *     written, no round is spent, and --commit only commits;
  *   - sets current_phase (the ENTRY marker) and updated_at;
  *   - on the first write of a run sets schema_version 2 and fix_rounds / spec_revisions to 0;
  *   - entering 4-review, or any --loopback, sets final_verdict and peer_review_verdict_counts to
- *     null (#110), because a run under remediation has not concluded;
+ *     null (#110), because a run under remediation has not concluded; a --loopback also drops
+ *     veto_reason and veto_ground;
  *   - entering 4-review from any other phase increments review_rounds (a re-checkpoint of the
  *     same 4-review after an interruption is not a new round);
  *   - --loopback into 3-* is a Phase 4 fix round and into 1-ba* a spec revision: the budget in
  *     round-budget.mjs is checked first, a refusal exits 2 with the owner decision block on
  *     stdout and writes nothing, and an allowed round increments fix_rounds or spec_revisions;
- *     a --loopback anywhere else (the Phase 2.5 judge) counts nothing;
+ *     a --loopback anywhere else (the Phase 2.5 judge) counts nothing. At the architectural tier a
+ *     fix round allowed ONLY by an owner override exits 3 (next=judge) unless the record comes
+ *     from 2.5-design, because that round re-opens the design first;
  *   - refreshes telemetry and effective_config (pipeline-telemetry.mjs);
  *   - runs check-status-record.mjs's checkRecords over the whole new record;
  *   - with --commit, stages and commits ONLY that status.json.
@@ -47,12 +53,12 @@
  * worktree, tasks.json satisfiability_proof must pass validate-pipeline-artifact.mjs's
  * groundSatisfiability, and only then is phase3_qa_test_commit recorded with a flags entry.
  *
- * EXIT CODES. 0 written (or printed). 2 REFUSED: a cap, the phase pattern, a round budget, or an
- * unmet QA contract; nothing was written. 1 usage, an unreadable input, or a failed commit after a
+ * EXIT CODES. 0 written, printed, or a retry. 3 JUDGE FIRST (above), nothing written. 2 REFUSED:
+ * a cap, the phase pattern, a round budget, or an unmet QA contract; nothing was written. 1 usage, an unreadable input, or a failed commit after a
  * successful write (the message says which).
  */
 
-import { readFileSync, writeFileSync, renameSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, renameSync, existsSync, unlinkSync } from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -138,7 +144,15 @@ export function applyEnter(status, phase, opts = {}) {
   checkVerdict(exitVerdict, "events", caps);
   const st = structuredClone(status);
   const prior = typeof st.current_phase === "string" ? st.current_phase : null;
-  const report = { phase, prior, exitEvent: null, cleared: false, reviewRounds: null, counter: null };
+  const report = { phase, prior, retry: false, alreadyClosed: null, exitEvent: null, cleared: false, reviewRounds: null, counter: null };
+
+  // A RETRY. No transition enters the phase the record already holds, so this is the same command
+  // run again, typically after its commit failed (exit 1, WRITTEN but NOT committed). Writing again
+  // would append a second exit event and spend a second round; the record is returned untouched.
+  if (prior === phase) {
+    report.retry = true;
+    return { status: st, report };
+  }
 
   let budget = null;
   const kind = loopback ? loopbackKind(phase) : null;
@@ -150,6 +164,17 @@ export function applyEnter(status, phase, opts = {}) {
           ? `the ${kind} counter is unreadable, so the round cannot be counted against the budget of ${budget.budget}`
           : `${kind} ${budget.next} is past the budget of ${budget.budget} at cost_class ${budget.costClass} and no owner_overrides entry covers it`;
       throw new RefusalError(`REFUSED loop-back into ${phase}: ${why}. Bring the owner the decision below; nothing was written.`, 2, `${budget.decision}\n`);
+    }
+    // JUDGE FIRST. A fix round past the budget the OWNER chose re-opens the design before another
+    // implementation attempt (the old loop-back table's Phase 2.5 row). The override is normally
+    // recorded AFTER record-verdict.mjs ran, so the check lives here, on the write that starts the
+    // round; a record arriving from 2.5-design has been through the judge.
+    if (kind === "fix-round" && budget.override && st.risk_tier === "architectural" && !String(prior || "").startsWith("2.5-design")) {
+      throw new RefusalError(
+        `JUDGE FIRST: fix round ${budget.next} is past the budget of ${budget.budget} and allowed only by an owner override. Run \`checkpoint.mjs enter 2.5-design --loopback\`, re-dispatch the Phase 2.5 JUDGE, then run this command again; nothing was written.`,
+        3,
+        "next=judge\n",
+      );
     }
   }
 
@@ -166,16 +191,29 @@ export function applyEnter(status, phase, opts = {}) {
   if (exitVerdict !== undefined) {
     const label = exitPhase || (prior ? prior.replace(/-complete$/, "") : null);
     if (!label) throw new RefusalError("--exit-verdict needs --exit-phase: the record names no current_phase to close", 1);
-    const ev = { phase: label, verdict: exitVerdict, at: now };
-    if (note !== undefined) ev.note = note;
-    st.events.push(ev);
-    report.exitEvent = ev;
+    // A `<p>-complete` record whose last event already closed <p> (record-verdict.mjs writes
+    // 4-review-complete WITH the 4-review exit event) gets no second event: a duplicate would count
+    // a panel round that never ran.
+    const last = st.events.length ? st.events[st.events.length - 1] : null;
+    if (!exitPhase && prior && prior.endsWith("-complete") && last && last.phase === label) {
+      report.alreadyClosed = label;
+    } else {
+      const ev = { phase: label, verdict: exitVerdict, at: now };
+      if (note !== undefined) ev.note = note;
+      st.events.push(ev);
+      report.exitEvent = ev;
+    }
   }
 
   if (phase === "4-review" || loopback) {
     st.final_verdict = null;
     st.peer_review_verdict_counts = null;
     report.cleared = true;
+  }
+  if (loopback) {
+    // They describe the round being left, and would read as live on the next one.
+    delete st.veto_reason;
+    delete st.veto_ground;
   }
   if (phase === "4-review" && prior !== "4-review") {
     st.review_rounds = (Number.isInteger(st.review_rounds) && st.review_rounds >= 0 ? st.review_rounds : 0) + 1;
@@ -267,8 +305,17 @@ export function readStatus(file) {
 
 export function writeAtomic(file, obj) {
   const tmp = `${file}.tmp-${process.pid}`;
-  writeFileSync(tmp, `${JSON.stringify(obj, null, 2)}\n`);
-  renameSync(tmp, file);
+  try {
+    writeFileSync(tmp, `${JSON.stringify(obj, null, 2)}\n`);
+    renameSync(tmp, file);
+  } catch (e) {
+    try {
+      unlinkSync(tmp);
+    } catch {
+      // never created, or already gone
+    }
+    throw e;
+  }
 }
 
 /** Stage and commit ONLY this status.json. Returns the new short sha. */
@@ -278,6 +325,8 @@ export function commitStatus(file, status, label) {
   const issue = Number.isInteger(status.issue_number) ? status.issue_number : path.basename(dir);
   const git = (...args) => execFileSync("git", ["-C", dir, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
   try {
+    // A retry after a commit that did land has nothing to commit; that is not a failure.
+    if (git("status", "--porcelain", "--", base).trim() === "") return `${git("rev-parse", "--short", "HEAD").trim()} (already committed)`;
     git("add", "--", base);
     git("commit", "-q", "-m", `chore(pipeline): ${label} for #${issue}`, "--only", "--", base);
     return git("rev-parse", "--short", "HEAD").trim();
@@ -341,8 +390,14 @@ export function main(argv, io = { out: (s) => process.stdout.write(s), err: (s) 
         loopback: Boolean(o.loopback),
         config: readConfig(o.config),
       });
+      if (report.retry) {
+        const tail = o.commit ? `; committed ${commitStatus(statusFile, status, `checkpoint phase ${arg}`)}` : "";
+        io.out(`checkpoint: the record is already at ${arg}; nothing was written (a retry)${tail}\n`);
+        return 0;
+      }
       writeAtomic(statusFile, status);
       const parts = [`checkpoint: entered ${arg}`];
+      if (report.alreadyClosed) parts.push(`${report.alreadyClosed} was already closed by the last event`);
       if (report.exitEvent) parts.push(`closed ${report.exitEvent.phase} ${report.exitEvent.verdict}`);
       if (report.cleared) parts.push("final_verdict cleared");
       if (report.reviewRounds !== null) parts.push(`review_rounds ${report.reviewRounds}`);

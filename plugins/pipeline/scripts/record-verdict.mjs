@@ -24,7 +24,8 @@
  * NEXT. APPROVE and APPROVE_WITH_NOTES: merge. REQUEST_CHANGES and REQUEST_REFACTOR: dev, through
  * `checkpoint.mjs enter 3-impl --loopback`, which spends the fix round; when the round is allowed
  * only by an owner override at the architectural tier, the judge re-opens the design first
- * (next=judge then=dev). SECOPS_VETO: ba, through `checkpoint.mjs enter 1-ba --loopback`, which
+ * (next=judge then=dev); an override recorded after this ran is caught by that loop-back, which
+ * exits 3 until the record comes from 2.5-design. SECOPS_VETO: ba, through `checkpoint.mjs enter 1-ba --loopback`, which
  * spends a spec revision; at the architectural tier then=judge, before the next implementation.
  *
  * --pr-body writes the Phase 4 summary comment: one row per panel role with its verdict and open
@@ -37,7 +38,7 @@
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { isMain, nativePath } from "./lib.mjs";
-import { finalVerdict, normVerdict } from "./materiality.mjs";
+import { finalVerdict, normVerdict, openBlockerRoles } from "./materiality.mjs";
 import { countVerdicts } from "./merge-peer-review.mjs";
 import { checkRoundBudget } from "./round-budget.mjs";
 import { applyEnter, readStatus, writeAtomic, commitStatus, RefusalError } from "./checkpoint.mjs";
@@ -62,11 +63,34 @@ export const ROLE_NAMES = {
   art_director: "Art Director",
 };
 
+const BLOCKING_WORDS = new Set(["REQUEST_CHANGES", "REQUEST_REFACTOR", "VETO"]);
+
+/**
+ * The merged file as the rubric reads it. A block whose verdict word blocks but whose materiality
+ * record refuses nothing (a shard merged before normalization, or hand-edited) is read as
+ * APPROVE_WITH_NOTES with the word kept as verdict_as_returned, exactly what merge-peer-review.mjs
+ * records; without this the rubric reaches no row and the run halts on a review that exists.
+ */
+export function normalizeForRubric(peerReview, roles) {
+  const refusing = new Set(openBlockerRoles(peerReview));
+  const out = { ...peerReview };
+  const demoted = [];
+  for (const r of roles) {
+    const b = peerReview[r];
+    if (b && typeof b === "object" && BLOCKING_WORDS.has(normVerdict(b.verdict)) && !refusing.has(r)) {
+      out[r] = { ...b, verdict: "APPROVE_WITH_NOTES", verdict_as_returned: b.verdict_as_returned || b.verdict };
+      demoted.push(r);
+    }
+  }
+  return { peerReview: out, demoted };
+}
+
 /** Verdict, counts, loop target and budget, pure. Throws RefusalError(1) on an unusable input. */
-export function decide(status, peerReview) {
+export function decide(status, rawPeerReview) {
   const roles = Array.isArray(status && status.panel_roles) ? status.panel_roles.filter((r) => typeof r === "string") : [];
   if (roles.length === 0) throw new RefusalError("status.json carries no panel_roles; the verdict is computed over the FULL recorded panel", 1);
-  if (!peerReview || typeof peerReview !== "object" || Array.isArray(peerReview)) throw new RefusalError("peer-review.json is not an object", 1);
+  if (!rawPeerReview || typeof rawPeerReview !== "object" || Array.isArray(rawPeerReview)) throw new RefusalError("peer-review.json is not an object", 1);
+  const { peerReview, demoted } = normalizeForRubric(rawPeerReview, roles);
   const missing = roles.filter((r) => !PANEL_VERDICTS.has(normVerdict(peerReview[r] && peerReview[r].verdict)));
   if (missing.length) {
     throw new RefusalError(`no recoverable verdict for panel role(s) ${missing.join(", ")} in peer-review.json; a missing review is a halt, not a pass`, 1);
@@ -90,7 +114,7 @@ export function decide(status, peerReview) {
     next = "ba";
     if (architectural) then = "judge";
   }
-  return { roles, verdict, counts, next, then, budget, exitCode: EXIT_FOR[verdict] };
+  return { roles, verdict, counts, next, then, budget, demoted, peerReview, exitCode: EXIT_FOR[verdict] };
 }
 
 /** The PR summary comment, pure. */
@@ -150,7 +174,9 @@ export function main(argv, io = { out: (s) => process.stdout.write(s), err: (s) 
       extra,
     });
     writeAtomic(statusFile, written);
-    if (o["pr-body"]) writeFileSync(nativePath(o["pr-body"]), prBody(status, peerReview, d));
+    if (o["pr-body"]) writeFileSync(nativePath(o["pr-body"]), prBody(status, d.peerReview, d));
+    for (const r of d.demoted) io.err(`record-verdict: ${r} returned a blocking verdict word with no blocking concern in its materiality record; read as APPROVE_WITH_NOTES (verdict_as_returned kept)
+`);
     const out = [`final_verdict=${d.verdict}`, `counts=${JSON.stringify(d.counts)}`, `next=${d.next}`];
     if (d.then) out.push(`then=${d.then}`);
     if (d.budget) {

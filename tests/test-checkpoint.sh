@@ -268,6 +268,80 @@ assert_eq "CONTROL: criteria_unproven with reasons satisfies the check" "$RC" "0
 assert_eq "  and the FULL sha is recorded" "$(jget "$ST" phase3_qa_test_commit)" "\"$SHA\""
 assert_eq "  with a qa flags entry" "$(jget "$ST" flags.0.agent)/$(jget "$ST" flags.0.verdict)" '"qa"/"CONTRACT_AUTHORED"'
 
+suite "review fixes: no duplicate exit event, judge first after an override, a retry spends nothing"
+
+# (1) THE FULL WALK. record-verdict.mjs writes 4-review-complete WITH the 4-review exit event, and
+# the Phase 5 checkpoint then passes --exit-verdict too. Before the fix that closed 4-review twice,
+# and telemetry counted a panel round that never ran.
+RV="$SCRIPTS_DIR/record-verdict.mjs"
+WALK="$TEMP_PROJECT/walk.json"; PRW="$TEMP_PROJECT/walk-pr.json"
+printf '%s' "$(base 3-impl-complete ',"panel_roles":["qa","secops"],"cost_class":"product","risk_tier":"standard"')" > "$WALK"
+printf '{"qa":{"verdict":"APPROVE"},"secops":{"verdict":"APPROVE"}}' > "$PRW"
+cp_run enter 4-review --status "$WALK" --exit-verdict GATE_PASSED
+( cd "$TEMP_PROJECT" && node "$RV" --status "$WALK" --peer-review "$PRW" ) >/dev/null 2>&1
+cp_run enter 5-archive --status "$WALK" --exit-verdict APPROVE
+assert_eq "the walk: 3-impl, 4-review once, and no second 4-review event at 5-archive" \
+  "$(node -e 'const s=JSON.parse(require("fs").readFileSync(process.argv[1]));console.log(s.events.map(e=>e.phase+":"+e.verdict).join(","))' "$WALK")" "3-impl:GATE_PASSED,4-review:APPROVE"
+assert_eq "  so the observed rounds agree with the counter" "$(jget "$WALK" telemetry.review_rounds_observed)/$(jget "$WALK" review_rounds)/$(jget "$WALK" telemetry.review_rounds_recorded_delta)" "1/1/0"
+assert_contains "  and the output says why no event was appended" "$OUT" "4-review was already closed by the last event"
+printf '%s' "$(base 4-review-complete ',"events":[{"phase":"4-review","verdict":"APPROVE","at":"2026-09-01T00:00:00Z"}]')" > "$WALK"
+cp_run enter 5-archive --status "$WALK" --exit-verdict MERGED --exit-phase 4-review-merge
+assert_eq "CONTROL: an explicit --exit-phase is always appended" "$(jget "$WALK" events.1.phase)" '"4-review-merge"'
+printf '%s' "$(base 2-review-complete ',"events":[{"phase":"1-ba","verdict":"OK","at":"2026-09-01T00:00:00Z"}]')" > "$WALK"
+cp_run enter 2.5-design --status "$WALK" --exit-verdict APPROVE
+assert_eq "CONTROL: a -complete phase whose last event closed something else still gets its event" "$(jget "$WALK" events.1.phase)" '"2-review"'
+
+# (2) JUDGE FIRST. The owner records owner_overrides AFTER record-verdict.mjs printed allowed=no,
+# so the loop-back that starts the round is where a round past the owner-chosen budget is sent to
+# the Phase 2.5 judge before another implementation attempt.
+OVR=',"cost_class":"tooling","fix_rounds":1,"schema_version":2,"owner_overrides":[{"kind":"fix-round","up_to":2,"at":"2026-09-01T00:00:00Z"}]'
+status "$(base 4-review-complete ",\"risk_tier\":\"architectural\"$OVR")"
+BEFORE="$(sum "$ST")"
+cp_run enter 3-impl --status "$ST" --loopback --commit
+assert_eq "architectural, an override-only fix round: exit 3, nothing written" "$RC/$(sum "$ST")" "3/$BEFORE"
+assert_eq "  and stdout says next=judge" "$OUT" "next=judge"
+assert_contains "  and stderr names the command to run first" "$ERR" "enter 2.5-design --loopback"
+cp_run enter 2.5-design --status "$ST" --loopback
+assert_eq "the judge loop-back is allowed and spends nothing" "$RC/$(jget "$ST" fix_rounds)" "0/1"
+cp_run enter 3-impl --status "$ST" --loopback
+assert_eq "  and from 2.5-design the override-covered fix round starts" "$RC/$(jget "$ST" fix_rounds)" "0/2"
+status "$(base 4-review-complete ",\"risk_tier\":\"standard\"$OVR")"
+cp_run enter 3-impl --status "$ST" --loopback
+assert_eq "CONTROL: below the architectural tier there is no design to re-open" "$RC/$(jget "$ST" fix_rounds)" "0/2"
+status "$(base 4-review-complete ',"risk_tier":"architectural","cost_class":"product","fix_rounds":0,"schema_version":2')"
+cp_run enter 3-impl --status "$ST" --loopback
+assert_eq "CONTROL: an architectural round inside the budget needs no judge" "$RC/$(jget "$ST" fix_rounds)" "0/1"
+
+# (3) A RETRY SPENDS NOTHING. The commit fails after the write (a hook refuses it); re-running the
+# same command must commit the record as written, not spend a second round, and not be refused by
+# the tooling budget that first round used up.
+RR="$TEMP_PROJECT/retry"; mkdir -p "$RR/.pipeline/9"
+git -C "$RR" init -q; git -C "$RR" config user.email t@t; git -C "$RR" config user.name t
+git -C "$RR" commit -q --allow-empty -m base
+base 4-review-complete ',"cost_class":"tooling","fix_rounds":0,"schema_version":2,"final_verdict":"REQUEST_CHANGES","veto_reason":"old","veto_ground":"auth"' > "$RR/.pipeline/9/status.json"
+printf '#!/bin/sh\nexit 1\n' > "$RR/.git/hooks/pre-commit"; chmod +x "$RR/.git/hooks/pre-commit"
+cp_run enter 3-impl --status "$RR/.pipeline/9/status.json" --loopback --commit
+assert_eq "the first run writes, fails to commit, exit 1" "$RC/$(jget "$RR/.pipeline/9/status.json" fix_rounds)" "1/1"
+assert_eq "  and the loop-back dropped the stale veto_reason and veto_ground" "$(jget "$RR/.pipeline/9/status.json" veto_reason)/$(jget "$RR/.pipeline/9/status.json" veto_ground)" "undefined/undefined"
+assert_eq "  and left no temp file behind" "$(ls -a "$RR/.pipeline/9" | grep -c tmp | tr -d ' ')" "0"
+rm -f "$RR/.git/hooks/pre-commit"
+cp_run enter 3-impl --status "$RR/.pipeline/9/status.json" --loopback --commit
+assert_eq "the retry exits 0 and spends no second round" "$RC/$(jget "$RR/.pipeline/9/status.json" fix_rounds)" "0/1"
+assert_contains "  says it was a retry" "$OUT" "nothing was written (a retry)"
+assert_eq "  and committed the record" "$(git -C "$RR" show --name-only --format= HEAD)" ".pipeline/9/status.json"
+cp_run enter 3-impl --status "$RR/.pipeline/9/status.json" --loopback --commit
+assert_eq "a retry after the commit DID land is not a commit failure" "$RC" "0"
+assert_contains "  and says so" "$OUT" "already committed"
+
+# A failed write leaves no temp file: a rename onto a non-empty directory fails on every platform.
+TMPD="$TEMP_PROJECT/tmpclean"; mkdir -p "$TMPD/target/inner"
+WA="$( cd "$TEMP_PROJECT" && SCRIPTS="$SCRIPTS_DIR" T="$TMPD/target" node --input-type=module -e '
+  const c = await import(process.env.SCRIPTS + "/checkpoint.mjs");
+  try { c.writeAtomic(process.env.T, { a: 1 }); console.log("wrote"); } catch { console.log("threw"); }' 2>&1)"
+assert_eq "writeAtomic throws on a failed rename" "$WA" "threw"
+assert_eq "  and removes its temp file" "$(ls "$TMPD" | grep -c tmp | tr -d ' ')" "0"
+
+
 suite "the prose calls the script (and the removed prose stays removed)"
 
 CONCAT="$(cat "$PIPELINE_MD")"

@@ -66,6 +66,10 @@ verdict_case "a blocking REQUEST_REFACTOR outranks REQUEST_CHANGES" "$RC_" "$RF"
 verdict_case "a blocking VETO outranks everything" "$RF" "$VT" SECOPS_VETO 4
 verdict_case "CONTROL: a REQUEST_CHANGES demoted to a note (blocks_merge false) does not block" "$DEMOTED" "$A" APPROVE_WITH_NOTES 0
 verdict_case "the legacy alias APPROVE_WITH_NITS reads as notes" '{"verdict":"APPROVE_WITH_NITS"}' "$A" APPROVE_WITH_NOTES 0
+# A blocking WORD with a materiality record that refuses nothing (a shard merged before normalization)
+# is read as a note, the way merge-peer-review.mjs records it, rather than halting on no verdict.
+verdict_case "an UNNORMALIZED REQUEST_CHANGES with nothing blocking reads as notes" "$(blk REQUEST_CHANGES "" false)" "$A" APPROVE_WITH_NOTES 0
+assert_contains "  and stderr says why" "$ERR" "read as APPROVE_WITH_NOTES"
 
 suite "the record: one write through checkpoint.mjs"
 # The verdict, its counts, the 4-review exit event and the phase land in ONE write. That is what keeps
