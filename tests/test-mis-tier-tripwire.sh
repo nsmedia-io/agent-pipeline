@@ -328,7 +328,7 @@ LIT_INFRA='(^\.github/|^infra/|^deploy)'
 
 md_hits() { # <literal>
   local n
-  n=$( { grep -Fl -- "$1" "$PLUGIN_DIR"/commands/*.md "$PLUGIN_DIR"/commands/pipeline/*.md "$PLUGIN_DIR"/agents/*.md "$PLUGIN_DIR"/shared/*.md 2>/dev/null || true; } | wc -l )
+  n=$( { grep -Fl -- "$1" "$PLUGIN_DIR"/commands/*.md "$PLUGIN_DIR"/orchestrator/*.md "$PLUGIN_DIR"/agents/*.md "$PLUGIN_DIR"/shared/*.md 2>/dev/null || true; } | wc -l )
   printf '%s' "$(printf '%s' "$n" | tr -d ' ')"
 }
 

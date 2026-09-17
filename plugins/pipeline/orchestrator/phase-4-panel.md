@@ -73,7 +73,7 @@ The direction is the same rule the mis-tier tripwire states, applied to a third 
 
 If any probe prints a `PANEL-NOTE:` line (data-layer, infra, or the frontend one in the Design block below), record that sentence in `status.json` (`flags`) alongside `panel_roles`, and say it in the PR summary: the recorded panel then contains a role seated by indeterminacy rather than by a match, and an auditor reading `panel_roles` later cannot tell those apart from the array alone. Fixing the stale `${CLAUDE_PLUGIN_ROOT}` is the real remedy; the seat is the safe default while it is broken.
 
-Art Director seating: when `<ARTIFACT_DIR>/visual-contract.json` exists, read `${CLAUDE_PLUGIN_ROOT}/commands/pipeline/art-director-contract.md` now (Duty B is its panel seat); the frontend block below seats it on that same condition.
+Art Director seating: when `<ARTIFACT_DIR>/visual-contract.json` exists, read `${CLAUDE_PLUGIN_ROOT}/orchestrator/art-director-contract.md` now (Duty B is its panel seat); the frontend block below seats it on that same condition.
 
 **Design is surface-conditional at EVERY tier.** Add `design_review` to `PANEL_ROLES` (on top of the architectural/trivial six or the standard four-plus) when, and only when, the diff touches a frontend surface. Use the SAME allowlist the gate uses, so detection and dispatch never diverge:
 

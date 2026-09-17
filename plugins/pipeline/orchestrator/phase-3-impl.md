@@ -10,7 +10,7 @@ Phase 3 is coupled write-work and always runs as **a single coherent thread on o
 
 All of these shapes preserve the property that killed the old `PENDING_CI` race: no agent ever builds against or reviews a half-built tree owned by a concurrent agent.
 
-**Architectural tier: read `${CLAUDE_PLUGIN_ROOT}/commands/pipeline/phase-3-architectural.md` now, before any Phase 3 dispatch.** It holds the falsifiability gate and the hard sequencing gate, which run before the worktree steps below, the dual-build shape, and the Phase 3a (QA) and 3b (Dev) dispatches that replace the single Dev dispatch at that tier.
+**Architectural tier: read `${CLAUDE_PLUGIN_ROOT}/orchestrator/phase-3-architectural.md` now, before any Phase 3 dispatch.** It holds the falsifiability gate and the hard sequencing gate, which run before the worktree steps below, the dual-build shape, and the Phase 3a (QA) and 3b (Dev) dispatches that replace the single Dev dispatch at that tier.
 
 Before dispatching, the orchestrator resolves the active worktree path:
 1. If a Phase-3 worktree for this issue already exists, read its path from `$PIPELINE_BASE/<issue>/tasks.json` `worktree_path`, or from `git worktree list --porcelain` matching the issue branch.

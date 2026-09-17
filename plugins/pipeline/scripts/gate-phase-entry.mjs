@@ -768,7 +768,7 @@ function refusalMessage(result) {
       `The guard cannot tell which phase the run is at, so it cannot check that phase's prerequisite. Before this refusal existed, a malformed phase disarmed the guard for the rest of the run.`,
       `Work already done in this turn is not undone; only the turn boundary is blocked.`,
       `Ways to clear it:`,
-      `  1. Set current_phase to the literal commands/pipeline/*.md names for the checkpoint (e.g. 3-impl, 4-review-complete, halted-error), then run node "\${CLAUDE_PLUGIN_ROOT}/scripts/check-status-record.mjs" and commit ${dir}/status.json.`,
+      `  1. Set current_phase to the literal orchestrator/*.md names for the checkpoint (e.g. 3-impl, 4-review-complete, halted-error), then run node "\${CLAUDE_PLUGIN_ROOT}/scripts/check-status-record.mjs" and commit ${dir}/status.json.`,
       `  2. If this run is YOURS and is over, conclude it: give ${dir}/status.json a \`final_verdict\` or a \`completed_at\`.`,
     ].join("\n");
   }

@@ -129,7 +129,7 @@ phase_md_drift() {  # <phase.md> <pipeline.md> <delta block> -> "" when the two 
   case "$sec" in *INDETERMINATE*) ;; *) out="$out|does not name the INDETERMINATE outcome" ;; esac
   case "$sec" in *PANEL-NOTE*) ;; *) out="$out|does not carry the PANEL-NOTE record of a seat-on-indeterminate" ;; esac
   case "$sec" in *surface_probe*) ;; *) out="$out|does not name surface_probe, the shared definition" ;; esac
-  case "$sec" in *commands/pipeline/phase-4-delta.md*) ;; *) out="$out|does not point at the file that holds the one definition" ;; esac
+  case "$sec" in *orchestrator/phase-4-delta.md*) ;; *) out="$out|does not point at the file that holds the one definition" ;; esac
   while IFS= read -r pred; do
     [[ -n "$pred" ]] || continue
     case "$sec" in *"$pred"*) ;; *) out="$out|never names $pred, which the delta block probes" ;; esac

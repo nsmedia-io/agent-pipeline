@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # The /pipeline orchestrator is a core (commands/pipeline.md, loaded on every run) plus one file per
-# phase under commands/pipeline/, each Read by the orchestrator when its phase starts. Splitting a
+# phase under orchestrator/, each Read by the orchestrator when its phase starts. Splitting a
 # prompt opens three failure shapes a single file could not have, and this suite holds each one:
 #
 #   (1) a phase file nothing tells the orchestrator to load: its rules exist on disk and in no run;
 #   (2) a phase file the pins never read: harness.sh's PIPELINE_MD_PARTS decides what every
 #       prose-pinning suite sees, so a file missing from that list escapes every pin at once;
-#   (3) a phase file the plugin loader would register as a command of its own, or a rationale file
+#   (3) a phase file the plugin loader would register as a command of its own (markdown in a
+#       subdirectory of commands/ can be exposed as a namespaced slash command, which is why the
+#       phase files live in orchestrator/, outside commands/), or a rationale file
 #       a prompt tells the model to read (which would put the moved bytes straight back).
 #
 # And the same for the two blocks the nine agent contracts now read by reference from shared/.
@@ -14,7 +16,7 @@
 . "$(dirname "${BASH_SOURCE[0]}")/harness.sh"
 
 CORE="$PLUGIN_ROOT/commands/pipeline.md"
-PARTS_DIR="$PLUGIN_ROOT/commands/pipeline"
+PARTS_DIR="$PLUGIN_ROOT/orchestrator"
 SHARED_DIR="$PLUGIN_ROOT/shared"
 
 suite "the core and its phase files agree with the pins' fixed order"
@@ -23,7 +25,7 @@ ON_DISK="$(cd "$PARTS_DIR" 2>/dev/null && ls -1 *.md 2>/dev/null | LC_ALL=C sort
 IN_LIST="$(printf '%s\n' $PIPELINE_MD_PARTS | LC_ALL=C sort | tr '\n' ' ' | sed 's/ *$//')"
 assert_eq "VACUITY: the phase directory holds files at all" \
   "$([[ -n "$ON_DISK" ]] && echo present || echo "EMPTY: $PARTS_DIR")" "present"
-assert_eq "harness.sh's PIPELINE_MD_PARTS names exactly the files in commands/pipeline/ (no file escapes the pins)" \
+assert_eq "harness.sh's PIPELINE_MD_PARTS names exactly the files in orchestrator/ (no file escapes the pins)" \
   "$IN_LIST" "$ON_DISK"
 assert_eq "and names each one once (a duplicate would double every count a pin takes)" \
   "$(printf '%s\n' $PIPELINE_MD_PARTS | LC_ALL=C sort | uniq -d | tr '\n' ' ')" ""
@@ -37,10 +39,10 @@ assert_eq "the concatenation the pins read is the core plus every part, byte for
 # NON-ZERO CONTROL: a missing part must refuse, not concatenate around the hole.
 new_tmpdir || exit 90
 FAKE="$NEW_TMPDIR/plugin"
-mkdir -p "$FAKE/commands/pipeline"
+mkdir -p "$FAKE/orchestrator"
 cp "$CORE" "$FAKE/commands/pipeline.md"
-for p in $PIPELINE_MD_PARTS; do cp "$PARTS_DIR/$p" "$FAKE/commands/pipeline/$p"; done
-rm -f "$FAKE/commands/pipeline/phase-4-panel.md"
+for p in $PIPELINE_MD_PARTS; do cp "$PARTS_DIR/$p" "$FAKE/orchestrator/$p"; done
+rm -f "$FAKE/orchestrator/phase-4-panel.md"
 pipeline_md_concat "$FAKE" 2>/dev/null
 FAKE_RC=$?
 assert_eq "NON-ZERO CONTROL: a part missing from the tree makes the concatenation refuse (exit 90)" "$FAKE_RC" "90"
@@ -73,6 +75,15 @@ for p in $PIPELINE_MD_PARTS; do
   [[ "$(head -1 "$PARTS_DIR/$p")" == "---" ]] && WITH_FRONTMATTER="$WITH_FRONTMATTER $p"
 done
 assert_eq "no phase file carries command frontmatter" "$WITH_FRONTMATTER" ""
+subdir_md() {  # <commands dir> -> markdown files below its top level, space-separated
+  find "$1" -mindepth 2 -name '*.md' 2>/dev/null | LC_ALL=C sort | tr '\n' ' ' | sed 's/ *$//'
+}
+assert_eq "commands/ holds no markdown below its top level (a subdirectory file can become a namespaced slash command)" \
+  "$(subdir_md "$PLUGIN_ROOT/commands")" ""
+# NON-ZERO CONTROL: the same check sees a planted subdirectory file.
+mkdir -p "$NEW_TMPDIR/cmdtree/commands/pipeline" && printf 'x\n' > "$NEW_TMPDIR/cmdtree/commands/pipeline/phase.md"
+assert_contains "NON-ZERO CONTROL: the subdirectory check finds a planted commands/pipeline/phase.md" \
+  "$(subdir_md "$NEW_TMPDIR/cmdtree/commands")" "commands/pipeline/phase.md"
 assert_eq "docs/rationale.md exists to hold what moved out of the prompt" \
   "$([[ -s "$PLUGIN_ROOT/docs/rationale.md" ]] && echo present || echo ABSENT)" "present"
 READERS="$(grep -rniE '\b(read|load)\b[^.|]*docs/rationale\.md' "$PLUGIN_ROOT/commands" "$PLUGIN_ROOT/agents" "$SHARED_DIR" "$PLUGIN_ROOT/voice.md" "$PLUGIN_ROOT/evidence.md" "$PLUGIN_ROOT/evidence-controls.md" 2>/dev/null | cut -c1-160)"

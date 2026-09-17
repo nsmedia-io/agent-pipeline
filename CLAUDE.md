@@ -20,8 +20,10 @@ file reads as a one-off SyntaxError (see `tests/run.sh` header).
 
 - `plugins/pipeline/commands/` the `/pipeline` orchestrator, `/phase`, `/warmup`. Prose the
   model executes; the deterministic parts live in `scripts/` and the prose calls them.
-  `pipeline.md` is the always-loaded core; each phase lives in `commands/pipeline/<file>.md`,
-  read when that phase starts (the core's loading map says when).
+  `pipeline.md` is the always-loaded core; the core's loading map says when to read each phase.
+- `plugins/pipeline/orchestrator/` one file per `/pipeline` phase, gate and handoff, read when
+  that phase starts. Kept out of `commands/` on purpose: markdown in a subdirectory there can be
+  exposed as a namespaced slash command.
 - `plugins/pipeline/shared/` blocks the agent contracts read by reference (evidence discipline,
   tracked-write isolation). `docs/rationale.md` holds incident histories no prompt loads.
 - `plugins/pipeline/agents/` nine role contracts (frontmatter sets model, effort, maxTurns).

@@ -65,7 +65,7 @@ On a hit, HALT before the panel: update `status.json` with `current_phase: "3-im
 
 If the block prints a `TRIPWIRE-NOTE:` line, the effective tripwire set matches zero tracked files in this repository, so this control cannot fire here: put that sentence in the run transcript and record it in `status.json` (`flags`), because the session-start config report that says the same thing may have scrolled past days ago, while the decision is being made now.
 
-**Live-verification gate.** When the diff ADDS or ALTERS a data migration touching access controls or a security-sensitive table, read `${CLAUDE_PLUGIN_ROOT}/commands/pipeline/live-verification.md` now and apply it before the panel.
+**Live-verification gate.** When the diff ADDS or ALTERS a data migration touching access controls or a security-sensitive table, read `${CLAUDE_PLUGIN_ROOT}/orchestrator/live-verification.md` now and apply it before the panel.
 
 Only on a clean (exit 0) gate, AND a recorded local pass for any data-migration / security-sensitive change, do you proceed to dispatch the panel below.
 

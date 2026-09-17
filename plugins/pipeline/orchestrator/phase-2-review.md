@@ -117,7 +117,7 @@ A Design `REQUEST_CHANGES` is gated exactly like DBA/DevOps (case 2 below); a De
 
 Then validate `review.json` against `${CLAUDE_PLUGIN_ROOT}/schemas/review.schema.json` via `${CLAUDE_PLUGIN_ROOT}/scripts/validate-pipeline-artifact.mjs`. The merged shape (keys `dba`, `devops`, `secops`) is identical to the old sequential output, so every downstream reader is unaffected. A merged block that comes out `null` (a reviewer that never wrote, or wrote unrecoverable garbage) is a halt condition, not a pass: a `null` verdict matches neither `APPROVE` nor `APPROVE_WITH_NOTES`, so the gate below will not advance on it.
 
-Before the verdict gate below loops back to BA, read `${CLAUDE_PLUGIN_ROOT}/commands/pipeline/loop-backs.md` now: the spec-revision count that runs before any BA dispatch, and what its exit 2 obliges, are stated there.
+Before the verdict gate below loops back to BA, read `${CLAUDE_PLUGIN_ROOT}/orchestrator/loop-backs.md` now: the spec-revision count that runs before any BA dispatch, and what its exit 2 obliges, are stated there.
 Apply the verdict gate, most-blocking first:
 
 1. **SecOps `VETO`** (on a named `veto_ground`; a `VETO` without one is case 2, a blocking concern, not a redesign):

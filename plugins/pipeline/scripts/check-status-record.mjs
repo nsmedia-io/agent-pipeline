@@ -508,7 +508,7 @@ export function main(argv) {
     );
     for (const line of result.badphases) process.stderr.write(`  ${line}\n`);
     process.stderr.write(
-      "Write the phase literal commands/pipeline/*.md names for the checkpoint (e.g. 3-impl, 4-review-complete, halted-error).\n" +
+      "Write the phase literal orchestrator/*.md names for the checkpoint (e.g. 3-impl, 4-review-complete, halted-error).\n" +
         "A malformed phase is not a harmless label: the phase-entry guard refuses a turn at one, and before it did, every\n" +
         "reader of this record treated it as a phase it had never heard of and checked nothing.\n",
     );

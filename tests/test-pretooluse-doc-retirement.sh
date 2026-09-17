@@ -287,7 +287,7 @@ for (const f of files) {
 process.stdout.write(JSON.stringify({ total, bad }));
 MJS
 
-SHIPPED=("${TEN_FILES[@]}" "$GATE_PLUGIN_DIR"/commands/pipeline/*.md "$GATE_PLUGIN_DIR"/shared/*.md "$PLUGIN_README" "$PLUGIN_CHANGELOG" "$ROOT_README")
+SHIPPED=("${TEN_FILES[@]}" "$GATE_PLUGIN_DIR"/orchestrator/*.md "$GATE_PLUGIN_DIR"/shared/*.md "$PLUGIN_README" "$PLUGIN_CHANGELOG" "$ROOT_README")
 GATE_FILE="$(gate_resolved_command "$GATE_PLUGIN_DIR" | awk '{print $1}')"
 [[ -n "$GATE_FILE" && -f "$GATE_FILE" ]] && SHIPPED+=("$GATE_FILE")
 CITE_JSON="$("$GATE_REAL_NODE" "$CITE_MJS" "$GATE_REPO_ROOT" "${SHIPPED[@]}" 2>/dev/null)"

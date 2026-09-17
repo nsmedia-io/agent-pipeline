@@ -360,7 +360,7 @@ new_tmpdir() {
 # ---- the /pipeline orchestrator prose: a core plus per-phase files ------------------------------
 #
 # commands/pipeline.md is the always-loaded core, and every phase, gate and handoff lives in its own
-# file under commands/pipeline/, which the core tells the orchestrator to Read when that phase
+# file under orchestrator/, which the core tells the orchestrator to Read when that phase
 # starts. A suite that pins orchestrator prose, or extracts and RUNS a bash block from it, reads ALL
 # of that prose, concatenated in the FIXED order below: the core first, then the phase files in the
 # order the single file carried them before the split. So a pin follows a rule when the rule moves
@@ -384,11 +384,11 @@ pipeline_md_concat() {
   fi
   cat "$plugin/commands/pipeline.md" > "$PIPELINE_MD_CONCAT" || return 90
   for part in $PIPELINE_MD_PARTS; do
-    if [[ ! -f "$plugin/commands/pipeline/$part" ]]; then
-      printf 'FATAL: pipeline_md_concat: %s is missing\n' "$plugin/commands/pipeline/$part" >&2
+    if [[ ! -f "$plugin/orchestrator/$part" ]]; then
+      printf 'FATAL: pipeline_md_concat: %s is missing\n' "$plugin/orchestrator/$part" >&2
       return 90
     fi
-    cat "$plugin/commands/pipeline/$part" >> "$PIPELINE_MD_CONCAT" || return 90
+    cat "$plugin/orchestrator/$part" >> "$PIPELINE_MD_CONCAT" || return 90
   done
   return 0
 }

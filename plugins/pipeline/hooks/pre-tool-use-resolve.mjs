@@ -40,7 +40,7 @@ const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "
 // current_phase, and tests/test-status-schema-contract.sh already holds it to a both-directions
 // set comparison. A third private copy here is the drift this repo has already paid for once.
 // The extraction is the same one that suite performs. The orchestrator prose is a core
-// (commands/pipeline.md) plus one file per phase under commands/pipeline/, and the literals are
+// (commands/pipeline.md) plus one file per phase under orchestrator/, and the literals are
 // spread across them, so every one is read. An unreadable core is still no vocabulary; an
 // unreadable phase directory is too, because a vocabulary read from the core alone would be
 // silently narrower than the one the orchestrator writes.
@@ -48,7 +48,7 @@ function phase4Literals() {
   let src;
   try {
     const core = path.join(PLUGIN_ROOT, "commands", "pipeline.md");
-    const dir = path.join(PLUGIN_ROOT, "commands", "pipeline");
+    const dir = path.join(PLUGIN_ROOT, "orchestrator");
     const parts = readdirSync(dir).filter((f) => f.endsWith(".md")).sort();
     src = [core, ...parts.map((f) => path.join(dir, f))].map((f) => readFileSync(f, "utf8")).join("\n");
   } catch {
@@ -72,7 +72,7 @@ const NOTE = {
     "two or more in-flight runs and no honoured active-issue marker, so which run this call belongs to is undecidable",
   "record-has-no-phase": "the owning run records no current_phase",
   "phase-not-guarded": "the owning run is not at a Phase 4 phase",
-  "no-phase-vocabulary": "commands/pipeline.md or commands/pipeline/*.md could not be read, so the Phase 4 vocabulary is unknown",
+  "no-phase-vocabulary": "commands/pipeline.md or orchestrator/*.md could not be read, so the Phase 4 vocabulary is unknown",
 };
 
 function abstain(reason) {
