@@ -76,51 +76,19 @@ Do your review per your agent definition. Write your block to <ARTIFACT_DIR>/rev
 })
 ```
 
-After all reviewers return, **merge the shards into `review.json`**. The merge **defensively unwraps**: the contract is a bare shard (`verdict` at top level), but if an agent still wraps its block under its role key (`{"dba": {...}}`) or buries it under a stray sibling, the `unwrap` function recovers the inner block so a verdict can never silently read as null and pass a gate it should have failed. A correctly-bare shard passes through untouched.
-
-Orchestrator note: run this and the Phase 4 shard-merge loop via `bash -c '...'`. The session shell may be zsh, which does not word-split an unquoted `$PANEL_ROLES` (the whole string becomes one word and the loop iterates zero roles); `bash -c` guarantees POSIX word-splitting. Avoid `status` and `path` as shell variable names in these snippets (zsh treats them specially).
+After all reviewers return, **merge the shards and read the verdict in one call**. `merge-review.mjs` reads each role's `review.<role>.json`, or `fallback-shards/review.<role>.json` when a refused write landed there, unwraps a role-wrapped shard, normalizes each block under the materiality rule (a `VETO` with no valid `veto_ground` or no blocking concern reads as `REQUEST_CHANGES`; a `REQUEST_CHANGES` with no blocking concern reads as `APPROVE_WITH_NOTES`; `design_review` keeps the Phase 2 Design rule instead: its `REQUEST_CHANGES` stands, and sends the spec back, when a `blocker` or `major` concern cites a token-lint or axe failure, whatever its `merge_class`, and taste alone is advisory; the merge_class test applies to Design only on the Phase 4 panel), writes `review.json`, removes the consumed shards, and prints `ROLES:` and `OUTCOME:`. Name `design_review` only when Design was dispatched. A first round passes `--fresh`; a delta round (case 3 below) omits it, so the standing blocks of reviewers not re-dispatched are kept.
 
 ```bash
-jq -n \
-  --slurpfile dba "$ARTIFACT_DIR/review.dba.json" \
-  --slurpfile dvo "$ARTIFACT_DIR/review.devops.json" \
-  --slurpfile sec "$ARTIFACT_DIR/review.secops.json" \
-  '
-  def unwrap($k): if type=="object" and has("verdict") then .
-                  elif type=="object" then (.[$k] // .)
-                  else . end;
-  {
-    dba:    ($dba[0] | unwrap("dba")),
-    devops: ($dvo[0] | unwrap("devops")),
-    secops: ($sec[0] | unwrap("secops"))
-  }' \
-  > "$ARTIFACT_DIR/review.json"
-rm -f "$ARTIFACT_DIR"/review.dba.json "$ARTIFACT_DIR"/review.devops.json "$ARTIFACT_DIR"/review.secops.json
+node "${CLAUDE_PLUGIN_ROOT}/scripts/merge-review.mjs" --status "$PIPELINE_BASE/<issue>/status.json" --fresh "$ARTIFACT_DIR" dba devops secops
 ```
 
-When the Design reviewer was dispatched (frontend-scoped spec), fold its shard into the same `review.json` under the `design_review` key after the merge above, with the same `unwrap` defense:
-
-```bash
-if [ -f "$ARTIFACT_DIR/review.design_review.json" ]; then
-  tmp=$(mktemp) && jq \
-    --slurpfile dsg "$ARTIFACT_DIR/review.design_review.json" '
-    def unwrap($k): if type=="object" and has("verdict") then .
-                    elif type=="object" then (.[$k] // .)
-                    else . end;
-    .design_review = ($dsg[0] | unwrap("design_review"))' \
-    "$ARTIFACT_DIR/review.json" > "$tmp" && mv "$tmp" "$ARTIFACT_DIR/review.json"
-  rm -f "$ARTIFACT_DIR/review.design_review.json"
-fi
-```
-
-A Design `REQUEST_CHANGES` is gated exactly like DBA/DevOps (case 2 below); a Design `VETO` is impossible (only SecOps holds the veto), so the `design_review` verdict only ever reads as APPROVE, APPROVE_WITH_NOTES, or REQUEST_CHANGES.
-
-Then validate `review.json` against `${CLAUDE_PLUGIN_ROOT}/schemas/review.schema.json` via `${CLAUDE_PLUGIN_ROOT}/scripts/validate-pipeline-artifact.mjs`. The merged shape (keys `dba`, `devops`, `secops`) is identical to the old sequential output, so every downstream reader is unaffected. A merged block that comes out `null` (a reviewer that never wrote, or wrote unrecoverable garbage) is a halt condition, not a pass: a `null` verdict matches neither `APPROVE` nor `APPROVE_WITH_NOTES`, so the gate below will not advance on it.
+Then validate `review.json` against `${CLAUDE_PLUGIN_ROOT}/schemas/review.schema.json` via `${CLAUDE_PLUGIN_ROOT}/scripts/validate-pipeline-artifact.mjs`.
 
 Before the verdict gate below loops back to BA, read `${CLAUDE_PLUGIN_ROOT}/orchestrator/loop-backs.md` now: the spec-revision count that runs before any BA dispatch, and what its exit 2 obliges, are stated there.
-Apply the verdict gate, most-blocking first:
+Act on the exit code:
 
-1. **SecOps `VETO`** (on a named `veto_ground`; a `VETO` without one is case 2, a blocking concern, not a redesign):
+1. **Exit 2** (a missing, unparseable, provisional or verdict-less shard, or a null block): HALT and name the role from stderr. A stray copy it names is moved to the path it gives and the merge re-run; otherwise re-dispatch that reviewer. Never read a missing review as a pass.
+2. **Exit 4** (a SecOps `VETO` that stands):
    1. Update `status.json` with `current_phase: "1-ba-rework-required"`, `veto_reason: <text>`, `veto_ground: <ground>`.
    2. Return to the owner in **full voice mode** (see "Human-facing responses"): a veto is an acceptance moment the owner has to understand and act on, so it gets the complete `voice.md` shape, not the one-liner. The line below is the factual spine to build that report around, not the whole message:
       ```
@@ -144,7 +112,7 @@ Apply the verdict gate, most-blocking first:
       one issue is the cheapest honest moment to ask whether the design, rather than the code,
       is what is wrong.
    4. Halt. Await `/pipeline --resume <issue>` after BA addresses the veto.
-2. **Any `REQUEST_CHANGES`** (from any of the three): halt Phase 2, collect every blocker into one summary, return to the owner, and loop back to BA for spec rework. Do not advance to Phase 3. **On the re-run, Phase 2 is a DELTA, not a fresh fan-out:** re-dispatch the reviewer(s) that returned `REQUEST_CHANGES`, plus any reviewer whose lens the rework touched (a new data-layer requirement re-seats DBA, a new deploy or binding requirement re-seats DevOps, a new caregiver-facing string re-seats Design; SecOps is re-seated by any rework that adds a logging, retention, auth, or copy requirement). The standing `APPROVE` / `APPROVE_WITH_NOTES` blocks of the untouched reviewers carry forward into `review.json` unchanged, and the round is recorded in `status.json` (`phase2_round`, plus a `2-review` event whose note names the re-dispatched subset). Keep the prior round's merged file as `review.round1.json` beside it so the audit trail shows both. "Re-run Phase 2" read literally is four reviewer spin-ups for a rework one of them asked for, and that is what the round budget below is counting.
-3. **All `APPROVE` or `APPROVE_WITH_NOTES`**: update `status.json` with `current_phase: "2-review-complete"` and proceed to Phase 2.5 (this phase only runs at the architectural tier, which always continues into the bake-off). Notes carry forward as constraints in `review.json` for Dev to honor.
+3. **Exit 3** (any `REQUEST_CHANGES` after normalization): halt Phase 2, collect every blocker into one summary, return to the owner, and loop back to BA for spec rework. Do not advance to Phase 3. **On the re-run, Phase 2 is a DELTA, not a fresh fan-out:** re-dispatch the reviewer(s) that returned `REQUEST_CHANGES`, plus any reviewer whose lens the rework touched (a new data-layer requirement re-seats DBA, a new deploy or binding requirement re-seats DevOps, a new caregiver-facing string re-seats Design; SecOps is re-seated by any rework that adds a logging, retention, auth, or copy requirement), and merge only those roles, without `--fresh`. Record the round in `status.json` (`phase2_round`, plus a `2-review` event whose note names the re-dispatched subset). Copy the prior round's `review.json` to `review.round1.json` before the merge so the audit trail shows both.
+4. **Exit 0** (all `APPROVE` or `APPROVE_WITH_NOTES`): update `status.json` with `current_phase: "2-review-complete"` and proceed to Phase 2.5 (this phase only runs at the architectural tier, which always continues into the bake-off). Notes carry forward as constraints in `review.json` for Dev to honor.
 
 ---

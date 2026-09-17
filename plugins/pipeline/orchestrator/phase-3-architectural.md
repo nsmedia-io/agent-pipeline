@@ -56,10 +56,9 @@ Keep <ARTIFACT_DIR>/tasks.json updated as you go. Run `<your checks>` (# CUSTOMI
 
 Write <ARTIFACT_DIR>/impl-report.json at completion, including the requirement_checks array AND the qa_signoff block (coverage record of QA-authored tests plus any internal-unit tests you added: test files, edge cases covered, acceptance mapping, verdict APPROVE). Record anything you observed and did not fix in deferred[], with a tracker_ref obtained from `node "${CLAUDE_PLUGIN_ROOT}/scripts/deferral.mjs" record ...` (it routes by deferralTracker); the gate refuses a deferral with no resolvable ref. Open a PR against the integration branch with Closes #<issue>.
 
-Before you return: run BOTH pre-Phase-4 gates against your own artifacts and PASTE their output in your reply.
-  node "${CLAUDE_PLUGIN_ROOT}/scripts/gate-pre-phase4.mjs" --issue <issue> --impl-report "<ARTIFACT_DIR>/impl-report.json" --spec "<ARTIFACT_DIR>/spec.json"
-  node "${CLAUDE_PLUGIN_ROOT}/scripts/gate-pre-phase4-frontend.mjs" --issue <issue> --impl-report "<ARTIFACT_DIR>/impl-report.json"
-A gate that refuses is YOURS to fix before you hand off; I run both again at the transition and a refusal discovered there costs a full round trip. SKIP from the frontend gate is a pass.
+Before you return, run the Phase 3 exit against your own artifacts (no --status: the record is mine) and PASTE its output in your reply:
+  node "${CLAUDE_PLUGIN_ROOT}/scripts/phase3-exit.mjs" --issue <issue> --worktree "<WORKTREE_PATH>" --artifact-dir "<ARTIFACT_DIR>"
+Exit 2 is YOURS to fix before you hand off, exit 3 is a tripwire to report, and exit 4 or any other exit is not yours to fix: stop and report it to me. I run it again at the transition.
 
 Return a short summary with branch name, commit count, check status, acceptance mapping status, PR URL.
   """
