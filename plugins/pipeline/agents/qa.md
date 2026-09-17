@@ -250,7 +250,7 @@ Write your bare block to `<ARTIFACT_DIR>/peer-review.qa.json` (the per-agent sha
 
 You may read the file-based knowledge store to ground your work in prior decisions and current project state: `knowledge/living-context/*.json` (current state), `knowledge/decisions/*.json` (decision records), `knowledge/issue-archive/*.json` (prior issue history). Glob and filter `status: current`, or run `node "${CLAUDE_PLUGIN_ROOT}/scripts/knowledge-store.mjs" --search "<terms>" [--domain <d>]`.
 
-**Default warmup domain scope (QA):** `testing`. When warmup runs on your behalf it reads `living-context` for this domain by default so you start from a focused context. This is noise reduction, not a hard boundary: you may still read any domain on demand.
+**Default warmup domain scope:** the `DOMAINS` line of `warmup-report.mjs --role qa`. Noise reduction, not a boundary: read any domain on demand.
 
 Your access is **read-only**. You MUST NOT create, edit, or delete any knowledge-store file. Write access belongs to the Librarian alone. When the knowledge store and live reality disagree, trust live reality (the database, the code, the canonical doc) for your current decision. The knowledge files are durable derived truth, not the source of truth.
 

@@ -8,7 +8,7 @@ allowed-tools: Read, Grep, Glob, Bash
 Session-start ritual. Run this before accepting any ask so the workspace is fresh and durable context is loaded.
 
 Four jobs, in order:
-1. Report git state: current branch, drift from the integration branch (`origin/main`), dirty files, stale worktrees.
+1. Report git state: current branch, drift from the integration branch, dirty files, stale worktrees.
 2. Read the file-based knowledge store (`knowledge/living-context/*.json`) and surface current-status highlights.
 3. Note any in-flight work (open PRs/issues) if the project uses GitHub.
 4. List the external data sources the project has wired, so they can be reached on demand.
@@ -23,48 +23,15 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/version-check.mjs" --plugin-root "${CLAUDE_P
 
 It prints nothing when the marketplace clone advertises no newer version (a newer copy in the cache alone does not warn, because the update command cannot change an orphaned cache directory), and one line naming both versions and the update command when there is. If it prints, put that line at the top of the Step 5 risk summary. Silence means nothing newer is cached locally, not that the install is current: the marketplace clone is only as fresh as its last update.
 
-`# CUSTOMIZE:` the integration branch defaults to `main`. Set `integrationBranch` in `pipeline.config.json` if yours differs; substitute it wherever `main` appears below.
-
 ---
 
-### Step 1: Fresh worktree pinned to the integration branch
-
-Repo root: `$(git rev-parse --show-toplevel)`.
-
-**If starting fresh (not already in a worktree):**
+### Step 1: Git state against the integration branch
 
 ```bash
-ROOT="$(git rev-parse --show-toplevel)"
-cd "$ROOT"
-git fetch origin main
-NAME="warmup-$(date +%Y%m%d-%H%M%S)"
-git worktree add .claude/worktrees/"$NAME" origin/main
-cd .claude/worktrees/"$NAME"
-git log -1 --oneline
-git status
+node "${CLAUDE_PLUGIN_ROOT}/scripts/warmup-report.mjs" [--role <role>] [--spec <spec.json>]
 ```
 
-**If already inside a worktree (session started there):**
-
-Do not force-reset. Verify the tracking branch and report drift:
-
-```bash
-git fetch origin main
-git log -1 --oneline
-git rev-list --left-right --count HEAD...origin/main
-```
-
-If there is drift from `origin/main` that conflicts with the current branch's purpose, stop and surface it to the owner. Do not silently rebase or reset.
-
-**Worktree hygiene.** Long sessions accumulate orphaned worktrees. Glance at the count and flag clearly-stale ones rather than letting the tree grow unbounded:
-
-```bash
-git worktree list | wc -l
-git worktree prune   # drops administrative records for worktree dirs already deleted
-# stale candidates = worktrees whose branch is already merged into origin/main or no longer exists
-```
-
-Report the count and any obviously-stale worktrees; offer to remove the merged ones, do not delete silently.
+It fetches and reports against `integrationBranch` from `pipeline.config.json` (`main` when unset): `BRANCH`, `HEAD`, `IN-WORKTREE`, `DIRTY`, `DRIFT`, `WORKTREES`, one `MERGED-WORKTREE` or `GONE-WORKTREE` line per stale candidate, the open PRs and issues (Step 3) and the `DOMAINS` to sweep (Step 2). If `IN-WORKTREE` is `no`, start fresh: `git worktree add .claude/worktrees/warmup-$(date +%Y%m%d-%H%M%S) origin/<integration branch>` and `cd` into it. Already inside one: do not force-reset; if the drift conflicts with the branch's purpose, stop and surface it. Offer to remove the merged worktrees; never delete silently.
 
 ---
 
@@ -99,20 +66,7 @@ grep -l '"status": *"current"' "$(git rev-parse --show-toplevel)"/knowledge/livi
 
 #### Role-scoped sweep
 
-At a generic session start, and for the BA and Librarian roles, sweep **all domains**. When warmup runs on behalf of a specific pipeline agent, search ONLY that role's domains so the agent starts from a focused, low-noise context. Domain scoping is noise reduction, not a hard boundary: any role may still search any domain on demand when a blast-radius or cross-cutting check needs it.
-
-| Role | Warmup domains |
-|---|---|
-| BA | all domains |
-| DBA | `data` |
-| SecOps | `security`, `compliance` |
-| DevOps | `infrastructure` |
-| QA | `testing` |
-| Dev | the domains of the package(s) impacted by the current task (read the spec's `impacted_domains`); fall back to all domains if none resolve yet |
-| Design | `frontend` |
-| Librarian | all domains (it maintains the whole knowledge base) |
-
-The generic domain set is: `data`, `api`, `frontend`, `infrastructure`, `security`, `compliance`, `architecture`, `testing`. To run a role-scoped sweep, iterate the role's domains, passing each as `--domain <d>`.
+At a generic session start sweep all domains. On behalf of a pipeline agent, sweep the `DOMAINS` line of `warmup-report.mjs --role <role>` (Dev also passes `--spec`), one `--domain <d>` per domain. Domain scoping is noise reduction, not a hard boundary: any role may search any domain on demand.
 
 **Source precedence (apply on every conflict).** Two tiers, not equals:
 1. The **code and the live system are present truth** and win on any disagreement.
@@ -124,18 +78,7 @@ Read the knowledge store to orient, but treat every load-bearing claim as a lead
 
 ### Step 3: In-flight work (open PRs/issues)
 
-The archive in the knowledge store is merged history. The higher-risk context is what is OPEN right now, where duplicated or conflicting effort happens. If the project uses GitHub, query it directly:
-
-```bash
-gh pr list --state open --json number,title,isDraft,headRefName,updatedAt \
-  -q 'sort_by(.updatedAt) | reverse | .[] | "[PR \(if .isDraft then "draft" else "open" end)] #\(.number) \(.title)  (\(.headRefName))"' | head -15
-gh issue list --state open --limit 12 --json number,title,updatedAt \
-  -q 'sort_by(.updatedAt) | reverse | .[] | "#\(.number) \(.title)"'
-```
-
-An open PR or issue touching the current branch's area is a near-certain conflict or duplication, and more actionable than anything in the merged archive. The BA "duplicate search must include open PRs" rule applies to warmup too.
-
-`# CUSTOMIZE:` if the project does not use GitHub (or `gh` is not installed), skip this step or substitute your forge's CLI. Also glance at active local pipelines with `node ${CLAUDE_PLUGIN_ROOT}/scripts/pipeline-status.mjs`.
+The archive in the knowledge store is merged history; what is OPEN now is where duplicated or conflicting effort happens. The report's `PR` and `ISSUE` lines are the open ones, newest first (`IN-FLIGHT: unknown` when `gh` is absent or the project is not on GitHub: substitute your forge's CLI, # CUSTOMIZE). An open PR or issue touching the current branch's area is a near-certain conflict or duplication; the BA "duplicate search must include open PRs" rule applies here too. Also glance at active local pipelines with `node ${CLAUDE_PLUGIN_ROOT}/scripts/pipeline-status.mjs`.
 
 ---
 
@@ -157,7 +100,7 @@ An open PR or issue touching the current branch's area is a near-certain conflic
 
 Summarize to the owner before waiting for the ask. **Lead with what changed and what is risky, then the detail.** A flat dump of everything you read is noise; the value is the synthesis.
 
-**1. Risk and delta summary (lead with this, 3 to 6 lines).** The handful of things that matter now: divergence from `origin/main`; in-flight PRs/issues that touch the current area (conflict or duplication risk); any load-bearing knowledge-store fact that is stale or contradicts the code; and, if wired, the monitoring/DB pulse (clean, or the one anomaly). If nothing is risky, say so plainly in one line.
+**1. Risk and delta summary (lead with this, 3 to 6 lines).** The handful of things that matter now: divergence from the integration branch; in-flight PRs/issues that touch the current area (conflict or duplication risk); any load-bearing knowledge-store fact that is stale or contradicts the code; and, if wired, the monitoring/DB pulse (clean, or the one anomaly). If nothing is risky, say so plainly in one line.
 
 **2. Detail (only what the summary references, plus brief orientation):**
 - Active worktree path and head commit (short SHA + subject); worktree-hygiene note if stale ones exist.

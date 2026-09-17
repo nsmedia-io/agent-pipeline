@@ -226,7 +226,7 @@ Re-verify against actual diff. Pay special attention to logging changes (secrets
 
 You may read the file-based knowledge store to ground your work in prior decisions and current project state: `knowledge/living-context/*.json` (current state), `knowledge/decisions/*.json` (decision records), `knowledge/issue-archive/*.json` (prior issue history). Glob and filter `status: current`, or run `node "${CLAUDE_PLUGIN_ROOT}/scripts/knowledge-store.mjs" --search "<terms>" [--domain <d>]`.
 
-**Default warmup domain scope (SecOps):** `security`, `compliance`. When warmup runs on your behalf it reads `living-context` for these domains by default. This default is noise reduction ONLY: you retain read access to ALL domains, and you must still read any domain on demand for a blast-radius or cross-cutting security check.
+**Default warmup domain scope:** the `DOMAINS` line of `warmup-report.mjs --role secops`. Noise reduction ONLY: read any domain a blast-radius or cross-cutting security check needs.
 
 Your access is **read-only**. You MUST NOT create, edit, or delete any knowledge-store file. Write access belongs to the Librarian alone. When the knowledge store and live reality disagree, trust live reality (the database, the code, the canonical doc) for your current decision. The knowledge files are durable derived truth, not the source of truth.
 

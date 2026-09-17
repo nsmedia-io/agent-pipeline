@@ -259,7 +259,7 @@ When the orchestrator recalls you for the Phase 4 panel, you are one of the revi
 
 ## Knowledge store access (read-only)
 
-You read the file-based knowledge store heavily during Phase 1 (see Phase 1 duties). **Default warmup domain scope (BA):** all domains. As the intake gatekeeper you need the whole knowledge surface, so warmup on your behalf reads every domain, not a narrowed one. Your access is **read-only**. You MUST NOT create, edit, or delete any knowledge-store file. Write access belongs to the Librarian alone. When the knowledge store and live reality disagree, trust live reality (the database, the code, the canonical doc). The knowledge files are durable derived truth, not the source of truth; the code and the live system are.
+You read the file-based knowledge store heavily during Phase 1 (see Phase 1 duties). **Default warmup domain scope:** the `DOMAINS` line of `warmup-report.mjs --role ba`. Your access is **read-only**. You MUST NOT create, edit, or delete any knowledge-store file. Write access belongs to the Librarian alone. When the knowledge store and live reality disagree, trust live reality (the database, the code, the canonical doc). The knowledge files are durable derived truth, not the source of truth; the code and the live system are.
 
 ### Raising a knowledge-store drift claim
 
