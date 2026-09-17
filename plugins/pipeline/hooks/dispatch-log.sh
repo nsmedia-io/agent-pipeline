@@ -6,7 +6,7 @@
 #
 # OFF BY DEFAULT, AND OFF COSTS NO NODE START. The telemetry switch is CLAUDE_PIPELINE_USAGE_TELEMETRY
 # or `usageTelemetry` in pipeline.config.json. With the env var at 0, or unset and no such key in the
-# config, this exits 0 before reading stdin further or starting node. A config that names the key
+# config, this drains stdin and exits 0 without starting node. A config that names the key
 # with `enabled: false` pays one node start, which then writes nothing.
 #
 # NEVER BLOCKS A DISPATCH. Exit 0 always, no decision on stdout. When telemetry is ENABLED and the
@@ -17,12 +17,18 @@
 PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$(pwd)}"
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-}"
 
+# Off: drain the payload (one cat, no node) so the writer never sees a closed pipe, then leave.
+off() {
+  cat >/dev/null 2>&1
+  exit 0
+}
+
 case "${CLAUDE_PIPELINE_USAGE_TELEMETRY:-}" in
-  0 | false) exit 0 ;;
+  0 | false) off ;;
   1 | true) ;;
   *)
-    [ -f "$PROJECT_DIR/pipeline.config.json" ] || exit 0
-    grep -q '"usageTelemetry"' "$PROJECT_DIR/pipeline.config.json" 2>/dev/null || exit 0
+    [ -f "$PROJECT_DIR/pipeline.config.json" ] || off
+    grep -q '"usageTelemetry"' "$PROJECT_DIR/pipeline.config.json" 2>/dev/null || off
     ;;
 esac
 

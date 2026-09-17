@@ -131,6 +131,32 @@ assert_eq "secops carries no model key, so the frontmatter model and the pin are
 assert_eq "secops effort and its tiered rule" "$(field "$SEC" effort) $(field "$SEC" effort_reason)" "high table:secops/4/standard/panel-lens"
 assert_eq "the Workflow call's issue comes from the rendered meta name" "$(field "$SEC" issue)" "42"
 assert_not_contains "no lens or preamble text in the log" "$(cat "$LOG")" "Your role"
+assert_eq "a well-formed line rejects nothing" "$(field "$SEC" rejected_fields)" "0"
+
+suite "#163 dispatch log: a crafted script or payload cannot write free text into the log"
+
+SECRET_SCRIPT="$(printf '%s\n' \
+  'export const meta = { name: "phase4-panel-SECRET sk-ant-xyz", description: "x", phases: [{ title: "Panel" }] }' \
+  '  () => agent(PREAMBLE + "lens", {"agentType":"pipeline:ba SECRET sk-ant-xyz","model":"sk-ant-xyz secret","effort":"medium; rm -rf","label":"ba-panel"}),' \
+  '  () => agent(PREAMBLE + "lens", {"agentType":"pipeline:qa","model":"opus","effort":"high","label":"qa-panel"}),')"
+SECRET_WF="$(SCRIPT="$SECRET_SCRIPT" node -e '
+  process.stdout.write(JSON.stringify({ session_id: "s-1", tool_use_id: "toolu_secret", tool_name: "Workflow", tool_input: { script: process.env.SCRIPT } }));')"
+run_hook "$SECRET_WF" >/dev/null 2>&1
+run_hook '{"session_id":"s-1 sk-ant-xyz","tool_use_id":"toolu_4","tool_name":"Agent","effort":{"level":"sk-ant-xyz leak"},"tool_input":{"subagent_type":"general purpose sk-ant-xyz","model":"sk-ant-xyz","prompt":"x"}}' >/dev/null 2>&1
+assert_eq "the crafted workflow gave two lines and the crafted Agent call one" "$(grep -c . "$LOG" | tr -d ' ')" "8"
+assert_not_contains "no secret-shaped value reaches the log" "$(cat "$LOG")" "sk-ant"
+assert_not_contains "no free text from the meta name reaches the log" "$(cat "$LOG")" "SECRET"
+W1="$(sed -n 6p "$LOG")"
+W2="$(sed -n 7p "$LOG")"
+AG="$(sed -n 8p "$LOG")"
+assert_eq "a meta-name issue outside the issue pattern is null" "$(field "$W1" issue)" "null"
+assert_eq "agentType, model and effort outside the token pattern are null" \
+  "$(field "$W1" subagent_type)/$(field "$W1" model)/$(field "$W1" effort)" "null/null/null"
+assert_eq "and every rejection is counted (issue, subagent_type, model, effort)" "$(field "$W1" rejected_fields)" "4"
+assert_eq "the well-formed agent in the same script keeps its values, issue still rejected" \
+  "$(field "$W2" role)/$(field "$W2" model)/$(field "$W2" effort)/$(field "$W2" issue)/$(field "$W2" rejected_fields)" "qa/opus/high/null/1"
+assert_eq "a crafted Agent payload: session, subagent_type, model and session effort are null" \
+  "$(field "$AG" session_id)/$(field "$AG" subagent_type)/$(field "$AG" model)/$(field "$AG" session_effort)/$(field "$AG" rejected_fields)" "null/null/null/null/4"
 
 suite "#163 dispatch log: enabled but not writable is a visible disarm, never a block"
 
@@ -306,6 +332,31 @@ assert_eq "OTel usage with no dispatch is unattributed" "$(q 'r.attr.unattribute
 assert_eq "effort comes from the OTel attribute when present" "$(q 'row("effort","xhigh")')" "2"
 assert_eq "cost_usd is summed as reported" "$(node -e 'const r = JSON.parse(process.argv[1]); process.stdout.write(r.tables.role.find((x) => x.key === "qa").cost.toFixed(2));' "$JSON")" "0.50"
 assert_eq "cumulative cost is differenced, not summed" "$(node -e 'const r = JSON.parse(process.argv[1]); process.stdout.write(r.tables.role.find((x) => x.key === "(unattributed)").cost.toFixed(2));' "$JSON")" "1.60"
+
+suite "#163 report: one usage source per session when both are given"
+
+mkdir -p "$FX/t3"
+node - "$FX" <<'EOF'
+const fs = require("fs");
+const path = require("path");
+const fx = process.argv[2];
+const line = (session, ts, id, input) => JSON.stringify({
+  type: "assistant", sessionId: session, timestamp: ts,
+  message: { id, model: "claude-opus-4-8", usage: { input_tokens: input, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } },
+});
+fs.writeFileSync(path.join(fx, "t3", "sess-3333.jsonl"), line("sess-3333", "2026-09-03T13:05:00Z", "dup1", 1000) + "\n");
+fs.writeFileSync(path.join(fx, "t3", "sess-7777.jsonl"), [
+  line("sess-7777", "2026-09-03T15:00:00Z", "only1", 500),
+  line("sess-7777", "not a time", "undated1", 42),
+].join("\n") + "\n");
+EOF
+BOTH="$(CLAUDE_PROJECT_DIR="$FX" node "$REPORT" --dispatch-log "$FX/otel-dispatch.jsonl" --otel "$FX/otel" --transcripts "$FX/t3" --json 2>/dev/null)"
+JSON="$BOTH"
+assert_eq "a session with OTel records does not also count its transcript (359 OTel + 500 from a transcript-only session)" "$(q 'r.attr.total')" "859"
+assert_eq "the qa row is OTel's 100, not 100 plus the transcript's 1000" "$(q 'row("role","qa")')" "100"
+assert_contains "the dropped transcript messages are reported" "$(q 'r.notes.join(" | ")')" "1 transcript message(s) dropped: their session also has OpenTelemetry records"
+assert_contains "records with no parseable timestamp are counted, not silently lost" "$(q 'r.notes.join(" | ")')" "1 transcript message(s) dropped: no parseable timestamp"
+assert_contains "usage from sessions with no dispatch line is reported" "$(q 'r.notes.join(" | ")')" "757 tokens (6 records) come from sessions with no dispatch line; reported as unattributed"
 
 suite "#163 resolvers: the rule label is a label, not a new decision"
 

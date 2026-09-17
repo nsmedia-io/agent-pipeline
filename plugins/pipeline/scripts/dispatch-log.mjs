@@ -76,7 +76,49 @@ export const LOG_FIELDS = [
   "effort_reason",
   "session_effort",
   "transcript_path",
+  "rejected_fields",
 ];
+
+/**
+ * THE VALUE SHAPE EACH FIELD MAY TAKE. Payload text, a Workflow script and a status record are all
+ * inputs this file does not control: a rendered-looking script can put anything in its meta name or
+ * agent options. So every string is matched against a short token pattern and a value that fails is
+ * written as null and counted in rejected_fields, never copied. Nothing free-text reaches the log.
+ */
+export const ISSUE_RE = /^(\d+|exp-[a-z0-9-]+)$/;
+export const TOKEN_RE = /^[A-Za-z0-9:._\[\]-]{1,64}$/;
+const ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
+// A token pattern alone admits a secret-shaped token such as an API key, so the two fields with a
+// known vocabulary get it: an alias or a claude-* model id (with an optional context suffix), and the
+// vendor's five effort levels.
+const MODEL_RE = /^(opus|sonnet|haiku|fable|inherit|claude-[a-z0-9.-]{1,48})(\[[a-z0-9]{1,8}\])?$/;
+const EFFORT_RE = /^(low|medium|high|xhigh|max)$/;
+const REASON_RE = /^[A-Za-z0-9:._\[\]\/<>(); -]{1,160}$/;
+const TS_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/;
+// A transcript path is a path, so it gets a path's shape: no control characters or quotes, a
+// bounded length, and the .jsonl suffix a transcript has.
+const TRANSCRIPT_RE = { test: (v) => v.length <= 512 && v.endsWith(".jsonl") && ![...v].some((ch) => ch.charCodeAt(0) < 32 || ch === String.fromCharCode(34)) };
+export const FIELD_PATTERNS = {
+  ts: TS_RE,
+  session_id: ID_RE,
+  agent_id: ID_RE,
+  tool_use_id: ID_RE,
+  surface: /^(agent|workflow)$/,
+  subagent_type: TOKEN_RE,
+  role: TOKEN_RE,
+  issue: ISSUE_RE,
+  phase: /^[0-5](?:[.]5)?$/,
+  current_phase: TOKEN_RE,
+  tier: /^(trivial|standard|architectural)$/,
+  cost_class: /^(product-money|product|tooling)$/,
+  site: TOKEN_RE,
+  model: MODEL_RE,
+  model_reason: REASON_RE,
+  effort: EFFORT_RE,
+  effort_reason: REASON_RE,
+  session_effort: EFFORT_RE,
+  transcript_path: TRANSCRIPT_RE,
+};
 
 export const REASONS = {
   noDir: "the dispatch log directory could not be resolved (no git common dir and no usageTelemetry.dir)",
@@ -222,10 +264,30 @@ export function frontmatter(pluginRoot, role) {
   return { model: field("model"), effort: field("effort") };
 }
 
-/** Copy only the allowlisted fields, in order. Anything else a caller attached is dropped. */
+/**
+ * Copy only the allowlisted fields, in order, and only values of the shape FIELD_PATTERNS allows.
+ * Anything else a caller attached is dropped; a field whose value fails its shape is null and counted.
+ */
 export function sanitize(record) {
   const out = {};
-  for (const k of LOG_FIELDS) out[k] = record[k] === undefined ? null : record[k];
+  let rejected = 0;
+  for (const k of LOG_FIELDS) {
+    if (k === "rejected_fields") continue;
+    const v = record[k];
+    if (v === undefined || v === null) {
+      out[k] = null;
+    } else if (k === "v" || k === "batch_index") {
+      const ok = Number.isInteger(v) && v >= 0 && v < 10000;
+      out[k] = ok ? v : null;
+      if (!ok) rejected++;
+    } else if (typeof v === "string" && FIELD_PATTERNS[k] && FIELD_PATTERNS[k].test(v)) {
+      out[k] = v;
+    } else {
+      out[k] = null;
+      rejected++;
+    }
+  }
+  out.rejected_fields = rejected + (Number.isInteger(record.rejected_fields) ? record.rejected_fields : 0);
   return out;
 }
 

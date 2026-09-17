@@ -27,6 +27,9 @@
  * With neither flag: OTel files in the telemetry directory if any exist, else the transcripts named
  * by the dispatch log's transcript_path values (and their subagent files).
  *
+ * ONE SOURCE PER SESSION. Both sources describe the same requests, so a session with OTel records has
+ * its transcript records dropped (and the count printed) rather than counted twice.
+ *
  * THE JOIN (see joinUsage). Exact where the data allows, by time where it does not, and the method is
  * counted in the output so a reader can see how much rests on each:
  *   tool_use_id     a subagent transcript's meta.json toolUseId equals the dispatch line's tool_use_id.
@@ -265,7 +268,9 @@ export function loadOtel(files) {
   }
   const withEvents = new Set(events.map((e) => e.session));
   const metrics = metricRecords(points).filter((m) => !withEvents.has(m.session));
-  return { records: [...events, ...metrics].filter((r) => Number.isFinite(r.t)), bad };
+  const all = [...events, ...metrics];
+  const records = all.filter((r) => Number.isFinite(r.t));
+  return { records, bad, undated: all.length - records.length };
 }
 
 // ---- transcripts
@@ -317,7 +322,9 @@ export function loadTranscripts(files) {
       if (!prev || rec.output >= prev.output) byId.set(id, prev && !Number.isFinite(rec.t) ? { ...rec, t: prev.t } : rec);
     }
   }
-  return { records: [...byId.values()].filter((r) => Number.isFinite(r.t)), bad };
+  const all = [...byId.values()];
+  const records = all.filter((r) => Number.isFinite(r.t));
+  return { records, bad, undated: all.length - records.length };
 }
 
 /** A session transcript plus every subagent transcript beside it. */
@@ -659,20 +666,35 @@ export function buildReport(args, env = process.env) {
     }
   }
   let records = [];
+  const otelSessions = new Set();
   if (otelFiles.length) {
     const o = loadOtel(otelFiles);
     records.push(...o.records);
+    for (const r of o.records) otelSessions.add(r.session);
     sources.push(`OpenTelemetry: ${otelFiles.length} file(s), ${o.records.length} usage records${o.bad ? `, ${o.bad} unparsable lines` : ""}`);
+    if (o.undated) notes.push(`${o.undated} OpenTelemetry usage record(s) dropped: no parseable timestamp`);
   }
   if (transcriptFiles.length) {
     const t = loadTranscripts(transcriptFiles);
-    records.push(...t.records);
+    // ONE SOURCE PER SESSION. OTel and the transcripts describe the same requests, so a session
+    // present in both would count twice. OTel wins (it carries cost and effort); that session's
+    // transcript records are dropped, and the drop is printed.
+    const kept = t.records.filter((r) => !otelSessions.has(r.session));
+    const dropped = t.records.length - kept.length;
+    records.push(...kept);
     sources.push(`transcripts: ${transcriptFiles.length} file(s), ${t.records.length} distinct messages${t.bad ? `, ${t.bad} unparsable lines` : ""}`);
+    if (dropped) notes.push(`${dropped} transcript message(s) dropped: their session also has OpenTelemetry records, which are counted instead`);
+    if (t.undated) notes.push(`${t.undated} transcript message(s) dropped: no parseable timestamp`);
   }
   if (records.length === 0) notes.push("no usage records found");
 
+  const logged = new Set(log.lines.map((l) => l.session_id));
+  const orphan = records.filter((r) => !logged.has(r.session));
+  if (orphan.length) {
+    const n = orphan.reduce((sum, r) => sum + totalTokens(r), 0);
+    notes.push(`${n.toLocaleString("en-US")} tokens (${orphan.length} records) come from sessions with no dispatch line${scopeToLog ? "; excluded, since no source was named" : "; reported as unattributed"}`);
+  }
   if (scopeToLog) {
-    const logged = new Set(log.lines.map((l) => l.session_id));
     records = records.filter((r) => logged.has(r.session));
   }
   if (args.session.length) records = records.filter((r) => args.session.includes(r.session));
