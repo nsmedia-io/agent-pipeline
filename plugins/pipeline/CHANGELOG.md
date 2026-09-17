@@ -1,8 +1,49 @@
 # Changelog
 
-Behaviour changes that reach an existing project at its next plugin update, newest release first. There is no migration to run; each entry says what changes on its own and what to do, if anything.
+Behaviour changes that reach an existing project at its next plugin update, newest release first. Each entry says what changes on its own and what to do, if anything. Records an older release wrote can be checked, and their mechanical part normalised, with `scripts/migrate-records.mjs`; see Unreleased.
 
 Entries keep the numbers they carried in the README's old Upgrading list, so a cross-reference such as "item 29 below" still resolves. Measured figures in an entry describe the commit that entry shipped with and are not re-taken afterwards.
+
+## Unreleased
+
+### Upgrading from an older install, and the records it left behind
+
+**Find out whether you are behind.** Hooks, gates and agent contracts load from the installed plugin cache (`~/.claude/plugins/cache/agent-pipeline/pipeline/<version>/`), not from your checkout, and one machine ran 0.24.0 hooks while 0.42.0 was published with nothing saying so. `scripts/version-check.mjs` now runs at SessionStart and in `/warmup`. It compares the running `plugin.json` version with the marketplace clone under `~/.claude/plugins/marketplaces/agent-pipeline/` and with every other version directory in the cache, makes no network call, and prints one line naming both versions and the update command (`/plugin marketplace update agent-pipeline`, then `/plugin update pipeline@agent-pipeline`, then restart the session) when the running copy is older. Silence means nothing newer is on this disk, not that you are current: the clone is only as fresh as its last marketplace update.
+
+**Check your records after updating.** `scripts/migrate-records.mjs` reads every `.pipeline/<issue>/status.json` and review shard in a project and reports what the current schemas reject: a `current_phase` outside `<phase>-<slug>` (such as `phase3_complete_rev21`), missing required status fields, non-ISO timestamps, concerns missing `severity`, `likelihood`, `harm`, `merge_class` or `must_satisfy` (or carrying a value outside that field's enum), and vulnerabilities missing `remediation`. It is a dry run by default:
+
+```bash
+node "$CLAUDE_PLUGIN_ROOT/scripts/migrate-records.mjs" --root .           # report only
+node "$CLAUDE_PLUGIN_ROOT/scripts/migrate-records.mjs" --root . --write   # apply the mechanical fixes
+node "$CLAUDE_PLUGIN_ROOT/scripts/migrate-records.mjs" --root . --check   # exit 1 while anything needs attention
+```
+
+`--write` changes two things and nothing else. A run whose record carries a merge (`merged_at`, `merge_commit`, or an `events[]` verdict of `merged`) gets `current_phase: "5-archive"`; a rejected phase with no merge record is reported for you to set, because a run that stopped without merging is not archived by inference. A status record with no remaining problem gets `schema_version` stamped. Review shards are never written: a missing likelihood, harm or merge class is the reviewer's judgement, and the script does not invent one. Directories starting with `_`, such as `_archived/`, are skipped.
+
+**What changed for an existing project, per release from 0.24.0.** Dates are the release commits. Item numbers point at the numbered entries further down, which carry the detail.
+
+- **0.24.0 (2026-08-21):** items 9 to 12. The phase-entry guard abstains on an unknown tier; the pre-Phase-4 gate's up-section and coverage checks tightened; absolute paths are redacted at archive; an mtime tie resolves to no run.
+- **0.25.0 (2026-08-22):** items 13 to 18. Records: a Phase 2 `review.json` written before this release can block a `dba`, `devops` or `secops` stop for thirty minutes (item 14: `must_satisfy` and `remediation` became required), and `migrate-records.mjs` lists every such concern and vulnerability. Also the brace-form `surface_probe`, the unconditional `pipeline.config.json` trigger, the tier-independent map requirement, the wider no-secrets rule and the sync-step clobber fix.
+- **0.26.0 (2026-08-22):** item 19. Phase 4 panelists treat the dispatch worktree as read-only.
+- **0.27.0 (2026-08-23):** item 20. The Stop hook's voice check finds the human turn from the transcript.
+- **0.28.0 (2026-08-28):** items 21 to 25. `falsifiability_pass` is machine-checked; `review_rounds` is cross-checked against events; the multi-repo `commits` shape no longer crashes the gate; the fix-round budget; the introduced-defect instruction on every panel.
+- **0.29.0 to 0.34.0 (2026-08-29 to 2026-08-31):** no numbered upgrade entry. The release commit subjects name what changed (the frontend gate's "nothing changed" answer, spec states, the panel's turn handling); read them if you depend on those.
+- **0.35.0 (2026-09-02):** items 26 and 27. Archival refuses credential-shaped material; the PreToolUse hook refuses a blanket stage from a subagent during Phase 4.
+- **0.36.0 (2026-09-03):** items 28 and 29. The SubagentStop validator scopes by the run in flight; archival warns on blank required text.
+- **0.37.0 (2026-09-03):** item 30. The PreToolUse timeout is 30 s.
+- **0.38.0 (2026-09-04):** item 31. The Stop hook timeout is 120 s.
+- **0.39.0 (2026-09-04):** item 32. Heredoc bodies are opaque to the blanket-staging scanner.
+- **0.40.0 (2026-09-04):** item 33. Records: concerns carry `likelihood`, `reversibility` and `harm`, and an unrated blocking concern is treated as blocking; `migrate-records.mjs` names every unrated concern. 0.40.1 and 0.40.2 (same day) changed the suite only.
+- **0.41.0 (2026-09-05):** item 34. Deferrals go to a tracker or a committed directory, and the pre-Phase-4 gate checks the ref.
+- **0.41.1 (2026-09-07):** items 35 to 38. Field readers in the blast-radius map, Phase 2 delta re-runs, blocking concerns carry their test, shards are parse-checked.
+- **0.42.0 (2026-09-14):** items 39 to 42. Records: a provisional or empty shard is refused by the merge; QA's `satisfiability_proof` is required in `tasks.json` at the architectural tier. Test files under a migrations directory are not migrations; the Phase 4 script is rendered.
+- **Unreleased:** status records gain an integer `schema_version` and concerns a required `merge_class` (`wrong-pass`, `money`, `data-loss`, `security-exposure`, `none`). Run `migrate-records.mjs` after updating: it stamps what is mechanical and lists the concerns a reviewer has to rate.
+
+### Also in this release
+
+- **Agent frontmatter is linted at warmup.** `config-doctor.mjs` parses the frontmatter of the plugin's agents and of `.claude/agents/*.md` with a small dependency-free YAML subset parser, and reports parse errors (an unquoted `: ` in a value, an invalid escape, text after a closing quote, a duplicate key, a tab indent, an unclosed block), a missing `name` or `description`, and a `model` or `effort` outside the known values. Origin: a project agent whose description carried an unquoted `: ` failed to load with no message.
+- **A consumer-owned config namespace.** The config doctor's "read by nothing" warning now names the remedy: put project-owned settings under the `x` object, or in a key starting with `_`. The plugin never reads inside either, and the doctor never reports them. `architecturalTriggers` is documented as advisory: no script reads it, and `keywords` is a hint to the BA agent's judgment rather than a mechanical trigger.
+- **Windows Git Bash.** `scripts/lib.mjs` gains `nativePath`, which turns an MSYS `/c/...` path into `C:/...` on win32 only; the new scripts pass every path they receive through it.
 
 ## 0.42.0 (2026-09-14)
 
