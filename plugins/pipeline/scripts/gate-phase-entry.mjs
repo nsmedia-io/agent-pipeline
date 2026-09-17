@@ -71,6 +71,7 @@ import { phaseKey } from "./pipeline-telemetry.mjs";
 import { activeIssueDir, MTIME_ONLY } from "./validate-pipeline-artifact.mjs";
 import { inFlightObservations } from "./run-candidates.mjs";
 import { phaseShapeOk } from "./check-status-record.mjs";
+import { checkRoundBudget } from "./round-budget.mjs";
 
 /**
  * The 15 guarded rows: the 8 phases pipeline.md checkpoints into ("Checkpoint first:") and the
@@ -203,6 +204,42 @@ export const TERMINAL = ["5-archived"];
 export const PRELUDE = ["0-setup"];
 
 export const IN_FLIGHT_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * THE FIX-ROUND BUDGET, AT THE TURN BOUNDARY (0.43.0). round-budget.mjs counts Phase 4 fix rounds
+ * in status.json `fix_rounds` and refuses to START one past the budget; pipeline.md calls it
+ * before Dev is dispatched. That call is prose the orchestrator can skip or out-type, so this guard
+ * re-asks the same question of the record: a run sitting in a fix round (one of these phases, with
+ * `fix_rounds` >= 1) whose round number is past the budget for its cost_class, with no
+ * owner_overrides entry covering that round, cannot end its turn. The decision is
+ * round-budget.mjs's own checkRoundBudget, asked about the round already entered, so the budget
+ * table and the override rule have one copy.
+ *
+ * WHAT IT DOES NOT SEE. A fix round entered without the counter being raised at all reads as the
+ * round before it; this guard checks the count a record carries, not whether it is true. A record
+ * with no `fix_rounds` (older than schema_version 2) is not judged here, the same fail-open this
+ * table takes on vocabulary. A counter that is present but not a non-negative integer is refused,
+ * as round-budget.mjs refuses it: nobody can number that round.
+ */
+export const FIX_ROUND_PHASES = ["3-impl", "3-impl-complete", "4-review"];
+
+export function fixRoundOverBudget(status) {
+  if (!FIX_ROUND_PHASES.includes(status.current_phase)) return null;
+  const raw = status.fix_rounds;
+  if (raw === undefined || raw === 0) return null;
+  // Asked about the round ALREADY ENTERED: checkRoundBudget decides the NEXT round from the count
+  // done, so the count done before this round is fix_rounds - 1. Only integers and the free-text
+  // fields the decision block does not print are passed through: issue_number is echoed only when
+  // it is an integer, and owner_overrides reasons are never read.
+  const probe = {
+    cost_class: status.cost_class,
+    owner_overrides: status.owner_overrides,
+    fix_rounds: Number.isInteger(raw) && raw >= 1 ? raw - 1 : raw,
+  };
+  if (Number.isInteger(status.issue_number)) probe.issue_number = status.issue_number;
+  const r = checkRoundBudget(probe, "fix-round");
+  return r.allowed ? null : r;
+}
 
 /**
  * An unusable risk_tier resolves to the STRICTEST row, never the loosest. That default is right
@@ -636,6 +673,22 @@ function decideForDir(issueDir, now) {
     return decided("not-applicable", `${at} is not in flight (stale or already concluded).`);
   }
 
+  // Before the prerequisite row: a run past its fix-round budget is refused whatever its artifacts
+  // say, because the refusal is about whether this round should exist at all.
+  const overBudget = fixRoundOverBudget(status);
+  if (overBudget) {
+    return {
+      ...decided(
+        "refused",
+        overBudget.next === null
+          ? `${at} is in a Phase 4 fix round whose fix_rounds counter is unreadable.`
+          : `${at} is in Phase 4 fix round ${overBudget.next}, past the budget of ${overBudget.budget} for cost_class ${overBudget.costClass}, and no owner_overrides entry covers it.`,
+      ),
+      phase,
+      budget: overBudget,
+    };
+  }
+
   // The RAW field, before normalizeTier resolves every unusable value to the strictest row.
   const tierDetermined = KNOWN_TIERS.includes(status.risk_tier);
   const tier = normalizeTier(status.risk_tier);
@@ -694,6 +747,21 @@ const CONTENT_REPAIR = {
 
 function refusalMessage(result) {
   const dir = `.pipeline/${result.issue_dir}`;
+  if (result.budget) {
+    const b = result.budget;
+    return [
+      b.next === null
+        ? `Phase-entry guard: this turn cannot end while ${dir} is in a Phase 4 fix round whose fix_rounds counter is not a non-negative integer.`
+        : `Phase-entry guard: this turn cannot end with ${dir} in Phase 4 fix round ${b.next}; the budget at cost_class ${b.costClass} is ${b.budget} and no owner_overrides entry covers round ${b.next}.`,
+      `Going past the fix-round budget is the owner's decision, not the orchestrator's. Work already done in this turn is not undone; only the turn boundary is blocked.`,
+      `Ways to clear it:`,
+      `  1. Bring the owner the decision below. If they choose to keep going, record their answer in ${dir}/status.json owner_overrides as {"kind": "fix-round", "up_to": <round>, "at": "<iso>", "reason": "<their reason>"} and commit it.`,
+      `  2. If they choose to ship with deferrals, split or stop, move the run to that outcome (a final_verdict, or a halt state) and commit ${dir}/status.json.`,
+      `  3. If fix_rounds is wrong, correct it to the number of fix rounds actually run.`,
+      "",
+      b.decision,
+    ].join("\n");
+  }
   if (result.malformed) {
     return [
       `Phase-entry guard: this turn cannot end while ${dir}/status.json records a current_phase that is not phase-shaped.`,

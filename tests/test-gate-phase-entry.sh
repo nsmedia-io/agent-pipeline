@@ -3056,4 +3056,73 @@ new_case 4242 "$(mk_status "3-something-nobody-writes" '"architectural"' "$NO_EV
 gate "$CASE_ROOT"
 assert_eq "CONTROL: a WELL-SHAPED unknown phase still fails open on vocabulary" "$GATE_DEC" "not-applicable"
 
+# ---------------------------------------------------------------------------
+suite "0.43.0: a Phase 4 fix round past its budget cannot end the turn without an owner override"
+# ---------------------------------------------------------------------------
+# round-budget.mjs refuses to START a round past the budget, but only when pipeline.md's prose calls
+# it. This guard asks checkRoundBudget the same question of the record at the turn boundary. Every
+# fixture below carries its prerequisite (impl-report.json at 4-review) so a refusal can only come
+# from the budget, and the first CONTROL proves that.
+FR_OVERRIDE='[{"kind":"fix-round","up_to":2,"at":"2026-09-16T10:00:00Z","reason":"owner chose round two"}]'
+fr_case() { # fr_case <phase> <extra-json-with-leading-comma>
+  new_case 4242 "$(mk_status "$1" '"standard"' "$NO_EVENTS" "$2")"
+  printf '{}' > "$CASE_DIR/impl-report.json"
+}
+
+fr_case 4-review ',"cost_class":"tooling","fix_rounds":1'
+gate "$CASE_ROOT"
+assert_eq "CONTROL: tooling fix round 1 at 4-review (inside the budget of 1) -> granted" "$GATE_DEC/$GATE_RC" "granted/0"
+
+fr_case 4-review ',"cost_class":"tooling","fix_rounds":2'
+gate "$CASE_ROOT"
+assert_eq "tooling fix round 2 at 4-review, no override -> refused, exit 2" "$GATE_DEC/$GATE_RC" "refused/2"
+assert_contains "  ...the reason names the round and the budget" "$GATE_REASON" "fix round 2, past the budget of 1 for cost_class tooling"
+assert_contains "  ...stderr carries the owner decision block" "$GATE_ERR" "### I need a decision"
+assert_contains "  ...with ship with deferrals, split and stop" "$GATE_ERR" "A) Ship with deferrals"
+assert_contains "  ...and how the owner's keep-going answer is recorded" "$GATE_ERR" '"kind": "fix-round", "up_to": 2'
+
+fr_case 3-impl ',"cost_class":"tooling","fix_rounds":2'
+printf '{}' > "$CASE_DIR/constraints.md"
+gate "$CASE_ROOT"
+assert_eq "the same over-budget round at 3-impl (the loopback write) -> refused" "$GATE_DEC" "refused"
+
+fr_case 4-review ',"cost_class":"tooling","fix_rounds":2,"owner_overrides":'"$FR_OVERRIDE"
+gate "$CASE_ROOT"
+assert_eq "an owner override up_to 2 covers tooling fix round 2 -> granted" "$GATE_DEC/$GATE_RC" "granted/0"
+
+fr_case 4-review ',"cost_class":"tooling","fix_rounds":3,"owner_overrides":'"$FR_OVERRIDE"
+gate "$CASE_ROOT"
+assert_eq "the override up_to 2 does NOT cover fix round 3 -> refused" "$GATE_DEC" "refused"
+
+fr_case 4-review ',"cost_class":"product","fix_rounds":2'
+gate "$CASE_ROOT"
+assert_eq "CONTROL: product fix round 2 is inside its budget of 2 -> granted" "$GATE_DEC" "granted"
+fr_case 4-review ',"fix_rounds":3'
+gate "$CASE_ROOT"
+assert_eq "no cost_class reads as product: fix round 3 -> refused" "$GATE_DEC" "refused"
+
+fr_case 4-review ',"cost_class":"tooling","fix_rounds":"two"'
+gate "$CASE_ROOT"
+assert_eq "an unreadable fix_rounds counter -> refused (nobody can number the round)" "$GATE_DEC" "refused"
+assert_contains "  ...and says the counter is unreadable" "$GATE_ERR" "not a non-negative integer"
+
+fr_case 4-review ',"cost_class":"tooling"'
+gate "$CASE_ROOT"
+assert_eq "CONTROL: a record older than schema_version 2 (no fix_rounds) is not judged on the budget" "$GATE_DEC" "granted"
+
+fr_case 4-review-complete ',"cost_class":"tooling","fix_rounds":5'
+gate "$CASE_ROOT"
+assert_not_contains "CONTROL: a phase outside the fix-round phases is not budget-checked" "$GATE_REASON" "past the budget"
+
+MK_UPDATED="$STALE_ISO"
+fr_case 4-review ',"cost_class":"tooling","fix_rounds":2'
+unset MK_UPDATED
+gate "$CASE_ROOT"
+assert_eq "CONTROL: an over-budget record that is not in flight never wedges the project" "$GATE_DEC/$GATE_RC" "not-applicable/0"
+
+new_case 4242 "$(mk_status 4-review '"standard"' "$NO_EVENTS" ',"cost_class":"tooling","fix_rounds":2,"owner_overrides":[{"kind":"fix-round","up_to":1,"at":"2026-09-16T10:00:00Z","reason":"SECRET-REASON-TEXT"}]')"
+printf '{}' > "$CASE_DIR/impl-report.json"
+gate "$CASE_ROOT"
+assert_not_contains "an override's free-text reason is never republished on stderr" "$GATE_ERR" "SECRET-REASON-TEXT"
+
 finish
