@@ -901,22 +901,21 @@ assert_contains "CONTROL: and the telemetry-fix revert names its own" \
 suite "AC6: the shipped gate suite still passes, and its assertions are untouched"
 
 GATE_OUT="$(bash "$TESTS_DIR/test-gate-pre-phase4.sh" 2>&1)"
-assert_contains "test-gate-pre-phase4.sh passes in full" "$GATE_OUT" "passed=127 failed=0"
-# The count is pinned as well as the verdict: a suite that passes with FEWER assertions than
-# it shipped with has had a case deleted, which is exactly how a fail-closed gate loses its
-# deletion-exemption coverage quietly.
-#
-# 56 -> 95 for #31 and #48, 95 -> 99 for the multi-repo commits-shape cases, then 99 -> 125 for
-# 125 -> 127 for 0.42.0's #156 (a .test.ts under migrations/ no longer fires the migration rule;
-# two rows: the rc and the absent down-section message).
-# 0.41.0's deferral-ledger and acceptance_criteria_met coverage cases, and the two
-# literals below are NOT the same number wearing two
-# hats. This one tracks the LIVE suite and moves whenever it legitimately grows; the CONTROL
-# further down counts assertion lines in the historical commit that authored the suite, and 56
-# is a fact about that commit forever. Raising both together is the mistake this note exists to
-# prevent -- it would retire the only non-zero control the pattern above has.
-assert_eq "and it still carries all 127 assertions (a green with fewer is a deleted case)" \
-  "$(printf '%s' "$GATE_OUT" | grep -c '^  ok' | tr -d ' ')" "127"
+GATE_TALLY="$(printf '%s\n' "$GATE_OUT" | sed 's/\x1b\[[0-9;]*m//g' | grep -E '^passed=[0-9]+ failed=[0-9]+$' | tail -1)"
+GATE_PASSED="$(printf '%s' "$GATE_TALLY" | sed -n 's/^passed=\([0-9]*\) .*/\1/p')"
+assert_eq "test-gate-pre-phase4.sh passes in full" \
+  "$(printf '%s' "$GATE_TALLY" | sed -n 's/^passed=[0-9]* failed=\([0-9]*\)$/\1/p')" "0"
+# A FLOOR, NOT AN EXACT COUNT. A suite that passes with FEWER assertions than it shipped with has
+# had a case deleted, which is exactly how a fail-closed gate loses its deletion-exemption coverage
+# quietly, so the count may not fall below the 127 it carried at 0.42.0 (#156). It used to be
+# pinned EXACTLY, here and in the tally row above, and every legitimate addition to that suite
+# (56 -> 95 -> 99 -> 125 -> 127) needed a hand re-baseline in this file. Deletion BY NAME is
+# already pinned where it is cheap to maintain: test-claims-consumers.sh's AC19 label set for this
+# same suite reddens on a vanished label and prints it. The CONTROL further down counts assertion
+# lines in the historical commit that authored the suite, and 56 is a fact about that commit
+# forever, so it stays exact.
+assert_eq "and it still carries at least the 127 assertions it had at 0.42.0 (a green with fewer is a deleted case)" \
+  "$(n="$(printf '%s' "$GATE_OUT" | grep -c '^  ok' | tr -d ' ')"; [[ "$n" -ge 127 && "${GATE_PASSED:-0}" -ge 127 ]] && echo at-least-127 || echo "ONLY $n ok rows (passed=${GATE_PASSED:-?})")" "at-least-127"
 # Measured across the SERIES WINDOW, for the same reason the round lookups are: `origin/main...HEAD`
 # is an empty diff on main, so after the merge this line was green because it compared a commit
 # with itself. A vacuous pass is the worse half of the same defect -- the round assertions at
