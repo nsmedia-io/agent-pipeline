@@ -19,15 +19,9 @@ DEFERRAL="$SCRIPTS_DIR/deferral.mjs"
 EFFORT="$SCRIPTS_DIR/dispatch-effort.mjs"
 RENDER="$SCRIPTS_DIR/render-panel.mjs"
 
-# ---- extraction: the same anchors test-panel-composition-fail-direction.sh uses ----------------
-PANEL_BLOCK="$TEMP_PROJECT/panel-block.sh"
-{
-  awk '/^PANEL_ROLES="ba dev qa secops"$/{f=1} f{print} f&&/^```$/{exit}' "$PIPELINE_MD"
-  awk '/^# \$CHANGED_PATHS is the NUL-delimited diff path list, and `surface_probe` is the function$/{f=1} f{print} f&&/^```$/{exit}' "$PIPELINE_MD"
-} | grep -v '^```' > "$PANEL_BLOCK"
-DELTA_BLOCK="$TEMP_PROJECT/delta-block.sh"
-awk '/^# The FULL panel is whatever was recorded in status.json panel_roles on the first$/{f=1} f{print} f&&/^```$/{exit}' "$PIPELINE_MD" \
-  | grep -v '^```' | sed -e '/^FULL_PANEL=/d' > "$DELTA_BLOCK"
+# ---- the roster script the orchestrator prose calls (panel-roles.mjs, #164) --------------------
+PANEL_ROLES_MJS="$SCRIPTS_DIR/panel-roles.mjs"
+export CLAUDE_PROJECT_DIR="$TEMP_PROJECT"
 
 make_diff_repo() {  # $1 = dest dir, remaining args = paths added in the HEAD commit
   local dir="$1"; shift
@@ -47,30 +41,30 @@ SEC_REPO="$TEMP_PROJECT/repo-sec"; make_diff_repo "$SEC_REPO" "src/auth/session.
 FE_REPO="$TEMP_PROJECT/repo-fe"; make_diff_repo "$FE_REPO" "src/ui/Button.tsx"
 CLEAN_REPO="$TEMP_PROJECT/repo-clean"; make_diff_repo "$CLEAN_REPO" "docs/notes.txt"
 
-# run_panel <worktree> <cost_class> -> ROLES=...
+# run_panel <worktree> <cost_class> -> ROLES=... (standard tier)
 run_panel() {
-  WORKTREE_PATH="$1" CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" COST_CLASS="$2" ARTIFACT_DIR="$TEMP_PROJECT/no-artifacts" \
-    bash -c ". \"$PANEL_BLOCK\"; printf 'ROLES=%s\n' \"\$PANEL_ROLES\"" 2>/dev/null | grep '^ROLES='
+  printf '{"risk_tier":"standard","cost_class":"%s"}' "$2" > "$TEMP_PROJECT/st-panel.json"
+  node "$PANEL_ROLES_MJS" full --status "$TEMP_PROJECT/st-panel.json" --worktree "$1" \
+    --artifact-dir "$TEMP_PROJECT/no-artifacts" > "$TEMP_PROJECT/panel.out" 2>/dev/null
+  printf 'ROLES=%s\n' "$(tr '\n' ' ' < "$TEMP_PROJECT/panel.out" | sed 's/ $//')"
 }
-# run_delta <worktree> <cost_class> [<artifact dir>] -> DELTA=... plus any PANEL-NOTE lines.
-# OBJECTING_ROLES is left UNSET so the block derives the seed from peer-review.json itself.
+# run_delta <worktree> <cost_class> [<artifact dir>] -> DELTA=<roles> plus any PANEL-NOTE lines. The
+# first-round panel on the record is "ba dev qa secops dba".
 run_delta() {
-  env -u OBJECTING_ROLES WORKTREE_PATH="$1" CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" COST_CLASS="$2" \
-    ARTIFACT_DIR="${3:-$TEMP_PROJECT/art-empty}" FIRST_ROUND_HEAD="origin/main" FULL_PANEL="ba dev qa secops dba" \
-    bash -c ". \"$DELTA_BLOCK\"; printf 'DELTA=%s\n' \"\$ROLES_TO_MERGE\"" 2>/dev/null
+  printf '{"panel_roles":["ba","dev","qa","secops","dba"],"cost_class":"%s"}' "$2" > "$TEMP_PROJECT/st-delta.json"
+  local art="${3:-$TEMP_PROJECT/art-empty}"
+  node "$PANEL_ROLES_MJS" delta --status "$TEMP_PROJECT/st-delta.json" --worktree "$1" --first-round-head origin/main \
+    --peer-review "$art/peer-review.json" > "$TEMP_PROJECT/delta.out" 2> "$TEMP_PROJECT/delta.err"
+  printf 'DELTA=%s\n' "$(tr '\n' ' ' < "$TEMP_PROJECT/delta.out" | sed 's/ $//')"
+  grep '^PANEL-NOTE' "$TEMP_PROJECT/delta.err"
 }
-
-suite "the blocks under test were extracted"
-
-assert_eq "the panel block is non-empty" "$([[ -s "$PANEL_BLOCK" ]] && echo yes || echo no)" "yes"
-assert_eq "the delta block is non-empty" "$([[ -s "$DELTA_BLOCK" ]] && echo yes || echo no)" "yes"
 
 suite "delta seating: the seed is the roles holding OPEN BLOCKER ids"
 
 ART="$TEMP_PROJECT/art-blockers"; mkdir -p "$ART"
 printf '%s' '{"qa":{"verdict":"REQUEST_CHANGES","materiality":{"open_blocker_ids":["qa-1"],"blocks_merge":true}},"ba":{"verdict":"APPROVE_WITH_NOTES","verdict_as_returned":"REQUEST_CHANGES","materiality":{"open_blocker_ids":[],"blocks_merge":false}},"secops":{"verdict":"APPROVE","materiality":{"open_blocker_ids":[],"blocks_merge":false}}}' > "$ART/peer-review.json"
 OUT="$(run_delta "$CLEAN_REPO" product "$ART")"
-assert_contains "a role holding an open blocker id is seeded" "$OUT" "DELTA= qa"
+assert_contains "a role holding an open blocker id is seeded" "$OUT" "DELTA=qa"
 assert_not_contains "a role whose REQUEST_CHANGES was downgraded to a note is NOT reseated" "$OUT" "ba"
 assert_not_contains "nor a standing approval" "$OUT" "secops"
 ART0="$TEMP_PROJECT/art-noblockers"; mkdir -p "$ART0"
@@ -79,10 +73,10 @@ assert_eq "CONTROL: no open blocker ids and a clean fix seats nobody" "$(run_del
 LEG="$TEMP_PROJECT/art-legacy"; mkdir -p "$LEG"
 printf '%s' '{"dba":{"verdict":"REQUEST_CHANGES","materiality":{"blocks_merge":true,"blocking_concerns":1}},"qa":{"verdict":"APPROVE","materiality":{"blocks_merge":false}}}' > "$LEG/peer-review.json"
 assert_eq "a LEGACY block with blocks_merge:true and no open_blocker_ids is reseated, not dropped" \
-  "$(run_delta "$CLEAN_REPO" product "$LEG")" "DELTA= dba"
+  "$(run_delta "$CLEAN_REPO" product "$LEG")" "DELTA=dba"
 BAD="$TEMP_PROJECT/art-unreadable"; mkdir -p "$BAD"; printf '{not json' > "$BAD/peer-review.json"
 OUT="$(run_delta "$CLEAN_REPO" product "$BAD")"
-assert_contains "an UNREADABLE peer-review.json seeds the FULL panel rather than nobody" "$OUT" "DELTA= ba dev qa secops dba"
+assert_contains "an UNREADABLE peer-review.json seeds the FULL panel rather than nobody" "$OUT" "DELTA=ba dev qa secops dba"
 assert_contains "and says so" "$OUT" "PANEL-NOTE: open blocker ids UNREADABLE"
 
 suite "delta seating: a role by surface only where its MERGE-CLASS surface changed"
