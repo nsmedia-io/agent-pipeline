@@ -717,3 +717,6 @@ assert_eq "NON-ZERO CONTROL for the row above: the comparison is not two empty s
    ' "$PAY_VIA_FILE")" "carried"
 
 finish
+
+# run.sh runs this suite alone, after the parallel pool (#162): it measures wall time against a budget.
+# pipeline-tests: serial

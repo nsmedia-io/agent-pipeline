@@ -4,6 +4,34 @@ Behaviour changes that reach an existing project at its next plugin update, newe
 
 Entries keep the numbers they carried in the README's old Upgrading list, so a cross-reference such as "item 29 below" still resolves. Measured figures in an entry describe the commit that entry shipped with and are not re-taken afterwards.
 
+## Unreleased
+
+### What changes for you
+
+- Nothing reaches an installed plugin: `tests/` is outside the published plugin path. This is for anyone running the suite on this repo.
+
+### In this release
+
+- **The suite runs in two modes (#162).** `bash tests/run.sh` is the routine mode. `PIPELINE_TESTS_FULL=1 bash tests/run.sh` is the full mode, and a release is cut on `PIPELINE_TESTS_FULL=1 bash tests/run-linux.sh` (CLAUDE.md, Versioning). Full mode adds three release-only cells: the nested run of the whole suite inside a fresh checkout (`test-issue17-integration.sh` AC41(c)), the dense-cell climb and its killed-at-the-timeout pair (`test-pretooluse-timeout-bound.sh` AC3 + AC11), and the 1100-length refill-boundary sweep (`test-pretooluse-gate-verdicts.sh` #140 AC13; routine drives every 11th length, 100 of them). A routine run records each cell it did not run by name, and a routine cell runs `run.sh` both ways on a probe tree to prove the switch works.
+- **Suites run in parallel.** `run.sh` runs 4 suites at a time (`PIPELINE_TESTS_JOBS`), buffers each suite's output and prints it whole, so no two suites interleave. A suite ending in `# pipeline-tests: serial` runs alone after the pool: the four that measure wall time against a budget (`test-pretooluse-timeout-bound.sh`, `-gate-verdicts.sh`, `-gate-declaration.sh`, `-timeout-knowledge.sh`) and `test-issue17-integration.sh`, which adds worktrees to the checkout.
+- **Per-suite wall time.** `run.sh` prints each suite's elapsed time and, before the verdict, every suite slowest first with the run total, mode and job count.
+- **A baked test image.** `tests/Dockerfile` adds zsh and jq to the pinned `node:22-bookworm`. `run-linux.sh` builds it locally, tagged with the Dockerfile's checksum, and no longer runs apt-get on every run. `PIPELINE_TESTS_IMAGE` still overrides it; that image installs zsh and jq when it lacks them.
+
+### Measured: whole-suite wall time on Linux
+
+One run each, `run.sh` wall time only (image pull and package install excluded). Population: `node:22-bookworm` container (the baked image for routine and full) under Docker 29.5.3 on WSL2 (kernel 6.18.33), `--cpus 6` on a 16-core Windows 11 host that was also running other agents' containers; non-root user; a fresh LF clone of the commit; zsh and jq installed; `PIPELINE_TESTS_REQUIRE_CAPABILITIES=1`. Before is 334c122 (0.44.0 plus the timing lines, run serially as 0.44.0 did); routine and full are 96331f8. All three runs: 65 suites, 0 failed.
+
+| | before | routine | full |
+|---|---|---|---|
+| run.sh wall time | 1015.9 s | 209.1 s (79.4% less) | 844.4 s |
+| assertions passed | 6911 | 5905 | 6921 |
+| test-issue17-integration.sh | 511.4 s | 8.0 s | 428.0 s |
+| test-pretooluse-timeout-bound.sh | 178.6 s | 62.2 s | 184.3 s |
+| test-pretooluse-gate-verdicts.sh | 162.4 s | 78.5 s | 170.8 s |
+| the other 62 suites, summed | 163.5 s | 193.1 s | not summed |
+
+Full mode ran every assertion the before run did: with commit shas, temp paths and digits normalised, each before label occurs in the full run at least as many times as in the before run (0 missing of 6911). The full run adds the 10 mode-proof and release-step rows. Routine drops 1021 label occurrences, all inside the three release-only cells. A Windows Git Bash figure is not taken here (a run takes about 4 hours) and is a follow-up.
+
 ## 0.44.0 (2026-09-17)
 
 ### What changes for you

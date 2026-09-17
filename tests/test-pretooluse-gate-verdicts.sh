@@ -1702,14 +1702,22 @@ hd13_cmd() {  # <n pad bytes> -> the full command string for that pad length
 # reason -- stopping the body early rather than genuinely reaching the real terminator) without
 # necessarily reddening the sweep above, which is why (i) and (ii) are both asserted rather than
 # either alone.
+# ROUTINE RUNS A REPRESENTATIVE SUBSET (#162): every 11th pad length, 100 of the 1100, which still
+# spans both window periods at a step coprime to 512. The whole sweep is release-only (about 90 s
+# on Linux) and runs under PIPELINE_TESTS_FULL=1; the routine run records that it did not.
+HD13_NS="$(seq 0 1099)"
+if ! full_mode_only "#140 AC13 the other 1000 pad lengths of the refill-boundary sweep (routine drives every 11th, 0..1089)"; then
+  HD13_NS="$(seq 0 11 1099)"
+fi
 HD13_FAIL=""
-for n in $(seq 0 1099); do
+for n in $HD13_NS; do
   v="$(sub_verdict "$P4" "$(hd13_cmd "$n")")"
   [[ "$v" == "deny" ]] || HD13_FAIL="$HD13_FAIL $n"
   assert_eq "#140 AC13: refill-boundary sweep, pad=${n} bytes (cat <<-EOF / 6 prose lines / ${n} pad bytes / TAB-EOF / git add -A) -> deny" \
     "$v" "deny"
 done
-record "#140 AC13: swept 1100 consecutive pad lengths (0..1099, spanning >1024 bytes = >2 internal 512-byte scanner-window periods). Lengths returning the wrong verdict (none instead of deny) at the reviewed commit:${HD13_FAIL:- none}"
+[[ "$PIPELINE_TESTS_FULL_MODE" == "1" ]] && record "#140 AC13: swept 1100 consecutive pad lengths (0..1099, spanning >1024 bytes = >2 internal 512-byte scanner-window periods). Lengths returning the wrong verdict (none instead of deny) at the reviewed commit:${HD13_FAIL:- none}"
+[[ "$PIPELINE_TESTS_FULL_MODE" == "1" ]] || record "#140 AC13 ROUTINE SUBSET: swept 100 pad lengths (0..1089, step 11). Lengths returning the wrong verdict (none instead of deny) at the reviewed commit:${HD13_FAIL:- none}"
 
 # THE REAL-SHELL-ORACLE NON-ZERO CONTROL, reusing this file's own real_argv() idiom (defined above,
 # THE ORACLE section) rather than a second implementation of the same shim. Sampled at pad=457,
@@ -1881,3 +1889,6 @@ assert_eq "#140/#145 PIN (d): same body, with NO trailing git command at all aft
 record "#140/#145 PIN: the discrimination twin for this block (quoted-delimiter <<'EOF' + backtick -> none) is already asserted above as AC12(d)/2 and is cited rather than duplicated"
 
 finish
+
+# run.sh runs this suite alone, after the parallel pool (#162): it measures wall time against a budget.
+# pipeline-tests: serial

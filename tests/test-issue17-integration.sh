@@ -371,7 +371,9 @@ suite "AC41(c): run.sh passes in a FRESH CHECKOUT, not only in the worktree it w
 # ONE LEVEL OF NESTING, bounded by an environment variable rather than by a comment: the inner
 # run.sh runs this same file, and an unguarded clone-and-run recurses forever. The inner run
 # reports that it deferred, so the guard is visible in the transcript instead of being a silent
-# skip. Cost: this roughly doubles run.sh's wall time, which is the price of the statement.
+# skip. Cost: this roughly doubles run.sh's wall time, which is the price of the statement, so
+# the nested run is RELEASE-ONLY (#162): it runs under PIPELINE_TESTS_FULL=1, and a routine run
+# records that it did not. The clone and its four premises stay routine; they cost seconds.
 if [[ -n "${PIPELINE_TESTS_FRESH_CHECKOUT:-}" ]]; then
   assert_eq "nested run: the fresh-checkout case defers to the OUTER run (one level, by design)" \
     "deferred" "deferred"
@@ -397,6 +399,7 @@ else
   assert_eq "and origin/main resolves in it, which is what the diff-based blocks need" \
     "$(git -C "$FRESH" rev-parse --verify origin/main >/dev/null 2>&1 && echo resolves || echo MISSING)" "resolves"
 
+  if full_mode_only "AC41(c) the nested run of the whole suite inside the fresh checkout"; then
   FRESH_OUT="$(PIPELINE_TESTS_FRESH_CHECKOUT=1 bash "$FRESH/tests/run.sh" </dev/null 2>&1)"
   FRESH_RC="$?"
   assert_eq "run.sh exits 0 in the fresh checkout" "$FRESH_RC" "0"
@@ -447,7 +450,44 @@ else
   # this case is silently recursing.
   assert_contains "the inner run took the nesting guard, so this is one level deep and not many" \
     "$FRESH_OUT" "the fresh-checkout case defers to the OUTER run"
+  fi
 fi
+
+suite "AC41(c) MODE PROOF: run.sh switches the release-only cells on and off, and says which"
+
+# The cheap cell that keeps the full mode honest in every routine run (#162). A scratch tree holding
+# THIS tree's run.sh and harness.sh plus one probe suite with a full_mode_only cell is run both ways.
+# Routine must record the skip and not run the cell; full must run it and not record a skip. If the
+# variable stopped reaching the suites, or the helper stopped honouring it, the nested run above
+# would be skipped in full mode too and a release would be cut without it.
+MODE_TREE="$TEMP_PROJECT/mode-proof"
+mkdir -p "$MODE_TREE"
+cp "$TESTS_DIR/run.sh" "$TESTS_DIR/harness.sh" "$MODE_TREE/"
+cat > "$MODE_TREE/test-mode-probe.sh" <<'EOF'
+. "$(dirname "${BASH_SOURCE[0]}")/harness.sh"
+suite "mode probe"
+if full_mode_only "the probe's release-only cell"; then
+  assert_eq "PROBE: the release-only cell ran" "ran" "ran"
+fi
+finish
+EOF
+MODE_ROUTINE_OUT="$(env -u PIPELINE_TESTS_FULL bash "$MODE_TREE/run.sh" </dev/null 2>&1)"
+MODE_ROUTINE_RC="$?"
+MODE_FULL_OUT="$(PIPELINE_TESTS_FULL=1 bash "$MODE_TREE/run.sh" </dev/null 2>&1)"
+MODE_FULL_RC="$?"
+assert_eq "routine: run.sh exits 0 on the probe tree" "$MODE_ROUTINE_RC" "0"
+assert_contains "routine: run.sh names its mode" "$MODE_ROUTINE_OUT" "mode=routine"
+assert_contains "routine: the skipped cell is RECORDED by name, not dropped in silence" \
+  "$MODE_ROUTINE_OUT" "RELEASE-ONLY, not run in routine mode (PIPELINE_TESTS_FULL=1 runs it): the probe's release-only cell"
+assert_not_contains "routine: and the cell did not run" "$MODE_ROUTINE_OUT" "PROBE: the release-only cell ran"
+assert_eq "full: run.sh exits 0 on the probe tree" "$MODE_FULL_RC" "0"
+assert_contains "full: run.sh names its mode" "$MODE_FULL_OUT" "mode=full"
+assert_contains "full: the release-only cell RAN" "$MODE_FULL_OUT" "PROBE: the release-only cell ran"
+assert_not_contains "full: and no skip was recorded" "$MODE_FULL_OUT" "RELEASE-ONLY, not run"
+assert_contains "the Linux runner passes PIPELINE_TESTS_FULL into the container, so full mode reaches the Linux answer" \
+  "$RUNNER_CODE" 'PIPELINE_TESTS_FULL=${PIPELINE_TESTS_FULL:-}'
+assert_contains "and the release step (CLAUDE.md, Versioning) requires the full-mode Linux run, so a release is not cut on routine mode" \
+  "$(grep -A2 '^- \*\*Versioning\.\*\*' "$REPO_ROOT/CLAUDE.md" | tr '\n' ' ')" "PIPELINE_TESTS_FULL=1 bash tests/run-linux.sh"
 
 # =============================================================================
 # AC24 -- THE COMMITS SPLIT THE WAY THE SPEC REQUIRES.
@@ -1065,3 +1105,7 @@ assert_eq "CONTROL: the .md sibling really does not, so the README's Markdown cl
   "$(excl 'docs/migrations/upgrade-v2.md')" "false"
 
 finish
+
+# run.sh runs this suite alone, after the parallel pool (#162): it adds worktrees to the checkout
+# and, in full mode, runs the whole suite again inside a fresh clone.
+# pipeline-tests: serial

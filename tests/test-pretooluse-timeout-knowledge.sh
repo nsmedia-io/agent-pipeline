@@ -411,3 +411,6 @@ assert_eq "[PHASE-5] AC18: and the check exits 0 on the unmodified tree" \
 record "COMPARED on the unmodified tree: count=[$KS_BASE_COMPARED] literals=[$KS_BASE_LITERALS] mismatched=[$KS_BASE_MISMATCH]"
 
 finish
+
+# run.sh runs this suite alone, after the parallel pool (#162): it measures wall time against a budget.
+# pipeline-tests: serial

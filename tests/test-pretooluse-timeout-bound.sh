@@ -438,6 +438,11 @@ assert_eq "AC11 FIT-FLOOR PREMISE: the intercept the fit subtracts is a fraction
   "$([[ "$DENSE_FIT_FLOOR" -ge 0 && "$DENSE_FIT_FLOOR" -lt "$CAL_MS1" ]] && echo "separated" || echo "INTERCEPT $DENSE_FIT_FLOOR ms against a ${CAL_MS1} ms smallest cell")" \
   "separated"
 
+# RELEASE-ONLY FROM HERE TO THE DISCRIMINATION ROW (#162). The climb drives the dense cell past the
+# declared timeout on purpose and arm two then waits out the kill: about two minutes on Linux, by
+# design. The pad search, both calibration cells and the floor above stay in routine runs, so a
+# fixture that can no longer DENY or separate a slope still reddens every run.
+if full_mode_only "AC3 + AC11 the climb to the dense cell past the declared timeout, arm one, and arm two killed at it"; then
 # THE CLIMB. Each step re-estimates the exponent from the two most recent MEASURED points with the
 # floor subtracted, caps the candidate at 32x the largest measured count and at the ceiling, and
 # runs it under a wall-clock bound of twice the aim. A killed probe is not a stall: it fixes an
@@ -485,6 +490,7 @@ assert_eq "AC11 ARM TWO was really KILLED at ${DECLARED_S:-?} s rather than fini
 assert_eq "AC11 DISCRIMINATION: the pair discriminates -- arm one emitted $DENSE_OUT_BYTES bytes at $DENSE_MS ms, arm two emitted $KILL_BYTES at the ${DECLARED_S:-?} s kill. If arm one finished INSIDE the kill the pair proves nothing" \
   "$([[ "$DENSE_MS" -gt "$DECLARED_MS" ]] && echo discriminates || echo "ARM ONE FINISHED IN $DENSE_MS ms, INSIDE the ${DECLARED_MS} ms kill -- no discrimination at this length")" \
   "discriminates"
+fi
 
 # ===============================================================================================
 suite "AC11 SIZING METHOD: the climb driven against KNOWN cost curves, including the recorded one"
@@ -589,6 +595,8 @@ README_ITEM27="$(grep -n '^27\. ' "$MAT/$CHANGELOG_REL" 2>/dev/null | head -1 | 
 README_COST4="$(sed -n "${README_ITEM27:-1}p" "$MAT/$CHANGELOG_REL" 2>/dev/null)"
 assert_eq "VACUITY: CHANGELOG item 27 was located and is non-empty (a grep that found nothing makes every disclosure row below pass by scanning an empty string)" \
   "$([[ "${#README_COST4}" -gt 2000 ]] && echo located || echo "ONLY ${#README_COST4} BYTES AT LINE ${README_ITEM27:-none}")" "located"
+# Release-only with the climb above (#162): the verdict is taken over the cell the climb accepted.
+if full_mode_only "AC3 the cell verdict and its disclosure row, taken over the climbed dense cell"; then
 DENSE_UNCOVERED="$([[ "$DENSE_ADJ" -gt "$DECLARED_MS" ]] && echo uncovered || echo covered)"
 record "AC3 CELL VERDICT under the inequality: adjusted $DENSE_ADJ ms against declared $DECLARED_MS ms -> $DENSE_UNCOVERED"
 assert_eq "AC3: the uncovered dense cell is DISCLOSED -- CHANGELOG item 27 cost (4) names the source file the body is built from, so a reader holding only the commit can rebuild it" \
@@ -596,6 +604,7 @@ assert_eq "AC3: the uncovered dense cell is DISCLOSED -- CHANGELOG item 27 cost 
      elif [[ "$README_COST4" == *"$DENSEST_REL"* ]]; then echo disclosed
      else echo "NOT DISCLOSED: item 27 cost (4) does not name $DENSEST_REL"; fi)" \
   "$([[ "$DENSE_UNCOVERED" == "covered" ]] && echo "n/a: this cell is covered at the declared bound" || echo disclosed)"
+fi
 
 # ===============================================================================================
 suite "AC4: the population is a RULE over the tree at check time, not a list of filenames"
@@ -1131,3 +1140,6 @@ assert_eq "AC16: the caller's command text appears in NO child's argv and in NO 
 record "LOAD at end $(tb_loadavg) (was $LOAD_AT_START at start). Every millisecond figure above is a min-of-3 or a single run as its own row states, taken on $(uname -sr); a figure without its load is not re-takeable."
 
 finish
+
+# run.sh runs this suite alone, after the parallel pool (#162): it measures wall time against a budget.
+# pipeline-tests: serial
