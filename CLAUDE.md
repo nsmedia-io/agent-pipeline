@@ -43,7 +43,7 @@ file reads as a one-off SyntaxError (see `tests/run.sh` header).
   `pipeline_md_concat` in `tests/harness.sh`; a new phase file goes in its `PIPELINE_MD_PARTS`. Editing prose can redden a test; that is the test
   working. Read the failing assertion's label before changing either side.
 - **The replicated block.** `## The property, not the fix` is byte-identical in the nine agent
-  files plus `pipeline.md`, with a sha1 digest on the line after the span. Edit all ten
+  files plus `orchestrator/phase-4-panel-preamble.md`, with a sha1 digest on the line after the span. Edit all ten
   together and update the digest line in all ten.
 - **Config keys are a closed set.** A new `pipeline.config.json` key needs a row in
   `scripts/config-doctor.mjs`, the README table, and `pipeline.config.example.json`.

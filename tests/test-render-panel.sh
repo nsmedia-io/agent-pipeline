@@ -164,7 +164,7 @@ CACHE="$(MOD="$RENDER" ROOT="$PLUGIN_ROOT" node --input-type=module -e '
 import { readFileSync } from "node:fs";
 const m = await import(process.env.MOD);
 const root = process.env.ROOT;
-const md = readFileSync(root + "/commands/pipeline.md", "utf8");
+const md = m.readPreambleMarkdown(root);
 const lenses = m.loadLenses(root);
 const one = (issue, tier, worktree, head, pluginRoot, delta) => m.assemble({
   status: { issue_number: issue, risk_tier: tier, panel_roles: ["qa", "secops", "dba"] },
@@ -233,11 +233,11 @@ write_status standard '["ba"]'
 render --status "$STATUS" --worktree "$WT" --plugin-root "$PLUGIN_ROOT" --delta "qa"
 assert_eq "--delta without --first-round-head exits non-zero" "$RC" "1"
 
-# A plugin root whose command file lost its markers must refuse rather than render an empty preamble.
+# A plugin root whose preamble file (orchestrator/phase-4-panel-preamble.md) lost its markers must refuse rather than render an empty preamble.
 FAKE_ROOT="$TEMP_PROJECT/fake-root"
-mkdir -p "$FAKE_ROOT/scripts" "$FAKE_ROOT/commands"
+mkdir -p "$FAKE_ROOT/scripts" "$FAKE_ROOT/orchestrator"
 cp "$PLUGIN_ROOT/scripts/panel-lenses.json" "$FAKE_ROOT/scripts/"
-printf '# no markers here\n' > "$FAKE_ROOT/commands/pipeline.md"
+printf '# no markers here\n' > "$FAKE_ROOT/orchestrator/phase-4-panel-preamble.md"
 render --status "$STATUS" --worktree "$WT" --plugin-root "$FAKE_ROOT"
 assert_eq "a command file without the PHASE4-PREAMBLE markers exits non-zero" "$RC" "2"
 assert_contains "the failure names the markers" "$ERR" "PHASE4-PREAMBLE"

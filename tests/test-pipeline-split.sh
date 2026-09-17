@@ -63,10 +63,15 @@ assert_eq "and every file its loading map names exists (a row pointing nowhere i
 sed 's/`phase-3-4-gate.md`/`phase-3-4-GONE.md`/g' "$CORE" > "$NEW_TMPDIR/core-mutated.md"
 assert_eq "NON-ZERO CONTROL: the naming check sees a file name removed from the core" \
   "$(grep -cF '`phase-3-4-gate.md`' "$NEW_TMPDIR/core-mutated.md" | tr -d ' ')" "0"
-assert_eq "the renderer's preamble markers stay in the core, the one file scripts/render-panel.mjs reads" \
-  "$(grep -c '^<!-- BEGIN PHASE4-PREAMBLE -->$\|^<!-- END PHASE4-PREAMBLE -->$' "$CORE" | tr -d ' ')" "2"
-assert_eq "and appear in no phase file (a second copy would be a preamble the renderer never renders)" \
-  "$(cat "$PARTS_DIR"/*.md | grep -cE '^<!-- (BEGIN|END) PHASE4-PREAMBLE -->$' | tr -d ' ')" "0"
+PREAMBLE_MD="$PARTS_DIR/phase-4-panel-preamble.md"
+assert_eq "the renderer's preamble markers are in orchestrator/phase-4-panel-preamble.md, the one file scripts/render-panel.mjs reads" \
+  "$(grep -c '^<!-- BEGIN PHASE4-PREAMBLE -->$\|^<!-- END PHASE4-PREAMBLE -->$' "$PREAMBLE_MD" | tr -d ' ')" "2"
+assert_eq "and appear in no other orchestrator file (a second copy would be a preamble the renderer never renders)" \
+  "$(for f in "$CORE" "$PARTS_DIR"/*.md; do [[ "$f" == "$PREAMBLE_MD" ]] || cat "$f"; done | grep -cE '^<!-- (BEGIN|END) PHASE4-PREAMBLE -->$' | tr -d ' ')" "0"
+assert_eq "the renderer names that file (moving the preamble again moves this pin with it)" \
+  "$(grep -cF '"orchestrator", "phase-4-panel-preamble.md"' "$PLUGIN_ROOT/scripts/render-panel.mjs" | tr -d ' ')" "1"
+assert_eq "the core no longer carries the preamble (the orchestrator loads the core on every run and never acts on it)" \
+  "$(grep -cF 'Phase 4 peer review for #<issue>.' "$CORE" | tr -d ' ')" "0"
 
 suite "a phase file is not a command, and the rationale file is loaded by no prompt"
 

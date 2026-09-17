@@ -50,14 +50,15 @@ assert_contains "the token figures are labelled an estimate" "$OUT_TXT" "an esti
 assert_contains "a consumer tier is named, not silently mapped" "$OUT_TXT" 'risk_tier "money" is not a plugin tier'
 assert_contains "a consumer role with no plugin lens is named" "$OUT_TXT" "skipped: ledger"
 assert_contains "every agent definition is weighed" "$OUT_TXT" "agents/secops.md"
-assert_contains "pipeline.md is split per phase section" "$OUT_TXT" "Phase 4: Peer Review Panel"
+assert_contains "each orchestrator phase file is weighed" "$OUT_TXT" "orchestrator/phase-4-panel.md"
+assert_contains "the typical standard-tier load set is reported against the baseline" "$OUT_TXT" "% of baseline"
 
 J="$(node "$PW" --fixture "$FX" --json)"
 FIG="$(J="$J" MOD="$RENDER" ROOT="$PLUGIN_ROOT" node --input-type=module -e '
 import { readFileSync } from "node:fs";
 const r = JSON.parse(process.env.J);
 const m = await import(process.env.MOD);
-const pre = m.extractPreamble(readFileSync(process.env.ROOT + "/commands/pipeline.md", "utf8")) + "\n\n" + m.RUN_DATA_NOTE + "\n\n";
+const pre = m.extractPreamble(m.readPreambleMarkdown(process.env.ROOT)) + "\n\n" + m.RUN_DATA_NOTE + "\n\n";
 const ac = r.artifacts.tables.find((t) => t.file === "spec.json" && t.path === "$.acceptance_criteria");
 const qaDelta = r.panel.delta.dispatches.find((d) => d.role === "qa");
 console.log([
@@ -67,9 +68,11 @@ console.log([
   "toon_smaller=" + Boolean(ac && ac.toon_bytes < ac.json_bytes),
   "delta_qa=" + Boolean(qaDelta),
   "prefix_dominates=" + r.panel.full.dispatches.every((d) => d.static_prefix.bytes > d.run_data.bytes),
+  "typical_le_half=" + (r.orchestrator.load_sets.find((l) => l.name === "typical-standard")?.pct_of_baseline <= 50),
+  "preamble_not_loaded=" + r.orchestrator.load_sets.every((l) => !l.files.includes("orchestrator/phase-4-panel-preamble.md")),
 ].join(" "));
 ')"
-for k in static=true est=true table_found=true toon_smaller=true delta_qa=true prefix_dominates=true; do
+for k in static=true est=true table_found=true toon_smaller=true delta_qa=true prefix_dominates=true typical_le_half=true preamble_not_loaded=true; do
   assert_contains "json report: $k" "$FIG" "$k"
 done
 assert_eq "the fixture is not modified" "$(cd "$FX" && cat -- * | cksum)" "$BEFORE"

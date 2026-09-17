@@ -1,5 +1,5 @@
 {
-  "_comment": "The ONE source of the Phase 4 lens line per panel role (#157). render-panel.mjs appends the role's lens to the shared preamble it slices out of commands/pipeline.md; the Workflow block in that file shows the SHAPE and must not carry a second copy of these strings. agentType is the namespaced subagent name the Workflow tool dispatches; the role key is the panel_roles token and the shard suffix (peer-review.<role>.json). # CUSTOMIZE: a project may add a role here only if it also ships the agent.",
+  "_comment": "The ONE source of the Phase 4 lens line per panel role (#157). render-panel.mjs appends the role's lens to the shared preamble it slices out of orchestrator/phase-4-panel-preamble.md; the Workflow block in that file shows the SHAPE and must not carry a second copy of these strings. agentType is the namespaced subagent name the Workflow tool dispatches; the role key is the panel_roles token and the shard suffix (peer-review.<role>.json). # CUSTOMIZE: a project may add a role here only if it also ships the agent.",
   "roles": {
     "ba": {
       "agentType": "pipeline:ba",

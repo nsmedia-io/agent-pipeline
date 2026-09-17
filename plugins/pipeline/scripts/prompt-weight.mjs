@@ -4,8 +4,10 @@
 //   node prompt-weight.mjs [--plugin-root <dir>] [--fixture <issue-artifact-dir>] [--json]
 //
 // Reports:
-//   1. orchestrator: the command files, and commands/pipeline.md split at its `## ` headings, so a
-//      per-phase load can be read off (today the slash command loads the whole file in every phase);
+//   1. orchestrator: the command files, each file under orchestrator/ (the /pipeline core loads one
+//      when its phase starts; orchestrator/phase-4-panel-preamble.md is rendered into the panel
+//      prompts and never loaded by the orchestrator), and the bytes a run loads for each named
+//      LOAD SET below, against the single-file baseline;
 //   2. agents: each agent definition under agents/;
 //   3. with --fixture: the rendered Phase 4 panel prompts for that issue (per role: static prefix,
 //      run data, total), the cacheable static prefix, and the run data encoded as JSON vs TOON;
@@ -28,7 +30,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { isMain } from "./lib.mjs";
 import { encode as toon } from "./toon.mjs";
-import { assemble, loadLenses, openBlockerMap } from "./render-panel.mjs";
+import { assemble, loadLenses, openBlockerMap, readPreambleMarkdown } from "./render-panel.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const ESTIMATOR = "ceil(chars/4), an estimate, not a tokenizer count";
@@ -81,11 +83,72 @@ function mdFiles(dir) {
     .sort();
 }
 
+// What the orchestrator loads, per kind of run, in the layout where commands/pipeline.md is a core
+// and each phase is a file under orchestrator/ read when its row in the core's loading map fires.
+// The lists follow that map; a file named here that does not exist is an error, not a zero.
+// BASELINE: before the split, every run loaded commands/pipeline.md whole plus the three rule files
+// it told the orchestrator to read (voice.md, evidence.md, evidence-controls.md): 288,089 bytes at
+// 6a835a5 (0.43.0). It is a recorded figure for that commit, not re-measured here.
+export const BASELINE = { bytes: 288089, population: "commands/pipeline.md + voice.md + evidence.md + evidence-controls.md at 6a835a5 (0.43.0)" };
+const TYPICAL_STANDARD = [
+  "commands/pipeline.md",
+  "orchestrator/phase-0-setup.md", "orchestrator/status-record.md", "orchestrator/phase-0.5-map.md",
+  "orchestrator/phase-1-ba.md", "orchestrator/phase-2-lite.md", "orchestrator/phase-3-impl.md",
+  "orchestrator/phase-3-4-gate.md", "orchestrator/phase-4-panel.md", "orchestrator/phase-4-verdict.md",
+  "orchestrator/phase-5-archive.md", "orchestrator/owner-handoff.md", "voice.md",
+];
+export const LOAD_SETS = {
+  "typical-standard": {
+    label: "typical standard-tier run: fresh ask, clean tree, no open questions, no frontend, one panel round ending APPROVE_WITH_NOTES, through Phase 5",
+    files: TYPICAL_STANDARD,
+  },
+  architectural: {
+    label: "architectural run, one panel round, frontend-scoped, with a migration, no delta round, no loop back",
+    files: [
+      ...TYPICAL_STANDARD,
+      "orchestrator/phase-2-review.md", "orchestrator/phase-2.5-design.md", "orchestrator/art-director-contract.md",
+      "orchestrator/phase-3-architectural.md", "orchestrator/live-verification.md", "orchestrator/dispatch-routing.md",
+      "evidence-controls.md",
+    ],
+  },
+  "worst-case": {
+    label: "worst case: the core, every orchestrator file the core loads (delta round and loop-backs included) and all three rule files",
+    files: null, // computed: every orchestrator/*.md except the rendered preamble
+  },
+};
+export const RENDERED_NOT_LOADED = "orchestrator/phase-4-panel-preamble.md";
+
+export function loadSetWeight(pluginRoot) {
+  const out = [];
+  for (const [name, set] of Object.entries(LOAD_SETS)) {
+    const files = set.files || [
+      "commands/pipeline.md",
+      ...mdFiles(path.join(pluginRoot, "orchestrator")).map((f) => `orchestrator/${f}`).filter((f) => f !== RENDERED_NOT_LOADED),
+      "voice.md", "evidence.md", "evidence-controls.md",
+    ];
+    const text = files.map((f) => {
+      const abs = path.join(pluginRoot, f);
+      if (!existsSync(abs)) throw new Error(`load set ${name} names ${f}, which does not exist`);
+      return readFileSync(abs, "utf8");
+    });
+    const bytes = text.reduce((a, t) => a + Buffer.byteLength(t, "utf8"), 0);
+    const chars = text.reduce((a, t) => a + t.length, 0);
+    out.push({
+      name, label: set.label, files, bytes, est_tokens: Math.ceil(chars / 4),
+      pct_of_baseline: Math.round((1000 * bytes) / BASELINE.bytes) / 10,
+    });
+  }
+  return out;
+}
+
 export function orchestratorWeight(pluginRoot) {
-  const dir = path.join(pluginRoot, "commands");
-  const files = mdFiles(dir).map((f) => ({ file: `commands/${f}`, ...weigh(readFileSync(path.join(dir, f), "utf8")) }));
-  const md = readFileSync(path.join(dir, "pipeline.md"), "utf8");
-  return { files, pipeline_sections: sections(md) };
+  const weighDir = (rel) =>
+    mdFiles(path.join(pluginRoot, rel)).map((f) => {
+      const text = readFileSync(path.join(pluginRoot, rel, f), "utf8");
+      const first = sections(text).find((x) => !x.title.startsWith("("));
+      return { file: `${rel}/${f}`, title: first ? first.title : "", ...weigh(text) };
+    });
+  return { files: weighDir("commands"), phase_files: weighDir("orchestrator"), baseline: BASELINE, load_sets: loadSetWeight(pluginRoot) };
 }
 
 export function agentWeight(pluginRoot) {
@@ -170,7 +233,7 @@ export function panelWeight(fixture, pluginRoot) {
     head: typeof status.head === "string" && /^[0-9a-f]{7,40}$/.test(status.head) ? status.head : "f".repeat(40),
     pluginRoot: "/plugins/pipeline",
     lenses,
-    preambleMarkdown: readFileSync(path.join(pluginRoot, "commands", "pipeline.md"), "utf8"),
+    preambleMarkdown: readPreambleMarkdown(pluginRoot),
   };
   const full = assemble(common);
   const deltaRoles = roles.filter((r) => merged[r]).join(" ") || roles[0];
@@ -203,10 +266,16 @@ const cmp = (label, s) =>
   `  ${label.padEnd(58)} JSON ${String(s.json_bytes).padStart(8)} B / ${String(s.json_est_tokens).padStart(7)} est.tok   TOON ${String(s.toon_bytes).padStart(8)} B / ${String(s.toon_est_tokens).padStart(7)} est.tok   saved ${s.saved_pct}%`;
 
 export function formatText(r) {
-  const lines = [`Prompt weight. Tokens are estimated: ${r.estimator}.`, "", "Orchestrator command files (the /pipeline command loads pipeline.md whole in every phase):"];
-  for (const f of r.orchestrator.files) lines.push(row(f.file, f));
-  lines.push("", "commands/pipeline.md by `## ` section (what a per-phase split would load):");
-  for (const s of r.orchestrator.pipeline_sections) lines.push(row(s.title.slice(0, 58), s));
+  const o = r.orchestrator;
+  const lines = [`Prompt weight. Tokens are estimated: ${r.estimator}.`, "", "Command files (/pipeline loads commands/pipeline.md, the core, on every run):"];
+  for (const f of o.files) lines.push(row(f.file, f));
+  lines.push("", `Orchestrator phase files (each read when its phase starts; ${RENDERED_NOT_LOADED} is rendered into panel prompts, not loaded):`);
+  for (const f of o.phase_files) lines.push(row(f.file, f));
+  lines.push("", `Load sets, against the baseline of ${o.baseline.bytes} B (${o.baseline.population}):`);
+  for (const l of o.load_sets) {
+    lines.push(`${row(l.name, l)}  ${l.pct_of_baseline}% of baseline`);
+    lines.push(`    ${l.label}`);
+  }
   lines.push("", "Agent definitions:");
   for (const a of r.agents) lines.push(row(a.file, a));
   if (r.panel) {

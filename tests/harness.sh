@@ -363,10 +363,11 @@ new_tmpdir() {
 # file under orchestrator/, which the core tells the orchestrator to Read when that phase
 # starts. A suite that pins orchestrator prose, or extracts and RUNS a bash block from it, reads ALL
 # of that prose, concatenated in the FIXED order below: the core first, then the phase files in the
-# order the single file carried them before the split. So a pin follows a rule when the rule moves
+# order the single file carried them before the split (phase-4-panel-preamble.md first: it was the
+# core's closing appendix until render-panel.mjs learned to read it from its own file). So a pin follows a rule when the rule moves
 # between files, and a rule moved out of every file still reddens the pin. test-pipeline-split.sh
 # holds this list equal to the directory, so a new phase file cannot be left out of every pin.
-PIPELINE_MD_PARTS="phase-0-setup.md status-record.md phase-0.5-map.md phase-1-ba.md phase-2-lite.md phase-2-review.md phase-2.5-design.md phase-3-impl.md phase-3-architectural.md phase-3-4-gate.md live-verification.md phase-4-panel.md art-director-contract.md dispatch-routing.md phase-4-delta.md phase-4-verdict.md phase-5-archive.md loop-backs.md owner-handoff.md"
+PIPELINE_MD_PARTS="phase-4-panel-preamble.md phase-0-setup.md status-record.md phase-0.5-map.md phase-1-ba.md phase-2-lite.md phase-2-review.md phase-2.5-design.md phase-3-impl.md phase-3-architectural.md phase-3-4-gate.md live-verification.md phase-4-panel.md art-director-contract.md dispatch-routing.md phase-4-delta.md phase-4-verdict.md phase-5-archive.md loop-backs.md owner-handoff.md"
 
 # pipeline_md_concat [<plugin dir>] -> PIPELINE_MD_CONCAT=<registered tmpdir>/commands/pipeline.md
 # A global rather than an echo, for new_tmpdir's reason. The copy keeps the `commands/pipeline.md`

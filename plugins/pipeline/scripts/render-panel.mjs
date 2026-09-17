@@ -9,8 +9,9 @@
 // values COMPUTED:
 //
 //   - the reviewed sha is `git rev-parse HEAD` of the worktree, never typed;
-//   - the preamble is sliced out of commands/pipeline.md between two HTML-comment markers, so
-//     the prose the agents read is the prose the command file documents, with no second copy;
+//   - the preamble is sliced out of orchestrator/phase-4-panel-preamble.md between two HTML-comment
+//     markers, so the prose the agents read is the prose the plugin ships, with no second copy. It
+//     lives outside commands/pipeline.md so the orchestrator does not load ~25 KB it never acts on;
 //   - the lens per role comes from scripts/panel-lenses.json, the one lens table;
 //   - model and effort come from dispatch-model.mjs / dispatch-effort.mjs for (role, tier, 4,
 //     panel-lens, workflow), exactly as the dispatch sites are told to resolve them;
@@ -52,6 +53,13 @@ import { encode as toon } from "./toon.mjs";
 
 export const PREAMBLE_BEGIN = "<!-- BEGIN PHASE4-PREAMBLE -->";
 export const PREAMBLE_END = "<!-- END PHASE4-PREAMBLE -->";
+/** Where the marked block lives, relative to the plugin root. */
+export const PREAMBLE_FILE = path.join("orchestrator", "phase-4-panel-preamble.md");
+
+/** The markdown file carrying the preamble markers, read from a plugin root. */
+export function readPreambleMarkdown(pluginRoot) {
+  return readFileSync(path.join(pluginRoot, PREAMBLE_FILE), "utf8");
+}
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_PLUGIN_ROOT = path.resolve(HERE, "..");
@@ -78,12 +86,12 @@ export function parseArgs(argv) {
   return args;
 }
 
-/** Slice the preamble out of commands/pipeline.md: between the markers, fences stripped. */
+/** Slice the preamble out of orchestrator/phase-4-panel-preamble.md: between the markers, fences stripped. */
 export function extractPreamble(markdown) {
   const b = markdown.indexOf(PREAMBLE_BEGIN);
   const e = markdown.indexOf(PREAMBLE_END);
   if (b === -1 || e === -1 || e < b) {
-    throw new Error(`commands/pipeline.md carries no ${PREAMBLE_BEGIN} ... ${PREAMBLE_END} block`);
+    throw new Error(`orchestrator/phase-4-panel-preamble.md carries no ${PREAMBLE_BEGIN} ... ${PREAMBLE_END} block`);
   }
   const inner = markdown.slice(b + PREAMBLE_BEGIN.length, e);
   const lines = inner.split("\n");
@@ -330,7 +338,7 @@ function main(argv) {
     const status = JSON.parse(readFileSync(args.status, "utf8"));
     const head = readHead(args.worktree);
     const lenses = loadLenses(args.pluginRoot);
-    const md = readFileSync(path.join(args.pluginRoot, "commands", "pipeline.md"), "utf8");
+    const md = readPreambleMarkdown(args.pluginRoot);
     const peerReview = args.peerReview ? JSON.parse(readFileSync(args.peerReview, "utf8")) : null;
     const script = render({
       status,
