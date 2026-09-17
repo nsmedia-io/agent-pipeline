@@ -38,29 +38,19 @@ Do not implement. Do not review schema/infra/security. Hand back to the orchestr
 
 After BA returns:
 - Read `$PIPELINE_BASE/<issue>/spec.json` (the absolute path BA wrote to; your own checkout, so a cwd-relative `.pipeline/<issue>/spec.json` resolves to the same file, but read it absolutely to avoid the exact divergence this hardening fixes).
-- Validate required fields present: `issue_number`, `title`, `problem`, `requirements`, `acceptance_criteria`, `impacted_domains`, `trivial`.
-- If validation fails: report to the owner and halt.
 - **Record the cost class and refuse an oversized tooling spec.** Copy `spec.cost_class` into `status.json` (absent reads as `product`, and say so in `flags`), and on the first write of a run also set `schema_version: 2`, `fix_rounds: 0` and `spec_revisions: 0`. Then run `node "${CLAUDE_PLUGIN_ROOT}/scripts/round-budget.mjs" spec-size --spec "$PIPELINE_BASE/<issue>/spec.json" --status "$PIPELINE_BASE/<issue>/status.json"`. Exit 2 is a REFUSAL, not a warning: a `tooling` spec with more than 12 acceptance criteria and no `size_justification` goes back to BA to split, cut, or justify, and does not proceed.
 - **Run the open-questions gate (below) before anything else.** It comes before tier routing, because a blocking question can change the tier.
 - Update `status.json` with `current_phase: "1-ba-complete"`, `issue_number: <n>`, append event.
 
 ### Open-questions gate
 
-Read `spec.open_questions`. Absent or empty: progress tick, proceed to tier routing.
-
-The gate exists because the artifact contract used to reward guessing. `requirements` and `acceptance_criteria` are schema-required, so a spec with a blank in it FAILED validation while a spec with a plausible invented answer PASSED, and no instruction to "ask rather than guess" survives that gradient. `open_questions` is where an unresolved ambiguity can live in a valid artifact; this gate is what makes it cost something.
-
-For each entry with `blocking: false`: no stop. Write `resolution` with `answered_by: "ba_default"`, `answer` set to `ba_recommendation`, and the current timestamp. The default is now recorded rather than assumed, which is what lets Phase 4 check the build against it and the Phase 5 report grade its confidence honestly.
-
-If ANY entry has `blocking: true`:
+Run `node "${CLAUDE_PLUGIN_ROOT}/scripts/owner-gate.mjs" open-questions --spec "$PIPELINE_BASE/<issue>/spec.json" --status "$PIPELINE_BASE/<issue>/status.json"`, adding `--experiment` when `EXPERIMENT_MODE` is true. It checks the spec's required fields and records a `ba_default` resolution on every non-blocking question (on every question in experiment mode: an unattended run cannot answer one). Exit 0: proceed to tier routing. Exit 2 printing `INVALID`: report it to the owner and halt. Exit 2 printing `ASK`, the first unresolved blocking question:
 
 1. Update `status.json` with `current_phase: "1-ba-open-questions"` and commit.
-2. **Ask ONE question, the first blocking one, in full voice mode** with the decision block from `${CLAUDE_PLUGIN_ROOT}/voice.md`. `question` is **What I'm asking**, `why_it_matters` is **Why I'm asking**, `options` (plus the always-present "do nothing for now") are **Options**, and `ba_recommendation` is **My recommendation**. Serial, not batched: voice.md's "if two calls are open, ask the first and wait" applies with force here, because answers to early questions routinely dissolve the later ones outright, and a batch of five questions gets one skimmed answer.
-3. HALT. Do not proceed to tier routing, and do not answer on the owner's behalf. `ba_recommendation` exists so an owner who does not care can reply "your call" in two words, and *that* is the cheap path, not you deciding for them.
-4. On the answer: write `resolution` (`answered_by: "owner"`, or `"ba_default"` if they explicitly deferred to the recommendation). If blocking questions remain, return to step 2 with the next one.
-5. When none remain, **re-dispatch BA** to fold every resolution into `requirements`, `acceptance_criteria`, `out_of_scope`, and the tier. Do NOT edit the spec yourself: BA owns scope, and an orchestrator that rewrites acceptance criteria has quietly taken the one job the gate was built to protect. BA re-writes `spec.json` in place, keeping the `open_questions` array with its resolutions intact as the record of what was asked and what came back.
-
-**Experiment runs never block.** When `EXPERIMENT_MODE` is true, treat every entry as `blocking: false` regardless of what BA wrote, resolving each to `answered_by: "ba_default"`. An unattended A/B harness cannot answer a question, and a run that hangs waiting for one produces no result at all. The artifact then shows plainly that the run stood on defaults.
+2. **Ask that ONE question in full voice mode** with the decision block from `${CLAUDE_PLUGIN_ROOT}/voice.md`: `question` is **What I'm asking**, `why_it_matters` is **Why I'm asking**, `options` (plus "do nothing for now") are **Options**, `ba_recommendation` is **My recommendation**. Serial, not batched: an early answer often dissolves a later question.
+3. HALT. Do not answer on the owner's behalf; "your call" is their cheap path, not yours.
+4. On the answer, write that entry's `resolution` (`answer`, `answered_by: "owner"`, or `"ba_default"` if they deferred to the recommendation, and `at`) and run the gate again.
+5. Once it exits 0 after any owner answer, **re-dispatch BA** to fold the resolutions into `requirements`, `acceptance_criteria`, `out_of_scope` and the tier, keeping `open_questions` intact. Do NOT edit the spec yourself: BA owns scope.
 
 Route by tier:
 - `risk_tier: "trivial"` (or legacy `trivial: true`): skip Phase 2-lite and Phase 2, go directly to Phase 3.

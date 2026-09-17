@@ -195,10 +195,13 @@ assert_contains "Phase 2.5 still assigns stance B verbatim" "$MD" "cleanest seam
 assert_contains "the two-poles rationale survives (it invites a third sketch)" "$MD" "Two poles, not three"
 assert_contains "the open-questions gate still HALTs" "$MD" "1-ba-open-questions"
 assert_contains "the design-lock gate still HALTs" "$MD" "2.5-design-owner-decision"
-assert_contains "the experiment-mode carve-out survives" "$MD" "Experiment runs never block"
+# #164: the gate decisions (required fields, defaults, the experiment carve-out, the absent and
+# incomplete owner_decision branches) live in scripts/owner-gate.mjs and are tested in
+# test-owner-gate.sh. What stays pinned here is that the prose still CALLS it.
+assert_contains "the open-questions gate is run as a script" "$MD" 'owner-gate.mjs" open-questions'
+assert_contains "the experiment-mode carve-out is still passed to it" "$MD" 'adding `--experiment` when `EXPERIMENT_MODE` is true'
 assert_contains "design-lock still forbids self-answering" "$MD" "progress tick wearing a costume"
-assert_contains "the absent-owner_decision branch exists (schema cannot catch it)" \
-  "$MD" "key is absent entirely"
+assert_contains "the design-lock gate is run as a script (it covers the absent owner_decision)" "$MD" 'owner-gate.mjs" design-lock'
 
 # ---------------------------------------------------------------------------
 suite "the phase strings the gates write are valid status.json values"

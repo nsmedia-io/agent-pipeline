@@ -414,7 +414,7 @@ for cand in $(grep -oE 'scripts/[a-zA-Z0-9_-]+\.mjs' "$PIPELINE_MD" | sort -u); 
     round-budget.mjs) continue ;;
     # #164: deterministic gates moved out of prose; resolve no model. See the twin in
     # test-dispatch-model-resolver.sh.
-    check-merged.mjs|extract-constraints.mjs) continue ;;
+    check-merged.mjs|extract-constraints.mjs|owner-gate.mjs) continue ;;
   esac
   CANDIDATES_REL+=("$cand")
 done

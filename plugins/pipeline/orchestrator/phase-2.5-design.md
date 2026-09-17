@@ -19,18 +19,15 @@ The judge writes a `design.json` artifact at `ARTIFACT_DIR` with the chosen appr
 
 ### Design-lock: the owner's call when the stances materially diverged
 
-This is the one decision on the HAPPY path that the pipeline does not make for itself, and the reason is not deference. It is the moment with the lowest reversibility (the approach constrains every phase after it, and by Phase 4 the cost of switching is the entire diff) and the highest owner-only content: roadmap, urgency, and what else is landing in this area are inputs the judge cannot read out of the repo. Every other full-voice moment in this file is an exception (a veto, a halt) or a terminus (PR ready, Phase 5). This one is a standing gate, and it is the cheapest point in the run at which the answer can still change.
+The one happy-path decision the pipeline does not make for itself: the approach constrains every later phase, and roadmap and urgency are inputs the judge cannot read from the repo. Run `node "${CLAUDE_PLUGIN_ROOT}/scripts/owner-gate.mjs" design-lock --design "$ARTIFACT_DIR/design.json" --status "$PIPELINE_BASE/<issue>/status.json"` every time, including on a resumed or seeded `design.json`:
 
-Read `design.owner_decision`. **This check is the ONLY thing enforcing the block's presence**, so run it every time, including on a resumed or seeded `design.json`:
-
-- **The `owner_decision` key is absent entirely**: HALT and re-dispatch the judge to add its ruling. The field is deliberately OPTIONAL in `design.schema.json`, so validation will not catch this for you. It is optional because making it required also failed every `design.json` written before the field existed, and that failure surfaced at the Phase 3 **Dev** stop, on the one role that does not own this artifact and cannot legitimately fix it. Enforcing it here instead puts the halt in front of the party that can act.
-- **`required === false`**: no stop. Progress tick only, then Phase 3.
-- **`required === true`, but any of `question`, `option_a`, `option_b`, `recommendation` is missing or empty**: HALT and re-dispatch the judge. The artifact validator does NOT implement `if/then` (see the header of `${CLAUDE_PLUGIN_ROOT}/scripts/validate-pipeline-artifact.mjs`), so schema validation cannot enforce this conditional completeness either. Do not "fill in" the missing half yourself: you did not read the sketches, and a decision block composed by the role that is supposed to be neutral about the outcome is not a decision block.
-- **`required === true` and complete**:
+- **Exit 0**: proceed to Phase 3.
+- **Exit 3**: re-dispatch the judge with what the script printed. Do not fill in the block yourself: you did not read the sketches.
+- **Exit 2**:
   1. Update `status.json` with `current_phase: "2.5-design-owner-decision"` and commit.
-  2. Return to the owner in **full voice mode**, ending with the decision block from `${CLAUDE_PLUGIN_ROOT}/voice.md`. Options A and B are the two sketches AS RENDERED, in plain language, never the stance labels: what each buys, what each costs, what each forecloses. The judge's winner is your **My recommendation** line, carrying its reasoning. Fill Reversibility from the migration and contract shape each option implies, and say plainly that this is the last cheap moment to change the answer.
-  3. HALT and await the owner. Do NOT dispatch Phase 3 on the recommendation while the question is open. A decision block the pipeline answers for itself is a progress tick wearing a costume, and it costs more trust than it saves time.
-  4. On the answer: if the owner picked the judge's winner, proceed to Phase 3 unchanged. If they picked the other option, or a variant of it, re-dispatch the JUDGE (not the sketches; they are still valid, only the ruling changed) to re-materialize `design.json` around the chosen approach, keeping whichever grafts still apply. Either way, write the owner's answer AND their stated reasoning into `owner_decision.resolution` before proceeding: the reason a design was chosen is the part that stops the next person quietly reverting it.
+  2. Return to the owner in **full voice mode**, ending with the decision block from `${CLAUDE_PLUGIN_ROOT}/voice.md`. Options A and B are the two sketches as rendered, in plain language, never the stance labels: what each buys, costs and forecloses. The judge's winner is **My recommendation**. Fill Reversibility from the migration and contract shape of each option, and say this is the last cheap moment to change the answer.
+  3. HALT. Do NOT dispatch Phase 3 on the recommendation while the question is open: a decision block the pipeline answers for itself is a progress tick wearing a costume.
+  4. On the answer, write `owner_decision.resolution` (`chosen`, the owner's `reasoning`, `resolved_at`). If they picked the other option or a variant, re-dispatch the JUDGE (not the sketches) to re-materialize `design.json` around it. Then run the gate again.
 
 After `design.json` is written (and resolved, when a decision was required), update `status.json` with `current_phase: "2.5-design-complete"` and proceed to Phase 3.
 
