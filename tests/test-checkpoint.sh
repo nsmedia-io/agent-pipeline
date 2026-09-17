@@ -249,7 +249,7 @@ BEFORE="$(sum "$ST")"
 cp_run qa-contract --sha deadbeef1234 --tasks "$TASKS" --status "$ST" --worktree "$REPO"
 assert_eq "a sha naming no commit is REFUSED with nothing written" "$RC/$(sum "$ST")" "2/$BEFORE"
 assert_contains "  and says do NOT dispatch Dev" "$ERR" "do NOT dispatch Dev"
-cp_run qa-contract --sha "main; rm -rf x" --tasks "$TASKS" --status "$ST" --worktree "$REPO"
+cp_run qa-contract --sha "main; echo x" --tasks "$TASKS" --status "$ST" --worktree "$REPO"
 assert_eq "a non-hex sha is refused before git sees it" "$RC" "2"
 for bad in '{"satisfiability_proof":{"reference_impl_run":true,"criteria_proven":[],"criteria_unproven":[],"configs_run":["a"]}}' \
            '{"satisfiability_proof":{"reference_impl_run":false,"criteria_proven":["AC1"],"configs_run":["a"]}}' \
