@@ -26,7 +26,7 @@ The one happy-path decision the pipeline does not make for itself: the approach 
 - **Exit 2**:
   1. Update `status.json` with `current_phase: "2.5-design-owner-decision"` and commit.
   2. Return to the owner in **full voice mode**, ending with the decision block from `${CLAUDE_PLUGIN_ROOT}/voice.md`. Options A and B are the two sketches as rendered, in plain language, never the stance labels: what each buys, costs and forecloses. The judge's winner is **My recommendation**. Fill Reversibility from the migration and contract shape of each option, and say this is the last cheap moment to change the answer.
-  3. HALT. Do NOT dispatch Phase 3 on the recommendation while the question is open: a decision block the pipeline answers for itself is a progress tick wearing a costume.
+  3. HALT and await the owner. Do NOT dispatch Phase 3 on the recommendation while the question is open: a decision block the pipeline answers for itself is a progress tick wearing a costume.
   4. On the answer, write `owner_decision.resolution` (`chosen`, the owner's `reasoning`, `resolved_at`). If they picked the other option or a variant, re-dispatch the JUDGE (not the sketches) to re-materialize `design.json` around it. Then run the gate again.
 
 After `design.json` is written (and resolved, when a decision was required), update `status.json` with `current_phase: "2.5-design-complete"` and proceed to Phase 3.
