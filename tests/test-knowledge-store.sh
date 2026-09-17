@@ -269,8 +269,8 @@ suite "knowledge-store: the module-entrypoint guard (AC11)"
 SPACED="$TEMP_PROJECT/plugin dir with spaces"
 PLAIN="$TEMP_PROJECT/plugindir"
 mkdir -p "$SPACED" "$PLAIN"
-cp "$STORE" "$SPACED/knowledge-store.mjs" && cp "$(dirname "$STORE")/lib.mjs" "$SPACED/"
-cp "$STORE" "$PLAIN/knowledge-store.mjs" && cp "$(dirname "$STORE")/lib.mjs" "$PLAIN/"
+cp "$STORE" "$SPACED/knowledge-store.mjs" && cp "$(dirname "$STORE")/lib.mjs" "$(dirname "$STORE")/artifact-ownership.mjs" "$SPACED/"
+cp "$STORE" "$PLAIN/knowledge-store.mjs" && cp "$(dirname "$STORE")/lib.mjs" "$(dirname "$STORE")/artifact-ownership.mjs" "$PLAIN/"
 
 # Control: the same copy under a space-free path. If this one ever fails, the harness (not the
 # guard) is broken, and the case below would be measuring the wrong thing.

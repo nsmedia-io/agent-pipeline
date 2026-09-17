@@ -414,6 +414,9 @@ for cand in $(grep -oE 'scripts/[a-zA-Z0-9_-]+\.mjs' "$PIPELINE_MD" | sort -u); 
     round-budget.mjs) continue ;;
     # #164: the Phase 4 roster (full panel and delta set); seats roles, resolves no model.
     panel-roles.mjs) continue ;;
+    # #164: deterministic gates moved out of prose; resolve no model. See the twin in
+    # test-dispatch-model-resolver.sh.
+    check-merged.mjs|extract-constraints.mjs|owner-gate.mjs|sync-artifacts.mjs|artifact-ownership.mjs|merge-ready.mjs) continue ;;
   esac
   CANDIDATES_REL+=("$cand")
 done

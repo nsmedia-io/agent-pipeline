@@ -13,7 +13,7 @@ SCRIPTS_DIR="${SCRIPTS_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../plugins/pipe
 suite "isMain: runs directly, stays quiet on import"
 
 new_tmpdir; d="$NEW_TMPDIR"
-cp "$SCRIPTS_DIR"/lib.mjs "$SCRIPTS_DIR"/knowledge-store.mjs "$d/"
+cp "$SCRIPTS_DIR"/lib.mjs "$SCRIPTS_DIR"/artifact-ownership.mjs "$SCRIPTS_DIR"/knowledge-store.mjs "$d/"
 
 out=$( cd "$d" && node ./knowledge-store.mjs --list --collection living-context 2>&1 ); rc=$?
 assert_eq "a direct run executes main()" "$rc" "0"
@@ -78,11 +78,11 @@ cat > "$PROBE_ROOT/knowledge/living-context/probe--entrypoint.json" <<'EOF'
  "last_updated":"2026-01-01T00:00:00Z"}
 EOF
 
-mkdir -p "$d/real" && cp "$d/lib.mjs" "$d/knowledge-store.mjs" "$d/real/" && ln -s real "$d/link"
+mkdir -p "$d/real" && cp "$d/lib.mjs" "$d/artifact-ownership.mjs" "$d/knowledge-store.mjs" "$d/real/" && ln -s real "$d/link"
 out=$( node "$d/link/knowledge-store.mjs" --list --collection living-context --root "$PROBE_ROOT" 2>&1 )
 assert_contains "invoked through a symlinked directory" "$out" "ENTRYPOINT-PROBE-MARKER"
 
-mkdir -p "$d/has space" && cp "$d/lib.mjs" "$d/knowledge-store.mjs" "$d/has space/"
+mkdir -p "$d/has space" && cp "$d/lib.mjs" "$d/artifact-ownership.mjs" "$d/knowledge-store.mjs" "$d/has space/"
 out=$( node "$d/has space/knowledge-store.mjs" --list --collection living-context --root "$PROBE_ROOT" 2>&1 )
 assert_contains "invoked through a path containing a space" "$out" "ENTRYPOINT-PROBE-MARKER"
 

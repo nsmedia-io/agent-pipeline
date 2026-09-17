@@ -133,6 +133,13 @@ const CODE_KEYS = {
     degrades:
       'the deferral ledger routes to `gh issue create` whatever your project uses. Legal values are "github", "gitlab" and "directory"; anything else is IGNORED and github applies, so a project on neither tracker records deferrals into a command it does not have and the pre-Phase-4 gate refuses every tracker_ref it writes. Set "directory" to keep the ledger in the repository instead.',
   },
+  ciRequiredForMerge: {
+    type: "boolean",
+    reader: "scripts/merge-ready.mjs",
+    fallback: "true",
+    degrades:
+      "a PR with no CI checks reported on its head is NOT ready to merge, because CI that has not registered yet looks the same as no CI. Set false only for a project with no remote CI; a failing or pending check refuses either way.",
+  },
   deferralDir: {
     type: "string",
     reader: "scripts/deferral.mjs (directory mode only)",

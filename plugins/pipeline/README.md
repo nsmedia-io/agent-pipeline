@@ -67,6 +67,7 @@ Copy `pipeline.config.example.json` to `pipeline.config.json` at your project ro
 | `infraGlobs` | Globs that seat DevOps on the Phase 4 panel (CI, deploy scripts, infra config). Empty or invalid means defaults | the infra set in `scripts/data-layer-surface.mjs` |
 | `migrationDownMarker` | The line that marks a migration's down section for the reversibility gate | `-- DOWN` |
 | `deferralTracker` | Where a deferred item is written so it stops being a sentence in an artifact: `github` (`gh issue create`), `gitlab` (`glab issue create`), or `directory` (a committed markdown file, for a project with no tracker CLI) | `github` |
+| `ciRequiredForMerge` | Whether `merge-ready.mjs` refuses a PR head with no CI checks reported. Set `false` only for a project with no remote CI; failing or pending checks refuse either way | `true` |
 | `deferralDir` | The committed ledger directory, read only when `deferralTracker` is `directory` | `knowledge/deferred` |
 | `dispatchModels` | Per-role model overrides for the orchestrator's dispatches, allowlisted to `opus`/`sonnet`/`haiku`. `secops` and `qa` are pinned to opus in code and ignore this key | the built-in table in `scripts/dispatch-model.mjs` (DBA drops to sonnet on a standard or trivial panel) |
 | `dispatchEfforts` | Per-role effort overrides (`low`..`max`) for the Phase 4 panel, which dispatches through the Workflow tool. Every role is reachable, both directions | the tiered table in `scripts/dispatch-effort.mjs` (SecOps xhigh/high/medium and QA high/medium/medium by tier) |

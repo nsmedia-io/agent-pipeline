@@ -4,18 +4,18 @@
 
 import { readdirSync, readFileSync, writeFileSync, mkdirSync, existsSync, statSync } from "node:fs";
 import { isMain as isMainScript, assertPathSegment } from "./lib.mjs";
+import { WORKTREE_PRODUCED } from "./artifact-ownership.mjs";
 import { join, resolve, relative, basename, isAbsolute, dirname, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const COLLECTIONS = ["living-context", "issue-archive", "decisions"];
 // Pipeline artifacts folded into an issue archive, in phase order; each read only if present.
 const ARCHIVE_ARTIFACTS = ["spec", "map", "review", "tasks", "impl-report", "peer-review", "status"];
-// The subset PRODUCED IN the Phase 3 worktree rather than seeded into it. This list MIRRORS the
-// ownership split in the Phase 4 sync step of commands/pipeline.md and has to: the staleness
-// check below is what proves that sync actually ran. `status` is deliberately absent -- the
-// orchestrator owns it, and the canonical copy being AHEAD of the worktree's is the correct
-// state, not a divergence.
-const WORKTREE_PRODUCED = ["map", "tasks", "impl-report", "peer-review"];
+// WORKTREE_PRODUCED, the subset PRODUCED IN the Phase 3 worktree rather than seeded into it, is
+// imported from artifact-ownership.mjs, the same list scripts/sync-artifacts.mjs copies by: the
+// staleness check below is what proves that sync actually ran. `status` is deliberately absent
+// from it -- the orchestrator owns it, and the canonical copy being AHEAD of the worktree's is the
+// correct state, not a divergence.
 // The escape hatch is an ENV VAR and not a flag, so it reaches archiveIssue identically through
 // both entry points; archive-pipeline.mjs is documented as a thin re-dispatch and a flag only
 // one of the two parsed would make that false.
@@ -520,7 +520,7 @@ const stable = (v) =>
 // WHAT IT DOES NOT DO, stated plainly rather than left for someone to discover: it ABSTAINS
 // whenever the worktree is already gone, which post-merge cleanup makes common. It is a backstop
 // that catches the state #34 actually shipped, not a guarantee that no stale archive can be
-// written. The re-sync rule in commands/pipeline.md is still the primary control.
+// written. The re-sync rule (scripts/sync-artifacts.mjs, run twice) is still the primary control.
 function staleArtifacts({ fromDir, rootAbs, issue, docs }) {
   const wt = [docs.tasks, docs["impl-report"]]
     .map((d) => (d && typeof d.worktree_path === "string" ? d.worktree_path : null))

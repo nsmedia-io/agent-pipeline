@@ -113,6 +113,9 @@ for cand in $(grep -oE 'scripts/[a-zA-Z0-9_-]+\.mjs' "$PIPELINE_MD" | sort -u); 
     round-budget.mjs) continue ;;
     # #164: the Phase 4 roster (full panel and delta set); seats roles, resolves no model.
     panel-roles.mjs) continue ;;
+    # #164: deterministic gates moved out of prose. Each takes artifact paths or an issue, never a
+    # (role, tier, phase) triple, and resolves no model. Excluded by NAME, like the rest.
+    check-merged.mjs|extract-constraints.mjs|owner-gate.mjs|sync-artifacts.mjs|artifact-ownership.mjs|merge-ready.mjs) continue ;;
   esac
   # The data-layer surface module is referenced from the same file by R3; it is not this.
   grep -q 'migrationGlobsForTripwire' "$PLUGIN_DIR/$cand" 2>/dev/null && continue
