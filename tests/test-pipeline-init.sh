@@ -58,7 +58,7 @@ commit_all "config"
 
 suite "pipeline-init: a fresh ask"
 
-pi --no-fetch add a widget --experiment
+pi --no-fetch --experiment add a widget
 assert_eq "a clean fresh ask exits 0" "$RC" "0"
 assert_eq "mode is fresh with no issue" "$(jf r.mode)/$(jf r.issue)" "fresh/null"
 assert_eq "--experiment sets experiment_mode" "$(jf r.experiment_mode)" "true"
@@ -67,7 +67,7 @@ assert_eq "nothing is written for a fresh ask" "$(jf r.record)" "none"
 assert_eq "the skeleton is returned at 0-setup" "$(jf r.status.current_phase)" "0-setup"
 assert_eq "pipeline_base is absolute" "$(jp pipeline_base | cut -c1-4)" "abs:"
 assert_contains "  and is <toplevel>/.pipeline" "$(jp pipeline_base)" "repo/.pipeline"
-pi --no-fetch fix it --dry-run
+pi --dry-run --no-fetch fix it
 assert_eq "--dry-run is the same modifier" "$(jf r.experiment_mode)/$(jf r.ask_text)" "true/fix it"
 
 suite "pipeline-init: --issue writes the 0-setup record through checkpoint.mjs"
@@ -124,7 +124,7 @@ assert_contains "  and a warning says Phase 2 would read a stale base" "$(jf 'r.
 
 suite "pipeline-init: the stdin argument and the ask text"
 
-( cd "$REPO" && printf -- '--issue 21 --no-fetch "quoted" $HOME `id` --dry-run\n' | node "$PI" --argument-stdin ) >"$TEMP_PROJECT/o" 2>&1
+( cd "$REPO" && printf -- '--issue 21 --dry-run --no-fetch "quoted" $HOME `id`\n' | node "$PI" --argument-stdin ) >"$TEMP_PROJECT/o" 2>&1
 RC=$?; OUT=$(cat "$TEMP_PROJECT/o")
 assert_eq "--argument-stdin parses the whole argument from stdin (0)" "$RC" "0"
 assert_eq "  issue, mode and modifier come from stdin" "$(jf r.mode)/$(jf r.issue)/$(jf r.experiment_mode)" "issue/21/true"
@@ -145,8 +145,44 @@ pi --issue 1 --resume 1
 assert_eq "--issue and --resume together are usage (1)" "$RC" "1"
 pi --issue ../x
 assert_eq "an issue that is not one path segment is usage (1)" "$RC" "1"
-pi --bogus
-assert_eq "an unknown flag is usage (1)" "$RC" "1"
+pi --no-fetch --bogus first
+assert_eq "an unknown leading --word is ask text, never a usage error (0)" "$RC/$(jf r.mode)/$(jf r.ask_text)" "0/fresh/--bogus first"
+
+suite "pipeline-init: flags count only as LEADING tokens"
+
+# The review's reproduction: "make the --issue 55 lookup case-insensitive" parsed as a run on #55.
+# The old core read --resume and --issue only where the argument STARTS with them.
+pi --no-fetch make the --issue 55 lookup case-insensitive
+assert_eq "a --issue inside the ask is ask text: exit 0, mode fresh, no issue" "$RC/$(jf r.mode)/$(jf r.issue)" "0/fresh/null"
+assert_eq "  and it stays in ask_text" "$(jf r.ask_text)" "make the --issue 55 lookup case-insensitive"
+assert_eq "  and nothing was written for #55" "$([[ -e "$REPO/.pipeline/55" ]] && echo written || echo absent)" "absent"
+pi --no-fetch explain --resume 12 and --dry-run
+assert_eq "a --resume and a --dry-run inside the ask are ask text too" "$(jf r.mode)/$(jf r.experiment_mode)/$(jf r.ask_text)" "fresh/false/explain --resume 12 and --dry-run"
+pi --no-fetch rename --issue
+assert_eq "a trailing --issue with no value is ask text, not a usage error (0)" "$RC/$(jf r.ask_text)" "0/rename --issue"
+( cd "$REPO" && printf -- 'fix the\n--issue 55\nparser\n' | node "$PI" --argument-stdin --no-fetch ) >"$TEMP_PROJECT/o" 2>&1
+RC=$?; OUT=$(cat "$TEMP_PROJECT/o")
+assert_eq "the stdin form applies the same rule: a --issue after the first ask word is ask text" "$RC/$(jf r.mode)/$(jf r.ask_text)" "0/fresh/fix the --issue 55 parser"
+pi --issue 7 --no-fetch
+assert_eq "CONTROL: a leading --issue selects the issue (0, mode issue, #7)" "$RC/$(jf r.mode)/$(jf r.issue)" "0/issue/7"
+rm -r "$REPO/.pipeline/7"
+
+suite "pipeline-init: the prose's heredoc survives an ask line equal to a short delimiter"
+
+# The block phase-0-setup.md tells the orchestrator to run, extracted and RUN with a multi-line ask
+# carrying a bare ARG line (the old delimiter) and a bare EOF line. The <the argument> placeholder
+# is replaced by the ask; nothing else in the block is edited.
+BLOCK="$(awk '/^```bash$/{f=1; next} /^```$/{f=0} f' "$PLUGIN_ROOT/orchestrator/phase-0-setup.md")"
+ASK_LINES="$(printf 'first line of the ask\nARG\nEOF\nlast line')"
+SCRIPT="${BLOCK/<the argument>/$ASK_LINES}"
+SCRIPT="${SCRIPT//\$\{CLAUDE_PLUGIN_ROOT\}/$PLUGIN_ROOT}"
+printf '%s\n' "$SCRIPT" > "$TEMP_PROJECT/phase0.sh"
+( cd "$REPO" && bash "$TEMP_PROJECT/phase0.sh" ) >"$TEMP_PROJECT/o" 2>&1
+RC=$?; OUT=$(cat "$TEMP_PROJECT/o")
+assert_contains "VACUITY: the extracted block runs pipeline-init.mjs through a heredoc" "$BLOCK" "--argument-stdin <<'"
+assert_eq "the block exits 0 on this clean tree" "$RC" "0"
+assert_eq "and every ask line reaches the script, the ARG and EOF lines included" "$(jf r.ask_text)" "first line of the ask ARG EOF last line"
+assert_not_contains "the prose no longer uses the guessable ARG delimiter" "$BLOCK" "<<'ARG'"
 ( cd "$TEMP_PROJECT" && node "$PI" --no-fetch ) >"$TEMP_PROJECT/o" 2>&1
 assert_eq "outside a git repository is 1" "$?" "1"
 

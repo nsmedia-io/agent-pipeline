@@ -3,13 +3,18 @@
  * pipeline-init.mjs -- /pipeline Phase 0 as one command (#164 row 16).
  *
  *   node pipeline-init.mjs [--resume <n> | --issue <n>] [--dry-run | --experiment] [--no-fetch] [ask text...]
- *   node pipeline-init.mjs --argument-stdin [--no-fetch] <<'ARG'
+ *   node pipeline-init.mjs --argument-stdin [--no-fetch] <<'PIPELINE_ASK_EOF_7f3a'
  *   <the /pipeline argument, verbatim>
- *   ARG
+ *   PIPELINE_ASK_EOF_7f3a
  *
  * --argument-stdin reads the whole /pipeline argument from stdin and parses it exactly like argv,
  * split on whitespace. It is the form the prose uses: a pasted ask carrying quotes, `$` or
- * backticks never becomes a shell word, and a quoted heredoc expands nothing.
+ * backticks never becomes a shell word, and a quoted heredoc expands nothing. The delimiter is a
+ * long fixed token, so no plausible ask line (a bare `ARG`, `EOF`) ends the heredoc early.
+ *
+ * FLAGS (--resume, --issue, --dry-run, --experiment, --no-fetch) are honoured only as LEADING
+ * tokens. The first other token starts the ask text, and every later token is ask text, a
+ * `--word` included: never a flag, never an error.
  *
  * WHY. Phase 0 was six prose steps plus the argument parse in the core: test for
  * pipeline.config.json, read `git status --short`, compute PIPELINE_BASE, fetch the integration
@@ -32,7 +37,7 @@
  *      through checkpoint.mjs's applyEnter (schema_version, round counters, telemetry, and the
  *      check-status-record pass). A fresh ask has no issue yet: nothing is written and the skeleton
  *      is returned in `status`.
- *   --dry-run and --experiment set experiment_mode and are stripped from the ask text. ask_text is
+ *   A leading --dry-run or --experiment sets experiment_mode and is not part of the ask text. ask_text is
  *   cut to 200 characters and OMITTED, with a warning, when it carries a credential shape
  *   (knowledge-store.mjs's class table): the record is committed and archived verbatim.
  *
@@ -63,7 +68,12 @@ function git(args, cwd) {
 /** The argument parse, pure. Throws on usage. */
 export function parseInitArgs(argv) {
   const a = { mode: "fresh", issue: null, experiment: false, fetch: true, ask: [] };
-  for (let i = 0; i < argv.length; i++) {
+  let i = 0;
+  // FLAGS ARE LEADING TOKENS ONLY, as the core's old parse read them ("if the argument STARTS with
+  // --resume"). The first token that is not a recognised flag starts the ask, and everything from
+  // there on is ask text, `--words` included: "make the --issue 55 lookup case-insensitive" is an
+  // ask about a flag, never a run on #55, and an unknown `--word` is never a usage error.
+  for (; i < argv.length; i++) {
     const t = argv[i];
     if (t === "--resume" || t === "--issue") {
       if (a.mode !== "fresh") throw new Error("--resume and --issue are exclusive, and each is given once");
@@ -72,10 +82,20 @@ export function parseInitArgs(argv) {
       a.issue = assertPathSegment(argv[++i], t);
     } else if (EXPERIMENT_FLAGS.has(t)) a.experiment = true;
     else if (t === "--no-fetch") a.fetch = false;
-    else if (t.startsWith("--")) throw new Error(`unknown flag ${t}`);
-    else a.ask.push(t);
+    else break;
   }
+  a.ask = argv.slice(i);
   return a;
+}
+
+/** Leading argv flags, then (with a leading --argument-stdin) the stdin tokens, then the rest. */
+export function argumentTokens(argv, stdin) {
+  let k = 0;
+  while (k < argv.length && argv[k].startsWith("--")) k++;
+  const lead = argv.slice(0, k);
+  if (!lead.includes("--argument-stdin")) return argv;
+  const fromStdin = String(stdin()).split(/\s+/).filter(Boolean);
+  return [...lead.filter((t) => t !== "--argument-stdin"), ...fromStdin, ...argv.slice(k)];
 }
 
 /** ask_text for the record: whitespace collapsed, capped, never credential-shaped. */
@@ -96,11 +116,7 @@ function readConfig(root) {
 }
 
 export function init(argv, { cwd = process.cwd(), now = new Date().toISOString(), stdin = () => readFileSync(0, "utf8") } = {}) {
-  let tokens = argv;
-  if (argv.includes("--argument-stdin")) {
-    tokens = [...argv.filter((t) => t !== "--argument-stdin"), ...String(stdin()).split(/\s+/).filter(Boolean)];
-  }
-  const args = parseInitArgs(tokens);
+  const args = parseInitArgs(argumentTokens(argv, stdin));
   const r = {
     ok: false, halt: null, mode: args.mode, issue: args.issue, experiment_mode: args.experiment,
     ask_text: null, repo_root: null, pipeline_base: null, artifact_dir: null, integration_branch: null,
