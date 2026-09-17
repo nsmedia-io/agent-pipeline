@@ -149,7 +149,7 @@ assert_contains "the shared isolation file calls isolated-tree.mjs check" "$ISO"
 assert_contains "and isolated-tree.mjs reach for a location" "$ISO" 'scripts/isolated-tree.mjs" reach <parent>'
 assert_not_contains "the ls -ld ancestor loop is gone" "$ISO" 'while :; do ls -ld'
 assert_not_contains "the hand comparison of --absolute-git-dir is gone" "$ISO" 'rev-parse --absolute-git-dir` DIFFERS'
-assert_contains "the preamble calls the check" "$PRE" 'scripts/isolated-tree.mjs" check <tree>'
+assert_contains "the preamble calls the check" "$PRE" 'scripts/isolated-tree.mjs" check <isolated>'
 assert_not_contains "the preamble's hand comparison is gone" "$PRE" 'rev-parse --absolute-git-dir` EXITS 0 and DIFFERS'
 
 finish
