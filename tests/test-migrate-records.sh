@@ -118,6 +118,45 @@ assert_eq "--write leaves review.json byte-identical" "$(sum "$P/201/review.json
 assert_eq "--write leaves peer-review.qa.json byte-identical" "$(sum "$P/201/peer-review.qa.json")" "$S3"
 
 # ---------------------------------------------------------------------------
+suite "migrate-records: legacy fix_round / spec_revision counters map only when asked"
+
+# A record from before the counters were named: fix_round and spec_revision held the CURRENT
+# round and revision numbers, which is what fix_rounds and spec_revisions count.
+status 301 "{\"current_phase\":\"4-review\",$BASE,\"events\":[],\"fix_round\":2,\"spec_revision\":3}"
+BEFORE=$(sum "$P/301/status.json")
+run
+assert_contains "a dry run suggests fix_rounds = fix_round" "$OUT" "legacy counter fix_round 2: suggested mapping fix_rounds = 2"
+assert_contains "and spec_revisions = spec_revision" "$OUT" "legacy counter spec_revision 3: suggested mapping spec_revisions = 3"
+assert_contains "and names the flags that apply it" "$OUT" "apply it with --write --map-legacy-counters"
+run --write
+assert_eq "--write WITHOUT --map-legacy-counters leaves the record byte-identical" "$(sum "$P/301/status.json")" "$BEFORE"
+assert_contains "  ...and still reports the suggestion as an owner decision" "$OUT" "owner: legacy counter fix_round 2"
+run --map-legacy-counters
+assert_contains "--map-legacy-counters without --write is a dry run that says what WOULD change" "$OUT" "would change: fix_rounds set to 2 from the legacy fix_round 2"
+assert_eq "  ...and writes nothing" "$(sum "$P/301/status.json")" "$BEFORE"
+run --write --map-legacy-counters
+assert_contains "--write --map-legacy-counters reports the mapping as made" "$OUT" "changed: spec_revisions set to 3 from the legacy spec_revision 3"
+assert_eq "  ...fix_rounds = fix_round" "$(field "$P/301/status.json" fix_rounds)" "2"
+assert_eq "  ...spec_revisions = spec_revision" "$(field "$P/301/status.json" spec_revisions)" "3"
+assert_eq "  ...and the legacy key is kept" "$(field "$P/301/status.json" fix_round)" "2"
+AFTER=$(sum "$P/301/status.json")
+run --write --map-legacy-counters
+assert_eq "a second mapped write changes nothing (idempotent)" "$(sum "$P/301/status.json")" "$AFTER"
+assert_not_contains "  ...and reports no legacy counter for it" "$OUT" "legacy counter fix_round"
+
+status 302 "{\"current_phase\":\"4-review\",$BASE,\"events\":[],\"fix_round\":2,\"fix_rounds\":1}"
+BEFORE=$(sum "$P/302/status.json")
+run --write --map-legacy-counters
+assert_contains "CONTROL: a legacy counter that DISAGREES with the new field is an owner decision" "$OUT" "legacy counter fix_round 2 disagrees with fix_rounds 1"
+assert_eq "  ...and is not overwritten" "$(sum "$P/302/status.json")" "$BEFORE"
+
+status 303 "{\"current_phase\":\"4-review\",$BASE,\"events\":[],\"fix_round\":\"two\"}"
+BEFORE=$(sum "$P/303/status.json")
+run --write --map-legacy-counters
+assert_contains "CONTROL: a legacy counter that is not a non-negative integer is not mapped" "$OUT" 'legacy counter fix_round "two" is not a non-negative integer'
+assert_eq "  ...and the record is byte-identical" "$(sum "$P/303/status.json")" "$BEFORE"
+
+# ---------------------------------------------------------------------------
 suite "migrate-records: scope, exit codes and usage"
 
 mkdir -p "$P/_archived/9"

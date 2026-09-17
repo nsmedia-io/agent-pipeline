@@ -31,13 +31,19 @@
  *      without merging is not archived by inference.
  *   2. `schema_version` is stamped, but only on a status record that has no remaining problem
  *      after step 1. The stamp is a conformance claim; a record that still fails does not get it.
+ *   3. Only with --write --map-legacy-counters: a record written before the counters were named
+ *      carries `fix_round` / `spec_revision` (the CURRENT round and revision numbers). Each is
+ *      reported with its suggested mapping (fix_rounds = fix_round, spec_revisions =
+ *      spec_revision); the flag sets the new field and leaves the legacy key in place. Without the
+ *      flag the mapping is an owner decision, because only the owner knows the old number meant
+ *      the same thing.
  *   Review shards are never written. A missing likelihood, harm or merge class is a judgement
  *   the reviewer did not record, and a migration that filled it in would be inventing a rating.
  *
  * Dry run by default. Exit 0 unless --check is passed, in which case exit 1 when any record
  * still needs attention. Exit 2 on a usage error.
  *
- * Usage: node migrate-records.mjs [--root <project>] [--write] [--check] [--json]
+ * Usage: node migrate-records.mjs [--root <project>] [--write [--map-legacy-counters]] [--check] [--json]
  */
 
 import { readFileSync, readdirSync, renameSync, statSync, writeFileSync } from "node:fs";
@@ -95,6 +101,28 @@ export function recordsMerge(status) {
   if (typeof status.merged_at === "string" && status.merged_at.trim() !== "") return true;
   if (typeof status.merge_commit === "string" && status.merge_commit.trim() !== "") return true;
   return Array.isArray(status.events) && status.events.some((e) => typeof e?.verdict === "string" && e.verdict.trim().toLowerCase() === "merged");
+}
+
+/** Legacy counter -> the field the round budget reads. Both old keys held the CURRENT number. */
+export const LEGACY_COUNTERS = { fix_round: "fix_rounds", spec_revision: "spec_revisions" };
+
+/**
+ * The legacy counters a status record carries, each with its suggested mapping. Pure.
+ * @returns {{legacy, field, value, action: "map"|"same"|"conflict"|"unreadable"}[]}
+ */
+export function legacyCounterMappings(status) {
+  const out = [];
+  if (!status || typeof status !== "object" || Array.isArray(status)) return out;
+  for (const [legacy, field] of Object.entries(LEGACY_COUNTERS)) {
+    if (status[legacy] === undefined) continue;
+    const value = status[legacy];
+    let action;
+    if (!Number.isInteger(value) || value < 0) action = "unreadable";
+    else if (status[field] === undefined) action = "map";
+    else action = status[field] === value ? "same" : "conflict";
+    out.push({ legacy, field, value, action });
+  }
+  return out;
 }
 
 /** A run that says it is over, by any of the spellings records actually use. */
@@ -210,10 +238,10 @@ function writeJsonAtomic(file, value) {
  * @returns {{root: string, write: boolean, files: {file: string, kind: string, problems: string[],
  *            changes: string[], decisions: string[]}[]}}
  */
-export function migrate({ root, write = false }) {
+export function migrate({ root, write = false, mapLegacyCounters = false }) {
   const schemas = loadSchemas();
   const target = targetSchemaVersion(schemas.status);
-  const report = { root, write, targetSchemaVersion: target, files: [] };
+  const report = { root, write, mapLegacyCounters, targetSchemaVersion: target, files: [] };
 
   for (const dir of runDirs(root)) {
     let entries = [];
@@ -247,6 +275,21 @@ export function migrate({ root, write = false }) {
               entry.decisions.push(
                 `current_phase ${JSON.stringify(phase)} is rejected and the record carries NO merge${isConcluded(next) ? " although the run reads as concluded" : ""}: set it by hand (5-archive if it merged, otherwise the <phase>-<slug> it stopped at); not inferred`,
               );
+            }
+          }
+          for (const m of legacyCounterMappings(next)) {
+            const was = `${m.legacy} ${JSON.stringify(m.value)}`;
+            if (m.action === "map" && mapLegacyCounters) {
+              next[m.field] = m.value;
+              entry.changes.push(`${m.field} set to ${m.value} from the legacy ${was} (the legacy key is kept)`);
+            } else if (m.action === "map") {
+              entry.decisions.push(
+                `legacy counter ${was}: suggested mapping ${m.field} = ${m.value} (${m.legacy} held the current number); apply it with --write --map-legacy-counters`,
+              );
+            } else if (m.action === "conflict") {
+              entry.decisions.push(`legacy counter ${was} disagrees with ${m.field} ${JSON.stringify(next[m.field])}: set ${m.field} by hand; not mapped`);
+            } else if (m.action === "unreadable") {
+              entry.decisions.push(`legacy counter ${was} is not a non-negative integer: set ${m.field} by hand; not mapped`);
             }
           }
           const remaining = statusProblems(next, schemas).filter((p) => !/^\/schema_version: /.test(p));
@@ -316,13 +359,13 @@ function main(argv) {
         return 2;
       }
       root = argv[++i];
-    } else if (["--write", "--check", "--json"].includes(a)) flags.add(a);
+    } else if (["--write", "--check", "--json", "--map-legacy-counters"].includes(a)) flags.add(a);
     else {
-      process.stderr.write(`migrate-records: unknown argument ${a}\nusage: node migrate-records.mjs [--root <project>] [--write] [--check] [--json]\n`);
+      process.stderr.write(`migrate-records: unknown argument ${a}\nusage: node migrate-records.mjs [--root <project>] [--write [--map-legacy-counters]] [--check] [--json]\n`);
       return 2;
     }
   }
-  const report = migrate({ root: path.resolve(nativePath(root)), write: flags.has("--write") });
+  const report = migrate({ root: path.resolve(nativePath(root)), write: flags.has("--write"), mapLegacyCounters: flags.has("--map-legacy-counters") });
   process.stdout.write(`${flags.has("--json") ? JSON.stringify(report, null, 2) : formatReport(report)}\n`);
   return flags.has("--check") && needsAttention(report) ? 1 : 0;
 }
