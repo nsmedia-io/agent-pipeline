@@ -3,9 +3,9 @@
 Run Phase 0 as one command, the `/pipeline` argument verbatim inside the quoted heredoc (never as shell words):
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/pipeline-init.mjs" --argument-stdin <<'ARG'
+node "${CLAUDE_PLUGIN_ROOT}/scripts/pipeline-init.mjs" --argument-stdin <<'PIPELINE_ASK_EOF_7f3a'
 <the argument>
-ARG
+PIPELINE_ASK_EOF_7f3a
 ```
 
 It prints one JSON object (config check, dirty tree, base, fetch, record, resume point), stopping at the first halt:
