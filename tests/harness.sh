@@ -178,6 +178,23 @@ optional_tool() {
   [[ "$state" == "present" ]]
 }
 
+# ---- FULL MODE: release-only cells, recorded when they do not run (#162) ----------------------
+#
+# A routine run (`bash tests/run.sh`) leaves out the cells whose cost is out of proportion to how
+# often what they guard changes: the nested fresh-checkout run of the whole suite, and oversized
+# timeout and sweep cells. PIPELINE_TESTS_FULL=1 runs them, and a release is cut on that mode
+# (CLAUDE.md, Versioning). The skip is never silent: routine mode RECORDS a line naming what did
+# not run, the same honesty rule as optional_tool above, so a routine transcript cannot be read as
+# a full one.
+#
+#   if full_mode_only "the nested fresh-checkout run"; then ... fi
+PIPELINE_TESTS_FULL_MODE="${PIPELINE_TESTS_FULL:-0}"
+full_mode_only() {
+  [[ "$PIPELINE_TESTS_FULL_MODE" == "1" ]] && return 0
+  record "RELEASE-ONLY, not run in routine mode (PIPELINE_TESTS_FULL=1 runs it): $1"
+  return 1
+}
+
 # Create a throwaway git repo. Echoes its path; caller removes it.
 # Pre-existing helper, used by the three hook suites. Left exactly as it was: those suites
 # keep their own inline rm -rf and are NOT refactored onto the guarded helper below.

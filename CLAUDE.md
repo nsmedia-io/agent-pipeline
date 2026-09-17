@@ -6,13 +6,17 @@ development pipeline. This repo IS the plugin source; it also runs the pipeline 
 ## Commands
 
 ```
-bash tests/run.sh        # the whole suite; also the Stop-hook checkCommand
-bash tests/test-<name>.sh # one suite
-bash tests/run-linux.sh [test-<name>.sh ...]  # the Linux answer, in a container, on demand
+bash tests/run.sh        # the whole suite, routine mode, 4 suites at a time; also the Stop-hook checkCommand
+PIPELINE_TESTS_FULL=1 bash tests/run.sh   # full mode: adds the release-only cells (nested fresh-checkout run, oversized timeout and sweep cells)
+PIPELINE_TESTS_JOBS=1 bash tests/run.sh   # one suite at a time (default 4)
+bash tests/test-<name>.sh # one suite (routine mode unless PIPELINE_TESTS_FULL=1)
+bash tests/run-linux.sh [test-<name>.sh ...]  # the Linux answer, in a container built from tests/Dockerfile, on demand
 node scripts/sync-manifests.mjs --check    # marketplace.json matches plugin.json (the one remaining workflow)
 ```
 
-Healthy output ends with every suite listed and `failed=0`. Do not run the suite while a
+Healthy output ends with a slowest-first wall-time list and `All test suites passed.`; each suite
+reports `failed=0`. A suite ending in `# pipeline-tests: serial` runs alone after the parallel pool
+(wall-time budgets, or it acts on the shared checkout). Do not run the suite while a
 `plugins/pipeline/scripts/*.mjs` edit is mid-write: the tests read the live tree, and a partial
 file reads as a one-off SyntaxError (see `tests/run.sh` header).
 
@@ -47,7 +51,9 @@ file reads as a one-off SyntaxError (see `tests/run.sh` header).
   together and update the digest line in all ten.
 - **Config keys are a closed set.** A new `pipeline.config.json` key needs a row in
   `scripts/config-doctor.mjs`, the README table, and `pipeline.config.example.json`.
-- **Versioning.** Bump `plugins/pipeline/.claude-plugin/plugin.json`, run
-  `node scripts/sync-manifests.mjs`, commit as `<version>: <one-line what changed>`.
+- **Versioning.** Run `PIPELINE_TESTS_FULL=1 bash tests/run-linux.sh` on the release commit and cut
+  nothing unless it passes (routine mode skips cells a release needs). Bump
+  `plugins/pipeline/.claude-plugin/plugin.json`, run `node scripts/sync-manifests.mjs`, commit as
+  `<version>: <one-line what changed>`.
 - **Numbers carry their population.** A figure in prose names what it was measured on.
 - **Pipeline changes are judged on throughput.** Measure phase time before adding a gate.
