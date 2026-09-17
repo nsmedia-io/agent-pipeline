@@ -214,6 +214,11 @@
       "type": "boolean",
       "description": "Legacy boolean, kept for backward compatibility. trivial: true implies risk_tier trivial."
     },
+    "cost_class": {
+      "type": "string",
+      "enum": ["product-money", "product", "tooling"],
+      "description": "What a defect in this change COSTS, set by BA (agents/ba.md duty 6) and copied into status.json by the orchestrator. product-money: the change can move money. product: anything a user of the product reaches. tooling: the repository's own build, test, CI, hook, gate or developer tooling, reached by no product user. It decides what a Phase 4 finding may block on, the fix-round budget and the tooling panel shape. A tooling spec with more than 12 acceptance criteria and no size_justification is REFUSED by `node scripts/round-budget.mjs spec-size`, not merely warned about. Absent reads as product."
+    },
     "risk_tier": {
       "type": "string",
       "enum": [

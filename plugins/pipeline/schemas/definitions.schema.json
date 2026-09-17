@@ -1,0 +1,18 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "agent-pipeline/definitions.schema.json",
+  "title": "SharedDefinitions",
+  "description": "Definitions shared by more than one artifact schema, so a vocabulary has ONE spelling. Not an artifact: nothing is written against this file on its own. Referenced as definitions.schema.json#/definitions/<name>; scripts/validate-pipeline-artifact.mjs resolves that sibling-file form. scripts/materiality.mjs carries the same lists as code (VETO_GROUNDS, MERGE_CLASSES) and tests/test-materiality.sh asserts the two agree.",
+  "definitions": {
+    "vetoGround": {
+      "type": "string",
+      "enum": ["auth", "authorization", "session", "crypto", "secrets", "injection", "webhook-verification", "data-access-policy", "migration", "pii-exposure", "compliance"],
+      "description": "REQUIRED beside verdict VETO, SecOps only (0.40.0): the surface the veto stands on. scripts/materiality.mjs records a VETO as a VETO only when this ground is valid AND the block carries at least one BLOCKING concern under the materiality rule; any other VETO reads as REQUEST_CHANGES (and then as APPROVE_WITH_NOTES when nothing blocks), which does not send the spec back to BA. Not typed as required because that would redden archived artifacts; the normalizer is the control."
+    },
+    "mergeClass": {
+      "type": "string",
+      "enum": ["wrong-pass", "money", "data-loss", "security-exposure", "none"],
+      "description": "What merging this defect would actually cost, in one token. wrong-pass: a gate, check or test reports green on a real failure. money: a charge, payout, fee, refund or ledger entry comes out wrong. data-loss: stored data is destroyed, corrupted or silently not written. security-exposure: an attacker, or a user outside their permission, reaches data, a secret or an action. none: none of those; the finding may still be real, and it ships as a note. A concern can block the merge only when this is not none (scripts/materiality.mjs)."
+    }
+  }
+}

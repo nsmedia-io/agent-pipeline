@@ -175,8 +175,28 @@ export function registeredAgents() {
 
 // ---- pointer + schema helpers ----------------------------------------------
 
+// B1 review-convergence (shared definitions): a $ref of the form
+// "<sibling>.schema.json#/<pointer>" resolves against that sibling file under SCHEMA_DIR, so a
+// vocabulary shared by two artifact schemas (veto_ground, merge_class) has one spelling in
+// schemas/definitions.schema.json. Only the bare sibling-file form is accepted; anything with a
+// path separator resolves to nothing, which the walker already treats as "no constraint".
+const siblingSchemas = new Map();
+function siblingSchemaAt(ptr) {
+  const hash = ptr.indexOf("#");
+  const file = hash === -1 ? ptr : ptr.slice(0, hash);
+  if (!/^[a-z0-9-]+\.schema\.json$/.test(file)) return undefined;
+  if (!siblingSchemas.has(file)) {
+    let sib = null;
+    try { sib = loadJson(path.join(SCHEMA_DIR, file)); } catch { sib = null; }
+    siblingSchemas.set(file, sib);
+  }
+  const sib = siblingSchemas.get(file);
+  return sib ? schemaAt(sib, hash === -1 ? "#" : ptr.slice(hash)) : undefined;
+}
+
 function schemaAt(root, ptr) {
   if (!ptr || ptr === "#") return root;
+  if (!ptr.startsWith("#")) return siblingSchemaAt(ptr);
   const parts = ptr.replace(/^#\//, "").split("/");
   let cur = root;
   for (const p of parts) cur = cur == null ? undefined : cur[p];
@@ -1523,15 +1543,37 @@ function selfTest() {
   check("panel REQUEST_REFACTOR accepted (QA)", validate({ verdict: "REQUEST_REFACTOR" }, panelVerdict, peerSchema), false);
   check("panel VETO accepted (SecOps)", validate({ verdict: "VETO" }, panelVerdict, peerSchema), false);
   check("panel notes-as-array accepted", validate({ verdict: "APPROVE", notes: ["a", "b"] }, panelVerdict, peerSchema), false);
-  check("panel major severity accepted", validate({ verdict: "APPROVE", concerns: [{ severity: "major", description: "d" }] }, panelVerdict, peerSchema), false);
+  // B1 review-convergence: a panel concern REQUIRES severity, likelihood, harm and merge_class, so
+  // every concern fixture below carries the four ratings (RATED); the vocabulary each case pins is
+  // unchanged. The new required list and the shared definitions get their own cases after them.
+  const RATED = { likelihood: "normal-use", harm: "internal", merge_class: "none" };
+  check("panel major severity accepted", validate({ verdict: "APPROVE", concerns: [{ severity: "major", description: "d", ...RATED }] }, panelVerdict, peerSchema), false);
   check("panel bad verdict rejected", validate({ verdict: "LGTM" }, panelVerdict, peerSchema), true);
   check("final_verdict SECOPS_VETO accepted", validate({ final_verdict: "SECOPS_VETO", reviewed_at: "2026-01-01T00:00:00Z" }, peerSchema, peerSchema), false);
   check("final_verdict APPROVE_WITH_NOTES accepted", validate({ final_verdict: "APPROVE_WITH_NOTES", reviewed_at: "2026-01-01T00:00:00Z" }, peerSchema, peerSchema), false);
   // A security reviewer's CVE-style concern severity validates cleanly alongside the canonical
   // blocker|major|nit vocabulary; a garbage severity still rejects.
-  check("panel concern severity 'low' accepted (CVE-style)", validate({ verdict: "APPROVE", concerns: [{ severity: "low", description: "d" }] }, panelVerdict, peerSchema), false);
-  check("panel concern severity 'critical' accepted (CVE-style)", validate({ verdict: "REQUEST_CHANGES", concerns: [{ severity: "critical", description: "d" }] }, panelVerdict, peerSchema), false);
-  check("panel concern severity rejects a garbage value", validate({ verdict: "APPROVE", concerns: [{ severity: "spicy", description: "d" }] }, panelVerdict, peerSchema), true);
+  check("panel concern severity 'low' accepted (CVE-style)", validate({ verdict: "APPROVE", concerns: [{ severity: "low", description: "d", ...RATED }] }, panelVerdict, peerSchema), false);
+  check("panel concern severity 'critical' accepted (CVE-style)", validate({ verdict: "REQUEST_CHANGES", concerns: [{ severity: "critical", description: "d", ...RATED }] }, panelVerdict, peerSchema), false);
+  check("panel concern severity rejects a garbage value", validate({ verdict: "APPROVE", concerns: [{ severity: "spicy", description: "d", ...RATED }] }, panelVerdict, peerSchema), true);
+  for (const missing of ["severity", "likelihood", "harm", "merge_class"]) {
+    const concern = { severity: "high", description: "d", ...RATED };
+    delete concern[missing];
+    check(`panel concern missing ${missing} rejected (required since review-convergence)`,
+      validate({ verdict: "REQUEST_CHANGES", concerns: [concern] }, panelVerdict, peerSchema), true);
+  }
+  check("panel concern merge_class wrong-pass accepted (shared definition resolves)",
+    validate({ verdict: "REQUEST_CHANGES", concerns: [{ severity: "high", description: "d", ...RATED, merge_class: "wrong-pass" }] }, panelVerdict, peerSchema), false);
+  check("panel concern merge_class off-enum rejected (shared definition resolves)",
+    validate({ verdict: "REQUEST_CHANGES", concerns: [{ severity: "high", description: "d", ...RATED, merge_class: "annoying" }] }, panelVerdict, peerSchema), true);
+  check("panel concern harm money accepted",
+    validate({ verdict: "APPROVE", concerns: [{ severity: "nit", description: "d", ...RATED, harm: "money" }] }, panelVerdict, peerSchema), false);
+  check("panel veto_ground on the shared enum accepted",
+    validate({ verdict: "VETO", veto_ground: "auth" }, panelVerdict, peerSchema), false);
+  check("panel veto_ground off the shared enum rejected",
+    validate({ verdict: "VETO", veto_ground: "code-style" }, panelVerdict, peerSchema), true);
+  check("review secops veto_ground off the shared enum rejected (same definition)",
+    validate({ ...goodBlock, verdict: "VETO", veto_ground: "code-style" }, secopsSchema, reviewSchema), true);
 
   // ---- grounding: impl-report claims vs evidence ----
   const evAllExist = { fileExists: () => true, testResults: () => null };
