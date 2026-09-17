@@ -111,6 +111,10 @@ for cand in $(grep -oE 'scripts/[a-zA-Z0-9_-]+\.mjs' "$PIPELINE_MD" | sort -u); 
     # It counts rounds in status.json and takes a subcommand plus --status, never a (role, tier,
     # phase) triple, and resolves no model. Excluded by NAME, like the rest.
     round-budget.mjs) continue ;;
+    # #164: the checkpoint writer and the Phase 4 verdict recorder, referenced from every phase
+    # checkpoint and the verdict step. Both take --status and a subcommand or --peer-review, never a
+    # (role, tier, phase) triple, and resolve no model. Excluded by NAME, like the rest.
+    checkpoint.mjs|record-verdict.mjs) continue ;;
   esac
   # The data-layer surface module is referenced from the same file by R3; it is not this.
   grep -q 'migrationGlobsForTripwire' "$PLUGIN_DIR/$cand" 2>/dev/null && continue

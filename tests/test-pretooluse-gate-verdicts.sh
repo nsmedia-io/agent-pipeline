@@ -960,20 +960,20 @@ suite "AC3: the orchestrator's own checkpoint, on the REAL command shapes"
 # documents the checkpoint as TWO commands and PreToolUse fires once per Bash call, so all three
 # forms are asserted separately. Deliberately redundant with AC8 on the command term, and labelled
 # so: the subject here is the real-world shape, not a predicate term.
-CKPT_BLOCK="$(awk '/^# Run BEFORE entering each phase/{f=1} f&&/^```$/{exit} f' "$GATE_PIPELINE_MD")"
-CKPT_ADD="$(printf '%s\n' "$CKPT_BLOCK" | grep -m1 '^git add ' | sed 's|<issue>|106|g')"
-CKPT_COMMIT="$(printf '%s\n' "$CKPT_BLOCK" | grep -m1 '^git commit ' | sed 's|<issue>|106|g; s|<n>|4-review|g')"
-record "CHECKPOINT CONVENTION, read from commands/pipeline.md at this commit: [$CKPT_ADD] and [$CKPT_COMMIT]"
-assert_eq "VACUITY: both checkpoint commands were actually extracted (an empty fixture asserts nothing)" \
-  "$([[ -n "$CKPT_ADD" && -n "$CKPT_COMMIT" ]] && echo extracted || echo "MISSING add=[$CKPT_ADD] commit=[$CKPT_COMMIT]")" "extracted"
-assert_eq "VACUITY: the extracted add stages exactly one status.json, not a blanket pathspec" \
-  "$([[ "$CKPT_ADD" == *"status.json" ]] && echo scoped || echo "WIDENED: $CKPT_ADD")" "scoped"
+# #164: the checkpoint is now ONE Bash call, `node .../checkpoint.mjs enter ... --commit`, and the
+# git add/commit it performs run inside that process, where they stage only the named status.json
+# (tests/test-checkpoint.sh pins the staged set). So the real-world shape PreToolUse sees is the
+# node invocation, read from the recipe rather than transcribed.
+CKPT_CMD="$(sed -n '/^### Durable checkpoint convention/,/^### /p' "$GATE_PIPELINE_MD" | grep -m1 '^node .*checkpoint.mjs" enter' \
+  | sed 's|<issue>|106|g; s|<phase>|4-review|g; s|<verdict token of the phase closing>|GATE_PASSED|g')"
+record "CHECKPOINT CONVENTION, read from the orchestrator prose at this commit: [$CKPT_CMD]"
+assert_eq "VACUITY: the checkpoint command was actually extracted (an empty fixture asserts nothing)" \
+  "$([[ -n "$CKPT_CMD" ]] && echo extracted || echo "MISSING")" "extracted"
+assert_eq "VACUITY: the extracted command names exactly one status.json, not a blanket pathspec" \
+  "$([[ "$CKPT_CMD" == *'--status "$PIPELINE_BASE/106/status.json"'* && "$CKPT_CMD" != *"git add"* ]] && echo scoped || echo "WIDENED: $CKPT_CMD")" "scoped"
 
 for who in "agent_id=__ABSENT__" "agent_id=sub-orchestrator-impersonator"; do
-  assert_eq "AC3 ALLOW ($who): $CKPT_ADD" "$(verdict "$P4" "$CKPT_ADD" "$who")" "none"
-  assert_eq "AC3 ALLOW ($who): $CKPT_COMMIT" "$(verdict "$P4" "$CKPT_COMMIT" "$who")" "none"
-  assert_eq "AC3 ALLOW ($who): the &&-joined form" \
-    "$(verdict "$P4" "$CKPT_ADD && $CKPT_COMMIT" "$who")" "none"
+  assert_eq "AC3 ALLOW ($who): $CKPT_CMD" "$(verdict "$P4" "$CKPT_CMD" "$who")" "none"
 done
 
 # ===============================================================================================

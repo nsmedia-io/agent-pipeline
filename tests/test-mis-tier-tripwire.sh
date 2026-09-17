@@ -412,6 +412,10 @@ for cand in $(grep -oE 'scripts/[a-zA-Z0-9_-]+\.mjs' "$PIPELINE_MD" | sort -u); 
     # Review convergence: the round budget; counts rounds, resolves no model. See the twin in
     # test-dispatch-model-resolver.sh.
     round-budget.mjs) continue ;;
+    # #164: the checkpoint writer and the Phase 4 verdict recorder, referenced from every phase
+    # checkpoint and the verdict step. Both take --status and a subcommand or --peer-review, never a
+    # (role, tier, phase) triple, and resolve no model. Excluded by NAME, like the rest.
+    checkpoint.mjs|record-verdict.mjs) continue ;;
   esac
   CANDIDATES_REL+=("$cand")
 done

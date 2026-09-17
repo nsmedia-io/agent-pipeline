@@ -1,10 +1,6 @@
 The `status.json` record and its checkpoint convention. `commands/pipeline.md` has you read this file on every run, fresh or resumed, before the record is first written or read.
 
-Append an entry to `events` after each phase transition: `{"phase": "1-ba", "verdict": "<agent verdict>", "at": "<iso>"}`.
-
-**The exit event for phase N and the entry checkpoint for phase N+1 are ONE write, in that order, committed together.** Appending the closing event first and checkpointing the next phase second are not two steps to be interleaved with anything, least of all with the end of a turn. The Stop hook fires at the turn boundary and a turn very commonly ends right after a checkpoint commit, so checkpointing first and appending later leaves a window in which the record says "entering 3-impl" with neither `design.json` (absent in a fresh checkout, because every artifact except `status.json` is gitignored) nor a closing 2.5 event. The phase-entry guard is CORRECT to refuse in that window -- the record is the only truth it has, and it genuinely does not show the phase closed -- so this convention, not a guard exemption, is what prevents the state.
-
-**`events[]` entries are EXIT markers and `current_phase` is an ENTRY marker.** An event is appended AFTER a phase finishes and carries that phase's `verdict`, so it records a phase CLOSING; `current_phase` is set BEFORE a phase begins and names the phase being ENTERED. Two fields with opposite conventions five lines apart is the trap that made the telemetry credit every interval to the wrong phase, so the two are named here rather than left to be inferred.
+**`events[]` entries are EXIT markers and `current_phase` is an ENTRY marker, and the exit event for the phase closing and the entry checkpoint for the phase opening are ONE write.** `scripts/checkpoint.mjs` makes them one, atomically and in that order. Do not hand-edit `current_phase`, `events[]`, `review_rounds`, `fix_rounds`, `spec_revisions`, `final_verdict` or `telemetry`; what the script does on each write, and why, is in its header.
 
 **NO FREE-TEXT FIELD IN A COMMITTED PIPELINE ARTIFACT MAY CARRY A SECRET.** `status.json` reaches a public tree twice: it is the one `.pipeline/` artifact committed to git (see the durable-checkpoint convention below), and Phase 5 copies it **verbatim** into `knowledge/issue-archive/<n>.json`. Neither copy is rewritten afterwards, so a pasted secret persists in history and a fix-forward commit does not remove it. Before writing any of these five fields, redact any token-shaped substring (API key, Bearer token, OAuth code, password, DSN with inline credentials, `.env` line):
 
@@ -38,38 +34,15 @@ Append an entry to `events` after each phase transition: `{"phase": "1-ba", "ver
 
 ### Durable checkpoint convention (resume reliability)
 
-`status.json` is the `/pipeline --resume <issue>` checkpoint, so it must be durable, not a post-hoc log. **Write AND commit `status.json` BEFORE each phase transition begins, recording the phase being ENTERED**, not the phase just finished. Set `current_phase` to the phase about to run, then commit, then dispatch that phase. If the run is interrupted mid-phase, `--resume` reads the committed `current_phase` and re-enters that same phase from the top, never a stale prior one.
-
-Commit the `status.json` checkpoints, but keep every other per-issue artifact (`spec.json`, `review.json`, `impl-report.json`, `peer-review.json`, and all `review.<role>.json`/`peer-review.<role>.json` shards) out of git, so checkpoint commits never drag transient intermediate state into history. The simplest setup is a `.gitignore` that ignores `.pipeline/` but re-includes `/.pipeline/*/status.json`; then a plain `git add .pipeline/<issue>/status.json` stages only the checkpoint (no `-f` needed, which would defeat the scoping). Use a consistent commit-message prefix so checkpoints are easy to spot and squash:
+`status.json` is the `/pipeline --resume <issue>` checkpoint, committed BEFORE each phase begins and naming the phase being ENTERED, so an interrupted run re-enters that same phase from the top. The checkpoint at the top of every phase file is this command, run before that phase's dispatch:
 
 ```bash
-# Run BEFORE entering each phase, after setting current_phase to the phase being ENTERED.
-# The checker refuses an over-cap events[]/flags[] verdict, and a recorded phase that fails the
-# schema's pattern, BEFORE either reaches a commit. It takes no arguments, reads the cap and the
-# pattern out of schemas/status.schema.json, and is silent when clean; a non-zero exit names the
-# file, the json path and the value, and means fix the record.
-node "${CLAUDE_PLUGIN_ROOT}/scripts/check-status-record.mjs"
-git add .pipeline/<issue>/status.json
-git commit -m "chore(pipeline): checkpoint phase <n> for #<issue>"
+node "${CLAUDE_PLUGIN_ROOT}/scripts/checkpoint.mjs" enter <phase> --status "$PIPELINE_BASE/<issue>/status.json" --exit-verdict <verdict token of the phase closing> --commit
 ```
 
-**Run that checker on every checkpoint, not only after you hand-edited a verdict.** It reads the FILE, not a diff, and takes no argument naming what you changed (#117's second occurrence, a fix silently overwritten by a stale `cp`, is in `${CLAUDE_PLUGIN_ROOT}/docs/rationale.md`). A check over the record's whole content cannot tell a keystroke from a `cp`, and does not need to.
+Add `--note "<note>"` for the exit event's note, and `--loopback` on a loop back (`loop-backs.md`). Exit 0 written and committed. Exit 2 REFUSED with nothing written: the phase fails the schema pattern, a verdict is over the schema cap, a round is past its budget, or the record would fail `check-status-record.mjs`; fix the input, do not hand-edit around it. Exit 1: an unreadable record, or a write that could not be committed (the message says which). The commit stages ONLY that `status.json`, so it matches no commit-triggered filter (`hooks/pre-tool-use.sh` included); keep every other `.pipeline/` artifact out of git.
 
-Dependency note (do not widen the commit scope blindly): a checkpoint commit touches ONLY `.pipeline/<issue>/status.json`. This plugin now ships one such filter itself — the `PreToolUse(Bash)` gate in `hooks/pre-tool-use.sh`, which is the commit-triggered automation nearest to hand and refuses a SUBAGENT's blanket staging while a Phase 4 run is in flight — and your project may wire others (a `PostToolUse(Bash)` hook that fires on specific committed paths, say). A status-only checkpoint commit must match none of them: the two `git` commands above name their pathspec, so they do not, and that is what keeps the gate silent for the orchestrator. A future change that widens what a checkpoint commit stages (e.g. committing other artifacts, or reaching for `git add -A`) must re-check every such filter, or it can silently start firing that automation on every phase transition.
-
-**Append to `flags` after each agent returns** so downstream phases (especially the Phase 4 panel) can start from a digest instead of re-reading the full artifact JSON. One entry per agent, one short line of free text:
-
-```json
-{"phase": "2-secops", "agent": "secops", "verdict": "APPROVE_WITH_NOTES", "summary": "auth path OK; PII filter on new logger call could be stricter", "at": "<iso>"}
-```
-
-Rules for `summary`:
-- Strict 140-char cap; truncate with ellipsis if longer.
-- Quote the agent's own concern, do not editorialize.
-- Verdict-only ("APPROVE") agents still get an entry with `summary: ""`.
-
-Rules for `verdict` (the same rule governs `events[].verdict`):
-- A TOKEN, not prose: strict 32-char cap, matching the `maxLength` on both verdict fields in `schemas/status.schema.json`. Write the agent's verdict word and nothing else; the reasoning goes in `summary`. Nothing validates status.json against that schema automatically, so this restatement is one honorer and `node "${CLAUDE_PLUGIN_ROOT}/scripts/check-status-record.mjs"` is the other -- run it before every checkpoint commit, as the recipe above does. Prose alone was not enough: #117 records the cap being broken twice in one run, once by seven labels accumulating unnoticed across phases (longest 44) and once by a fix being overwritten by a stale copy.
+**After each agent returns, record its digest line** so later phases start from it instead of re-reading artifacts: `node "${CLAUDE_PLUGIN_ROOT}/scripts/checkpoint.mjs" flag --status "$PIPELINE_BASE/<issue>/status.json" --phase <phase>-<role> --agent <role> --verdict <token> --summary "<the agent's own concern, quoted, not editorialized>"`. Omit `--summary` for a verdict-only agent. The script refuses an over-cap verdict and cuts an over-cap summary, both caps read from the schema.
 
 When dispatching Phase 4 reviewer prompts (see `phase-4-panel.md`), include the line `Prior flags: see status.json flags array; the digest is authoritative for what earlier agents already raised.` This avoids each Phase 4 reviewer re-parsing review.json and impl-report.json from cold.
 
