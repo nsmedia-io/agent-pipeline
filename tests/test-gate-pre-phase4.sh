@@ -987,6 +987,27 @@ assert_eq "CONTROL: an entry whose ac_id is AC3 covers AC3" "$RC" "0"
 assert_contains "and the pass reports the label method" "$OUT" \
   "coverage: 2 acceptance criteria matched by their own AC label, 0 by word overlap"
 
+# A LABEL THAT TRAILS is still the criterion's own label when it is the only one in the text. Below,
+# the only entry shares nearly every word with the criterion, so word overlap WOULD cover it; the
+# label rule must decide instead, and nothing names AC4.
+new_project own-label-trailing
+write_spec_criteria '["the courier roster rotates on the hour (AC4)"]'
+write_report_checks '[
+  {"requirement_index": 0, "requirement_text": "the courier roster rotates on the hour", "status": "PASS", "notes": "n"}
+]'
+gate --issue "$ISSUE"
+assert_eq "a trailing AC4 is judged by the label rule, not rescued by word overlap" "$RC" "1"
+assert_contains "  ...naming AC4 as the unanswered label" "$ERR" "carries AC4 as its own leading label or its ac_id"
+assert_contains "  ...and counted under the label method" "$ERR" "coverage: 1 acceptance criteria matched by their own AC label, 0 by word overlap"
+# CONTROL: with ac_id AC4 on that entry it passes.
+new_project own-label-trailing-control
+write_spec_criteria '["the courier roster rotates on the hour (AC4)"]'
+write_report_checks '[
+  {"requirement_index": 0, "requirement_text": "the courier roster rotates on the hour", "status": "PASS", "notes": "n", "ac_id": "AC4"}
+]'
+gate --issue "$ISSUE"
+assert_eq "CONTROL: the same entry with ac_id AC4 covers the trailing-label criterion" "$RC" "0"
+
 # An UNLABELLED spec still uses word overlap, and says so.
 new_project own-label-unlabelled-spec
 write_spec "Screenshots stay inside the pipeline issue directory"

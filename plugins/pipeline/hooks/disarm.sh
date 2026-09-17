@@ -68,8 +68,11 @@ disarm_flush() {
   return 0
 }
 
+# DISARM_NO_JSON=1: the caller may already have written a JSON decision on stdout (pre-tool-use.sh's
+# EXIT trap sets it), and a second object would make stdout unparseable. The stderr line and the log
+# line still happen; only the systemMessage is withheld.
 if [ "${DISARM_SOURCED:-0}" != 1 ] && [ $# -ge 3 ]; then
   disarm_record "$1" "$2" "$3"
-  disarm_flush
+  [ "${DISARM_NO_JSON:-0}" = 1 ] || disarm_flush
   exit 0
 fi

@@ -539,6 +539,17 @@ for good in '"0-setup"' '"0.5-map"' '"2.5-design-owner-decision"' '"3-impl-error
   assert_eq "CONTROL: a phase-shaped current_phase ($good) exits 0" "$(run_checker "$NEW_TMPDIR")" "0|"
 done
 
+# A CONCLUDED record is the archive: its phase is not checked, so an old malformed run never makes a
+# future checkpoint exit 1. --all walks it regardless of age, which is the case that bites.
+for concl in '"completed_at":"2026-01-01T00:00:00Z"' '"final_verdict":"APPROVE"'; do
+  new_tmpdir || exit 90
+  mkdir -p "$NEW_TMPDIR/.pipeline/43"
+  printf '{"current_phase":"Phase 5 done","started_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T00:00:00Z","branch":"b","events":[],%s}' "$concl" \
+    > "$NEW_TMPDIR/.pipeline/43/status.json"
+  assert_eq "a malformed phase on a CONCLUDED record ($concl) is not refused, even under --all" \
+    "$(run_checker "$NEW_TMPDIR" --all)" "0|"
+done
+
 phase_root '"Phase 3"' || exit 90
 BADPHASE_REPORT="$(cd "$NEW_TMPDIR" && node "$CHECKER" --root "$NEW_TMPDIR" --report 2>/dev/null)"
 assert_contains "--report names the record under badphases" "$BADPHASE_REPORT" "badphases=.pipeline"

@@ -163,7 +163,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { isMain as isMainScript } from "./lib.mjs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { validate, tokens } from "./validate-pipeline-artifact.mjs";
+import { validate, tokens, acLabels } from "./validate-pipeline-artifact.mjs";
 import {
   DEFAULT_MIGRATION_GLOBS,
   isMigrationPath,
@@ -517,10 +517,21 @@ export function hasUpSection(sql, marker = DEFAULT_DOWN_MARKER) {
 // remedy is one leading label or one ac_id per entry. The gate reports how many criteria each
 // method decided, so a report scored on wording is visible as such.
 export function leadingLabel(value) {
-  if (typeof value === "number" && Number.isInteger(value) && value >= 0) return `ac${value}`;
   if (typeof value !== "string") return null;
   const m = /^\s*ac\s*(\d+)\b/i.exec(value);
   return m ? `ac${Number(m[1])}` : null;
+}
+
+// THE CRITERION'S OWN LABEL. Its leading label when it has one; otherwise the ONE AC label its text
+// carries anywhere ("the roster rotates (AC4)", "... per AC4"), because a criterion whose label
+// trails is still a labelled criterion and must not fall to word overlap. Two or more labels and no
+// leading one is ambiguous ("unlike AC1, AC3 ..."), so it is judged as unlabelled rather than guessed.
+export function criterionLabel(criterion) {
+  const lead = leadingLabel(criterion);
+  if (lead) return lead;
+  const all = [...acLabels(criterion)].map((l) => `ac${Number(l.slice(2))}`);
+  const distinct = [...new Set(all)];
+  return distinct.length === 1 ? distinct[0] : null;
 }
 
 function entryLabels(entry) {
@@ -578,7 +589,7 @@ export function coverageCandidates(report) {
 /** { covered, method: "label" | "tokens", label } for one criterion. */
 export function coverageVerdict(criterion, checks) {
   const list = checks || [];
-  const own = leadingLabel(criterion);
+  const own = criterionLabel(criterion);
   if (own) {
     return { covered: list.some((c) => entryLabels(c).has(own)), method: "label", label: own };
   }

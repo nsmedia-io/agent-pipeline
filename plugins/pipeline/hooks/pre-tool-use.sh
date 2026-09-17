@@ -39,6 +39,29 @@ _note() {
   printf 'agent-pipeline PreToolUse: %s; nothing enforced.\n' "$1" >&2
 }
 
+# A CRASH IS REPORTED FROM INSIDE, SO IT CANNOT PRINT A SECOND JSON OBJECT (0.42.x, B2). hooks.json's
+# fail-open tail runs hooks/disarm.sh when this file exits non-zero, and disarm.sh prints a JSON
+# systemMessage -- which, after a deny object already on stdout, would make stdout two objects and
+# unparseable. The tail cannot see what was printed; this file can. So an EXIT trap reports any
+# non-zero exit itself, suppresses the systemMessage once _JSON_OUT says a decision may already be on
+# stdout, and exits 0, leaving the tail for the one case this trap cannot cover: a file that never
+# started. One builtin on the fast path, no fork.
+_JSON_OUT=0
+_pt_crash() {
+  _pt_disarm=${CLAUDE_PLUGIN_ROOT:-${0%/*}/..}/hooks/disarm.sh
+  if [ -f "$_pt_disarm" ]; then
+    if [ "$_JSON_OUT" = 1 ]; then
+      DISARM_NO_JSON=1 sh "$_pt_disarm" PreToolUse pretooluse-gate "the gate exited $1 after it may have written its decision"
+    else
+      sh "$_pt_disarm" PreToolUse pretooluse-gate "the gate exited $1 without a decision, so this Bash call was allowed unchecked"
+    fi
+  else
+    printf 'agent-pipeline PreToolUse: gate unavailable (rc %s); allowing\n' "$1" >&2
+  fi
+  exit 0
+}
+trap '_pt_rc=$?; [ "$_pt_rc" = 0 ] || _pt_crash "$_pt_rc"' EXIT
+
 # ---- moving a cursor forward without paying for it twice ---------------------------------------
 #
 # `${s#"$long"}` -- drop a prefix by NAMING it -- and `${s%"${s#?}"}` -- read the first character
@@ -333,7 +356,7 @@ _js_unescape() { # <escaped> -> _UNESC
 # POSIX simple command may carry any number of assignments and no command word, and all of them
 # take effect, so the whole reset is one statement.
 _inv_reset() {
-  _ist=head _idead=0 _valnext=0 _verb='' _blanket=0 _pathspec=0 _blanketspec=0 _endopts=0
+  _ist=head _idead=0 _valnext=0 _verb='' _blanket=0 _pathspec=0 _blanketspec=0 _endopts=0 _hpre=0
 }
 
 _inv_words() { # <closed word>...
@@ -371,9 +394,21 @@ _inv_words() { # <closed word>...
     case $_ist in
       head)
         # WHICH WORD NAMES THE COMMAND.
+        # A PREFIX COMMAND that runs its argument (env, command, sudo) keeps the head open, with its
+        # value-taking options skipped, so `sudo git stash` and `env -u X git reset --hard` are read
+        # as the git invocations they are. `git.exe` is the same program on a Windows host.
+        if [ "$_valnext" = 1 ]; then
+          _valnext=0
+          continue
+        fi
         case $_f in
           [A-Za-z_]*=*) ;; # a leading VAR=value assignment: the command word is still ahead
-          git | */git) _ist=global ;;
+          git | */git | git.exe | */git.exe) _ist=global ;;
+          env | */env | command | sudo | */sudo) _hpre=1 ;;
+          -u | -g | -C | -D | -h | -p | -r | -t | -U | -S | --user | --group | --chdir | --unset | --split-string)
+            if [ "$_hpre" = 1 ]; then _valnext=1; else _idead=1; fi
+            ;;
+          -*) [ "$_hpre" = 1 ] || _idead=1 ;;
           *) _idead=1 ;; # this word names something else, so nothing here can stage
         esac
         continue
@@ -397,7 +432,7 @@ _inv_words() { # <closed word>...
                 # verdict the first pass already reached, so staging verbs are inert there.
                 if [ "$_DG_ONLY" = 1 ]; then _idead=1; else _ist=arg; fi
                 ;;
-              stash | reset | checkout | restore | clean)
+              stash | reset | checkout | switch | restore | clean)
                 # Not staging, but able to DISCARD uncommitted work (0.42.x, B2). Read by
                 # _dg_word/_dg_finish; the state is initialised here rather than in _inv_reset so
                 # the per-separator reset (paid per heredoc line) costs nothing extra.
@@ -588,10 +623,12 @@ _inv_words() { # <closed word>...
 # question and no node process: the decision is made from the command text alone, in this stage.
 #
 # The same word machinery as the staging scan reads the words, so quoting, comments, heredocs and
-# separators are handled exactly once. Forms deliberately NOT refused: `git stash list` and
-# `git stash show` (read-only), `git reset` without --hard, `git restore --staged <path>` alone
-# (index only), and `git checkout <branch>` without `--` or `.` (git refuses to overwrite local
-# changes there). `git checkout <path>` with no `--` is a residual: it is textually a branch
+# separators are handled exactly once. Also refused: `git checkout -f`/`--force` and
+# `git switch -f`/`--discard-changes`, which throw local changes away on a branch switch. Forms
+# deliberately NOT refused: `git stash list`/`show` (read-only) and `apply`/`pop`/`create` (they
+# put work back or only record it), `git clean -n`/`--dry-run`, `git reset` without --hard,
+# `git restore --staged <path>` alone (index only), and `git checkout <branch>` without `--`,
+# `.` or `-f` (git refuses to overwrite local changes there). `git checkout <path>` with no `--` is a residual: it is textually a branch
 # switch, and this scanner cannot tell a branch name from a path.
 _dg_hit() { # <form>
   _DESTRUCT=1
@@ -606,9 +643,16 @@ _dg_word() { # <one word after a discarding verb>
   fi
   case $_verb in
     stash)
+      # The SUBCOMMAND decides. push/save/drop/clear (and a bare `git stash` or options only, which
+      # is a push) discard or destroy; list/show read; apply/pop/create/store/branch put work BACK
+      # or only record it, so they are allowed. An unknown word is refused: git reads it as nothing
+      # this rule can vouch for.
       case $1 in
-        -*) ;; # `git stash -u` is still a push; decided at the subcommand or at the end
-        list | show) _idead=1 ;;
+        --) _dg_hit "git stash push" ;;
+        -*) ;;
+        push | save) _dg_hit "git stash $1" ;;
+        drop | clear) _dg_hit "git stash $1" ;;
+        list | show | apply | pop | create | store | branch) _idead=1 ;;
         *) _dg_hit "git stash" ;;
       esac
       ;;
@@ -625,7 +669,14 @@ _dg_word() { # <one word after a discarding verb>
       case $1 in
         --) _dgsep=1 ;;
         . | ./ | :/) _dg_hit "git checkout ." ;;
+        -f | --force) _dg_hit "git checkout --force" ;;
         -b | -B | --orphan) _valnext=1 ;;
+      esac
+      ;;
+    switch)
+      case $1 in
+        -f | --force | --discard-changes) _dg_hit "git switch --discard-changes" ;;
+        -c | -C | --orphan) _valnext=1 ;;
       esac
       ;;
     restore)
@@ -659,7 +710,15 @@ _dg_word() { # <one word after a discarding verb>
         *) _dgops=1 ;;
       esac
       ;;
-    clean) _dg_hit "git clean" ;;
+    clean)
+      # A DRY RUN deletes nothing, and git honours -n wherever it sits, so it is decided at the end.
+      case $1 in
+        -n | --dry-run) _dgops=1 ;;
+        -e | --exclude) _valnext=1 ;;
+        --*) ;;
+        -*n*) _dgops=1 ;;
+      esac
+      ;;
   esac
   return 0
 }
@@ -667,7 +726,7 @@ _dg_word() { # <one word after a discarding verb>
 _dg_finish() { # a discarding verb's invocation ended without a hit on any single word
   case $_verb in
     stash) _dg_hit "git stash" ;; # a bare `git stash` (or options only) is a push
-    clean) _dg_hit "git clean" ;;
+    clean) [ "$_dgops" = 1 ] || _dg_hit "git clean" ;; # _dgops marks a dry run here
     restore)
       if [ "$_dgops" = 1 ]; then
         # --staged alone restores the index only; --worktree, or neither flag, rewrites files.
@@ -1720,6 +1779,7 @@ fi
 # was decided from the command, and whose run it is does not change what the command destroys.
 # _DFORM is fixed vocabulary from _dg_word and never command text, so it needs no JSON escaping.
 if [ "$_DESTRUCT" = 1 ]; then
+  _JSON_OUT=1
   printf 'agent-pipeline PreToolUse: refused destructive git for a subagent (%s).\n' "$_DFORM" >&2
   # THE REASON TEXT IS SINGLE-QUOTED AND MUST STAY SO. It names git commands in backquotes, and
   # inside double quotes a backquote is command substitution: an earlier draft of this line RAN
@@ -1752,6 +1812,7 @@ _js_get cwd "$_REST" && { _js_unescape "$_JS_VAL"; _CWD=$_UNESC; } || _CWD=''
 # The caller's command is NOT passed. The resolver decides ownership and phase; the class of the
 # command was decided here, and putting it on a child's argv would publish user-controlled text
 # to every other local user on the host.
+_JSON_OUT=1
 node "$_RESOLVER" "$_CWD" "$_AGENT_TYPE" "$_ACTIVE" || {
   _note 'the resolver exited non-zero'
   exit 0

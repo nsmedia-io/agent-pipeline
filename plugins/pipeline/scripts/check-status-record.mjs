@@ -243,7 +243,13 @@ export function checkRecords(records, caps, phaseRe = null) {
     // THE PHASE SHAPE. Absent and non-string count too: a record with no readable phase is the
     // same silence downstream as a mistyped one. The value is quoted TRUNCATED, because it is a
     // field of a committed record and this line lands in a transcript.
-    if (phaseRe && !(typeof s?.current_phase === "string" && phaseRe.test(s.current_phase))) {
+    //
+    // ONLY ON A RECORD THAT HAS NOT CONCLUDED: no `completed_at` and no `final_verdict`. A finished
+    // run's record is the archive, nobody may rewrite it, and the harm this refusal prevents (the
+    // phase-entry guard going quiet mid-run) cannot happen to a run that is over. Without this bound
+    // one old malformed archive would make every future checkpoint exit 1.
+    const concluded = Boolean(s?.completed_at) || Boolean(s?.final_verdict);
+    if (phaseRe && !concluded && !(typeof s?.current_phase === "string" && phaseRe.test(s.current_phase))) {
       const shown =
         s?.current_phase === undefined ? "absent" : JSON.stringify(s.current_phase).slice(0, 48);
       out.badphases.push(`${file} current_phase=${shown} does not match ${phaseRe.source}`);

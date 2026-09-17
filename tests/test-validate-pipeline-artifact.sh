@@ -584,6 +584,33 @@ rm -f "$STRAY_W/.pipeline/4242/peer-review.qa.json"
 # CONTROL 2: an agent working in the project dir itself has no wrong checkout to write into.
 stray_hook "$STRAY_P"
 assert_eq "CONTROL: an agent whose cwd IS the project dir is not refused" "$OUT" ""
+# THE MONOREPO SUBDIR. The project dir is a package INSIDE a larger repository, so its git root is
+# above it. An agent working in the project dir writes its shard exactly where the merge reads it;
+# comparing the git root with the project dir itself used to refuse that correct shard.
+new_tmpdir || exit 90
+MONO="$NEW_TMPDIR"
+mkdir -p "$MONO/.git"
+MONO_P="$MONO/packages/app"
+write_run_record "$MONO_P/.pipeline/4242/status.json" "4-review"
+printf '%s' "$VALID_QA_SHARD" > "$MONO_P/.pipeline/4242/peer-review.qa.json"
+MONO_OUT=$(printf '{"agent_type":"pipeline:qa","cwd":"%s"}' "$MONO_P" \
+  | ( cd "$MONO_P" && CLAUDE_PROJECT_DIR="$MONO_P" node "$VALIDATOR" ) 2>/dev/null)
+assert_eq "monorepo subdir: a correctly placed shard is NOT refused" "$MONO_OUT" ""
+# ...and a worktree of that monorepo maps the same subdir: the merge there reads
+# <worktree>/packages/app/.pipeline, so a stray shard in the main package still refuses, naming it.
+MONO_W="$MONO/.claude/worktrees/4242-panel"
+mkdir -p "$MONO_W/packages/app/.pipeline/4242"
+printf 'gitdir: %s/.git/worktrees/4242-panel\n' "$MONO" > "$MONO_W/.git"
+MONO_OUT=$(printf '{"agent_type":"pipeline:qa","cwd":"%s"}' "$MONO_W/packages/app" \
+  | ( cd "$MONO_W/packages/app" && CLAUDE_PROJECT_DIR="$MONO_P" node "$VALIDATOR" ) 2>/dev/null)
+assert_contains "monorepo worktree: a stray shard in the main package blocks" "$MONO_OUT" '"decision":"block"'
+assert_contains "  ...naming the SUBDIR path in the worktree as where the merge reads" "$MONO_OUT" \
+  "4242-panel/packages/app/.pipeline/4242/peer-review.qa.json"
+printf '%s' "$VALID_QA_SHARD" > "$MONO_W/packages/app/.pipeline/4242/peer-review.qa.json"
+MONO_OUT=$(printf '{"agent_type":"pipeline:qa","cwd":"%s"}' "$MONO_W/packages/app" \
+  | ( cd "$MONO_W/packages/app" && CLAUDE_PROJECT_DIR="$MONO_P" node "$VALIDATOR" ) 2>/dev/null)
+assert_eq "CONTROL monorepo worktree: with the shard at the mapped subdir path, nothing blocks" "$MONO_OUT" ""
+
 # CONTROL 3: a shard older than this subagent (its transcript's first timestamp) is not its write.
 touch -t 202001010000 "$STRAY_P/.pipeline/4242/peer-review.qa.json"
 node -e 'process.stdout.write(JSON.stringify({type:"user",timestamp:new Date().toISOString()})+"\n")' > "$STRAY_P/agent-transcript.jsonl"

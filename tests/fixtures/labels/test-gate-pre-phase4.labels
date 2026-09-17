@@ -1,3 +1,5 @@
+  ...and counted under the label method
+  ...naming AC4 as the unanswered label
 #152: a .ts helper under migrations/__tests__/ is not checked for a down section
 #152: isMigrationPath classifies exactly ONE of the two paths
 ...with no schema complaint about the fixture
@@ -11,6 +13,7 @@ CONTROL: and says nothing about discovery
 CONTROL: migrationGlobs: [] with no migration-shaped change passes
 CONTROL: the identical report with a flat commits array passes
 CONTROL: the same criterion passes once one check names AC23
+CONTROL: the same entry with ac_id AC4 covers the trailing-label criterion
 CONTROL: the same statements unwrapped ARE an up section
 GUARANTEE: an executable (uncommented) down region now halts
 NOT as commented-out: a `*/` past the marker must not vouch for the region
@@ -44,6 +47,7 @@ a schema violation halts
 a short criterion still matches on three tokens, exactly as before
 a stray 'see AC4' no longer decides anything: AC9 is unanswered and halts (was 0 before B2)
 a token-overlap match covers the criterion
+a trailing AC4 is judged by the label rule, not rescued by word overlap
 a whitespace-only marker falls back to the default
 an AC-label match covers the criterion
 an absent config applies the default globs

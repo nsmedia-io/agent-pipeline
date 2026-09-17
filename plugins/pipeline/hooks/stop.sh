@@ -102,8 +102,24 @@ fi
 # environment variable that disarms a halting control leaves no trace in the archived run
 # record, and this repo has already refused that shape twice. The skip itself now leaves a trace:
 # it is recorded in the disarm log, which the next session-start warmup reports.
+#
+# ONCE PER SESSION. The skip is an environment variable, so it is set for every Stop of the session;
+# recording each one would repeat the same line after every turn and train the reader to skip it.
+# The session_id from the Stop payload is remembered beside the disarm log, and a Stop in a session
+# already recorded exits 0 in silence. A payload with no readable session_id records every time,
+# which is the loud direction.
 if [[ "${CLAUDE_HOOK_STOP_SKIP:-0}" == "1" ]]; then
+  SKIP_SESSION=$(printf '%s' "$PAYLOAD" | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
+  SKIP_LOG=$(disarm_log_path 2>/dev/null || true)
+  SKIP_MARK=""
+  [[ -n "$SKIP_LOG" ]] && SKIP_MARK="$(dirname "$SKIP_LOG")/agent-pipeline-stop-skip.session"
+  if [[ -n "$SKIP_SESSION" && -n "$SKIP_MARK" && "$(cat "$SKIP_MARK" 2>/dev/null)" == "$SKIP_SESSION" ]]; then
+    exit 0
+  fi
   disarm_record Stop "voice-lint and project-check" "CLAUDE_HOOK_STOP_SKIP=1 is set"
+  if [[ -n "$SKIP_SESSION" && -n "$SKIP_MARK" ]]; then
+    printf '%s' "$SKIP_SESSION" > "$SKIP_MARK" 2>/dev/null || true
+  fi
   exit 0
 fi
 

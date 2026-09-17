@@ -1498,7 +1498,10 @@ export function subagentStartMs(input, now = Date.now()) {
  * worktree reported `MISSING SHARD`, and nothing said where the shard had gone.
  *
  * REFUSES THE STOP when all of these hold, and names both paths:
- *   - the payload's cwd sits in a checkout (see checkoutRootOf) that is NOT the project dir;
+ *   - the payload's cwd sits in a checkout (see checkoutRootOf) that is NOT the checkout the project
+ *     dir sits in. CHECKOUT ROOT AGAINST CHECKOUT ROOT, never against the project dir itself: a
+ *     project dir that is a SUBDIRECTORY of a larger repository (a monorepo package) has a git root
+ *     above it, and comparing that root with the project dir refused every correctly placed shard;
  *   - under the PROJECT dir's .pipeline/<issue>/ there is a review or peer-review shard this
  *     agent's own rules name, modified since this subagent started;
  *   - and the same file is ABSENT from the dispatch checkout's .pipeline/<issue>/.
@@ -1517,7 +1520,12 @@ export function strayShardFailures(agent, input, now = Date.now(), projectDir = 
   ];
   if (shardNames.length === 0) return out;
   const dispatchRoot = checkoutRootOf(input.cwd);
-  if (!dispatchRoot || samePath(dispatchRoot, projectDir)) return out;
+  const projectRoot = checkoutRootOf(projectDir);
+  if (!dispatchRoot || !projectRoot || samePath(dispatchRoot, projectRoot)) return out;
+  // The project's position INSIDE its checkout, carried over to the dispatch checkout: in a monorepo
+  // whose project is packages/app, the merge in the worktree reads <worktree>/packages/app/.pipeline.
+  const within = path.relative(path.resolve(projectRoot), path.resolve(projectDir));
+  const dispatchProject = within && !within.startsWith("..") ? path.join(dispatchRoot, within) : dispatchRoot;
   const since = subagentStartMs(input, now);
   for (const issueDir of issueDirs(path.join(path.resolve(projectDir), ".pipeline"))) {
     for (const name of shardNames) {
@@ -1529,7 +1537,7 @@ export function strayShardFailures(agent, input, now = Date.now(), projectDir = 
         continue;
       }
       if (st.mtimeMs < since) continue;
-      const expected = path.join(dispatchRoot, ".pipeline", path.basename(issueDir), name);
+      const expected = path.join(dispatchProject, ".pipeline", path.basename(issueDir), name);
       if (existsSync(expected)) continue;
       out.push(
         `${name} was written to ${stray}, but this agent was dispatched to ${dispatchRoot}, where the ` +

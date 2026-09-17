@@ -62,6 +62,43 @@ assert_contains "  ...and so does stderr" "$GATE_ERR" "agent-pipeline PreToolUse
 assert_contains "  ...and the disarm log carries it for the next warmup" "$(cat "$CRASH_LOG" 2>/dev/null)" \
   "PreToolUse pipeline check pretooluse-gate did not run"
 
+# ONE JSON OBJECT, NEVER TWO. A gate that exits non-zero AFTER printing its deny must not have a
+# systemMessage object appended behind it: stdout would stop being parseable and the deny would be
+# lost. A copy of the real plugin whose destructive-git deny exits 5 instead of 0 stands in for that.
+new_tmpdir || exit 90
+LATE_ROOT="$NEW_TMPDIR"
+mkdir -p "$LATE_ROOT/hooks" "$LATE_ROOT/scripts"
+cp "$HOOKS_DIR"/*.sh "$HOOKS_DIR"/*.mjs "$HOOKS_DIR"/hooks.json "$LATE_ROOT/hooks/" 2>/dev/null
+cp "$SCRIPTS_DIR"/*.mjs "$LATE_ROOT/scripts/" 2>/dev/null
+node -e '
+  const fs = require("fs"); const f = process.argv[1]; let s = fs.readFileSync(f, "utf8");
+  const a = "that decision belongs to the orchestrator.\"}}\x27 \"$_DFORM\"\n  exit 0";
+  if (!s.includes(a)) { process.stdout.write("SITE-MISSING"); process.exit(0); }
+  fs.writeFileSync(f, s.replace(a, a.replace(/exit 0$/, "exit 5"))); process.stdout.write("mutated");
+' "$LATE_ROOT/hooks/pre-tool-use.sh" > "$LATE_ROOT/mutation.txt"
+assert_eq "premise: the copy's deny path now exits 5 after printing its decision" "$(cat "$LATE_ROOT/mutation.txt")" "mutated"
+gate_reset_env "$TEMP_PROJECT"
+GATE_PLUGIN_ROOT_OVERRIDE="$LATE_ROOT"
+GATE_EXTRA_ENV=("CLAUDE_PIPELINE_DISARM_LOG=$LATE_ROOT/disarm.log")
+run_gate "$(gate_payload 'git stash' agent_id=late-1 agent_type=pipeline:qa)"
+assert_eq "a gate that fails AFTER its deny still exits 0" "$GATE_RC" "0"
+assert_eq "  ...and its stdout is still ONE parseable deny (two objects would read NOT-JSON)" "$GATE_DECISION" "deny"
+assert_contains "  ...while stderr and the log still say the gate did not finish" "$GATE_ERR" "pipeline check pretooluse-gate did not run"
+# CONTROL: the same copy failing BEFORE any decision does carry the systemMessage.
+node -e '
+  const fs = require("fs"); const f = process.argv[1]; let s = fs.readFileSync(f, "utf8");
+  const a = "_DESTRUCT=0\n_DFORM=\x27\x27\n";
+  if (!s.includes(a)) { process.stdout.write("SITE-MISSING"); process.exit(0); }
+  fs.writeFileSync(f, s.replace(a, "exit 6\n" + a)); process.stdout.write("mutated");
+' "$LATE_ROOT/hooks/pre-tool-use.sh" > "$LATE_ROOT/mutation.txt"
+assert_eq "CONTROL premise: the copy now exits 6 before deciding" "$(cat "$LATE_ROOT/mutation.txt")" "mutated"
+gate_reset_env "$TEMP_PROJECT"
+GATE_PLUGIN_ROOT_OVERRIDE="$LATE_ROOT"
+GATE_EXTRA_ENV=("CLAUDE_PIPELINE_DISARM_LOG=$LATE_ROOT/disarm.log")
+run_gate "$(gate_payload 'git stash' agent_id=late-2 agent_type=pipeline:qa)"
+assert_contains "CONTROL: failing before a decision, the systemMessage IS printed" "$(system_message "$GATE_OUT")" \
+  "pipeline check pretooluse-gate did not run: the gate exited 6 without a decision"
+
 # CONTROL: with disarm.sh itself missing, the last-resort tail still allows the call.
 rm -f "$CRASH_ROOT/hooks/disarm.sh"
 gate_reset_env "$TEMP_PROJECT"
@@ -83,6 +120,18 @@ assert_contains "its systemMessage names the skip (nothing was said before B2)" 
 assert_contains "the default disarm log lives in the git dir, never under .pipeline/" \
   "$(cat "$SKIP_REPO/.git/agent-pipeline-disarm.log" 2>/dev/null)" "CLAUDE_HOOK_STOP_SKIP=1 is set"
 assert_eq "  ...so nothing new appears under .pipeline/" "$(ls -A "$SKIP_REPO/.pipeline" | grep -c .)" "0"
+
+# ONCE PER SESSION. The variable is set for every Stop of a session; a second Stop in the same
+# session records nothing more, and a new session records again.
+repo_with_pipeline || exit 90
+ONCE_REPO="$NEW_TMPDIR"
+skip_stop() { printf '{"session_id":"%s"}' "$1" | CLAUDE_PROJECT_DIR="$ONCE_REPO" CLAUDE_HOOK_STOP_SKIP=1 bash "$HOOKS_DIR/stop.sh" 2>/dev/null; }
+OUT1=$(skip_stop sess-a); OUT2=$(skip_stop sess-a); OUT3=$(skip_stop sess-b)
+assert_contains "session A's first Stop shows the skip" "$(system_message "$OUT1")" "CLAUDE_HOOK_STOP_SKIP=1 is set"
+assert_not_contains "session A's second Stop does not repeat it" "$(system_message "$OUT2")" "CLAUDE_HOOK_STOP_SKIP"
+assert_contains "a new session B shows it again" "$(system_message "$OUT3")" "CLAUDE_HOOK_STOP_SKIP=1 is set"
+assert_eq "and the log holds exactly two skip lines, one per session" \
+  "$(grep -c 'CLAUDE_HOOK_STOP_SKIP=1 is set' "$ONCE_REPO/.git/agent-pipeline-disarm.log")" "2"
 
 # CONTROL: the same repository and no skip, with nothing to check, says nothing.
 repo_with_pipeline || exit 90
