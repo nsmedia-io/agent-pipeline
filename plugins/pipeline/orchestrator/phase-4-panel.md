@@ -25,7 +25,7 @@ What it computes (the rules are in the script header and pinned by `tests/test-p
 
 Art Director seating: when `<ARTIFACT_DIR>/visual-contract.json` exists, read `${CLAUDE_PLUGIN_ROOT}/orchestrator/art-director-contract.md` now (Duty B is its panel seat, which the call above already resolved).
 
-Record the resolved `PANEL_ROLES` in `status.json` so the merge, the rubric, and a `--resume` all agree on who was on the panel. At the same checkpoint, increment `review_rounds` (1 on the first full panel, +1 per delta round) and refresh the derived telemetry and the effective-config audit record:
+The call above (`--write`) has already recorded the panel in status.json `panel_roles`, so the merge, the rubric, and a `--resume` all agree on who was on the panel. At that checkpoint, increment `review_rounds` (1 on the first full panel, +1 per delta round) and refresh the derived telemetry and the effective-config audit record:
 
 ```bash
 node -e 'Promise.all([import(process.env.CLAUDE_PLUGIN_ROOT+"/scripts/pipeline-telemetry.mjs"),import("node:fs")]).then(([t,fs])=>{const f=process.argv[1];const st=JSON.parse(fs.readFileSync(f,"utf8"));st.telemetry=t.telemetry(st);let cfg={};try{cfg=JSON.parse(fs.readFileSync(process.argv[2],"utf8"))}catch{};st.effective_config=t.effectiveConfig(cfg);fs.writeFileSync(f,JSON.stringify(st,null,2))})' "$PIPELINE_BASE/<issue>/status.json" "$CLAUDE_PROJECT_DIR/pipeline.config.json"
