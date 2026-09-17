@@ -11,18 +11,50 @@ set -u
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
 
 PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$(pwd)}"
-cd "$PROJECT_DIR" 2>/dev/null || exit 0
 
-# Only run inside a git working tree; stay silent everywhere else.
-git rev-parse --is-inside-work-tree >/dev/null 2>&1 || exit 0
+# A WARMUP THAT CANNOT RUN SAYS SO (0.42.x, B2). The three early exits below used to be silent,
+# which made "this plugin is broken here" read exactly like "this project does not use it". Each
+# still exits 0 and prints no half-formed report; it prints one JSON systemMessage instead (see
+# hooks/disarm.sh), which is the user-visible channel. A bare directory that is neither a git tree
+# nor carries pipeline.config.json or .pipeline/ stays silent: that is a project not using this.
+DISARM_LIB="$(dirname "${BASH_SOURCE[0]}")/disarm.sh"
+if [[ -f "$DISARM_LIB" ]]; then
+  DISARM_SOURCED=1
+  # shellcheck source=./disarm.sh
+  . "$DISARM_LIB"
+else
+  disarm_record() { printf 'agent-pipeline %s: pipeline check %s did not run: %s\n' "$1" "$2" "$3" >&2; }
+  disarm_flush() { :; }
+  disarm_log_path() { return 1; }
+fi
+warmup_not_run() {
+  disarm_record SessionStart "warmup" "$1"
+  disarm_flush
+  exit 0
+}
+
+cd "$PROJECT_DIR" 2>/dev/null || warmup_not_run "the project directory $PROJECT_DIR could not be entered"
+
+# Only run inside a git working tree; stay silent everywhere else, unless this directory says it
+# uses the pipeline.
+if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  if [[ -f "$PROJECT_DIR/pipeline.config.json" || -d "$PROJECT_DIR/.pipeline" ]]; then
+    warmup_not_run "$PROJECT_DIR carries pipeline state but is not a git work tree (or git is not on PATH)"
+  fi
+  exit 0
+fi
 
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-}"
 
-# Shared config reader (see hooks/lib.sh). A missing lib means a broken install; stay silent
-# rather than emit a half-formed warmup report.
+# Shared config reader (see hooks/lib.sh). A missing lib means a broken install: no half-formed
+# warmup report, but a line saying the warmup did not run.
 LIB="$(dirname "${BASH_SOURCE[0]}")/lib.sh"
-# shellcheck source=./lib.sh
-[[ -f "$LIB" ]] && . "$LIB" || exit 0
+if [[ -f "$LIB" ]]; then
+  # shellcheck source=./lib.sh
+  . "$LIB"
+else
+  warmup_not_run "hooks/lib.sh is not installed"
+fi
 
 # CUSTOMIZE: set "integrationBranch" in pipeline.config.json if yours is not "main".
 INTEGRATION_BRANCH="$(read_config integrationBranch main)"
@@ -56,6 +88,22 @@ if [[ ! -f "$PROJECT_DIR/pipeline.config.json" ]]; then
   echo "  Settle it: cp \"\$CLAUDE_PLUGIN_ROOT/pipeline.config.example.json\" pipeline.config.json"
   echo "  and edit it, or move to the checkout that already has one."
   echo ""
+fi
+
+# --- Checks that did not run since the last warmup ---
+#
+# hooks/disarm.sh appends a line here whenever a pipeline check could not run (a crashed PreToolUse
+# gate, a Stop hook with no node, CLAUDE_HOOK_STOP_SKIP=1, an unreadable schema under the voice
+# lint). Reported ONCE, then rotated to .reported, so a stale disarm does not repeat forever and the
+# last batch is still on disk for anyone who wants it.
+DISARM_LOG_FILE="$(disarm_log_path 2>/dev/null || true)"
+if [[ -n "$DISARM_LOG_FILE" && -s "$DISARM_LOG_FILE" ]]; then
+  DISARM_COUNT=$(grep -c . "$DISARM_LOG_FILE" 2>/dev/null || echo "?")
+  echo "CHECKS THAT DID NOT RUN since the last warmup ($DISARM_COUNT, most recent last):"
+  tail -10 "$DISARM_LOG_FILE" 2>/dev/null | sed 's/^/  /'
+  echo "  Each is a pipeline check that failed open. Fix the named cause; nothing re-runs them for you."
+  echo ""
+  mv -f "$DISARM_LOG_FILE" "$DISARM_LOG_FILE.reported" 2>/dev/null || true
 fi
 
 # --- Git state ---
