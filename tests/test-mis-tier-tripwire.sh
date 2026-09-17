@@ -412,6 +412,8 @@ for cand in $(grep -oE 'scripts/[a-zA-Z0-9_-]+\.mjs' "$PIPELINE_MD" | sort -u); 
     # Review convergence: the round budget; counts rounds, resolves no model. See the twin in
     # test-dispatch-model-resolver.sh.
     round-budget.mjs) continue ;;
+    # #164: the Phase 4 roster (full panel and delta set); seats roles, resolves no model.
+    panel-roles.mjs) continue ;;
   esac
   CANDIDATES_REL+=("$cand")
 done

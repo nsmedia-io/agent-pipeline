@@ -8,108 +8,22 @@ Committed records written before this rule are NOT migrated: `.pipeline/*/status
 
 The panel reviews the finished diff, each agent through a distinct lens, while remote CI runs concurrently (CI-green is verified at merge, not required to enter the panel). This is the read-heavy, independent-perspective work where fan-out is a pure win, and where QA's adversarial test scrutiny lives: QA reviews the finished implementation with fresh eyes and renders the **binding independent test verdict**.
 
-**Panel composition by tier.** Resolve `PANEL_ROLES` before dispatching:
-
-- **architectural**: the six standing roles. `PANEL_ROLES="ba dba devops secops dev qa"`.
-- **trivial**: `PANEL_ROLES="qa secops"` (QA's binding test verdict plus SecOps, which is never trimmed at any tier). A trivial change is a typo or one-line fix, so DBA/DevOps/BA/Dev add no independent lens worth a context spin-up; two different tripwires still catch a diff that turns out to be bigger than the tier: the MECHANICAL path tripwire above, which is a data-layer PATH predicate and covers migrations, declarative schema and SQL data-access policy sources but NOT auth and NOT authorization code, and Dev's self-reported CONSTRAINT tripwire in the agents' STANDARD-TIER CONSTRAINTS blocks, which is what covers a new auth surface, crypto or webhook verification. Either one re-tiers, at which point the full gates apply. Add the surface-conditional Design lens exactly as below when the diff touches a frontend surface.
-- **cost_class `tooling`, at any tier**: `qa secops` plus ONE surface specialist (the first of `devops`, `dba`, `design_review` the probes below seat, else `dev`), for one round. The block after the Design probe applies it; SecOps keeps its seat, as it does on every full round.
-- **standard**: four always, `ba dev qa secops` (SecOps is never trimmed; it holds the veto and security drift is exactly what a pre-code triage can miss). Add the surface-conditional specialists from the diff, mechanically:
+**Panel composition.** Resolve and record the panel with one call before dispatching (#164). The script runs git without a shell and prints one role per line, so no role list or path list passes through a shell variable:
 
 ```bash
-PANEL_ROLES="ba dev qa secops"
-# NUL-delimited into a FILE, read by the probe on stdin. Not an unquoted shell variable: see
-# the mis-tier tripwire above for the zsh word-splitting defect that shape carries, and for
-# why git's exit status is captured rather than discarded.
-CHANGED_PATHS="$(mktemp)"
-git -C "$WORKTREE_PATH" diff --name-only -z origin/main...HEAD > "$CHANGED_PATHS"
-GIT_RC=$?
-if [ "$GIT_RC" -ne 0 ]; then
-  : > "$CHANGED_PATHS"
-  echo "SURFACE-INDETERMINATE: git diff --name-only -z exited $GIT_RC; the changed-path list is UNKNOWN, not empty." >&2
-fi
-# The data-layer and infra surfaces are read from ${CLAUDE_PLUGIN_ROOT}/scripts/data-layer-surface.mjs,
-# the same module the mis-tier tripwire uses, so detection and dispatch never diverge.
-# (# CUSTOMIZE: `dataLayerGlobs` and `infraGlobs` in pipeline.config.json describe YOUR layout.)
-# The panel predicate is the BROAD one deliberately: a panel seat is cheap and reversible,
-# where the tripwire's narrow halt is not.
-#
-# The MODULE is an argument, not a constant, so the frontend probe further down this phase runs
-# the same three-outcome shape instead of a second spelling of it. One function, one fail
-# direction, one place to get it wrong.
-surface_probe() {  # $1 = module basename under scripts/, $2 = predicate export; NUL path list on STDIN
-  # THE BRACES ARE LOAD-BEARING, and nothing else in the tree says so. Plain bash treats
-  # "$1" and "${1}" identically, so reverting both copies to the bare form is a no-op to a
-  # shell, to the test suite, and to any diff review: it reads as a stray-brace cleanup. The
-  # risk sits UPSTREAM of any shell. This file is a slash-command template, and the loader
-  # substitutes bare $N tokens in the TEXT before a shell ever runs it; a rendered copy with
-  # $1 substituted away exits 1 (INDETERMINATE) on every call, which the caller reads as a
-  # broken probe rather than a broken template. Keep the braces, and keep both copies
-  # byte-identical to each other.
-  node -e 'const fs=require("node:fs");new Promise(r=>r(fs.readFileSync(0,"utf8").split("\0").filter(Boolean))).then(paths=>import(process.env.CLAUDE_PLUGIN_ROOT + "/scripts/" + process.argv[1]).then(m=>{const f=m[process.argv[2]];if(typeof f!=="function")throw new Error("missing export "+process.argv[2]+" in "+process.argv[1]);if(paths.length===0)throw new Error("empty path list: an unread diff is not a clean diff");process.exit(f(paths)?0:20)})).catch(e=>{console.error("SURFACE-INDETERMINATE: "+process.argv[2]+": "+(e&&e.message));process.exit(1)})' "${1}" "${2}"
-}
-surface_probe data-layer-surface.mjs diffTouchesDataLayer < "$CHANGED_PATHS"; RC=$?
-if [ "$RC" -ne 20 ]; then
-  PANEL_ROLES="$PANEL_ROLES dba"
-  if [ "$RC" -ne 0 ]; then
-    echo "PANEL-NOTE: dba SEATED on an INDETERMINATE data-layer probe (exit $RC; see SURFACE-INDETERMINATE on stderr), not on a match."
-  fi
-fi
-surface_probe data-layer-surface.mjs diffTouchesInfra < "$CHANGED_PATHS"; RC=$?
-if [ "$RC" -ne 20 ]; then
-  PANEL_ROLES="$PANEL_ROLES devops"
-  if [ "$RC" -ne 0 ]; then
-    echo "PANEL-NOTE: devops SEATED on an INDETERMINATE infra probe (exit $RC; see SURFACE-INDETERMINATE on stderr), not on a match."
-  fi
-fi
+node "${CLAUDE_PLUGIN_ROOT}/scripts/panel-roles.mjs" full --status "$PIPELINE_BASE/<issue>/status.json" \
+  --worktree "<WORKTREE_PATH>" --artifact-dir "$ARTIFACT_DIR" --write > "$ARTIFACT_DIR/roles-to-merge.txt"
 ```
 
-**Three outcomes, never two, and the third one SEATS.** `surface_probe` exits 0 on a MATCH, **20** on a NO-MATCH, and anything else means INDETERMINATE: the module was absent, it threw, an export was renamed, the path list could not be read, or `node` itself was missing. The seat is therefore withheld only on the ONE code that means "the predicate ran and said no", so every unforeseen failure (node's own exit 1 on an uncaught throw or a syntax error, 127 for a missing binary) lands in the indeterminate branch instead of impersonating a clean diff.
+Read its exit status directly; never pipe the call, because a pipe discards it.
 
-**20 is the no-match code because node RESERVES 1 through 14 for itself** (`doc/api/process.md`, "Exit codes": 9 Invalid Argument, **10 Internal JavaScript Run-Time Failure**, 13 Unsettled Top-Level Await, 14 Snapshot Failure), and 126/127/128+n belong to the shell and to signals. The sentinel was 10, which collides with a code node emits on its own: a runtime failure inside node's bootstrap would have been read as "the predicate ran and said no", the exact impersonation the three-outcome shape exists to prevent. 20 sits above node's reserved band and below the shell's, so nothing but this block can produce it. `${CLAUDE_PLUGIN_ROOT}` resolving to a stale installed plugin cache that predates the module is a live condition, not a hypothetical, and a bare `process.exit(pred?0:1)` returns rc=1 with zero bytes on both streams in exactly that case: byte-identical to "the diff is clean", which silently drops the specialist the change exists to seat.
+- **0**: status.json `panel_roles` holds the panel, and `roles-to-merge.txt` holds the same roles for the merge below.
+- **21**: the same, and at least one role was seated because its surface probe could not be evaluated (git diff failed, the diff was empty, a predicate threw). The `PANEL-NOTE:` lines on stderr name each such seat and `--write` has already recorded them in status.json `flags`. Say them in the PR summary too: `panel_roles` alone cannot tell a seat earned by a match from one earned by indeterminacy. Dispatch the panel; fix the cause (usually a stale `${CLAUDE_PLUGIN_ROOT}` or a missing `origin/main`) separately.
+- **1**: bad input (status.json unreadable, `risk_tier` absent or unknown, a missing argument). Halt, fix the record, run it again. **Any other exit** is a failure to run: halt, and do not dispatch from the file.
 
-**Never write this as `surface_probe ... | grep -q ...`.** A pipe discards the exit status, which is the entire mechanism here.
+What it computes (the rules are in the script header and pinned by `tests/test-panel-roles.sh`): architectural seats `ba dba devops secops dev qa`; standard seats `ba dev qa secops` plus `dba` on a data-layer diff and `devops` on an infra diff; trivial seats `qa secops`; every tier adds `design_review` on a frontend diff and `art_director` when `visual-contract.json` exists. At cost_class `tooling`, whatever the tier, the panel is `qa secops` plus ONE specialist (the first of `devops`, `dba`, `design_review` a probe seats, else `dev`) for one round. SecOps sits on every full round. A trivial panel stays small because two tripwires re-tier a diff bigger than its tier: the mechanical mis-tier tripwire (a data-layer path predicate) and Dev's constraint tripwire (auth, crypto, webhook verification). The predicates are the gates' own (`data-layer-surface.mjs`, `frontend-surface.mjs`; # CUSTOMIZE: `dataLayerGlobs`, `infraGlobs`, `frontendSurface` in pipeline.config.json), so detection and dispatch never diverge. An unevaluable probe seats because it cannot know the diff misses the surface: over-seating costs one reviewer's context, under-seating removes the lens the diff needed. The frontend probe's late arrival on that rule (#20) is in `${CLAUDE_PLUGIN_ROOT}/docs/rationale.md` ("Frontend probe").
 
-The direction is the same rule the mis-tier tripwire states, applied to a third consumer: *an unevaluable check cannot know the answer is negative.* The tripwire halts because it cannot know the diff was clean; panel composition seats because it cannot know the diff misses the surface. Over-seating costs one reviewer's context and refuses no correct work; under-seating removes the exact lens the diff needed while `status.json` records a panel and the PR summary claims it reviewed the diff.
-
-If any probe prints a `PANEL-NOTE:` line (data-layer, infra, or the frontend one in the Design block below), record that sentence in `status.json` (`flags`) alongside `panel_roles`, and say it in the PR summary: the recorded panel then contains a role seated by indeterminacy rather than by a match, and an auditor reading `panel_roles` later cannot tell those apart from the array alone. Fixing the stale `${CLAUDE_PLUGIN_ROOT}` is the real remedy; the seat is the safe default while it is broken.
-
-Art Director seating: when `<ARTIFACT_DIR>/visual-contract.json` exists, read `${CLAUDE_PLUGIN_ROOT}/orchestrator/art-director-contract.md` now (Duty B is its panel seat); the frontend block below seats it on that same condition.
-
-**Design is surface-conditional at EVERY tier.** Add `design_review` to `PANEL_ROLES` (on top of the architectural/trivial six or the standard four-plus) when, and only when, the diff touches a frontend surface. Use the SAME allowlist the gate uses, so detection and dispatch never diverge:
-
-```bash
-# $CHANGED_PATHS is the NUL-delimited diff path list, and `surface_probe` is the function
-# defined in the panel-composition block above: this block runs in the SAME shell, immediately
-# after it (produce both the same way for architectural/trivial). diffTouchesFrontend in
-# ${CLAUDE_PLUGIN_ROOT}/scripts/frontend-surface.mjs is the single source of truth; the probe
-# reuses it so the panel and the gate agree.
-surface_probe frontend-surface.mjs diffTouchesFrontend < "$CHANGED_PATHS"; RC=$?
-if [ "$RC" -ne 20 ]; then
-  PANEL_ROLES="$PANEL_ROLES design_review"
-  if [ "$RC" -ne 0 ]; then
-    echo "PANEL-NOTE: design_review SEATED on an INDETERMINATE frontend probe (exit $RC; see SURFACE-INDETERMINATE on stderr), not on a match."
-  fi
-fi
-
-# Art Director sits only when it authored a contract for this issue (Duty A above).
-[ -f "$ARTIFACT_DIR/visual-contract.json" ] && PANEL_ROLES="$PANEL_ROLES art_director"
-
-# cost_class tooling, at ANY tier: qa + secops + ONE surface specialist, one round. SecOps keeps
-# its seat (a full round always seats it). The specialist is the first role the probes above
-# seated, in the order devops, dba, design_review; when none was seated it is dev.
-COST_CLASS="${COST_CLASS-$(jq -r '.cost_class // empty' "$PIPELINE_BASE/<issue>/status.json" 2>/dev/null)}"
-if [ "$COST_CLASS" = "tooling" ]; then
-  SPECIALIST="dev"
-  for r in devops dba design_review; do
-    case " $PANEL_ROLES " in *" $r "*) SPECIALIST="$r"; break ;; esac
-  done
-  PANEL_ROLES="qa secops $SPECIALIST"
-  echo "PANEL-NOTE: cost_class tooling panel: qa secops $SPECIALIST (one round)."
-fi
-rm -f "$CHANGED_PATHS"
-```
-
-The frontend probe's late arrival on this three-outcome shape (#20) is recorded in `${CLAUDE_PLUGIN_ROOT}/docs/rationale.md` ("Frontend probe").
+Art Director seating: when `<ARTIFACT_DIR>/visual-contract.json` exists, read `${CLAUDE_PLUGIN_ROOT}/orchestrator/art-director-contract.md` now (Duty B is its panel seat, which the call above already resolved).
 
 Record the resolved `PANEL_ROLES` in `status.json` so the merge, the rubric, and a `--resume` all agree on who was on the panel. At the same checkpoint, increment `review_rounds` (1 on the first full panel, +1 per delta round) and refresh the derived telemetry and the effective-config audit record:
 
@@ -127,13 +41,13 @@ Phase 4 runs inside the implementation worktree (the reviewers need the issue br
 cp "$PIPELINE_BASE/<issue>/status.json" "$ARTIFACT_DIR/status.json" 2>/dev/null || true
 ```
 
-Dispatch via the **Workflow tool**, one `agent()` call per role in `PANEL_ROLES`, run inside a single `parallel([...])`. This is the one fan-out in this file that dispatches this way rather than through a single message of parallel Agent tool calls; see "Dispatch via Workflow" below for why this phase specifically, and only this phase, migrated. Each reviewer still writes a **shard file** (`peer-review.<agent>.json`), never `peer-review.json` directly, for the same lost-update reason as Phase 2, and the merge step below reads those files exactly as it always has -- the dispatch mechanism changed, the verdict contract did not. Every Phase 4 prompt is this **shared preamble**, then its lens-specific line (dispatch only the resolved panel), then a `RUN DATA` block that carries the absolute values; nothing is substituted into the preamble or the lens (see "Prompt assembly" below). The preamble is the marked block in `${CLAUDE_PLUGIN_ROOT}/orchestrator/phase-4-panel-preamble.md`, where the renderer reads it; you do not need to Read it to dispatch.
+Dispatch via the **Workflow tool**, one `agent()` call per role in `panel_roles`, run inside a single `parallel([...])`. This is the one fan-out in this file that dispatches this way rather than through a single message of parallel Agent tool calls; see "Dispatch via Workflow" below for why this phase specifically, and only this phase, migrated. Each reviewer still writes a **shard file** (`peer-review.<agent>.json`), never `peer-review.json` directly, for the same lost-update reason as Phase 2, and the merge step below reads those files exactly as it always has -- the dispatch mechanism changed, the verdict contract did not. Every Phase 4 prompt is this **shared preamble**, then its lens-specific line (dispatch only the resolved panel), then a `RUN DATA` block that carries the absolute values; nothing is substituted into the preamble or the lens (see "Prompt assembly" below). The preamble is the marked block in `${CLAUDE_PLUGIN_ROOT}/orchestrator/phase-4-panel-preamble.md`, where the renderer reads it; you do not need to Read it to dispatch.
 
 
 **Render the Workflow script; do not hand-write it (#157).** Every value in the panel script is computed by `scripts/render-panel.mjs`: the reviewed sha is `git rev-parse HEAD` of the worktree, the preamble is the marked block in `orchestrator/phase-4-panel-preamble.md` (sliced between `<!-- BEGIN PHASE4-PREAMBLE -->` and `<!-- END PHASE4-PREAMBLE -->`, placeholders left as written; their values come from each prompt's RUN DATA block), the lens per role comes from `scripts/panel-lenses.json` (the ONE lens table; there is no second copy in this file), and model and effort come from the two dispatch resolvers for `(role, <risk_tier>, 4, panel-lens, workflow)`: for the two lenses that carry a model row the renderer resolves exactly what a hand-written dispatch was told to, `dispatch-model.mjs ba <risk_tier> 4 --site panel-lens` and `dispatch-model.mjs dev <risk_tier> 4 --site panel-lens` (sonnet today), emitting `model:` only when the resolver printed one token, and it resolves `effort` for every role with `--surface workflow`. Every string is emitted through `JSON.stringify`, so no quoting class can break the script.
 
 ```bash
-# Full round. PANEL_ROLES was recorded in status.json above; the renderer reads it from there.
+# Full round. panel-roles.mjs recorded panel_roles in status.json above; the renderer reads it from there.
 node "${CLAUDE_PLUGIN_ROOT}/scripts/render-panel.mjs" \
   --status "$PIPELINE_BASE/<issue>/status.json" --worktree "<WORKTREE_PATH>" --check \
   --out "$ARTIFACT_DIR/panel.workflow.mjs"
@@ -165,24 +79,25 @@ Invoking `Workflow` here is authorized under its own gating rule ("the user invo
 
 Both questions this migration was gated on are resolved (#101): q4, the SecOps veto stays fail-closed, by construction; q6, the runtime honors a `SubagentStop` block on a Workflow-dispatched agent, confirmed empirically. The record is in `${CLAUDE_PLUGIN_ROOT}/docs/rationale.md` ("Dispatch via Workflow").
 
-The Design row appears in the PR summary table and the merge loop only when `design_review` is in `PANEL_ROLES` (frontend-touching diffs); otherwise it is listed among the not-on-panel lenses, exactly like the surface-trimmed DBA/DevOps.
+The Design row appears in the PR summary table and the merge loop only when `design_review` is in `panel_roles` (frontend-touching diffs); otherwise it is listed among the not-on-panel lenses, exactly like the surface-trimmed DBA/DevOps.
 
-After all dispatched reviewers return, **merge the shards into `peer-review.json`** via `${CLAUDE_PLUGIN_ROOT}/scripts/merge-peer-review.mjs`, which folds each named role's bare shard into the target file with the same `unwrap` defense as Phase 2 (a wrapped or sibling-buried shard recovers its verdict instead of nulling out). The merge is ADDITIVE: it overwrites only the roles named on THIS invocation and preserves every other role already in the file. That is what makes a delta re-review round (below) safe, and it is the SAME script the manual `/phase peer-review` re-run calls, so the auto and manual paths cannot diverge. On a FULL round, start from a clean file so no stale shard survives; on a delta round, do NOT reset it (that is the whole point). Orchestrator note: run the loop that builds the argument list via `bash -c '...'`; the session shell may be zsh, which does not word-split an unquoted `$PANEL_ROLES` (the whole string becomes one word and the loop iterates zero roles), and `bash -c` guarantees POSIX word-splitting. Avoid `status` and `path` as shell variable names here (zsh treats them specially).
+After all dispatched reviewers return, **merge the shards into `peer-review.json`** via `${CLAUDE_PLUGIN_ROOT}/scripts/merge-peer-review.mjs`, which folds each named role's bare shard into the target file with the same `unwrap` defense as Phase 2 (a wrapped or sibling-buried shard recovers its verdict instead of nulling out). The merge is ADDITIVE: it overwrites only the roles named on THIS invocation and preserves every other role already in the file. That is what makes a delta re-review round (below) safe, and it is the SAME script the manual `/phase peer-review` re-run calls, so the auto and manual paths cannot diverge. On a FULL round, start from a clean file so no stale shard survives; on a delta round, do NOT reset it (that is the whole point). The loops read `roles-to-merge.txt` one line at a time, which bash and zsh do alike; avoid `status` and `path` as shell variable names here (zsh treats them specially).
 
 ```bash
-# Full round: reset, then fold every dispatched role. ROLES_TO_MERGE=$PANEL_ROLES here.
+# Full round: reset, then fold every dispatched role. roles-to-merge.txt is panel-roles.mjs stdout.
 rm -f "$ARTIFACT_DIR/peer-review.json"
 ARGS=()
-for role in $ROLES_TO_MERGE; do
+while IFS= read -r role; do
+  [ -n "$role" ] || continue
   SHARD="$ARTIFACT_DIR/peer-review.$role.json"
   # The recovery path a reviewer whose primary write was refused is told to use. Read HERE,
   # before the merge decides anything: a fallback nobody reads is a lost review.
   [ -f "$SHARD" ] || SHARD="$ARTIFACT_DIR/fallback-shards/peer-review.$role.json"
   if [ ! -f "$SHARD" ]; then echo "MISSING SHARD: $role" >&2; fi   # missing shard = halt (script exits 2)
   ARGS+=("$role=$SHARD")
-done
+done < "$ARTIFACT_DIR/roles-to-merge.txt"
 node "${CLAUDE_PLUGIN_ROOT}/scripts/merge-peer-review.mjs" --status "$PIPELINE_BASE/<issue>/status.json" "$ARTIFACT_DIR/peer-review.json" "${ARGS[@]}"
-for role in $ROLES_TO_MERGE; do rm -f "$ARTIFACT_DIR/peer-review.$role.json"; done
+while IFS= read -r role; do rm -f "$ARTIFACT_DIR/peer-review.$role.json"; done < "$ARTIFACT_DIR/roles-to-merge.txt"
 ```
 
 Recoverability is bought by making the fallback a path the merge actually READS, never by making a missing shard non-fatal: a lost VETO must never become a silent APPROVE. A dispatched role whose block is absent or survives as `null` (an agent that never wrote, or wrote unrecoverable garbage) carries no verdict, so the rubric below cannot read it as `APPROVE`; the script exits non-zero on a missing shard, and a recovered-but-null block (a shard present on disk that yields no verdict after unwrap) is treated as a missing review and HALTs without writing a partial merge. A role that was never on the panel (trimmed at standard/trivial tier) is simply absent from `peer-review.json`; that is not a missing review.
