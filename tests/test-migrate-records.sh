@@ -28,7 +28,7 @@ BASE='"started_at":"2026-08-01T00:00:00Z","updated_at":"2026-08-02T00:00:00Z","b
 # ---------------------------------------------------------------------------
 suite "migrate-records: a malformed phase on a run that records a merge"
 
-status 101 "{\"current_phase\":\"phase3_complete_rev21\",$BASE,\"events\":[{\"phase\":\"4-review\",\"verdict\":\"merged\",\"at\":\"2026-08-02T00:00:00Z\"}]}"
+status 101 "{\"current_phase\":\"phase3_complete_rev21\",$BASE,\"events\":[{\"phase\":\"4-review\",\"verdict\":\"merged\",\"commit\":\"9451894\",\"at\":\"2026-08-02T00:00:00Z\"}]}"
 BEFORE=$(sum "$P/101/status.json")
 run
 assert_eq "a dry run exits 0" "$RC" "0"
@@ -85,6 +85,24 @@ mkdir -p "$P/107"; printf '{ not json' > "$P/107/status.json"
 run --write
 assert_contains "an unparseable status.json is reported, not a crash" "$OUT" ".pipeline/107/status.json"
 assert_eq "and the run still exits 0" "$RC" "0"
+
+# A "merged" verdict is a typed word. Only a merge event that NAMES the commit is merge evidence.
+status 108 "{\"current_phase\":\"phase3_complete_rev21\",$BASE,\"events\":[{\"phase\":\"4-review\",\"verdict\":\"merged\",\"at\":\"2026-08-02T00:00:00Z\"}]}"
+BEFORE=$(sum "$P/108/status.json")
+run --write
+assert_eq "a bare verdict of merged, with no commit sha, is NOT a merge record: the file is untouched" "$(sum "$P/108/status.json")" "$BEFORE"
+assert_contains "  ...and the rejected phase is left for the owner" "$OUT" "108/status.json"
+status 109 "{\"current_phase\":\"phase3_complete_rev21\",$BASE,\"events\":[{\"phase\":\"4-review\",\"verdict\":\"merged\",\"at\":\"2026-08-02T00:00:00Z\",\"note\":\"PR #86 squash-merged to main as c337579\"}]}"
+run --write
+assert_eq "a merged event whose note names the merge commit sha is a merge record" "$(field "$P/109/status.json" current_phase)" '"5-archive"'
+status 110 "{\"current_phase\":\"phase3_complete_rev21\",$BASE,\"events\":[{\"phase\":\"4-review\",\"verdict\":\"merged\",\"at\":\"2026-08-02T00:00:00Z\",\"commit\":\"HEAD~1\",\"note\":\"merged in 2026, see deadbeef\"}]}"
+BEFORE=$(sum "$P/110/status.json")
+run --write
+assert_eq "CONTROL: a non-hex commit value and an all-letter word in the note are not shas" "$(sum "$P/110/status.json")" "$BEFORE"
+status 111 "{\"current_phase\":\"phase3_complete_rev21\",$BASE,\"events\":[{\"phase\":\"4-review\",\"verdict\":\"APPROVE\",\"commit\":\"9451894\",\"at\":\"2026-08-02T00:00:00Z\"}]}"
+BEFORE=$(sum "$P/111/status.json")
+run --write
+assert_eq "CONTROL: a sha on an event whose verdict is not merged is not a merge record" "$(sum "$P/111/status.json")" "$BEFORE"
 
 # ---------------------------------------------------------------------------
 suite "migrate-records: review shards are reported and NEVER written"

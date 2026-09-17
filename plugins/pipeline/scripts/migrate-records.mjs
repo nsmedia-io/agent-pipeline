@@ -26,7 +26,9 @@
  *
  * WHAT --write CHANGES, and nothing else:
  *   1. `current_phase` becomes "5-archive" when the run is concluded AND records a merge
- *      (`merged_at`, `merge_commit`, or an `events[]` entry whose verdict is "merged"). A
+ *      (`merged_at`, `merge_commit`, or an `events[]` entry whose verdict is "merged" AND which
+ *      carries the merge commit's sha, in a `commit`, `merge_commit` or `sha` field or in its
+ *      note; a "merged" verdict alone is a word, not a merge). A
  *      concluded run with no merge record is REPORTED for an owner decision: a run that ended
  *      without merging is not archived by inference.
  *   2. `schema_version` is stamped, but only on a status record that has no remaining problem
@@ -95,12 +97,29 @@ export function targetSchemaVersion(statusSchema) {
   return DEFAULT_STATUS_SCHEMA_VERSION;
 }
 
-/** Structured merge evidence only. A merge mentioned in free text is not a record of one. */
+/**
+ * Structured merge evidence only. A merge mentioned in free text is not a record of one, and
+ * neither is a bare `verdict: "merged"`: that token is typed by the same hand that types any
+ * other, so a merge event must also name the commit that merged, as a sha-shaped value (7 to 40
+ * hex characters in a structured field; in the note, a token must also hold at least one digit and
+ * one letter, so a year or a word in prose does not pass).
+ */
+const SHA_RE = /^[0-9a-f]{7,40}$/i;
+const SHA_IN_TEXT_RE = /(?<![0-9a-z])(?=[0-9a-f]*[0-9])(?=[0-9a-f]*[a-f])[0-9a-f]{7,40}(?![0-9a-z])/i;
+
+export function mergeEventCarriesSha(e) {
+  if (!e || typeof e !== "object" || typeof e.verdict !== "string" || e.verdict.trim().toLowerCase() !== "merged") return false;
+  for (const f of ["commit", "merge_commit", "sha"]) {
+    if (typeof e[f] === "string" && SHA_RE.test(e[f].trim())) return true;
+  }
+  return typeof e.note === "string" && SHA_IN_TEXT_RE.test(e.note);
+}
+
 export function recordsMerge(status) {
   if (!status || typeof status !== "object") return false;
   if (typeof status.merged_at === "string" && status.merged_at.trim() !== "") return true;
   if (typeof status.merge_commit === "string" && status.merge_commit.trim() !== "") return true;
-  return Array.isArray(status.events) && status.events.some((e) => typeof e?.verdict === "string" && e.verdict.trim().toLowerCase() === "merged");
+  return Array.isArray(status.events) && status.events.some(mergeEventCarriesSha);
 }
 
 /** Legacy counter -> the field the round budget reads. Both old keys held the CURRENT number. */
