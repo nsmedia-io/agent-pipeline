@@ -71,11 +71,12 @@ Copy `pipeline.config.example.json` to `pipeline.config.json` at your project ro
 | `dispatchModels` | Per-role model overrides for the orchestrator's dispatches, allowlisted to `opus`/`sonnet`/`haiku`. `secops` and `qa` are pinned to opus in code and ignore this key | the built-in table in `scripts/dispatch-model.mjs` (DBA drops to sonnet on a standard or trivial panel) |
 | `dispatchEfforts` | Per-role effort overrides (`low`..`max`) for the Phase 4 panel, which dispatches through the Workflow tool. Every role is reachable, both directions | the tiered table in `scripts/dispatch-effort.mjs` (SecOps xhigh/high/medium and QA high/medium/medium by tier) |
 | `securitySurfaceGlobs` | Additive globs that re-seat SecOps on a Phase 4 DELTA round when a fix commit touches them (auth, session, crypto, secrets, webhooks, policies). Widen-only | the built-in set in `scripts/security-surface.mjs` |
-| `architecturalTriggers` | Paths/domains/keywords that force the architectural tier | pipeline.config.json, the compliance domain, and the concrete security/data triggers in agents/ba.md duty 6 |
+| `architecturalTriggers` | Paths/domains/keywords that force the architectural tier. ADVISORY: no script reads this key; the BA agent reads it as prose at intake (agents/ba.md duty 6), and `keywords` in particular is a hint to that judgment, never a mechanical trigger | pipeline.config.json, the compliance domain, and the concrete security/data triggers in agents/ba.md duty 6 |
+| `x` | The PROJECT-OWNED namespace: an object for your own settings (a wrapper script's knobs, team notes). The plugin never reads inside it and the config doctor never flags it. A top-level key starting with `_` is exempt too. Any other unknown key is reported as read by nothing | absent |
 
 ### Upgrading
 
-Behaviour changes that reach an existing project at its next plugin update are listed per release, newest first, in [CHANGELOG.md](CHANGELOG.md). Read every entry between your installed version and the new one before updating. There is no migration to run.
+Behaviour changes that reach an existing project at its next plugin update are listed per release, newest first, in [CHANGELOG.md](CHANGELOG.md). Read every entry between your installed version and the new one before updating. SessionStart warns when the running copy is older than one already on disk (`scripts/version-check.mjs`), and `scripts/migrate-records.mjs` reports which `.pipeline/` records the current schemas reject and normalises the mechanical part with `--write`.
 
 Four more customization points:
 
