@@ -105,6 +105,10 @@ for cand in $(grep -oE 'scripts/[a-zA-Z0-9_-]+\.mjs' "$PIPELINE_MD" | sort -u); 
     # itself and takes --status/--worktree, never a (role, tier, phase) triple. Excluded by NAME,
     # like the rest; it is exactly the "next scripts/*.mjs reference" the halt exists to name.
     render-panel.mjs) continue ;;
+    # Review convergence: the round budget, referenced from the fix-round and spec-revision points.
+    # It counts rounds in status.json and takes a subcommand plus --status, never a (role, tier,
+    # phase) triple, and resolves no model. Excluded by NAME, like the rest.
+    round-budget.mjs) continue ;;
   esac
   # The data-layer surface module is referenced from the same file by R3; it is not this.
   grep -q 'migrationGlobsForTripwire' "$PLUGIN_DIR/$cand" 2>/dev/null && continue
