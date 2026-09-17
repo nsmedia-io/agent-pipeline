@@ -425,20 +425,15 @@ tp_exfp() { printf '%s' "$1" | sed -n '/^--EXFP--$/,$p' | sed '1d'; }
 # What it costs is stated in the assertion label below rather than left to be inferred: two
 # occurrences that share a fingerprint can be exchanged invisibly, so this cell catches an
 # ADDITION or a REMOVAL and not every conceivable swap.
-# ONE ENTRY CARRIES AN APOSTROPHE, spliced as '\''. The pinned block is a single-quoted shell
+# AN ENTRY THAT CARRIES AN APOSTROPHE IS SPLICED as '\''. The pinned block is a single-quoted shell
 # literal, and #110's prose is the first pinned occurrence to contain a `'` -- without the splice
 # the assignment terminates mid-entry and the file stops parsing. Future pipeline.md edits will
 # hit this again, so the splice is the fixture's limitation being handled, not the prose bending.
-EXCLUDED_MULTISET_10='1253|**Rows 2 and 3 loop back for remediation, and the write that DOES the lo
-133|- **User interrupts mid-phase**: status.json preserves position. `/pipel
+EXCLUDED_MULTISET_5='133|- **User interrupts mid-phase**: status.json preserves position. `/pipel
 285|- If starts with `--resume <issue>`: set `ISSUE=<issue>`, read `.pipelin
 285|- If starts with `--resume <issue>`: set `ISSUE=<issue>`, read `.pipelin
-397|Nothing is lost by clearing. The panel'\''s result is durable in `events[]`
-461|**`events[]` entries are EXIT markers and `current_phase` is an ENTRY ma
-461|**`events[]` entries are EXIT markers and `current_phase` is an ENTRY ma
-479|`status.json` is the `/pipeline --resume <issue>` checkpoint, so it must
-479|`status.json` is the `/pipeline --resume <issue>` checkpoint, so it must
-89|# Run BEFORE entering each phase, after setting current_phase to the pha'
+443|**`events[]` entries are EXIT markers and `current_phase` is an ENTRY ma
+443|**`events[]` entries are EXIT markers and `current_phase` is an ENTRY ma'
 
 # ---------------------------------------------------------------------------
 suite "#53 AC2: every bare-word occurrence lands in exactly one named bucket"
@@ -456,9 +451,9 @@ assert_eq "UNCLASSIFIED is EMPTY: no assignment the WIDER pattern can see is mis
 assert_eq "the derived label SET is exactly the 26 concrete literals pipeline.md writes, \`0-setup\` among them -- and it is the SAME sorted list the drift suite pins, so a narrowing in either copy reddens in that copy" \
   "$(vl "$TP_REAL" LITERALS)" "$PHASE_LITERALS_26"
 assert_eq "and the EXCLUDED bucket's MEMBERSHIP is asserted -- the sorted occurrence-text MULTISET, so an occurrence cannot be ADDED to or REMOVED from this bucket at constant bucket sizes. NARROWED deliberately from \"cannot move between buckets\": the key is a length-plus-72-character FINGERPRINT and it is non-injective (pipeline.md already holds a colliding pair, see above), so a swap BETWEEN two occurrences sharing one fingerprint is invisible here. The add/remove form is what this cell supports; the bucket-swap fixture that exercises it lives in the drift suite, which carries the full fixture matrix, and not in this copy" \
-  "$(tp_exfp "$TP_REAL")" "$EXCLUDED_MULTISET_10"
-assert_eq "MULTISET, NOT A SET: \`sort -u\` collapses those 10 entries to 7, which is measured here rather than asserted absent by inspection" \
-  "$(tp_exfp "$TP_REAL" | sort -u | grep -c . | tr -d ' ')/$(tp_exfp "$TP_REAL" | grep -c . | tr -d ' ')" "7/10"
+  "$(tp_exfp "$TP_REAL")" "$EXCLUDED_MULTISET_5"
+assert_eq "MULTISET, NOT A SET: \`sort -u\` collapses those 5 entries to 3, which is measured here rather than asserted absent by inspection" \
+  "$(tp_exfp "$TP_REAL" | sort -u | grep -c . | tr -d ' ')/$(tp_exfp "$TP_REAL" | grep -c . | tr -d ' ')" "3/5"
 
 # ---------------------------------------------------------------------------
 suite "#53 AC13: RUNTIME NEUTRALITY -- what the lint says is byte-unchanged by this change"
