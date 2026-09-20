@@ -482,6 +482,10 @@ export const NOT_CHECKED = Symbol.for("agent-pipeline.config-doctor.not-checked"
 // does not pull a routing module into the SessionStart path; the agents suite pins the two
 // lists equal, so a drift is a red row rather than a silent disagreement.
 export const KNOWN_AGENT_EFFORTS = ["low", "medium", "high", "xhigh", "max"];
+// From the Claude Code sub-agents docs (supported frontmatter fields): the display colors, and the
+// prompt-cache lifetimes `experimental.cacheTtl` accepts.
+export const KNOWN_AGENT_COLORS = ["red", "blue", "green", "yellow", "purple", "orange", "pink", "cyan"];
+export const KNOWN_AGENT_CACHE_TTLS = ["5m", "1h"];
 
 const DQ_ESCAPES = { "0": "\0", a: "\x07", b: "\b", t: "\t", "\t": "\t", n: "\n", v: "\v", f: "\f", r: "\r", e: "\x1b", " ": " ", '"': '"', "/": "/", "\\": "\\", N: "\x85", _: "\xa0", L: " ", P: " " };
 
@@ -768,6 +772,16 @@ export function lintAgentText(text, { includeUnchecked = false } = {}) {
     if (!KNOWN_AGENT_EFFORTS.includes(effort)) {
       problems.push(`effort "${effort}" is not a known value (${KNOWN_AGENT_EFFORTS.join(", ")})`);
     }
+  }
+  if (d.color !== undefined && d.color !== null && d.color !== NOT_CHECKED) {
+    const color = String(d.color);
+    if (!KNOWN_AGENT_COLORS.includes(color)) {
+      problems.push(`color "${color}" is not a documented value (${KNOWN_AGENT_COLORS.join(", ")})`);
+    }
+  }
+  const ttl = d.experimental && typeof d.experimental === "object" ? d.experimental.cacheTtl : undefined;
+  if (ttl !== undefined && ttl !== null && ttl !== NOT_CHECKED && !KNOWN_AGENT_CACHE_TTLS.includes(String(ttl))) {
+    problems.push(`experimental.cacheTtl "${ttl}" is not a known value (${KNOWN_AGENT_CACHE_TTLS.join(", ")}); Claude Code ignores any other value`);
   }
   return problems;
 }

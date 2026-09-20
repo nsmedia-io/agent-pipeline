@@ -5,7 +5,7 @@ tools: Read, Grep, Glob, Bash, Skill, mcp__Claude_Preview__preview_start, mcp__C
 model: sonnet
 effort: high
 maxTurns: 40
-color: magenta
+color: pink
 ---
 
 You are the **Design and UX reviewer** (Design) for this project's autonomous agent pipeline. You own the visual and frontend lens that no other role carries: the web UI and the email templates.

@@ -189,6 +189,39 @@ EFFORTS=$(DOC="$DOCTOR" DE="$SCRIPTS_DIR/dispatch-effort.mjs" node --input-type=
   console.log(JSON.stringify(a.KNOWN_AGENT_EFFORTS) === JSON.stringify(b.ALLOWED_EFFORTS) ? "same" : "DRIFT " + a.KNOWN_AGENT_EFFORTS + " vs " + b.ALLOWED_EFFORTS);')
 assert_eq "the lint's effort list equals dispatch-effort.mjs ALLOWED_EFFORTS" "$EFFORTS" "same"
 
+# color and experimental.cacheTtl: Claude Code documents eight display colors and two cache
+# lifetimes. design.md carried `magenta`, which is not one of them, until 0.47.0.
+reset_agents
+agent tinted.md 'name: tinted' 'description: Reviewer' 'color: magenta'
+doctor
+assert_contains "an undocumented color is reported" "$OUT" 'color "magenta" is not a documented value'
+reset_agents
+agent tinted.md 'name: tinted' 'description: Reviewer' 'color: pink'
+doctor
+assert_not_contains "CONTROL: a documented color is not reported" "$OUT" "documented value"
+reset_agents
+agent cached.md 'name: cached' 'description: Reviewer' 'experimental:' '  cacheTtl: 2h'
+doctor
+assert_contains "an unknown cacheTtl is reported" "$OUT" 'experimental.cacheTtl "2h" is not a known value'
+reset_agents
+agent cached.md 'name: cached' 'description: Reviewer' 'experimental:' '  cacheTtl: 1h'
+doctor
+assert_not_contains "CONTROL: cacheTtl 1h is not reported" "$OUT" "cacheTtl"
+assert_not_contains "CONTROL: and it is not reported as an unparsed construct" "$OUT" "cached.md does not parse"
+
+SHIPPED=$(AG="$PLUGIN_ROOT/agents" DOC="$DOCTOR" node --input-type=module -e '
+  const m = await import((await import("node:url")).pathToFileURL(process.env.DOC).href);
+  const fs = await import("node:fs"); const path = await import("node:path");
+  const bad = []; const ttl = [];
+  for (const f of fs.readdirSync(process.env.AG).filter((x) => x.endsWith(".md"))) {
+    const t = fs.readFileSync(path.join(process.env.AG, f), "utf8");
+    if (m.lintAgentText(t).length) bad.push(f);
+    const d = m.parseAgentFrontmatter(t).data;
+    if (d.experimental && d.experimental.cacheTtl) ttl.push(f.replace(".md", "") + "=" + d.experimental.cacheTtl);
+  }
+  console.log("lint-problems=" + bad.join(",") + " ttl=" + ttl.sort().join(","));')
+assert_eq "every shipped agent lints clean, and the 1h cache trial is on dev, qa and secops only" "$SHIPPED" "lint-problems= ttl=dev=1h,qa=1h,secops=1h"
+
 # ---------------------------------------------------------------------------
 suite "config namespace: the remedy travels with the warning"
 

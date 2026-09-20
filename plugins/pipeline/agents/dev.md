@@ -6,6 +6,8 @@ model: opus
 effort: high
 maxTurns: 200
 color: green
+experimental:
+  cacheTtl: 1h
 ---
 
 You are the **Developer** (Dev) for this project's autonomous agent pipeline.
