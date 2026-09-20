@@ -4,6 +4,20 @@ Behaviour changes that reach an existing project at its next plugin update, newe
 
 Entries keep the numbers they carried in the README's old Upgrading list, so a cross-reference such as "item 29 below" still resolves. Measured figures in an entry describe the commit that entry shipped with and are not re-taken afterwards.
 
+## 0.47.0 (2026-09-20)
+
+### What changes for you
+
+- **`dev`, `qa` and `secops` ask for a 1-hour prompt cache.** Their frontmatter gains `experimental: { cacheTtl: 1h }`, a Claude Code v2.1.248+ setting; older versions ignore it, and it is ignored while your subscription is spending usage credits. Nothing to do. It is a trial: a 1h cache write costs more than a 5m one, and it pays only if the long runs of these three roles read from the cache more. To check, enable usage telemetry and compare the `cache_write` to `cache_read` ratio per role (`usage-report.mjs`, README "Prompt cache lifetime") under `1h` against a period with the value set to `5m`. No baseline was taken before this release, so the comparison needs both periods.
+- **`design` is now `pink`, not `magenta`.** Claude Code documents eight display colors (`red, blue, green, yellow, purple, orange, pink, cyan`); magenta is not one of them.
+- **The agent frontmatter lint checks `color` and `experimental.cacheTtl`.** `config-doctor.mjs` reports a `color` outside the eight above and a `cacheTtl` other than `5m` or `1h` (Claude Code ignores any other value silently), for the plugin's agents and your `.claude/agents/`.
+
+### In this release
+
+- Evaluated the Claude Code sub-agents frontmatter reference against the nine agent files. Not adopted: `omitClaudeMd` (agents get a consumer's conventions only through the CLAUDE.md auto-load, and this repo's is 4,807 bytes), `memory` (the Librarian is the sole writer to `knowledge/`), `disallowedTools`, `isolation` and `background` (the orchestrator already owns those). Nine agents share eight colors, so `devops` and `art-director` still share orange.
+- Since Claude Code v2.1.251 the `model` in an agent's frontmatter outranks `CLAUDE_CODE_SUBAGENT_MODEL`, so SecOps and QA, pinned in code with no `model:` key, run at their frontmatter model even when that variable is set.
+- Open: v2.1.246 marks a subagent that hit `maxTurns` as partial and lets it be resumed. The hollow-shard refusal in `merge-peer-review.mjs` (#155) stays as the fail-closed guard; resuming a partial agent instead of re-dispatching it is unevaluated, and whether the Workflow panel surface gets the marking is unchecked.
+
 ## 0.46.2 (2026-09-17)
 
 ### What changes for you
