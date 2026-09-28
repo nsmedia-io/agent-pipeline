@@ -4,6 +4,13 @@ Behaviour changes that reach an existing project at its next plugin update, newe
 
 Entries keep the numbers they carried in the README's old Upgrading list, so a cross-reference such as "item 29 below" still resolves. Measured figures in an entry describe the commit that entry shipped with and are not re-taken afterwards.
 
+## 0.48.0 (2026-09-28)
+
+### What changes for you
+
+- **The 1-hour prompt cache stays on `dev` only; `qa` and `secops` go back to the 5-minute default.** Measured on one project (Rome, list prices), with every call's cache writes priced both ways. Before the trial (218 subagents, 2026-09-17..24), a 1h cache would have cost Dev $566 less, and QA, SecOps and BA $6, $14 and $19 more. After it (217 subagents, 2026-09-24..28), Dev's re-writes after 5-60 minute idle gaps fell from 226 ($688) to 2 ($7). Priced at 5m, the same QA and SecOps calls would have cost $7 and $11 less. A 1h write costs 2x input against 1.25x, and only Dev re-writes a long context after gaps inside the hour, while it waits on its own test runs. Reviewers are short-lived or idle for longer than an hour, so they pay the higher write price without the reads. Nothing to do.
+- **`devops` gets 60 turns, up from 40.** In the same project's four days after 0.47.0, all 8 DevOps dispatches that reached 40 turns had spent them verifying (scripts, dry runs, builds) and had written no report. Each needed an orchestrator resume to write it, and finished in 2 to 8 more turns. Nothing to do; a panel's DevOps shard now arrives in one dispatch more often.
+
 ## 0.47.0 (2026-09-20)
 
 ### What changes for you

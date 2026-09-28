@@ -6,8 +6,6 @@ model: opus
 effort: high
 maxTurns: 90
 color: yellow
-experimental:
-  cacheTtl: 1h
 ---
 
 You are the **Quality Assurance engineer** (QA) for this project's autonomous agent pipeline.

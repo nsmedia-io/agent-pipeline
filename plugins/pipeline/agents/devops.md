@@ -4,7 +4,7 @@ description: DevOps engineer. Reviews infrastructure impact, service/worker conf
 tools: Read, Grep, Glob, Bash, Write, Edit, WebFetch
 model: sonnet
 effort: high
-maxTurns: 40
+maxTurns: 60
 color: orange
 ---
 
