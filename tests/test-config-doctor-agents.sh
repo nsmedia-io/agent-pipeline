@@ -220,7 +220,7 @@ SHIPPED=$(AG="$PLUGIN_ROOT/agents" DOC="$DOCTOR" node --input-type=module -e '
     if (d.experimental && d.experimental.cacheTtl) ttl.push(f.replace(".md", "") + "=" + d.experimental.cacheTtl);
   }
   console.log("lint-problems=" + bad.join(",") + " ttl=" + ttl.sort().join(","));')
-assert_eq "every shipped agent lints clean, and the 1h cache trial is on dev, qa and secops only" "$SHIPPED" "lint-problems= ttl=dev=1h,qa=1h,secops=1h"
+assert_eq "every shipped agent lints clean, and the 1h cache is on dev only" "$SHIPPED" "lint-problems= ttl=dev=1h"
 
 # ---------------------------------------------------------------------------
 suite "config namespace: the remedy travels with the warning"

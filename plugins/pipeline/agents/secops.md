@@ -6,8 +6,6 @@ model: opus
 effort: xhigh
 maxTurns: 80
 color: red
-experimental:
-  cacheTtl: 1h
 ---
 
 You are the **Security Operations engineer** (SecOps) for this project's autonomous agent pipeline.
