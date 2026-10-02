@@ -584,6 +584,16 @@ export function fmtDuration(ms) {
 }
 
 /**
+ * The same process in two snapshots: its start time agrees to within the clock's resolution. On
+ * POSIX the start time is derived from `ps` elapsed time, which has one-second resolution and is
+ * dated at each snapshot, so the same process reads a second or so apart; a recycled pid starts
+ * at a different moment altogether (the confirmation pass runs well inside this window).
+ */
+export function sameStart(a, b) {
+  return Math.abs(a - b) <= 3000;
+}
+
+/**
  * Decide, on one snapshot, what is reported and what is to be killed.
  *
  * @returns {{ rootFound: boolean, root?: object, candidates: object[], notes: string[] }}
@@ -810,10 +820,11 @@ export async function reap(opts) {
         for (const c of decided.candidates) if (c.action === "kill") Object.assign(c, { action: "report", reason: `${c.reason} (kill not confirmed)` });
       } else {
         const confirmed = plan(again.procs, { ...ctx, now: later });
-        const ok = new Set(confirmed.candidates.filter((c) => c.action === "kill").map((c) => `${c.p.pid}:${c.p.created}`));
-        toKill = toKill.filter((c) => ok.has(`${c.p.pid}:${c.p.created}`));
+        const startOf = new Map(confirmed.candidates.filter((c) => c.action === "kill").map((c) => [c.p.pid, c.p.created]));
+        const ok = (c) => startOf.has(c.p.pid) && sameStart(startOf.get(c.p.pid), c.p.created);
+        toKill = toKill.filter(ok);
         for (const c of decided.candidates) {
-          if (c.action === "kill" && !ok.has(`${c.p.pid}:${c.p.created}`)) Object.assign(c, { action: "report", reason: `${c.reason} (changed before the kill)` });
+          if (c.action === "kill" && !ok(c)) Object.assign(c, { action: "report", reason: `${c.reason} (changed before the kill)` });
         }
       }
     }
@@ -838,7 +849,7 @@ export async function reap(opts) {
   const nextSeen = {};
   const lines = [];
   for (const c of decided.candidates) {
-    const key = `${c.p.pid}:${c.p.created}`;
+    const wasSeen = seen[c.p.pid] !== undefined && sameStart(seen[c.p.pid], c.p.created);
     if (c.action === "kill" && !o.dryRun) {
       if (toKill.includes(c)) {
         const ok = c.killed === true;
@@ -848,10 +859,10 @@ export async function reap(opts) {
         continue;
       }
     }
-    nextSeen[key] = seen[key] || o.now;
-    const fresh = !seen[key] || o.dryRun;
+    nextSeen[c.p.pid] = c.p.created;
+    const fresh = !wasSeen || o.dryRun;
     result.reported.push({ ...c, fresh });
-    if (!seen[key]) logLine(dir, `${o.event} REPORTED ${describe(c)}`);
+    if (!wasSeen) logLine(dir, `${o.event} REPORTED ${describe(c)}`);
     if (fresh) lines.push(`${c.action === "kill" ? "would kill" : "left running"} ${describe(c)}`);
   }
   if (!o.dryRun) writeState(dir, { lastRun: o.now, reported: nextSeen });

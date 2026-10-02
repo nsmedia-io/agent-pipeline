@@ -159,6 +159,7 @@ suite "CONFIRMATION: decide on one snapshot, act on a second"
 # ===============================================================================================
 assert_eq "a process gone at the second read is not killed" "$(r confirm_process_gone killCalls)" ""
 assert_contains "  ...and the report says it changed" "$(r confirm_process_gone summary)" "changed before the kill"
+assert_eq "the same process read a second apart (ps has one-second resolution) IS still killed" "$(r confirm_start_jitter killedPids)" "30"
 assert_eq "a pid recycled between the two reads (new start time) is not killed" "$(r confirm_pid_reused killCalls)" ""
 assert_eq "a normal run reads the table twice before a kill" "$(r waitloop_stale collects)" "2"
 assert_eq "and once when there is nothing to kill" "$(r thresholds collects)" "1"

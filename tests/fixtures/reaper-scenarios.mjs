@@ -182,6 +182,14 @@ export const scenarios = [
   // ---- confirm-before-kill -------------------------------------------------------------------
   { name: "confirm_process_gone", selfPid: SELF, procs: withBase(waitLoop()), second: base(), mtimes: STALE },
   {
+    // POSIX `ps` gives elapsed time to the second, so the same process reads ~1 s apart in two snapshots
+    name: "confirm_start_jitter",
+    selfPid: SELF,
+    procs: withBase(waitLoop()),
+    second: withBase(proc(LOOP, CLI, "bash.exe", 1500 - 1 / 60, 4500, LOOP_CMD)),
+    mtimes: STALE,
+  },
+  {
     name: "confirm_pid_reused",
     selfPid: SELF,
     procs: withBase(waitLoop()),
