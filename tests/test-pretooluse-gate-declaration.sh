@@ -577,9 +577,10 @@ assert_eq "AC36(a): a FUNCTION-SCOPE reverse edge is still a cycle and is still 
 # this pin is for -- bump the number, do not soften it to a floor. The assertion NAME is left as
 # it stands apart from the count: #132's AC15 compares this suite's row names against
 # origin/main with digits normalised, so a reworded row reads there as a DELETED one.
+# 52 with 0.49.0's reap-orphans.mjs and runaway-commands.mjs.
 MODULE_N="$(printf '%s' "$GRAPH_OUT" | sed -n 's/modules=\([0-9]*\).*/\1/p' | head -1)"
 assert_eq "AC36: scripts/ holds 50 modules -- R6's LEAF module plus #117's check-status-record.mjs, not the reviewed commit's 16" \
-  "$MODULE_N" "50"
+  "$MODULE_N" "52"
 
 # ===============================================================================================
 suite "AC36(b): three entry directions, PAIRED SAME-RUN CAPTURE against the reviewed commit"

@@ -63,6 +63,7 @@ assert_contains "the summary says what was killed" "$(r waitloop_stale summary)"
 assert_contains "and what it was polling" "$(r waitloop_stale summary)" "polling /tmp/agent.log"
 assert_contains "and how to turn it off" "$(r waitloop_stale summary)" 'CLAUDE_PIPELINE_REAPER=off'
 assert_contains "every kill is in the log" "$(r waitloop_stale log)" "KILLED pid 30 bash.exe (wait loop)"
+assert_eq "the POSIX ps spelling (bash -c <script>, no quotes) is recognised and killed too" "$(r waitloop_stale_posix_ps_form killedPids)" "30"
 assert_eq "a process that ignores SIGTERM gets the SIGKILL escalation" \
   "$(r waitloop_stale_sigkill killCalls)" "30:SIGTERM,30:SIGKILL"
 assert_eq "no readable transcript does not stop a loop whose file proves its writer is gone" \

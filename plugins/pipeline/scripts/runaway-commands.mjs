@@ -129,6 +129,9 @@ function atCommandPosition(text, idx) {
   while (j >= 0 && (text[j] === " " || text[j] === "\t")) j--;
   if (j < 0) return true;
   if ("\n;&|({'\"`".includes(text[j])) return true;
+  // `bash -c until ...`: the argument of a shell's -c flag. A process listing (`ps` on POSIX) shows
+  // that argument WITHOUT the quotes it was started with, so there is no quote to anchor on.
+  if (/(?:^|\s)-[A-Za-z]*c$/.test(text.slice(Math.max(0, j - 12), j + 1))) return true;
   return /(?:^|[\s;&|(){'"`])(?:do|then|else|elif|time)$/.test(text.slice(Math.max(0, j - 6), j + 1));
 }
 

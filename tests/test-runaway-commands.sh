@@ -72,6 +72,8 @@ LOOPS=(
   'while [ ! -s /tmp/result.json ]; do sleep 0.5; done'
   'sleep 1; until grep -q ok log; do usleep 100000; done'
   "bash <<'E'${NL}until grep -q x f; do sleep 1; done${NL}E"
+  # what `ps` prints for a `bash -c` command: the argument with the quotes it was started with gone
+  '/usr/bin/bash -c until grep -q "^exit" /tmp/x.log; do sleep 1; done'
 )
 PY=(
   "python3 - <<'E'${NL}print(1)${NL}E"

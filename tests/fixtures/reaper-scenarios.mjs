@@ -44,6 +44,13 @@ const STALE = { "/tmp/agent.log": 1500 };
 export const scenarios = [
   // ---- the kills ----------------------------------------------------------------------------
   { name: "waitloop_stale", selfPid: SELF, procs: withBase(waitLoop()), mtimes: STALE },
+  {
+    // the POSIX `ps` spelling of the same process: `bash -c <script>` with no quotes around the script
+    name: "waitloop_stale_posix_ps_form",
+    selfPid: SELF,
+    procs: withBase(waitLoop({ cmd: "/usr/bin/bash -c until grep -q \"^exit\" /tmp/agent.log; do sleep 10; done" })),
+    mtimes: STALE,
+  },
   { name: "waitloop_stale_sigkill", selfPid: SELF, ignoreTerm: true, procs: withBase(waitLoop()), mtimes: STALE },
   { name: "waitloop_stale_bg_unknown", selfPid: SELF, bg: { known: false, commands: [] }, procs: withBase(waitLoop()), mtimes: STALE },
   { name: "python_stub_win", selfPid: SELF, platform: "win32", bg: { known: true, commands: [] }, procs: withBase(pyTree()) },
