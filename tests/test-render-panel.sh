@@ -105,6 +105,39 @@ assert_contains "the ba lens resolves to sonnet at standard (dispatch-model tabl
 assert_not_contains "secops carries NO model key (pinned in code, frontmatter governs)" "$OUT" '"agentType":"pipeline:secops","model"'
 assert_contains "the qa lens text is present" "$OUT" 'binding independent test verdict'
 
+suite "render-panel: the diff base is origin/<integrationBranch>, bound in RUN DATA"
+
+# On #245 every reviewer was told `git diff origin/main...HEAD` while the project integrated into
+# staging, so each read staging's unpromoted commits as the PR's. The preamble now names the base
+# as <DIFF_BASE> and RUN DATA binds it from the worktree's pipeline.config.json.
+assert_eq "no integrationBranch configured: DIFF_BASE is origin/main" "$(run_value DIFF_BASE)" "origin/main"
+printf '{"integrationBranch":"staging"}' > "$WT/pipeline.config.json"
+render --status "$STATUS" --worktree "$WT" --plugin-root "$PLUGIN_ROOT" --check
+assert_eq "integrationBranch staging renders and passes --check" "$RC" "0"
+assert_eq "integrationBranch staging: DIFF_BASE is origin/staging" "$(run_value DIFF_BASE)" "origin/staging"
+PRE="$(OUT="$OUT" node -e 'console.log(JSON.parse(process.env.OUT.match(/^const PREAMBLE = (.*)$/m)[1]))')"
+assert_contains "the preamble diffs against the placeholder" "$PRE" "git diff <DIFF_BASE>...HEAD"
+assert_not_contains "and names no literal remote ref as the diff base" "$PRE" "git diff origin/"
+assert_not_contains "nor the configured branch (the static prefix stays project-independent)" "$PRE" "origin/staging"
+render --status "$STATUS" --worktree "$WT" --plugin-root "$PLUGIN_ROOT" --base origin/release
+assert_eq "--base overrides the config" "$(run_value DIFF_BASE)" "origin/release"
+render --status "$STATUS" --worktree "$WT" --plugin-root "$PLUGIN_ROOT" --base "<DIFF_BASE>"
+assert_eq "an unsubstituted --base exits 1" "$RC" "1"
+render --status "$STATUS" --worktree "$WT" --plugin-root "$PLUGIN_ROOT" --base
+assert_eq "a --base with no value exits 1" "$RC" "1"
+rm -f "$WT/pipeline.config.json"
+BASES="$(MOD="$RENDER" ROOT="$PLUGIN_ROOT" node --input-type=module -e '
+const m = await import(process.env.MOD);
+const root = process.env.ROOT;
+const one = (diffBase) => m.assemble({
+  status: { issue_number: 9, risk_tier: "standard", panel_roles: ["qa"] },
+  worktree: "/w", head: "e".repeat(40), diffBase, pluginRoot: "/p", lenses: m.loadLenses(root), preambleMarkdown: m.readPreambleMarkdown(root),
+});
+const a = one("origin/main"), b = one("origin/staging");
+console.log("preamble_equal=" + (a.preamble === b.preamble) + " run_data_differs=" + (a.dispatches[0].runData !== b.dispatches[0].runData));
+')"
+assert_eq "two diff bases share one cached preamble and differ only in RUN DATA" "$BASES" "preamble_equal=true run_data_differs=true"
+
 suite "render-panel: an architectural six-role panel"
 
 write_status architectural '["ba","dba","devops","secops","dev","qa"]'

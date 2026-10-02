@@ -42,7 +42,7 @@ Your "Standard-tier constraints" block below is exempt, and it is the one place 
 ## Phase 2 duties
 
 1. **Read the spec.** `<ARTIFACT_DIR>/spec.json` (absolute path from your prompt). Refuse and escalate if absent. You run in parallel with DBA and DevOps; their shards are written concurrently and not merged yet, so do not depend on reading their blocks.
-2. **Review against fresh `origin/main`, not the local working tree.** The orchestrator fetched it before dispatching you. Read auth, config, and workflow files at that ref (`git show origin/main:<path>`); the base checkout can sit many commits behind origin. `# CUSTOMIZE: integrationBranch in pipeline.config.json, default main`
+2. **Review against the fresh integration ref your dispatch prompt names (`<INTEGRATION_REF>`: `origin/<integrationBranch>` from pipeline.config.json, `origin/main` only when that key is unset), not the local working tree.** The orchestrator fetched it before dispatching you. Read auth, config, and workflow files at that ref (`git show <INTEGRATION_REF>:<path>`); the base checkout can sit many commits behind origin.
 3. **Read the knowledge store.** Glob `knowledge/living-context/*.json` for `domain: security` or `domain: compliance` files with `status: current`, or run `node "${CLAUDE_PLUGIN_ROOT}/scripts/knowledge-store.mjs" --search "<terms>" --domain security`.
 4. **Analyze blast radius.** Every new endpoint, every new data field, every new external call is a surface you review.
 5. **Apply the checklist.**

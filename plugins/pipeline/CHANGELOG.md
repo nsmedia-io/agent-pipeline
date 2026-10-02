@@ -4,6 +4,19 @@ Behaviour changes that reach an existing project at its next plugin update, newe
 
 Entries keep the numbers they carried in the README's old Upgrading list, so a cross-reference such as "item 29 below" still resolves. Measured figures in an entry describe the commit that entry shipped with and are not re-taken afterwards.
 
+## 0.49.1 (2026-10-02)
+
+### What changes for you
+
+- **The Phase 4 panel, the Phase 3 exit tripwire and the owner-handoff migration fact diff against your integration branch, not `origin/main`.** The base is `origin/<integrationBranch>` from `pipeline.config.json` (the worktree's copy, else the project dir's; `main` when the key is unset), resolved once in `scripts/lib.mjs` `diffBase`. `panel-roles.mjs`, `phase3-exit.mjs` and `voice-moment.mjs` use it unless `--base` is passed. On a project whose `integrationBranch` is not `main`, the panel was seated on every commit the integration branch carried and main lacked: measured on Rome (`integrationBranch: staging`, staging about 50 files ahead of main) on #245, PR 401, a packages-only diff of 8 files was probed as 58 and seated `devops` and `design_review` it had not earned. Projects that integrate into `main` see no change. Nothing to do.
+- **Reviewers are told the right base.** The Phase 4 preamble said `git diff origin/main...HEAD` and "origin/main is the DIFF BASE only", so every reviewer read the integration branch's unpromoted commits as the PR's. It now says `<DIFF_BASE>`, and `render-panel.mjs` binds `DIFF_BASE` in each prompt's RUN DATA (`--base` overrides). The static preamble stays byte-identical across projects, so the prompt cache still holds. The `ba`, `dba`, `devops` and `qa` Phase 4 instructions use the same placeholder.
+- **Phase 2 reviewers and the Librarian read the integration branch too.** Phase 0 now sets `INTEGRATION_REF` to `origin/<integration_branch>` and the Phase 2 prompts say `<INTEGRATION_REF>` where they said `origin/main`; the `dba`, `devops`, `secops` and `design` contracts and the Librarian's knowledge worktree follow. On a staging-integrated project a migration or workflow that had landed on staging but not main read as absent.
+
+### In this release
+
+- `tests/test-panel-roles.sh`, `tests/test-render-panel.sh` and `tests/test-phase3-exit.sh` each carry a fixture where `integrationBranch` is `staging` and main lags it, with an `--base origin/main` control that reproduces the old seats or tripwire hit on the same repo.
+- `warmup-report.mjs` and `worktree.mjs` read the integration branch through the same `lib.mjs` helper instead of their own copies.
+
 ## 0.49.0 (2026-10-02)
 
 ### What changes for you

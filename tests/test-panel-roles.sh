@@ -231,6 +231,56 @@ delta "$DW" "$NONE" "$NOREPO" --write
 assert_eq "panel_roles stays the full panel" "$(jqr "$DW" 's.panel_roles.join(" ")')" "ba dev qa secops dba"
 assert_eq "the four notes are flags" "$(jqr "$DW" 's.flags.length')" "4"
 
+suite "full: the diff base is origin/<integrationBranch>, not origin/main"
+
+# The #245 shape: the project integrates into staging and main lags it. staging carries a commit
+# main lacks (the committed config, a workflow and a UI file); the PR adds one non-surface file on
+# top of staging. Diffed against origin/staging the PR is that one file; diffed against origin/main
+# it is four, and the staging-only workflow and UI file seat devops and design_review.
+make_staged_repo() {  # $1 = dest dir, $2 = pipeline.config.json body committed on staging
+  local dir="$1" p
+  mkdir -p "$dir"
+  git -C "$dir" init -q
+  git -C "$dir" -c user.email=t@t -c user.name=t commit -q --allow-empty -m base
+  git -C "$dir" update-ref refs/remotes/origin/main HEAD
+  printf '%s' "$2" > "$dir/pipeline.config.json"
+  for p in .github/workflows/deploy.yml src/ui/Page.tsx; do
+    mkdir -p "$dir/$(dirname "$p")"; printf 'x\n' > "$dir/$p"
+  done
+  git -C "$dir" add pipeline.config.json .github/workflows/deploy.yml src/ui/Page.tsx
+  git -C "$dir" -c user.email=t@t -c user.name=t commit -q -m staging-only
+  git -C "$dir" update-ref refs/remotes/origin/staging HEAD
+  mkdir -p "$dir/packages/scheduling/src"; printf 'x\n' > "$dir/packages/scheduling/src/slots.ts"
+  git -C "$dir" add packages/scheduling/src/slots.ts
+  git -C "$dir" -c user.email=t@t -c user.name=t commit -q -m feature
+}
+STAGED="$TEMP_PROJECT/r-staged"; make_staged_repo "$STAGED" '{"integrationBranch":"staging"}'
+MAINCFG="$TEMP_PROJECT/r-maincfg"; make_staged_repo "$MAINCFG" '{}'
+NOSTAGING="$TEMP_PROJECT/r-nostaging"; make_staged_repo "$NOSTAGING" '{"integrationBranch":"staging"}'
+git -C "$NOSTAGING" update-ref -d refs/remotes/origin/staging
+
+full standard - "$STAGED"
+assert_eq "integrationBranch staging: the PR's own diff touches no surface, exit 0" "$OUT/$RC" "ba dev qa secops/0"
+assert_eq "and says nothing on stderr" "$ERR" ""
+full standard - "$STAGED" "$ART" --base origin/main
+assert_eq "CONTROL: the same repo diffed against origin/main seats the staging-only surfaces" "$OUT/$RC" "ba dev qa secops devops design_review/0"
+full standard tooling "$STAGED"
+assert_eq "integrationBranch staging at tooling: no specialist probe matches, so dev" "$OUT" "qa secops dev"
+full standard - "$MAINCFG"
+assert_eq "integrationBranch unset: the base stays origin/main" "$OUT/$RC" "ba dev qa secops devops design_review/0"
+full standard - "$NOSTAGING"
+assert_eq "a configured branch with no remote ref is indeterminate, never origin/main's answer" "$OUT/$RC" "ba dev qa secops dba devops design_review/21"
+assert_contains "and git's failure is named" "$ERR" "SURFACE-INDETERMINATE: git diff --name-only -z exited"
+# A worktree with no config of its own falls back to the project dir's.
+git -C "$STAGED" rm -q --cached pipeline.config.json && mv "$STAGED/pipeline.config.json" "$TEMP_PROJECT/staged-config.json"
+git -C "$STAGED" -c user.email=t@t -c user.name=t commit -q -m drop-config
+full standard - "$STAGED"
+assert_eq "CONTROL: no config anywhere, and the PR's diff now spans main's lag again" "$OUT" "ba dev qa secops devops design_review"
+cp "$TEMP_PROJECT/staged-config.json" "$TEMP_PROJECT/pipeline.config.json"
+full standard - "$STAGED"
+assert_eq "no worktree config: the project dir's integrationBranch is read" "$OUT/$RC" "ba dev qa secops/0"
+rm -f "$TEMP_PROJECT/pipeline.config.json"
+
 suite "the removed bash stays removed from the prose"
 
 PROSE_FILES=("$PLUGIN_ROOT"/commands/*.md "$PLUGIN_ROOT"/orchestrator/*.md "$PLUGIN_ROOT"/agents/*.md "$PLUGIN_ROOT"/shared/*.md)

@@ -10,7 +10,7 @@ This phase runs ONLY when `spec.risk_tier === "architectural"`. DBA, DevOps, and
 
 Two constraints go into every Phase 2 prompt verbatim:
 - **Absolute `ARTIFACT_DIR`.** Substitute the fully expanded absolute path (`$PIPELINE_BASE/<issue>`). Reviewers read and write only there.
-- **Read against fresh `origin/main`.** You fetched it in Phase 0. Config, workflows, and migrations must be read at the `origin/main` ref (`git show origin/main:<path>`), not the local working tree. The base checkout can be many commits behind; reviewing stale config produces false "this gate/file does not exist" findings.
+- **Read against fresh `<INTEGRATION_REF>`.** Substitute `origin/<integration_branch>` from Phase 0 (`origin/main` only when the project integrates into main); you fetched it there. Config, workflows, and migrations must be read at that ref (`git show <INTEGRATION_REF>:<path>`), not the local working tree, and never at `origin/main` on a project that integrates elsewhere: main lags the integration branch, so a file or migration that landed there reads as absent. The base checkout can be many commits behind; reviewing stale config produces false "this gate/file does not exist" findings.
 
 ```
 Agent({
@@ -20,7 +20,7 @@ Agent({
 You are invoked by the /pipeline orchestrator for Phase 2 review (running in parallel with DevOps and SecOps).
 
 Artifact directory (absolute): <ARTIFACT_DIR>. Read and write artifacts only at this absolute path; do not resolve .pipeline from your own cwd.
-Review against fresh origin/main: read schema/migration/config files at the origin/main ref (e.g. `git show origin/main:migrations/...`  # CUSTOMIZE: your migrations dir), not the local working tree, which may be stale. Confirm the highest migration number against origin/main before claiming a collision or gap.
+Review against fresh <INTEGRATION_REF>: read schema/migration/config files at the <INTEGRATION_REF> ref (e.g. `git show <INTEGRATION_REF>:migrations/...`  # CUSTOMIZE: your migrations dir), not the local working tree, which may be stale. Confirm the highest migration number against <INTEGRATION_REF> before claiming a collision or gap.
 
 Read: <ARTIFACT_DIR>/spec.json
 
@@ -34,7 +34,7 @@ Agent({
 You are invoked by the /pipeline orchestrator for Phase 2 review (running in parallel with DBA and SecOps).
 
 Artifact directory (absolute): <ARTIFACT_DIR>. Read and write artifacts only at this absolute path; do not resolve .pipeline from your own cwd.
-Review against fresh origin/main: read your infrastructure/deploy config, CI workflows, and deploy scripts at the origin/main ref (e.g. `git show origin/main:.github/workflows/ci.yml`), not the local working tree, which may be stale. A gate or file you cannot find locally may exist on the integration branch.
+Review against fresh <INTEGRATION_REF>: read your infrastructure/deploy config, CI workflows, and deploy scripts at the <INTEGRATION_REF> ref (e.g. `git show <INTEGRATION_REF>:.github/workflows/ci.yml`), not the local working tree, which may be stale. A gate or file you cannot find locally may exist on the integration branch.
 
 Read: <ARTIFACT_DIR>/spec.json
 
@@ -48,7 +48,7 @@ Agent({
 You are invoked by the /pipeline orchestrator for Phase 2 review (running in parallel with DBA and DevOps).
 
 Artifact directory (absolute): <ARTIFACT_DIR>. Read and write artifacts only at this absolute path; do not resolve .pipeline from your own cwd.
-Review against fresh origin/main: read auth/config/workflow files at the origin/main ref, not the local working tree, which may be stale.
+Review against fresh <INTEGRATION_REF>: read auth/config/workflow files at the <INTEGRATION_REF> ref, not the local working tree, which may be stale.
 
 Read: <ARTIFACT_DIR>/spec.json
 
@@ -67,7 +67,7 @@ Agent({
 You are invoked by the /pipeline orchestrator for Phase 2 review (running in parallel with DBA, DevOps, and SecOps). You were dispatched because spec.impacted_domains includes frontend.
 
 Artifact directory (absolute): <ARTIFACT_DIR>. Read and write artifacts only at this absolute path; do not resolve .pipeline from your own cwd.
-Review against fresh origin/main: read your design-token source and components at the origin/main ref (e.g. `git show origin/main:<your design-token source>`  # CUSTOMIZE), not the local working tree, which may be stale.
+Review against fresh <INTEGRATION_REF>: read your design-token source and components at the <INTEGRATION_REF> ref (e.g. `git show <INTEGRATION_REF>:<your design-token source>`  # CUSTOMIZE), not the local working tree, which may be stale.
 
 Read: <ARTIFACT_DIR>/spec.json
 

@@ -231,6 +231,8 @@ export function panelWeight(fixture, pluginRoot) {
     status: cleanStatus,
     worktree: "/work/fixture-worktree",
     head: typeof status.head === "string" && /^[0-9a-f]{7,40}$/.test(status.head) ? status.head : "f".repeat(40),
+    // Fixed, like the paths above, so the measurement does not vary with the caller's config.
+    diffBase: "origin/main",
     pluginRoot: "/plugins/pipeline",
     lenses,
     preambleMarkdown: readPreambleMarkdown(pluginRoot),

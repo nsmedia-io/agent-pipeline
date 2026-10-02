@@ -46,7 +46,7 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { isMain, nativePath, assertPathSegment } from "./lib.mjs";
+import { isMain, nativePath, assertPathSegment, integrationBranch } from "./lib.mjs";
 import { ownershipOf } from "./artifact-ownership.mjs";
 
 export const SEED_FILES = Object.freeze(["spec.json", "review.json", "constraints.md", "map.json", "design.json"]);
@@ -187,12 +187,6 @@ function stamp(d = new Date()) {
   return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
 }
 
-function integrationBranch(root) {
-  const cfg = readJson(path.join(root, "pipeline.config.json"));
-  const b = cfg && typeof cfg.integrationBranch === "string" && cfg.integrationBranch.trim();
-  return b || "main";
-}
-
 const USAGE =
   "usage:\n" +
   "  node worktree.mjs resolve --issue <n> [--seed-from <dir>] [--pipeline-base <dir>] [--repo <dir>]\n" +
@@ -260,7 +254,7 @@ export function main(argv, io = { out: (s) => process.stdout.write(s), err: (s) 
         if (!BRANCH_TYPES.includes(o.type)) throw new WorktreeError(`--type must be one of ${BRANCH_TYPES.join(", ")}, got ${JSON.stringify(o.type)}`);
         if (!/^[a-z0-9][a-z0-9-]*$/.test(o.slug)) throw new WorktreeError(`--slug must be lowercase letters, digits and hyphens, got ${JSON.stringify(o.slug)}`);
         branch = `${o.type}/${issue}-${o.slug}`;
-        const baseRef = o["base-ref"] || `origin/${integrationBranch(root)}`;
+        const baseRef = o["base-ref"] || `origin/${integrationBranch(root).branch}`;
         add = git(["worktree", "add", "--quiet", "-b", branch, target, baseRef], repo);
         source = "created";
       }

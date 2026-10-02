@@ -135,6 +135,23 @@ assert_contains "and names git's exit status" "$OUT" "git diff --name-only -z ex
 run "$R_NOREF" --base HEAD~1
 assert_eq "CONTROL: the same repo with a base that exists exits 0" "$RC" "0"
 
+suite "phase3-exit: the tripwire diffs against origin/<integrationBranch>, not origin/main"
+
+# staging carries a migration main lacks; the PR adds one plain file on top of staging. Against
+# origin/main the staging migration reads as this standard diff's and trips the tripwire.
+R_STAGED=$(repo staged standard '["lib/b.txt"]' db/migrations/0042.sql pipeline.config.json)
+printf '{"integrationBranch":"staging"}' > "$R_STAGED/pipeline.config.json"
+git -C "$R_STAGED" add pipeline.config.json
+git -C "$R_STAGED" -c user.email=t@t -c user.name=t commit -q -m staging-config
+git -C "$R_STAGED" update-ref refs/remotes/origin/staging HEAD
+mkdir -p "$R_STAGED/lib"; printf 'x\n' > "$R_STAGED/lib/b.txt"; git -C "$R_STAGED" add lib/b.txt
+git -C "$R_STAGED" -c user.email=t@t -c user.name=t commit -q -m feature
+run "$R_STAGED"
+assert_eq "integrationBranch staging: the PR's own diff is clean, exit 0" "$RC" "0"
+assert_not_contains "and no staging-only path is reported as a hit" "$OUT" "HIT:"
+run "$R_STAGED" --base origin/main
+assert_eq "CONTROL: the same repo against origin/main trips on staging's migration" "$RC" "3"
+
 new_tmpdir || exit 90
 BROKEN="$NEW_TMPDIR/scripts"
 mkdir -p "$BROKEN"

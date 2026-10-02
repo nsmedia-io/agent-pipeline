@@ -23,9 +23,9 @@
  * or a root that is not a git checkout.
  */
 
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
-import { isMain, nativePath } from "./lib.mjs";
+import { isMain, nativePath, integrationBranch } from "./lib.mjs";
 import { run } from "./check-merged.mjs";
 
 export const DOMAINS = ["data", "api", "frontend", "infrastructure", "security", "compliance", "architecture", "testing"];
@@ -62,18 +62,9 @@ export function domainsFor(role, spec) {
   return { domains: rule, why: `the ${role} domains` };
 }
 
-export function integrationBranch(root) {
-  const file = path.join(root, "pipeline.config.json");
-  try {
-    if (!existsSync(file)) return { branch: "main", source: "default" };
-    const cfg = JSON.parse(readFileSync(file, "utf8"));
-    const v = cfg && typeof cfg === "object" ? cfg.integrationBranch : undefined;
-    if (typeof v === "string" && v.trim() !== "") return { branch: v.trim(), source: "pipeline.config.json integrationBranch" };
-    return { branch: "main", source: "default" };
-  } catch {
-    return { branch: "main", source: "default (pipeline.config.json does not parse)" };
-  }
-}
+// The integration-branch reader lives in lib.mjs, shared with the diff-base callers; re-exported
+// here because callers and tests import it from this module.
+export { integrationBranch };
 
 /** `git worktree list --porcelain` -> [{ path, head, branch, prunable }]. */
 export function parseWorktrees(text) {

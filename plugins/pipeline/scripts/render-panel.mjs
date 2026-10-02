@@ -9,6 +9,10 @@
 // values COMPUTED:
 //
 //   - the reviewed sha is `git rev-parse HEAD` of the worktree, never typed;
+//   - the diff base is origin/<integrationBranch> from the worktree's pipeline.config.json (or
+//     --base), bound in RUN DATA as DIFF_BASE; the preamble once said origin/main outright, so on a
+//     project integrating into staging every reviewer diffed against main and read staging's
+//     unpromoted commits as part of the PR;
 //   - the preamble is sliced out of orchestrator/phase-4-panel-preamble.md between two HTML-comment
 //     markers, so the prose the agents read is the prose the plugin ships, with no second copy. It
 //     lives outside commands/pipeline.md so the orchestrator does not load ~25 KB it never acts on;
@@ -20,7 +24,7 @@
 //     part (see CACHE-FRIENDLY ASSEMBLY below).
 //
 // Usage:
-//   node render-panel.mjs --status <status.json> --worktree <path> [--plugin-root <dir>]
+//   node render-panel.mjs --status <status.json> --worktree <path> [--plugin-root <dir>] [--base <ref>]
 //                         [--delta "<roles>" --first-round-head <sha> [--peer-review <file>]]
 //                         [--out <file>] [--check]
 //
@@ -45,7 +49,7 @@ import { spawnSync } from "node:child_process";
 import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
-import { isMain as isMainScript } from "./lib.mjs";
+import { diffBase as resolveDiffBase, isMain as isMainScript } from "./lib.mjs";
 import { resolve as resolveModel } from "./dispatch-model.mjs";
 import { resolve as resolveEffort } from "./dispatch-effort.mjs";
 import { openBlockers as listOpenBlockers } from "./materiality.mjs";
@@ -94,12 +98,13 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_PLUGIN_ROOT = path.resolve(HERE, "..");
 
 export function parseArgs(argv) {
-  const args = { delta: null, firstRoundHead: null, peerReview: null, out: null, check: false, pluginRoot: DEFAULT_PLUGIN_ROOT };
+  const args = { delta: null, firstRoundHead: null, peerReview: null, out: null, check: false, pluginRoot: DEFAULT_PLUGIN_ROOT, base: null };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--status") args.status = argv[++i];
     else if (a === "--worktree") args.worktree = argv[++i];
     else if (a === "--plugin-root") args.pluginRoot = argv[++i];
+    else if (a === "--base") args.base = argv[++i];
     else if (a === "--delta") args.delta = argv[++i];
     else if (a === "--first-round-head") args.firstRoundHead = argv[++i];
     else if (a === "--peer-review") args.peerReview = argv[++i];
@@ -109,6 +114,9 @@ export function parseArgs(argv) {
   }
   if (!args.status) throw new Error("--status <status.json> is required");
   if (!args.worktree) throw new Error("--worktree <path> is required");
+  if (args.base !== null && (!args.base || args.base.startsWith("-") || /[\s<>]/.test(args.base))) {
+    throw new Error(`--base ${JSON.stringify(args.base ?? "")} is not a git revision; substitute the real ref`);
+  }
   if (args.delta !== null && !args.firstRoundHead) {
     throw new Error("--delta requires --first-round-head <sha> (the HEAD the first round's panel reviewed)");
   }
@@ -153,9 +161,9 @@ export function loadLenses(pluginRoot) {
 //   shared by every role of the panel        | per role | per dispatch
 //
 // The placeholders the command file and the lens table use (<issue>, <WORKTREE_PATH>, <HEAD_SHA>,
-// <REVIEWED_SHA>, <ARTIFACT_DIR>, <FIRST_ROUND_HEAD>, ${CLAUDE_PLUGIN_ROOT}) are NOT substituted
+// <REVIEWED_SHA>, <DIFF_BASE>, <ARTIFACT_DIR>, <FIRST_ROUND_HEAD>, ${CLAUDE_PLUGIN_ROOT}) are NOT substituted
 // into the static text; they are bound once, in the RUN DATA block at the end. The static part
-// therefore carries no issue number, sha, worktree or plugin path, so it is byte-identical across
+// therefore carries no issue number, sha, diff base, worktree or plugin path, so it is byte-identical across
 // the roles of one panel, across rounds, and across issues on the same plugin version, which is
 // what lets a prompt cache reuse it. test-render-panel.sh pins that property. Substituting a value
 // back into the static text (or prepending anything per-run) breaks the cache silently: the panel
@@ -240,11 +248,11 @@ export function openBlockerRows(role, peerReview, openBlockers) {
 }
 
 /** The per-run values of one dispatch, as data (prompt-weight.mjs encodes them both ways). */
-export function runDataValues({ issue, worktree, head, artifactDir, pluginRoot, tier, costClass, deltaRoles, firstRoundHead, peerReviewPath, role, openBlockers, peerReview }) {
+export function runDataValues({ issue, worktree, head, diffBase, artifactDir, pluginRoot, tier, costClass, deltaRoles, firstRoundHead, peerReviewPath, role, openBlockers, peerReview }) {
   // Forward slashes on every platform: a Windows backslash would be escaped (doubled) inside a
   // quoted TOON cell, and node, git and Git Bash all accept the forward-slash form.
   const slash = (p) => String(p).replace(/\\/g, "/");
-  const data = { issue, WORKTREE_PATH: slash(worktree), HEAD_SHA: head, REVIEWED_SHA: head, ARTIFACT_DIR: artifactDir, CLAUDE_PLUGIN_ROOT: slash(pluginRoot), risk_tier: tier };
+  const data = { issue, WORKTREE_PATH: slash(worktree), HEAD_SHA: head, REVIEWED_SHA: head, DIFF_BASE: diffBase, ARTIFACT_DIR: artifactDir, CLAUDE_PLUGIN_ROOT: slash(pluginRoot), risk_tier: tier };
   if (costClass !== undefined) data.cost_class = costClass;
   if (deltaRoles) {
     data.FIRST_ROUND_HEAD = firstRoundHead;
@@ -268,7 +276,7 @@ export function runDataBlock(input) {
  * and, per role, the static lens text and the run data, so a caller (the renderer, the test,
  * prompt-weight.mjs) can see where the cacheable prefix ends.
  */
-export function assemble({ status, worktree, head, pluginRoot, lenses, preambleMarkdown, delta = null, firstRoundHead = null, openBlockers = null, peerReview = null, peerReviewPath = null, cfg }) {
+export function assemble({ status, worktree, head, diffBase, pluginRoot, lenses, preambleMarkdown, delta = null, firstRoundHead = null, openBlockers = null, peerReview = null, peerReviewPath = null, cfg }) {
   const issue = status.issue_number ?? status.experiment_id;
   if (issue === undefined || issue === null) throw new Error("status.json carries no issue_number");
   const tier = status.risk_tier;
@@ -286,6 +294,8 @@ export function assemble({ status, worktree, head, pluginRoot, lenses, preambleM
   for (const r of roles) {
     if (!lenses[r]) throw new Error(`role "${r}" has no entry in scripts/panel-lenses.json`);
   }
+  // The PR's base, unless the caller resolved it: origin/<integrationBranch> from the config.
+  const base = diffBase || resolveDiffBase(worktree);
   const artifactDir = path.posix.join(worktree.replace(/\\/g, "/"), ".pipeline", String(issue));
   const body = extractPreamble(preambleMarkdown);
   // A preamble read without readPreambleMarkdown still carries its INCLUDE line; rendering it would
@@ -306,7 +316,7 @@ export function assemble({ status, worktree, head, pluginRoot, lenses, preambleM
     opts.label = lens.label;
     const lensText = `${lens.lens}\n\n`;
     const runInput = {
-      issue, worktree, head, artifactDir, pluginRoot, tier, costClass,
+      issue, worktree, head, diffBase: base, artifactDir, pluginRoot, tier, costClass,
       deltaRoles: delta ? roles : null, firstRoundHead, peerReviewPath, role, openBlockers, peerReview,
     };
     const runData = runDataBlock(runInput);
@@ -379,6 +389,7 @@ function main(argv) {
       status,
       worktree: path.resolve(args.worktree),
       head,
+      diffBase: args.base || resolveDiffBase(args.worktree),
       pluginRoot: path.resolve(args.pluginRoot),
       lenses,
       preambleMarkdown: md,
