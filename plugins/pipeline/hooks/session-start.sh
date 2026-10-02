@@ -313,6 +313,20 @@ fi
 
 [[ -n "$PLUGIN_ROOT" && -f "$PLUGIN_ROOT/scripts/version-check.mjs" ]] && command -v node >/dev/null 2>&1 && node "$PLUGIN_ROOT/scripts/version-check.mjs" --plugin-root "$PLUGIN_ROOT" 2>/dev/null
 
+# --- Orphaned processes ---
+# A finished sub-agent can leave a background command running (a `python3 -` stdin stub, an
+# unbounded `until ... sleep` loop) that burns CPU on this host until someone notices. The reaper
+# kills the known patterns and reports the rest; this is the one place the MODEL reads its summary
+# (SubagentStop and Stop can only show it to the owner). Silent when there is nothing to say.
+# The payload is not consumed here: the script reads the inherited stdin itself.
+REAPER_LIB="$(dirname "${BASH_SOURCE[0]}")/reaper.sh"
+if [[ -f "$REAPER_LIB" ]]; then
+  # shellcheck source=./reaper.sh
+  . "$REAPER_LIB"
+  reap_orphans SessionStart SessionStart
+  [[ -n "$REAP_SUMMARY" ]] && { printf '%s\n' "$REAP_SUMMARY"; echo ""; }
+fi
+
 echo "=== Pipeline primitives loaded ==="
 echo "  Subagents: ba, dba, devops, secops, dev, qa, design, librarian"
 echo "  Commands: /pipeline, /phase, /warmup"

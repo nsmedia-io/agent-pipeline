@@ -157,7 +157,9 @@ for k in $DOC_KEYS; do
   # Only tokens that LOOK like config keys are in scope; the docs backtick plenty of other
   # things (function names, phases, verdicts). A key is in scope when the example config or
   # the README config table names it.
-  grep -q "\"$k\":" "$EXAMPLE" 2>/dev/null || continue
+  # TOP-LEVEL keys only (two-space indent): a key nested inside another object (orphanReaper's
+  # mode, minAgeMinutes, ...) is not a registry key, and the doctor never reads inside one.
+  grep -q "^  \"$k\":" "$EXAMPLE" 2>/dev/null || continue
   UNRESOLVED="$UNRESOLVED $k"
 done
 assert_eq "no documented config key is missing from the registry" "$UNRESOLVED" ""

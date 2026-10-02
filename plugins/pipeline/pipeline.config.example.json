@@ -36,6 +36,21 @@
   "_usageTelemetry_comment": "OFF by default. Set enabled to true to append one line per subagent dispatch (issue, phase, role, tier, model, effort, routing rule; never prompt text) to <git common dir>/agent-pipeline-telemetry/dispatch.jsonl, or to dir if set (absolute, or relative to the project root; keep it out of the tracked tree). scripts/usage-report.mjs joins it with token usage from session transcripts or a local OpenTelemetry collector. CLAUDE_PIPELINE_USAGE_TELEMETRY=1 or 0 overrides this key for one session. See the README section Usage telemetry.",
   "usageTelemetry": { "enabled": false },
 
+  "_runawayCommandGuard_comment": "true (the default): the PreToolUse gate refuses a SUBAGENT's Bash call that reads `python3 -` from a heredoc on Windows, or that runs an unbounded `until`/`while ... sleep` loop (no deadline, attempt count, timeout, break or exit). Set false to turn the refusal off. The main thread is never refused.",
+  "runawayCommandGuard": true,
+
+  "_orphanReaper_comment": "ON by default. SessionStart, SubagentStop and Stop run scripts/reap-orphans.mjs, which looks at the processes under THIS session's claude process only, older than minAgeMinutes and still using CPU, KILLS a closed allowlist of known orphans (a Windows python stdin stub; an unbounded until/while-sleep loop whose polled file has not been written for staleFileMinutes) and REPORTS the rest. It never touches Docker, WSL, vmmem, CI runners, MCP servers, dev servers, claude itself, or a process a still-running background task may own. mode: \"kill\" (default), \"report\" (kill nothing) or \"off\". CLAUDE_PIPELINE_REAPER=off|report|kill overrides it for one session. Every kill is logged under <git common dir>/agent-pipeline-reaper/reaper.log. protectPatterns adds regexes whose matches are never touched.",
+  "orphanReaper": {
+    "mode": "kill",
+    "minAgeMinutes": 60,
+    "minCpuSeconds": 300,
+    "minCpuPercent": 1,
+    "staleFileMinutes": 60,
+    "minIntervalMinutes": 10,
+    "killPatterns": ["pythonStdinStub", "waitLoop"],
+    "protectPatterns": []
+  },
+
   "_x_comment": "The project-owned namespace. Put your own settings under x (or in a key starting with _); the plugin never reads inside it and the config doctor never reports it. Any other key the plugin does not know is reported as read by nothing.",
   "x": {},
 

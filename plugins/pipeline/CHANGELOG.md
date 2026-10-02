@@ -4,6 +4,19 @@ Behaviour changes that reach an existing project at its next plugin update, newe
 
 Entries keep the numbers they carried in the README's old Upgrading list, so a cross-reference such as "item 29 below" still resolves. Measured figures in an entry describe the commit that entry shipped with and are not re-taken afterwards.
 
+## 0.49.0 (2026-10-02)
+
+### What changes for you
+
+- **A sub-agent can no longer start the two commands that left processes spinning on the host for a day.** The PreToolUse Bash gate now refuses, for a SUBAGENT only, (a) `python3 -` / `python <<` reading its program from a heredoc on Windows, where the Store-alias python stub can hang reading stdin and spin, and (b) an unbounded `until ...; do sleep N; done` / `while ...; do sleep N; done` loop with no deadline, attempt count, `timeout`, `break` or `exit`. The refusal says what to run instead (`node -e` or a script file; a bounded loop, `timeout N bash -c`, or the Monitor tool). Bounded loops, `while read` loops, a loop merely written to a file, and python on macOS and Linux all still pass. The main thread is never refused. Off: `runawayCommandGuard: false` in `pipeline.config.json`, or `CLAUDE_HOOK_PRETOOLUSE_SKIP=1` for the whole gate. The check costs nothing on the common path (a shell `case` decides whether a command is a candidate) and starts one node process only for a candidate.
+- **An orphan reaper runs at SessionStart, SubagentStop and Stop.** `scripts/reap-orphans.mjs` looks only at processes under the CURRENT session's `claude` process that are older than 60 minutes and have used at least 300 CPU-seconds at 1% of a core or more. It KILLS only two named patterns, a Windows python reading stdin and a shell holding an unbounded wait loop whose polled file has not been written for 60 minutes, and REPORTS everything else once. It never touches a process outside the session's tree, `claude` itself, the hook's own ancestry, Docker, WSL, vmmem, CI runners, MCP servers, dev servers or preview tooling, anything under one of those, anything matching your `protectPatterns`, or a process whose command matches a background task the session transcript shows as started and not finished. The decision is confirmed on a second process snapshot (same pid and start time) right before the kill. A summary reaches the model at SessionStart and you at SubagentStop and Stop; every kill is in `<git common dir>/agent-pipeline-reaper/reaper.log`. SubagentStop and Stop run it at most once per `minIntervalMinutes` (10). Where PowerShell (Windows) or `ps` cannot be run it says so and does nothing.
+- **Two config keys, both optional.** `runawayCommandGuard` (boolean, default `true`) and `orphanReaper` (object: `mode` `"kill"`/`"report"`/`"off"`, `minAgeMinutes`, `minCpuSeconds`, `minCpuPercent`, `staleFileMinutes`, `minIntervalMinutes`, `killPatterns`, `protectPatterns`). `CLAUDE_PIPELINE_REAPER=off|report|kill` overrides `mode` for one session. To turn the reaper off for good: `"orphanReaper": { "mode": "off" }`. To see what it would do without acting: `node scripts/reap-orphans.mjs --dry-run --root-pid <claude pid>`.
+
+### In this release
+
+- The incident (2026-10-02, the Rome project, a Windows 11 host) and the design reasoning are in `docs/rationale.md`, "Orphaned sub-agent processes". Measured on that host (three runs each): the Windows process table through PowerShell 7 took 452 to 604 ms and through Windows PowerShell 5.1 1254 to 1505 ms, so `pwsh` is tried first; the real 142 MB Rome orchestrator transcript scans in about 0.5 s.
+- `tests/harness.sh` exports `CLAUDE_PIPELINE_REAPER=off` for every suite, so a suite that drives a hook never reads or kills a real process. `tests/Dockerfile` installs `procps`, which the real-process cell of `tests/test-reap-orphans.sh` needs for `ps`.
+
 ## 0.48.0 (2026-09-28)
 
 ### What changes for you

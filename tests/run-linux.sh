@@ -138,7 +138,13 @@ done
 exit $rc
 '"'"' run-linux "$@"
 '
-docker run --rm "${MOUNTS[@]}" -w "$REPO_ROOT" \
+# The container is NAMED and LABELLED so it can be addressed by exactly that name, and never by a
+# blanket `docker stop $(docker ps -q)`, which stops every container on the host (CI runners,
+# databases, other projects'). To stop a run of this script: `docker stop agent-pipeline-tests-<pid>`
+# (the name is printed first), or `docker ps -q --filter label=agent-pipeline-tests=1` to list them.
+CONTAINER_NAME="agent-pipeline-tests-$$"
+echo "run-linux.sh: container $CONTAINER_NAME" >&2
+docker run --rm --name "$CONTAINER_NAME" --label agent-pipeline-tests=1 "${MOUNTS[@]}" -w "$REPO_ROOT" \
   -e PIPELINE_TESTS_REQUIRE_CAPABILITIES=1 \
   -e "PIPELINE_TESTS_FULL=${PIPELINE_TESTS_FULL:-}" \
   -e "PIPELINE_TESTS_JOBS=${PIPELINE_TESTS_JOBS:-}" \

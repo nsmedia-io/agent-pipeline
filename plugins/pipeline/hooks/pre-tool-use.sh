@@ -1707,6 +1707,43 @@ _DELIMS=$_DELIMS"'"
 _DELIMS=$_DELIMS'\'
 _DELIMS=$_DELIMS';&|()<>#,:=./-'
 
+# ---- runaway commands (0.49.0): a subagent's call that leaves a process nothing will reap ------
+#
+# TWO CLASSES, DECIDED BY scripts/runaway-commands.mjs and refused for a SUBAGENT only (the origin
+# test above already let the main thread through): `python3 -` reading a heredoc on Windows, and an
+# `until`/`while` ... `sleep` loop with no bound. Why they matter is in docs/rationale.md,
+# "Orphaned sub-agent processes". Same two-stage shape as the rest of this file: the PREFILTER is a
+# `case` over builtins (a command that mentions neither python with a heredoc nor a sleep loop never
+# starts node), and only a plausible candidate pays one node start, with the command on STDIN, never
+# argv. Every tooling gap allows the call with its own attribution line, like the staging gate.
+_runaway_gate() {
+  _js_get tool_name "$_REST" || return 0
+  [ "$_JS_VAL" = "Bash" ] || return 0
+  _js_get agent_id "$_REST" || return 0
+  [ -n "$_JS_VAL" ] || return 0
+  [ -z "${CLAUDE_HOOK_PRETOOLUSE_SKIP:-}" ] || return 0
+  _rw_script=${CLAUDE_PLUGIN_ROOT:-}/scripts/runaway-commands.mjs
+  if [ -z "${CLAUDE_PLUGIN_ROOT:-}" ] || [ ! -f "$_rw_script" ]; then
+    _note 'the runaway-command classifier is not present under the plugin root'
+    return 0
+  fi
+  if ! command -v node >/dev/null 2>&1; then
+    _note 'node is not on PATH, so the runaway-command check could not run'
+    return 0
+  fi
+  _js_get cwd "$_REST" && { _js_unescape "$_JS_VAL"; _rw_cwd=$_UNESC; } || _rw_cwd=''
+  _rw_out=$(printf '%s' "$_COMMAND" | node "$_rw_script" --cwd "$_rw_cwd") || {
+    _note 'the runaway-command classifier exited non-zero'
+    return 0
+  }
+  if [ -n "$_rw_out" ]; then
+    _JSON_OUT=1
+    printf '%s' "$_rw_out"
+    exit 0
+  fi
+  return 0
+}
+
 _INPUT=''
 while IFS= read -r _line || [ -n "$_line" ]; do
   _INPUT=$_INPUT$_line
@@ -1736,6 +1773,11 @@ fi
 _REST=$_JS_PRE$_JS_POST
 _js_unescape "$_JS_VAL"
 _COMMAND=$_UNESC
+
+# (2b) runaway commands. Candidates only: python fed by a heredoc, or a loop that sleeps.
+case $_COMMAND in
+  *python*'<<'* | *until*sleep* | *while*sleep*) _runaway_gate ;;
+esac
 
 # (3) nothing without `git` in it can stage anything.
 case $_COMMAND in
