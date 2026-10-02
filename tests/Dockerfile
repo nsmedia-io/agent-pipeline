@@ -7,5 +7,5 @@
 ARG BASE_IMAGE=node:22-bookworm
 FROM ${BASE_IMAGE}
 RUN apt-get update -qq \
- && apt-get install -y -qq --no-install-recommends zsh jq \
+ && apt-get install -y -qq --no-install-recommends zsh jq procps \
  && rm -rf /var/lib/apt/lists/*

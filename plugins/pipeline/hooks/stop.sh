@@ -97,6 +97,20 @@ elif [[ "$PIPELINE_PRESENT" -eq 1 ]]; then
   fi
 fi
 
+# Orphan reaper (hooks/reaper.sh, scripts/reap-orphans.mjs). Placed ABOVE the skip below on
+# purpose: CLAUDE_HOOK_STOP_SKIP is the knob for the voice lint and the project check, and a
+# process left spinning by a finished sub-agent is not something a one-off iteration should keep.
+# It is throttled inside the script (orphanReaper.minIntervalMinutes, default 10), so a turn pays
+# for it at most that often, and it never blocks: the summary joins the systemMessage this hook's
+# EXIT trap prints on a 0 exit. Off: CLAUDE_PIPELINE_REAPER=off or orphanReaper.mode "off".
+REAPER_LIB="$(dirname "${BASH_SOURCE[0]}")/reaper.sh"
+if [[ -f "$REAPER_LIB" ]]; then
+  # shellcheck source=./reaper.sh
+  . "$REAPER_LIB"
+  reap_orphans Stop Stop "$PAYLOAD"
+  reap_note "$REAP_SUMMARY"
+fi
+
 # CLAUDE_HOOK_STOP_SKIP bypasses the voice lint and the project check for one-off iterations,
 # but NOT the phase-entry guard, which sits above this line and can still exit 2: an
 # environment variable that disarms a halting control leaves no trace in the archived run

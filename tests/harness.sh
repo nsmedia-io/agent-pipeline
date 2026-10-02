@@ -4,6 +4,13 @@
 
 set -u
 
+# THE ORPHAN REAPER IS OFF FOR EVERY SUITE BY DEFAULT. The hooks run scripts/reap-orphans.mjs, which
+# reads the REAL process table and may kill a real process; a suite that drives session-start.sh,
+# subagent-stop.sh or stop.sh must never do that to the machine it runs on, and must not pay a
+# PowerShell start per hook call. tests/test-reap-orphans.sh is the one suite that turns it on, per
+# invocation, against processes it planted itself.
+export CLAUDE_PIPELINE_REAPER=off
+
 HOOKS_DIR="${HOOKS_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../plugins/pipeline/hooks" && pwd)}"
 PLUGIN_ROOT="${PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../plugins/pipeline" && pwd)}"
 # The .mjs scripts under test. This is a READ path into the checkout (the scripts live here);

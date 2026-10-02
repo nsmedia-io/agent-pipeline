@@ -70,5 +70,21 @@ if [[ "$VRC" -ne 0 ]]; then
 fi
 
 # A non-empty payload is the decision:block JSON; pass it through to Claude Code.
+#
+# THE ORPHAN REAPER RUNS AFTER THE VALIDATOR, so it can never delay a block decision, and its
+# summary is printed only when there is no decision to print: stdout carries ONE JSON object. It
+# reaches the owner as the hook's systemMessage (the SubagentStop channel the model does not read;
+# the model sees the same line at the next SessionStart warmup if it is still unresolved). Every
+# kill is in the reaper log either way. See hooks/reaper.sh and scripts/reap-orphans.mjs.
+REAPER_LIB="$(dirname "${BASH_SOURCE[0]}")/reaper.sh"
+if [[ -f "$REAPER_LIB" ]]; then
+  # shellcheck source=./reaper.sh
+  . "$REAPER_LIB"
+  reap_orphans SubagentStop SubagentStop "$INPUT"
+  if [[ -z "$OUT" ]]; then
+    reap_note "$REAP_SUMMARY"
+    disarm_flush
+  fi
+fi
 [[ -n "$OUT" ]] && printf '%s' "$OUT"
 exit 0

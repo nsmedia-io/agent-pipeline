@@ -114,6 +114,21 @@ const CODE_KEYS = {
     degrades:
       'nothing breaks: this is off by default. When it is absent or not an object, no dispatch line is written, so scripts/usage-report.mjs can report tokens per model but cannot attribute them to an issue, phase or role. Set { "enabled": true } to log, and optionally "dir" (absolute, or relative to the project root) for where the log goes; the default is <git common dir>/agent-pipeline-telemetry. CLAUDE_PIPELINE_USAGE_TELEMETRY=1 or 0 overrides this key for one session.',
   },
+  runawayCommandGuard: {
+    type: "boolean",
+    reader: "scripts/runaway-commands.mjs, through hooks/pre-tool-use.sh",
+    fallback: "true",
+    degrades:
+      "nothing breaks: this key can only turn the refusal OFF. With false, a SUBAGENT's Bash call is no longer refused for reading `python3 -` from a heredoc on Windows or for an unbounded `until`/`while ... sleep` loop, so a command that outlives the Bash tool's timeout can be moved to the background and keep burning CPU after the agent is done. The main thread is never refused either way. CLAUDE_HOOK_PRETOOLUSE_SKIP disarms this and the rest of the PreToolUse gate for one session.",
+  },
+  orphanReaper: {
+    type: "object",
+    reader: "scripts/reap-orphans.mjs, through hooks/reaper.sh, from hooks/session-start.sh, hooks/subagent-stop.sh and hooks/stop.sh",
+    fallback:
+      'mode "kill", minAgeMinutes 60, minCpuSeconds 300, minCpuPercent 1, staleFileMinutes 60, minIntervalMinutes 10, killPatterns ["pythonStdinStub","waitLoop"], protectPatterns []',
+    degrades:
+      'nothing breaks; the reaper is ON by default and fail-open. Keys: mode "kill" (kill the known-orphan patterns, report the rest), "report" (kill nothing) or "off"; minAgeMinutes / minCpuSeconds / minCpuPercent (how old and how much CPU a process under THIS session\'s claude process needs before it is even a candidate); staleFileMinutes (how long a wait loop\'s polled file must be unwritten before the loop may be killed); minIntervalMinutes (throttle for SubagentStop and Stop, never SessionStart); killPatterns (a closed set of names, anything else is ignored); protectPatterns (additive regexes matched against a process\'s name and command line; a match is never killed or reported). An invalid value falls back to its default and is named on stderr. CLAUDE_PIPELINE_REAPER=off|report|kill overrides mode for one session.',
+  },
   securitySurfaceGlobs: {
     type: "string[]",
     reader: "scripts/security-surface.mjs (diffTouchesSecuritySurface)",
