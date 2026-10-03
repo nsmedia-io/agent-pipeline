@@ -30,7 +30,7 @@
 
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { isMain, nativePath } from "./lib.mjs";
+import { diffBase, isMain, nativePath } from "./lib.mjs";
 
 // current_phase -> what voice.md requires of the message that accompanies it.
 //
@@ -141,16 +141,18 @@ function readJson(file) {
   }
 }
 
-export async function describe({ status, worktree, spec, base = "origin/main" }) {
+export async function describe({ status, worktree, spec, base }) {
   const record = readJson(status);
   const phase = record && typeof record.current_phase === "string" ? record.current_phase : null;
   if (!phase) return null;
   const specDoc = readJson(spec || path.join(path.dirname(nativePath(status)), "spec.json"));
   const defaults = baDefaults(specDoc);
+  const wt = worktree && nativePath(worktree);
   return {
     phase,
     ...momentFor(phase),
-    migration: await migrationFact(worktree && nativePath(worktree), base),
+    // The diff base is the integration branch the PR opens against, not a literal origin/main.
+    migration: await migrationFact(wt, base || diffBase(wt)),
     ba_default: defaults === null ? "unknown" : defaults,
     full_voice_moments: FULL_VOICE_MOMENTS,
   };

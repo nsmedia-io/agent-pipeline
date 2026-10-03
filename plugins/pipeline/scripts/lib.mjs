@@ -7,7 +7,8 @@
  * found only after it had already misled something downstream.
  */
 
-import { basename } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { basename, join } from "node:path";
 
 /**
  * True when this process was started by running `name` directly, false when it was imported.
@@ -67,4 +68,48 @@ export function nativePath(p, platform = process.platform) {
   if (platform !== "win32") return s;
   const m = /^\/([a-zA-Z])(\/.*|)$/.exec(s);
   return m ? `${m[1].toUpperCase()}:${m[2] || "/"}` : s;
+}
+
+/**
+ * Where pipeline.config.json is read from: the worktree under review when it carries one (the
+ * config is committed, so the branch being diffed has it), else the project dir.
+ *
+ * @param {string} [worktree]
+ * @param {string} [fallback]
+ */
+export function configDir(worktree, fallback = process.env.CLAUDE_PROJECT_DIR || process.cwd()) {
+  return worktree && existsSync(join(worktree, "pipeline.config.json")) ? worktree : fallback;
+}
+
+/**
+ * The project's integration branch: `integrationBranch` in `<dir>/pipeline.config.json`, else
+ * `main`. Returns `{ branch, source }` so a report can say where the answer came from.
+ *
+ * @param {string} dir
+ */
+export function integrationBranch(dir) {
+  const file = join(dir, "pipeline.config.json");
+  try {
+    if (!existsSync(file)) return { branch: "main", source: "default" };
+    const cfg = JSON.parse(readFileSync(file, "utf8"));
+    const v = cfg && typeof cfg === "object" ? cfg.integrationBranch : undefined;
+    if (typeof v === "string" && v.trim() !== "") return { branch: v.trim(), source: "pipeline.config.json integrationBranch" };
+    return { branch: "main", source: "default" };
+  } catch {
+    return { branch: "main", source: "default (pipeline.config.json does not parse)" };
+  }
+}
+
+/**
+ * The ref a PR's diff is taken against: `origin/<integrationBranch>`, read from the worktree's
+ * config (see configDir). A PR opens against the integration branch, so this is the base its
+ * diff has. A hard-coded origin/main was right only where main IS the integration branch; on a
+ * project integrating into staging, with main promoted behind it, `origin/main...HEAD` carried
+ * every staging commit main lacked, and an 8-file diff probed as 58 files and seated two
+ * reviewers the change never earned.
+ *
+ * @param {string} [worktree]
+ */
+export function diffBase(worktree) {
+  return `origin/${integrationBranch(configDir(worktree)).branch}`;
 }

@@ -41,7 +41,7 @@ Your "Standard-tier constraints" block below is exempt, and it is the one place 
 ## Phase 2 duties
 
 1. **Read the spec.** `<ARTIFACT_DIR>/spec.json` (absolute path from your prompt). Refuse and escalate if absent.
-2. **Review against fresh `origin/main`, not the local working tree.** The orchestrator fetched it before dispatching you. Read the service/deploy config, CI workflows, and deploy scripts at that ref (`git show origin/main:<path>`). The base checkout can sit many commits behind origin, so a gate, job, or file you cannot find in the local tree may exist on the integration branch. Do not file a "this gate/file does not exist" finding without confirming against `origin/main` first. `# CUSTOMIZE: integrationBranch in pipeline.config.json, default main`
+2. **Review against the fresh integration ref your dispatch prompt names (`<INTEGRATION_REF>`: `origin/<integrationBranch>` from pipeline.config.json, `origin/main` only when that key is unset), not the local working tree.** The orchestrator fetched it before dispatching you. Read the service/deploy config, CI workflows, and deploy scripts at that ref (`git show <INTEGRATION_REF>:<path>`). The base checkout can sit many commits behind origin, so a gate, job, or file you cannot find in the local tree may exist on the integration branch. Do not file a "this gate/file does not exist" finding without confirming against `<INTEGRATION_REF>` first.
 3. **You review in parallel with DBA and SecOps.** Their shards are written concurrently and are not merged yet, so do not depend on reading their blocks. If the spec implies a schema change that may shift the infra picture, note that contingency in your own block.
 4. **Read the knowledge store.** Glob `knowledge/living-context/*.json` for `domain: infrastructure` files with `status: current`, or run `node "${CLAUDE_PLUGIN_ROOT}/scripts/knowledge-store.mjs" --search "<terms>" --domain infrastructure`.
 5. **Analyze blast radius.** Which services deploy-order-depend on each other? Does a secret change need a secrets-manager rotation? Does a queue config change need a coordinated rollout?
@@ -150,7 +150,7 @@ If there is no infra impact: write the block with `verdict: APPROVE`, empty arra
 
 ## Phase 4 peer review
 
-Re-verify against `git diff origin/main...HEAD -- <ci/deploy/infra paths>`. Write your bare block to `<ARTIFACT_DIR>/peer-review.devops.json` (top-level `verdict`, no `devops` wrapper; same Artifact I/O contract above). The orchestrator merges the shards into `peer-review.json`. The same materiality rule as Phase 2 applies: rate every concern, block only on a blocking one, at most two, `suggested_patch` where the fix is local.
+Re-verify against `git diff <DIFF_BASE>...HEAD -- <ci/deploy/infra paths>` (RUN DATA binds `DIFF_BASE`). Write your bare block to `<ARTIFACT_DIR>/peer-review.devops.json` (top-level `verdict`, no `devops` wrapper; same Artifact I/O contract above). The orchestrator merges the shards into `peer-review.json`. The same materiality rule as Phase 2 applies: rate every concern, block only on a blocking one, at most two, `suggested_patch` where the fix is local.
 
 ## Knowledge store access (read-only)
 

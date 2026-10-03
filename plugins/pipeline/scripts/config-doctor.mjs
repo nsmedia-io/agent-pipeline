@@ -47,7 +47,7 @@ const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const CODE_KEYS = {
   integrationBranch: {
     type: "string",
-    reader: "hooks/session-start.sh, scripts/warmup-report.mjs, the agents' diff base",
+    reader: "hooks/session-start.sh, scripts/warmup-report.mjs, the diff base (lib.mjs diffBase: panel-roles, render-panel, phase3-exit, voice-moment)",
     fallback: '"main"',
   },
   checkCommand: {

@@ -12,8 +12,9 @@
 //
 // 1. The mis-tier tripwire, at trivial and standard tier (the tier is --tier, else spec.risk_tier;
 //    an unknown tier runs the tripwire, since skipping it is the unsafe reading). The changed
-//    paths are `git -C <worktree> diff --name-only -z <base>...HEAD`. A HIT is a data-layer path
-//    (tripwireReport in data-layer-surface.mjs) or a path matching an architectural path trigger,
+//    paths are `git -C <worktree> diff --name-only -z <base>...HEAD`, where <base> is --base, else
+//    origin/<integrationBranch> from the worktree's pipeline.config.json (diffBase in lib.mjs).
+//    A HIT is a data-layer path (tripwireReport in data-layer-surface.mjs) or a path matching an architectural path trigger,
 //    pipeline.config.json and whatever the config adds (tierFloor in tier-floor.mjs; #76).
 //    INDETERMINATE is a git failure, an empty path list, or a surface module that cannot be
 //    evaluated: the run cannot know the diff was clean, so it is never read as clean.
@@ -26,11 +27,11 @@
 // Any other exit (a stale plugin root with no such script, a module that exits at import) is
 // the caller's to read as indeterminate.
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { isMain as isMainScript } from "./lib.mjs";
+import { configDir, diffBase, isMain as isMainScript } from "./lib.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const TIERS = ["trivial", "standard", "architectural"];
@@ -43,7 +44,7 @@ export const STATES = {
 };
 
 function parseArgs(argv) {
-  const a = { base: "origin/main" };
+  const a = {};
   for (let i = 0; i < argv.length; i++) {
     const k = argv[i];
     const v = argv[i + 1];
@@ -77,9 +78,7 @@ export function effectiveTier(tierArg, spec) {
 }
 
 /** Where pipeline.config.json is read from: the worktree under review, else the project dir. */
-export function configDir(worktree, fallback = process.env.CLAUDE_PROJECT_DIR || process.cwd()) {
-  return worktree && existsSync(path.join(worktree, "pipeline.config.json")) ? worktree : fallback;
-}
+export { configDir };
 
 /** git's changed-path list, or { error } naming git's exit status. Never an empty list on failure. */
 export function changedPaths(worktree, base) {
@@ -172,7 +171,7 @@ async function main(argv) {
   if (tier === "architectural") {
     console.log("SKIP: tripwire (architectural tier: nothing to mis-tier)");
   } else {
-    const diff = changedPaths(a.worktree, a.base);
+    const diff = changedPaths(a.worktree, a.base || diffBase(a.worktree));
     if (diff.error) trip.indeterminate = diff.error;
     else trip = await runTripwire(diff.paths, tier, projectDir);
   }

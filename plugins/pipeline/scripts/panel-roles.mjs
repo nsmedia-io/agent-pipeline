@@ -3,7 +3,7 @@
  * panel-roles.mjs -- who sits on the Phase 4 panel, as code rather than prose (#164 rows 1 and 3).
  *
  *   node panel-roles.mjs full  --status <status.json> --worktree <path> --artifact-dir <dir>
- *                              [--base origin/main] [--cost-class <c>] [--write]
+ *                              [--base <ref>] [--cost-class <c>] [--write]
  *   node panel-roles.mjs delta --status <status.json> --worktree <path> --first-round-head <sha>
  *                              --peer-review <peer-review.json> [--cost-class <c>] [--write]
  *
@@ -49,6 +49,12 @@
  *          tooling) on the data layer, qa on a test file, devops on infra except at tooling.
  *          Design re-sits only while it holds an open blocker. panel_roles is never changed.
  *
+ * THE DIFF BASE (full). --base when given, else origin/<integrationBranch> from the worktree's
+ * pipeline.config.json (the project dir's when the worktree has none; main when the key is unset),
+ * which is the branch the PR opens against. A hard-coded origin/main probed a staging-integrated
+ * project's 8-file diff as 58 files, every staging commit main lacked, and seated devops and
+ * design_review on surfaces the change never touched.
+ *
  * --write. full: sets status.json panel_roles to the printed roles. Both: appends each PANEL-NOTE
  * as a flags[] entry ({phase: "4-review", agent: "panel-roles", summary, at}) unless an identical
  * summary is already there. No absolute path reaches status.json; diagnostics stay on stderr.
@@ -57,7 +63,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
-import { isMain, nativePath } from "./lib.mjs";
+import { diffBase, isMain, nativePath } from "./lib.mjs";
 import { COST_CLASSES, normCostClass, openBlockerRoles } from "./materiality.mjs";
 import { diffTouchesDataLayer, diffTouchesInfra } from "./data-layer-surface.mjs";
 import { diffTouchesSecuritySurface, diffTouchesTests } from "./security-surface.mjs";
@@ -199,7 +205,7 @@ export function composeDelta({ fullPanel, seed, costClass, probes }) {
 export function parseArgs(argv) {
   const [mode, ...rest] = argv;
   if (mode !== "full" && mode !== "delta") throw new BadInput(`first argument must be full or delta, got ${JSON.stringify(mode)}`);
-  const args = { mode, base: "origin/main", write: false };
+  const args = { mode, write: false };
   const valued = { "--status": "status", "--worktree": "worktree", "--artifact-dir": "artifactDir", "--base": "base", "--first-round-head": "firstRoundHead", "--peer-review": "peerReview", "--cost-class": "costClass" };
   for (let i = 0; i < rest.length; i++) {
     const a = rest[i];
@@ -267,7 +273,8 @@ export function run(argv, { diag = (l) => process.stderr.write(`${l}\n`) } = {})
   let result;
   if (args.mode === "full") {
     if (!TIER_PANELS[st.risk_tier]) throw new BadInput(`status.json risk_tier ${JSON.stringify(st.risk_tier)} is not one of ${Object.keys(TIER_PANELS).join(", ")}; absence is not trivial`);
-    const paths = changedPaths(args.worktree, `${args.base}...HEAD`, diag);
+    const base = args.base || diffBase(args.worktree);
+    const paths = changedPaths(args.worktree, `${base}...HEAD`, diag);
     const probes = {
       dataLayer: probe((p) => diffTouchesDataLayer(p), paths, "diffTouchesDataLayer", diag),
       infra: probe((p) => diffTouchesInfra(p), paths, "diffTouchesInfra", diag),

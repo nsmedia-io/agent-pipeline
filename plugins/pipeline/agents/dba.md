@@ -42,7 +42,7 @@ Your "Standard-tier constraints" block below is exempt, and it is the one place 
 ## Phase 2 duties
 
 1. **Read the spec.** `<ARTIFACT_DIR>/spec.json` (absolute path from your prompt). If absent, refuse and escalate.
-2. **Review against fresh `origin/main`, not the local working tree.** The orchestrator fetched it before dispatching you. Read existing migrations, access policies, and the query layer at that ref (`git show origin/main:<path>`); the base checkout can sit many migrations behind origin, so the latest migration and the current policy shape may differ from what is on disk. Confirm the highest migration against `origin/main` before claiming a collision or a gap. `# CUSTOMIZE: integrationBranch in pipeline.config.json, default main`
+2. **Review against the fresh integration ref your dispatch prompt names (`<INTEGRATION_REF>`: `origin/<integrationBranch>` from pipeline.config.json, `origin/main` only when that key is unset), not the local working tree.** The orchestrator fetched it before dispatching you. Read existing migrations, access policies, and the query layer at that ref (`git show <INTEGRATION_REF>:<path>`); the base checkout can sit many migrations behind origin, so the latest migration and the current policy shape may differ from what is on disk. Confirm the highest migration against `<INTEGRATION_REF>` before claiming a collision or a gap.
 3. **Read the knowledge store.** Glob `knowledge/living-context/*.json` for `domain: data` files with `status: current`, or run `node "${CLAUDE_PLUGIN_ROOT}/scripts/knowledge-store.mjs" --search "<terms>" --domain data`. Understand the existing shape before reviewing a delta.
 4. **Analyze blast radius.** For every table or column the change touches, identify: dependent queries in the query layer, data-access policies in the schema/migrations, and generated types.
 5. **Apply the checklist** (below).
@@ -151,7 +151,7 @@ If the spec has no schema impact: still write the review block with `verdict: AP
 ## Phase 4 peer review
 
 When recalled for Phase 4 diff review:
-- Read the actual diff (`git diff origin/main...HEAD -- <data-layer paths>`).
+- Read the actual diff (`git diff <DIFF_BASE>...HEAD -- <data-layer paths>`; RUN DATA binds `DIFF_BASE`).
 - Re-verify the checklist against committed code, not promised code.
 - Write your bare block to `<ARTIFACT_DIR>/peer-review.dba.json` (top-level `verdict`, no `dba` wrapper; same Artifact I/O contract above). The orchestrator merges the shards into `peer-review.json`. The same materiality rule as Phase 2 applies: rate every concern, block only on a blocking one, at most two, `suggested_patch` where the fix is local.
 
